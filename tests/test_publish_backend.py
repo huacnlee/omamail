@@ -31,6 +31,12 @@ class PublicationTests(unittest.TestCase):
         (self.repo / 'src/main.rs').write_text('fn main() {}')
         (self.repo / 'Cargo.toml').write_text('[package]\nname="omamail"\nversion="0.2.0"\n')
         (self.repo / 'Cargo.lock').write_text('[[package]]\nname="omamail"\nversion="0.2.0"\n')
+        (self.repo / 'manifest.json').write_text('{"version":"0.2.0"}\n')
+        (self.repo / 'app').mkdir()
+        (self.repo / 'app/CMakeLists.txt').write_text(
+            'cmake_minimum_required(VERSION 3.21)\nproject(omamail-app VERSION 0.2.0 LANGUAGES CXX)\n')
+        (self.repo / 'install.sh').write_text('#!/bin/sh\nexit 0\n')
+        (self.repo / 'install.ps1').write_text('exit 0\n')
         (self.repo / 'backend-version').write_text('0.1.0\n')
         self.contract = {'apiVersion': 2, 'releasedApiVersion': 1, 'protocolVersion': 1,
                          'methods': ['system.info', 'message.new'],
@@ -60,6 +66,15 @@ class PublicationTests(unittest.TestCase):
             self.helper('package', str(binary), arch, str(artifact))
             self.helper('provenance', '--output', str(artifact / 'backend-build.json'))
             shutil.copy(self.repo / 'backend-api.json', artifact / 'backend-api.json')
+        app_assets = {
+            'app-macos-aarch64': 'omamail-app-macos-aarch64.tar.gz',
+            'app-linux-x86_64': 'omamail-app-linux-x86_64.tar.gz',
+            'app-windows-x86_64': 'omamail-app-windows-x86_64.zip',
+        }
+        for artifact_name, asset_name in app_assets.items():
+            artifact = self.repo / 'artifacts' / artifact_name
+            artifact.mkdir(parents=True)
+            (artifact / asset_name).write_bytes(('synthetic ' + asset_name).encode())
         bin_dir = self.root / 'bin'
         bin_dir.mkdir()
         gh = bin_dir / 'gh'
@@ -82,26 +97,39 @@ elif args[:3] == ['api', '--method', 'POST']:
     print('')
 elif args[:2] == ['release', 'create']:
     assert '--verify-tag' in args and '--draft' in args
+    uploaded = {pathlib.Path(arg).name for arg in args if arg.startswith('release-assets/')}
+    assert uploaded == {
+        'omamail-linux-x86_64.tar.gz', 'omamail-linux-aarch64.tar.gz',
+        'omamail-app-macos-aarch64.tar.gz', 'omamail-app-linux-x86_64.tar.gz',
+        'omamail-app-windows-x86_64.zip', 'install.sh', 'install.ps1',
+        'SHA256SUMS', 'backend-api.json', 'backend-build.json'}
     tag = subprocess.check_output(['git', 'ls-remote', 'origin', 'refs/tags/v0.2.0'], text=True).split()[0]
     assert tag == os.environ['GITHUB_SHA']
     if mode == 'create-failure': sys.exit(1)
     pathlib.Path('draft-created').touch()
 elif args[:2] == ['release', 'edit']:
     assert pathlib.Path('draft-created').exists()
+    assert pathlib.Path('draft-downloaded').exists()
     if mode == 'edit-failure': sys.exit(1)
     pathlib.Path('public-release').touch()
 elif args[:2] == ['release', 'download']:
-    assert pathlib.Path('public-release').exists()
-    if mode == 'download-failure': sys.exit(1)
+    assert pathlib.Path('draft-created').exists()
+    destination = pathlib.Path(args[args.index('--dir') + 1])
+    is_public = pathlib.Path('public-release').exists()
+    assert (destination.name == 'public-download') == is_public
+    if (mode == 'download-failure' and not is_public) or (mode == 'public-download-failure' and is_public): sys.exit(1)
     for path in pathlib.Path('release-assets').iterdir():
-        shutil.copy(path, pathlib.Path('published') / path.name)
-    if mode == 'corrupt':
-        pathlib.Path('published/omamail-linux-aarch64.tar.gz').write_bytes(b'corrupt')
-    if mode == 'wrong-contract':
-        pathlib.Path('published/backend-api.json').write_text('{}')
-    if mode == 'wrong-provenance':
-        pathlib.Path('published/backend-build.json').write_text('{}')
-    if mode == 'moved':
+        shutil.copy(path, destination / path.name)
+    pathlib.Path('public-downloaded' if is_public else 'draft-downloaded').touch()
+    if mode == 'corrupt' and not is_public:
+        (destination / 'omamail-linux-aarch64.tar.gz').write_bytes(b'corrupt')
+    if mode in ('corrupt-app', 'public-corrupt') and is_public == (mode == 'public-corrupt'):
+        (destination / 'omamail-app-windows-x86_64.zip').write_bytes(b'corrupt')
+    if mode == 'wrong-contract' and not is_public:
+        (destination / 'backend-api.json').write_text('{}')
+    if mode == 'wrong-provenance' and not is_public:
+        (destination / 'backend-build.json').write_text('{}')
+    if mode == 'moved' and is_public:
         subprocess.run(['git', 'push', 'origin', 'HEAD:refs/heads/release/0.2.0'], check=True)
         subprocess.run(['git', '--git-dir', '../origin.git', 'update-ref', 'refs/heads/release/0.2.0', 'refs/heads/main'], check=True)
 else:
@@ -119,12 +147,17 @@ else:
 
     def publish(self, mode=''):
         self.env['TEST_MODE'] = mode
+        if mode == 'missing-app':
+            (self.repo / 'artifacts/app-linux-x86_64/omamail-app-linux-x86_64.tar.gz').unlink()
         return subprocess.run(['bash', 'scripts/publish-backend.sh'], cwd=self.repo, env=self.env,
                               capture_output=True, text=True)
 
     def test_publish_verifies_downloads_then_pins_same_branch(self):
         result = self.publish()
         self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
+        stages = [call[1] for call in calls if call[0] == 'release']
+        self.assertEqual(stages, ['create', 'download', 'edit', 'download'])
         self.assertEqual(self.git('ls-remote', 'origin', 'refs/heads/main').split()[0], self.main)
         self.assertEqual(self.git('ls-remote', 'origin', 'refs/tags/v0.2.0').split()[0], self.sha)
         self.assertEqual(self.git('ls-remote', 'origin', 'refs/heads/release/0.2.0').split()[0], self.git('rev-parse', 'HEAD'))
@@ -138,7 +171,9 @@ else:
     def test_failure_never_advances_pin_or_main(self):
         # Each subcase needs independent tags, checkout and simulated release state.
         for mode in ('api-failure', 'existing', 'create-failure', 'edit-failure',
-                     'download-failure', 'corrupt', 'wrong-contract', 'wrong-provenance', 'moved'):
+                     'download-failure', 'corrupt', 'corrupt-app', 'wrong-contract',
+                     'wrong-provenance', 'public-download-failure', 'public-corrupt',
+                     'moved', 'missing-app'):
             with self.subTest(mode=mode):
                 if mode != 'api-failure':
                     self.temp.cleanup()
@@ -147,11 +182,16 @@ else:
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
                 stages = [call[1] for call in calls if call[0] == 'release']
-                expected = ([] if mode in ('api-failure', 'existing') else
+                expected = ([] if mode in ('api-failure', 'existing', 'missing-app') else
                             ['create'] if mode == 'create-failure' else
-                            ['create', 'edit'] if mode == 'edit-failure' else
-                            ['create', 'edit', 'download'])
+                            ['create', 'download', 'edit', 'download']
+                            if mode in ('public-download-failure', 'public-corrupt', 'moved') else
+                            ['create', 'download', 'edit'] if mode == 'edit-failure' else
+                            ['create', 'download'])
                 self.assertEqual(stages, expected, result.stderr)
+                if mode in ('download-failure', 'corrupt', 'corrupt-app',
+                            'wrong-contract', 'wrong-provenance'):
+                    self.assertFalse((self.repo / 'public-release').exists(), result.stderr)
                 self.assertEqual((self.repo / 'backend-version').read_text(), '0.1.0\n')
                 self.assertEqual(json.loads((self.repo / 'backend-api.json').read_text()), self.contract)
                 self.assertEqual(self.git('rev-parse', 'HEAD'), self.sha)

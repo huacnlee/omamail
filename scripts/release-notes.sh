@@ -13,7 +13,10 @@ repository="${GH_REPOSITORY:-huacnlee/omamail}"
 notes_dir="$(mktemp -d)"
 trap 'rm -rf "$notes_dir"' EXIT
 
-mapfile -t pull_requests < <(
+pull_requests=()
+while IFS= read -r pull_request; do
+  [ -z "$pull_request" ] || pull_requests+=("$pull_request")
+done < <(
   git log --reverse --format=%s "$previous_tag..$current_tag" \
     | sed -nE 's/.*\(#([0-9]+)\)$/\1/p' \
     | awk '!seen[$0]++'

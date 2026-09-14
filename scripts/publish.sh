@@ -36,19 +36,19 @@ if grep -Fxq "v$version" <<<"$releases"; then fail "release v$version already ex
 git switch --quiet -c "$branch"
 bash scripts/bump.sh "$version"
 python3 scripts/package-backend.py check >/dev/null
-git commit --quiet -m "Version $version" -- Cargo.toml Cargo.lock manifest.json
+git commit --quiet -m "Version $version" -- Cargo.toml Cargo.lock manifest.json app/CMakeLists.txt
 sha="$(git rev-parse HEAD)"
 git push --quiet -u origin "HEAD:refs/heads/$branch"
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 cat >"$body_file" <<EOF
-Publish backend v$version from this branch. Release CI builds and verifies both native packages, creates the tag and release, then updates backend-version and the released API contract in this PR after verifying the public downloads.
+Publish Omamail v$version from this branch. Release CI builds and verifies the plugin backends and all three standalone desktop packages, creates the tag and one release, then updates backend-version and the released API contract in this PR after verifying every public download.
 
 Merge this PR once the pin commit and required checks pass. Main receives the version and runtime pin together in one merge.
 
 ## Release Notes
 
-- Update the packaged backend to v$version.
+- Update the Omarchy backend and standalone desktop applications to v$version.
 EOF
 pr_url="$(gh pr create --base main --head "$branch" --title "Release v$version" --body-file "$body_file")"
 echo "$pr_url"

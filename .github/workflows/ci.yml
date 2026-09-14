@@ -44,6 +44,7 @@ jobs:
       # Version-sensitive QML/libcurl checks remain on the Omarchy host.
       - run: make test-rust test-js test-shell-portable
       - run: python3 tests/test_backend_release.py
+      - run: python3 app/tests/test_release_workflow.py
       - run: python3 scripts/package-backend.py check-api
       - run: git diff --check
       - name: Leave a note for the PR comment when this gate fails
@@ -63,6 +64,7 @@ jobs:
           ```
           make test-rust test-js test-shell-portable
           python3 tests/test_backend_release.py
+          python3 app/tests/test_release_workflow.py
           python3 scripts/package-backend.py check-api
           git diff --check
           ```

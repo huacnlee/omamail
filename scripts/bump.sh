@@ -22,6 +22,7 @@ patterns = {
     "manifest.json": r'("version"\s*:\s*")[^"]+(")',
     "Cargo.toml": r'(^\[package\][\s\S]*?^version\s*=\s*")[^"]+(")',
     "Cargo.lock": r'(^\[\[package\]\]\nname = "omamail"\nversion = ")[^"]+(")',
+    "app/CMakeLists.txt": r'(^\s*project\s*\(\s*omamail-app\s+VERSION\s+)[^\s\)]+(\s+LANGUAGES\s+CXX\s*\))',
 }
 prepared = {}
 for name, pattern in patterns.items():

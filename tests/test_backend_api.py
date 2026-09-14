@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the plugin's API contract against an explicitly selected binary.
+"""Exercise a frontend's API contract against an explicitly selected binary.
 
 Uses the production QML JavaScript request, frame and response codecs in Node.
 Only synthetic data, dry runs and local storage operations are used; no real account, credential,
@@ -15,6 +15,27 @@ import signal
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+WINDOWS_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x00000200)
+
+
+def process_group_options(platform=None):
+    """Start the Node harness in a group that can be torn down with its backend."""
+    if (platform or os.name) == 'nt':
+        return {'creationflags': WINDOWS_CREATE_NEW_PROCESS_GROUP}
+    return {'start_new_session': True}
+
+
+def terminate_process_group(process, platform=None):
+    """Terminate a timed-out harness and every backend process it created."""
+    if process.poll() is not None:
+        return
+    if (platform or os.name) == 'nt':
+        subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if process.poll() is None:
+            process.kill()
+    else:
+        os.killpg(process.pid, signal.SIGKILL)
 
 HARNESS = r"""
 const fs = require('fs');
@@ -27,12 +48,21 @@ const whole = JSON.parse(fs.readFileSync(process.env.CONTRACT_ROOT + '/backend-a
 // The pinned, published binary is asked only for the released API; a binary
 // built from this checkout for all of it.
 const released = process.env.CONTRACT_RELEASED === '1';
+const standalone = process.env.CONTRACT_STANDALONE === '1';
 const unreleased = whole.unreleased || {methods: [], cases: []};
-const contract = released ? {
+const selected = released ? {
   apiVersion: whole.releasedApiVersion, protocolVersion: whole.protocolVersion,
   methods: whole.methods.filter(m => !unreleased.methods.includes(m)),
   contractCases: whole.contractCases.filter(c => !unreleased.cases.includes(c.name))
 } : whole;
+// Agent RPC is a plugin-only capability. The standalone binary must omit its
+// inventory and reject every agent method without touching storage.
+const unavailable = standalone ? selected.methods.filter(m => m.startsWith('agent.')) : [];
+const contract = standalone ? {
+  ...selected,
+  methods: selected.methods.filter(m => !m.startsWith('agent.')),
+  contractCases: selected.contractCases.filter(c => !c.method.startsWith('agent.'))
+} : selected;
 const child = spawn(process.env.CONTRACT_BINARY, ['serve'], {stdio:['pipe','pipe','pipe']});
 let buffer = '', state = null, serial = 0, finished = false;
 const pending = new Map();
@@ -98,6 +128,14 @@ function storageSnapshot(directory = process.env.HOME) {
   assert.equal(api, contract.apiVersion, 'API version (only released 0.9.0 has a legacy fallback)');
   assert.ok(Array.isArray(info.methods));
   for (const method of contract.methods) assert.ok(info.methods.includes(method), 'advertised API method: ' + method);
+  if (standalone) assert.equal(info.capabilities && info.capabilities.agent, false, 'standalone disables agent capability');
+  for (const method of unavailable) {
+    assert.ok(!info.methods.includes(method), 'standalone does not advertise: ' + method);
+    const before = storageSnapshot();
+    const error = await call(method, {}, -32601, false);
+    assert.equal(error.message, 'Method not found');
+    assert.deepEqual(storageSnapshot(), before, method + ': disabled method has no effects');
+  }
   if (!released) {
     for (const method of ['jmap.actionAvailability', 'jmap.actionRows']) {
       assert.ok(!info.methods.includes(method), 'internal planner is not advertised');
@@ -198,6 +236,8 @@ def main():
     parser.add_argument('--expected-version')
     parser.add_argument('--released', action='store_true',
                         help='check only the released API, as the pinned published binary speaks it')
+    parser.add_argument('--standalone', action='store_true',
+                        help='check the standalone frontend subset and require agent RPC to be disabled')
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     contract = json.loads((ROOT / 'backend-api.json').read_text())
@@ -216,7 +256,8 @@ def main():
                    XDG_STATE_HOME=str(home / 'state'), XDG_RUNTIME_DIR=str(home / 'run'),
                    CONTRACT_ROOT=str(ROOT), CONTRACT_BINARY=str(binary),
                    CONTRACT_VERSION=args.expected_version or '',
-                   CONTRACT_RELEASED='1' if args.released else '')
+                   CONTRACT_RELEASED='1' if args.released else '',
+                   CONTRACT_STANDALONE='1' if args.standalone else '')
         (home / 'run').mkdir(mode=0o700)
         registry = home / 'config/omamail/accounts.json'
         registry.parent.mkdir(parents=True)
@@ -242,16 +283,16 @@ def main():
         credential_helper.chmod(0o700)
         env['PATH'] = str(helpers) + os.pathsep + env.get('PATH', '')
         process = subprocess.Popen(['node', '-e', HARNESS], env=env, cwd=home,
-                                   start_new_session=True)
+                                   **process_group_options())
         try:
             status = process.wait(timeout=60)
         finally:
             # A failed/expired harness must not leave its backend running.
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
+                terminate_process_group(process)
+            except (OSError, ProcessLookupError):
                 pass
-            process.wait()
+            process.wait(timeout=10)
         if status:
             raise SystemExit(status)
 

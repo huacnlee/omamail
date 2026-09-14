@@ -29,12 +29,13 @@ fresh_checkout() {
   git init -q -b main "$root/clone"
   git -C "$root/clone" config user.name Tester
   git -C "$root/clone" config user.email tester@example.test
-  mkdir -p "$root/clone/scripts"
+  mkdir -p "$root/clone/scripts" "$root/clone/app"
   cp "$project_dir/scripts/publish.sh" "$project_dir/scripts/bump.sh" \
     "$project_dir/scripts/package-backend.py" "$root/clone/scripts/"
   printf '[package]\nname = "omamail"\nversion = "0.1.0"\n' >"$root/clone/Cargo.toml"
   printf '[[package]]\nname = "omamail"\nversion = "0.1.0"\n' >"$root/clone/Cargo.lock"
   printf '{\n  "version": "0.1.0"\n}\n' >"$root/clone/manifest.json"
+  printf 'cmake_minimum_required(VERSION 3.21)\nproject(omamail-app VERSION 0.1.0 LANGUAGES CXX)\n' >"$root/clone/app/CMakeLists.txt"
   printf '__pycache__/\n' >"$root/clone/.gitignore"
   git -C "$root/clone" add -A
   git -C "$root/clone" commit -q -m "Initial"
@@ -61,7 +62,7 @@ fresh_checkout
 main_sha="$(git -C "$root/clone" rev-parse HEAD)"
 publish 0.2.0 >"$root/out"
 test "$(git -C "$root/clone" log -1 --format=%s)" = "Version 0.2.0"
-test "$(git -C "$root/clone" show --format= --name-only HEAD | sort | tr '\n' ' ')" = "Cargo.lock Cargo.toml manifest.json "
+test "$(git -C "$root/clone" show --format= --name-only HEAD | sort | tr '\n' ' ')" = "Cargo.lock Cargo.toml app/CMakeLists.txt manifest.json "
 grep -F 'version = "0.2.0"' "$root/clone/Cargo.toml" >/dev/null
 head_sha="$(git -C "$root/clone" rev-parse HEAD)"
 test "$(git -C "$root/origin.git" rev-parse refs/heads/main)" = "$main_sha"

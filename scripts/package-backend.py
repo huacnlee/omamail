@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate the plugin's fixed, single-executable release assets."""
+"""Build fixed plugin backends and validate the complete Omamail release set."""
 import argparse
 import hashlib
 import gzip
@@ -12,6 +12,15 @@ import tarfile
 import tomllib
 
 ARCHES = ('x86_64', 'aarch64')
+PLUGIN_ASSETS = tuple(f'omamail-linux-{arch}.tar.gz' for arch in ARCHES)
+APP_ASSETS = (
+    'omamail-app-macos-aarch64.tar.gz',
+    'omamail-app-linux-x86_64.tar.gz',
+    'omamail-app-windows-x86_64.zip',
+)
+INSTALLER_ASSETS = ('install.sh', 'install.ps1')
+HASHED_RELEASE_ASSETS = tuple(sorted(PLUGIN_ASSETS + APP_ASSETS + INSTALLER_ASSETS))
+UNHASHED_RELEASE_ASSETS = ('SHA256SUMS', 'backend-api.json', 'backend-build.json')
 
 
 def check(root, tag=None, require_pin=False):
@@ -21,6 +30,17 @@ def check(root, tag=None, require_pin=False):
     versions = {}
     packages = tomllib.loads((root / 'Cargo.lock').read_text())['package']
     versions['lock'] = next(p['version'] for p in packages if p['name'] == 'omamail')
+    manifest = json.loads((root / 'manifest.json').read_bytes())
+    if not isinstance(manifest, dict) or not isinstance(manifest.get('version'), str):
+        raise ValueError('manifest.json requires a string version')
+    versions['manifest'] = manifest['version']
+    cmake = (root / 'app/CMakeLists.txt').read_text()
+    app_versions = re.findall(
+        r'^\s*project\s*\(\s*omamail-app\s+VERSION\s+([^\s\)]+)', cmake,
+        flags=re.MULTILINE | re.IGNORECASE)
+    if len(app_versions) != 1:
+        raise ValueError('app/CMakeLists.txt requires one omamail-app project version')
+    versions['app'] = app_versions[0]
     if require_pin:
         versions['backend-version'] = (root / 'backend-version').read_text().removesuffix('\n')
     if tag is not None:
@@ -164,6 +184,12 @@ def check_api(root, published=None, baseline=None):
     if not inventory:
         raise ValueError('cannot locate public ALL method inventory')
     entries = re.sub(r'//[^\n]*', '', inventory[1])
+    # The default plugin exposes agent methods only on its supported Linux
+    # runtime, while standalone builds omit them. They remain part of the full
+    # source contract and this is the only conditional inventory form reviewed.
+    entries = re.sub(
+        r'#\s*\[\s*cfg\s*\(\s*all\s*\(\s*feature\s*=\s*"agent"\s*,\s*'
+        r'target_os\s*=\s*"linux"\s*\)\s*\)\s*\]', '', entries)
     if re.sub(r'"[a-zA-Z0-9.]+"|[\s,]', '', entries):
         raise ValueError('public method inventory must contain literal method names')
     methods = re.findall(r'"([a-zA-Z0-9.]+)"', entries)
@@ -337,21 +363,40 @@ def package(binary, arch, output):
     (output / 'SHA256SUMS').write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
 
 
-def verify(directory, arches):
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_checksums(directory):
+    path = directory / 'SHA256SUMS'
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 64 * 1024:
+        raise ValueError('SHA256SUMS must be a bounded regular file')
+    raw = path.read_bytes()
+    if not raw or not raw.endswith(b'\n') or b'\r' in raw or b'\0' in raw:
+        raise ValueError('SHA256SUMS must use canonical LF-terminated records')
     hashes = {}
-    for line in (directory / 'SHA256SUMS').read_text().splitlines():
-        match = re.fullmatch(r'([0-9a-f]{64})  (omamail-linux-(?:x86_64|aarch64)\.tar\.gz)', line)
-        if not match or match[2] in hashes:
-            raise ValueError('invalid or duplicate checksum record')
+    for line in raw[:-1].decode('ascii').split('\n'):
+        match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*)', line)
+        if not match or match[2] not in HASHED_RELEASE_ASSETS or match[2] in hashes:
+            raise ValueError('invalid, unknown or duplicate checksum record')
         hashes[match[2]] = match[1]
+    return hashes
+
+
+def verify(directory, arches):
+    hashes = read_checksums(directory)
     expected = {f'omamail-linux-{arch}.tar.gz' for arch in arches}
-    if set(hashes) != expected:
+    if not expected <= set(hashes):
         raise ValueError('checksum asset set does not match requested architectures')
     for name in expected:
         archive = directory / name
         if archive.is_symlink() or not archive.is_file() or archive.stat().st_size > 128 * 1024 * 1024:
             raise ValueError('missing or oversized archive')
-        if hashlib.sha256(archive.read_bytes()).hexdigest() != hashes[name]:
+        if sha256_file(archive) != hashes[name]:
             raise ValueError('archive checksum mismatch')
         # Match the installer's physical-header contract. Logical iteration hides
         # GNU/PAX records and ignores trailing nonzero data or truncated padding.
@@ -368,6 +413,56 @@ def verify(directory, arches):
         padded_end = 512 + ((member.size + 511) // 512) * 512
         if len(unpacked) < padded_end + 1024 or len(unpacked) % 512 or any(unpacked[end:]):
             raise ValueError('archive contains extra or truncated data')
+
+
+def checked_release_files(directory, require_checksum):
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError('release asset directory must be a real directory')
+    allowed = set(HASHED_RELEASE_ASSETS + UNHASHED_RELEASE_ASSETS)
+    entries = {path.name: path for path in directory.iterdir()}
+    unknown = set(entries) - allowed
+    if unknown:
+        raise ValueError('unexpected release asset: ' + sorted(unknown)[0])
+    for name in HASHED_RELEASE_ASSETS:
+        path = entries.get(name)
+        limit = 2 * 1024 * 1024 if name.startswith('install.') else 1024 * 1024 * 1024
+        if path is None or path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= limit:
+            raise ValueError('missing, unsafe or oversized release asset: ' + name)
+    required_metadata = {'backend-api.json', 'backend-build.json'}
+    if require_checksum:
+        required_metadata.add('SHA256SUMS')
+    for name in required_metadata:
+        path = entries.get(name)
+        if path is None:
+            raise ValueError('missing release metadata: ' + name)
+        if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+            raise ValueError('unsafe release metadata: ' + name)
+    return entries
+
+
+def release_checksums(directory):
+    checked_release_files(directory, require_checksum=False)
+    records = ''.join(f'{sha256_file(directory / name)}  {name}\n'
+                      for name in HASHED_RELEASE_ASSETS)
+    temporary = directory / f'.SHA256SUMS.{os.getpid()}.tmp'
+    try:
+        with temporary.open('x', encoding='ascii') as stream:
+            stream.write(records)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, directory / 'SHA256SUMS')
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def verify_release(directory):
+    checked_release_files(directory, require_checksum=True)
+    hashes = read_checksums(directory)
+    if set(hashes) != set(HASHED_RELEASE_ASSETS):
+        raise ValueError('release checksum does not cover the exact release asset set')
+    for name, expected in hashes.items():
+        if sha256_file(directory / name) != expected:
+            raise ValueError('release asset checksum mismatch: ' + name)
 
 
 def pin(root, branch, expected):
@@ -422,6 +517,10 @@ def main():
     cmd = sub.add_parser('verify')
     cmd.add_argument('directory', type=Path)
     cmd.add_argument('--arch', choices=ARCHES, action='append')
+    cmd = sub.add_parser('release-checksums')
+    cmd.add_argument('directory', type=Path)
+    cmd = sub.add_parser('verify-release')
+    cmd.add_argument('directory', type=Path)
     cmd = sub.add_parser('provenance')
     cmd.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
     cmd.add_argument('--output', type=Path, default=Path('backend-build.json'))
@@ -444,6 +543,10 @@ def main():
             package(args.binary, args.arch, args.output)
         elif args.command == 'verify':
             verify(args.directory, args.arch or ARCHES)
+        elif args.command == 'release-checksums':
+            release_checksums(args.directory)
+        elif args.command == 'verify-release':
+            verify_release(args.directory)
         elif args.command == 'provenance':
             args.output.write_text(json.dumps(provenance(args.root), indent=2, sort_keys=True) + '\n')
         elif args.command == 'check-provenance':

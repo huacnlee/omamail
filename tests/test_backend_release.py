@@ -11,6 +11,7 @@ import os
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,7 +29,43 @@ class ReleaseTests(unittest.TestCase):
         (self.root / 'Cargo.toml').write_text('[package]\nname = "omamail"\nversion = "0.8.2"\n')
         (self.root / 'Cargo.lock').write_text('[[package]]\nname = "omamail"\nversion = "0.8.2"\n')
         (self.root / 'manifest.json').write_text(json.dumps({'version': '0.8.2'}))
+        (self.root / 'app').mkdir(exist_ok=True)
+        (self.root / 'app/CMakeLists.txt').write_text(
+            'cmake_minimum_required(VERSION 3.21)\nproject(omamail-app VERSION 0.8.2 LANGUAGES CXX)\n')
         (self.root / 'backend-version').write_text('0.8.1\n')
+
+    def test_backend_api_process_group_cleanup_is_native_on_windows_and_posix(self):
+        spec = importlib.util.spec_from_file_location('backend_api_contract_test', ROOT / 'tests/test_backend_api.py')
+        backend_api = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(backend_api)
+        self.assertEqual(backend_api.process_group_options('nt'),
+                         {'creationflags': backend_api.WINDOWS_CREATE_NEW_PROCESS_GROUP})
+        self.assertEqual(backend_api.process_group_options('posix'), {'start_new_session': True})
+
+        class Process:
+            pid = 42
+
+            def __init__(self):
+                self.killed = False
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                self.killed = True
+
+        windows = Process()
+        with mock.patch.object(backend_api.subprocess, 'run') as taskkill:
+            backend_api.terminate_process_group(windows, 'nt')
+        taskkill.assert_called_once_with(
+            ['taskkill', '/PID', '42', '/T', '/F'], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False)
+        self.assertTrue(windows.killed)
+        posix = Process()
+        with mock.patch.object(backend_api.os, 'killpg') as killpg:
+            backend_api.terminate_process_group(posix, 'posix')
+        killpg.assert_called_once_with(42, backend_api.signal.SIGKILL)
+        self.assertFalse(posix.killed)
 
     def test_preparation_allows_old_pin_but_merge_requires_equality(self):
         self.metadata()
@@ -36,6 +73,22 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotEqual(self.run_helper('check', '--root', self.root, '--require-pin').returncode, 0)
         (self.root / 'Cargo.lock').write_text('[[package]]\nname = "omamail"\nversion = "0.8.1"\n')
         self.assertNotEqual(self.run_helper('check', '--root', self.root).returncode, 0)
+
+    def test_release_version_includes_plugin_manifest_and_standalone_host(self):
+        self.metadata()
+        self.assertEqual(self.run_helper('check', '--root', self.root, '--tag', 'v0.8.2').returncode, 0)
+        fixtures = {
+            'manifest.json': '{"version":"0.8.1"}',
+            'app/CMakeLists.txt': 'project(omamail-app VERSION 0.8.1 LANGUAGES CXX)\n',
+        }
+        for name, value in fixtures.items():
+            with self.subTest(name=name):
+                path = self.root / name
+                original = path.read_text()
+                path.write_text(value)
+                result = self.run_helper('check', '--root', self.root, '--tag', 'v0.8.2')
+                self.assertNotEqual(result.returncode, 0)
+                path.write_text(original)
 
     def test_release_pr_gate_requires_published_version_before_merge(self):
         # Execute the actual workflow guard: removing or weakening it must let
@@ -117,6 +170,21 @@ class ReleaseTests(unittest.TestCase):
         contract['apiVersion'] = 2
         contract['unreleased']['methods'] = ['nope.method']
         self.api.write_text(json.dumps(contract))
+        self.assertNotEqual(self.check_api().returncode, 0)
+
+    def test_api_inventory_accepts_only_the_reviewed_agent_platform_gate(self):
+        contract = self.api_fixture()
+        contract['methods'].append('agent.context')
+        self.api.write_text(json.dumps(contract))
+        methods = self.root / 'src/backend/methods.rs'
+        methods.write_text('''pub const ALL: &[&str] = &[
+            "system.info",
+            #[cfg(all(feature = "agent", target_os = "linux"))]
+            "agent.context",
+        ];''')
+        result = self.check_api()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        methods.write_text(methods.read_text().replace('target_os = "linux"', 'target_os = "windows"'))
         self.assertNotEqual(self.check_api().returncode, 0)
 
     def test_unreleased_cases_follow_their_methods_and_a_release_folds_them(self):
@@ -211,7 +279,7 @@ class ReleaseTests(unittest.TestCase):
         first = self.build_manifest.read_bytes()
         self.assertTrue(self.provenance_matches())
         (self.root / 'ui/App.qml').write_text('Item { width: 200 }')
-        (self.root / 'manifest.json').write_text('{"version":"0.8.3"}')
+        (self.root / 'manifest.json').write_text('{"version":"0.8.2","description":"changed"}')
         self.assertTrue(self.provenance_matches())
         result = self.run_helper('provenance', '--root', self.root, '--output', self.build_manifest)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -331,6 +399,64 @@ class ReleaseTests(unittest.TestCase):
         archive.write_bytes(archive.read_bytes() + b'corrupt')
         self.assertNotEqual(self.run_helper('verify', archive.parent, '--arch', 'x86_64').returncode, 0)
 
+    def test_plugin_verifier_selects_exact_backend_asset_from_full_release_checksum(self):
+        binary = self.root / 'binary'
+        binary.write_bytes(b'plugin backend')
+        binary.chmod(0o755)
+        out = self.root / 'out'
+        self.assertEqual(self.run_helper('package', binary, 'x86_64', out).returncode, 0)
+        sums = out / 'SHA256SUMS'
+        sums.write_text(sums.read_text() + '0' * 64 + '  omamail-app-linux-x86_64.tar.gz\n')
+        result = self.run_helper('verify', out, '--arch', 'x86_64')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sums.write_text(sums.read_text() + '1' * 64 + '  unexpected.tar.gz\n')
+        self.assertNotEqual(self.run_helper('verify', out, '--arch', 'x86_64').returncode, 0)
+
+    def test_release_checksum_covers_exact_binary_and_installer_assets(self):
+        out = self.root / 'release'
+        out.mkdir()
+        names = (
+            'omamail-linux-x86_64.tar.gz', 'omamail-linux-aarch64.tar.gz',
+            'omamail-app-macos-aarch64.tar.gz', 'omamail-app-linux-x86_64.tar.gz',
+            'omamail-app-windows-x86_64.zip', 'install.sh', 'install.ps1')
+        for index, name in enumerate(names):
+            (out / name).write_bytes(f'asset {index}'.encode())
+        (out / 'backend-api.json').write_text('{}\n')
+        (out / 'backend-build.json').write_text('{}\n')
+        result = self.run_helper('release-checksums', out)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = (out / 'SHA256SUMS').read_text().splitlines()
+        self.assertEqual([line.split('  ', 1)[1] for line in records], sorted(names))
+        self.assertEqual(self.run_helper('verify-release', out).returncode, 0)
+        (out / 'omamail-app-windows-x86_64.zip').write_bytes(b'changed')
+        self.assertNotEqual(self.run_helper('verify-release', out).returncode, 0)
+        (out / 'unexpected.bin').write_bytes(b'extra')
+        self.assertNotEqual(self.run_helper('release-checksums', out).returncode, 0)
+
+    def test_release_checksum_refuses_noncanonical_bytes_and_unsafe_assets(self):
+        out = self.root / 'release'
+        out.mkdir()
+        names = (
+            'omamail-linux-x86_64.tar.gz', 'omamail-linux-aarch64.tar.gz',
+            'omamail-app-macos-aarch64.tar.gz', 'omamail-app-linux-x86_64.tar.gz',
+            'omamail-app-windows-x86_64.zip', 'install.sh', 'install.ps1')
+        for name in names:
+            (out / name).write_bytes(name.encode())
+        (out / 'backend-api.json').write_text('{}\n')
+        (out / 'backend-build.json').write_text('{}\n')
+        self.assertEqual(self.run_helper('release-checksums', out).returncode, 0)
+        canonical = (out / 'SHA256SUMS').read_bytes()
+        for raw in (canonical.rstrip(b'\n'), canonical.replace(b'\n', b'\r\n'), canonical + b'\0'):
+            with self.subTest(raw=raw[-8:]):
+                (out / 'SHA256SUMS').write_bytes(raw)
+                self.assertNotEqual(self.run_helper('verify-release', out).returncode, 0)
+        (out / 'SHA256SUMS').write_bytes(canonical)
+        target = self.root / 'real-installer'
+        (out / 'install.sh').rename(target)
+        (out / 'install.sh').symlink_to(target)
+        self.assertNotEqual(self.run_helper('release-checksums', out).returncode, 0)
+        self.assertNotEqual(self.run_helper('verify-release', out).returncode, 0)
+
     def test_matching_hash_does_not_authorize_symlink_archive(self):
         archive = self.root / 'omamail-linux-x86_64.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:
@@ -410,6 +536,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root / 'backend-version').read_text(), '0.8.1\n')
         self.assertEqual(json.loads((self.root / 'manifest.json').read_text())['version'], '0.8.3')
+        self.assertIn('project(omamail-app VERSION 0.8.3 ',
+                      (self.root / 'app/CMakeLists.txt').read_text())
         self.assertNotEqual(subprocess.run(['git', '-C', str(self.root), 'rev-parse', '--verify', 'HEAD'], capture_output=True).returncode, 0)
 
     def test_pin_updates_only_source_branch_and_refuses_moved_remote(self):
