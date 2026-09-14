@@ -76,16 +76,29 @@ fn utf8(bytes: &[u8]) -> String {
     out
 }
 fn decode(charset: &str, bytes: &[u8]) -> String {
-    let charset = charset.to_ascii_lowercase();
-    if (charset.starts_with("iso-8859")
+    let charset = charset.trim().to_ascii_lowercase();
+    let encoding = encoding_rs::Encoding::for_label(charset.as_bytes());
+    // Preserve the existing repair for UTF-8 sent under a single-byte label.
+    // The alias's canonical name also covers cp1251, latin2, and friends.
+    let name = encoding.map_or(charset.as_str(), |e| e.name());
+    let single_byte = name.starts_with("windows-125")
+        || name.starts_with("ISO-8859")
+        || charset.starts_with("iso-8859")
         || charset.starts_with("windows-125")
         || charset.starts_with("us-ascii")
-        || charset.is_empty())
-        && std::str::from_utf8(bytes).is_err()
-    {
-        return bytes.iter().copied().map(char::from).collect();
+        || charset.is_empty();
+    if single_byte && let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_owned();
     }
-    utf8(bytes)
+    match encoding {
+        // A MIME charset labels these octets; a BOM must not silently select
+        // another decoder. Malformed legacy sequences become replacement chars.
+        Some(encoding) if encoding != encoding_rs::UTF_8 => {
+            encoding.decode_without_bom_handling(bytes).0.into_owned()
+        }
+        // Keep the established permissive fallback for UTF-8 and unknown labels.
+        _ => utf8(bytes),
+    }
 }
 pub fn decoded_header(value: &str) -> String {
     if !value.contains("=?") {
@@ -347,13 +360,15 @@ fn decode_part(part: &Value) -> Result<String> {
         return Err("message_too_large");
     }
     static CHARSET: OnceLock<Regex> = OnceLock::new();
-    let re = CHARSET.get_or_init(|| Regex::new(r#"(?i)charset="?([^";\s]+)"?"#).unwrap());
+    let re = CHARSET.get_or_init(|| {
+        Regex::new(r#"(?i)(?:^|;)\s*charset\s*=\s*(?:"([^"]*)"|([^;\s]+))"#).unwrap()
+    });
     let mime = text(&part["mimeType"]);
     let header = part_header(part, "Content-Type");
     let charset = re
         .captures(mime)
         .or_else(|| re.captures(&header))
-        .map(|c| c[1].to_owned())
+        .and_then(|c| c.get(1).or_else(|| c.get(2)).map(|m| m.as_str().to_owned()))
         .unwrap_or_else(|| "utf-8".into());
     Ok(decode(&charset, &bytes64(data)))
 }

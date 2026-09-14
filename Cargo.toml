@@ -19,6 +19,7 @@ unicode-normalization = "0.1"
 futures-util = "0.3"
 libc = "0.2"
 mailparse = "0.17"
+encoding_rs = "0.8"
 regex = "1"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

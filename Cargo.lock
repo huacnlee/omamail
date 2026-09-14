@@ -992,6 +992,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
+ "encoding_rs",
  "futures-util",
  "hickory-resolver",
  "libc",
