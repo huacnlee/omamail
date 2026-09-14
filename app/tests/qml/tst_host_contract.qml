@@ -245,7 +245,7 @@ TestCase {
     verify(!Color.hasOmarchyTheme)
     verify(Color.applySystemAppearance("light"))
     compare(Color.dark, false)
-    compare(String(Color.background), "#fafafa")
+    compare(String(Color.background), "#ffffff")
     compare(String(Color.foreground), "#212121")
     compare(String(Color.accent), "#3264eb")
     compare(String(Color.surface), "#f5f5f5")

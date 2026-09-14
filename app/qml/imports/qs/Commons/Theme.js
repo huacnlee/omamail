@@ -11,11 +11,12 @@ var DARK_FALLBACK = {
   mode: "dark"
 }
 
-// Lupine is Omarchy's built-in light theme. Keep this fallback pinned to the
-// source palette rather than approximating a light version of Tokyo Night:
+// Lupine is Omarchy's built-in light theme. This standalone adaptation keeps
+// its palette pinned to the source, with the user-selected pure-white window
+// background replacing Lupine's near-white background:
 // https://github.com/bjarneo/omarchy-lupine-theme/blob/3c225d2129e6f8649e6a9ebba18ea5db4e37f7a3/colors.toml
 var LIGHT_FALLBACK = {
-  background: "#fafafa", foreground: "#212121", accent: "#3264eb",
+  background: "#ffffff", foreground: "#212121", accent: "#3264eb",
   red: "#c900c4", yellow: "#026fde", green: "#4a2fd0",
   lighter_background: "#f5f5f5", dark_background: "#ececec",
   bright_foreground: "#000000", selection: "#d0d0d0", muted: "#9e9e9e",
