@@ -97,6 +97,10 @@ Item {
       sidebar.numbersVisible = true
       var chip = named(sidebar, "mailbox-shortcut-chip", [])[0]
       verify(chip, "the numbered mailbox draws its shortcut hint")
+      verify(chip.x >= chip.parent.width / 2, "hint stays in the right corner")
+      verify(chip.y < chip.parent.height / 4, "hint stays at the top")
+      verify(chip.height < chip.parent.height / 2, "hint is smaller than the row icon")
+      verify(named(sidebar, "mailbox-entry-icon", [])[0].visible, "modifier preserves mailbox icon")
       verify(chip.color.a < Style.selectedFillFor(Color.foreground, Color.accent).a,
         "a shortcut hint must not use the much heavier selected-state fill")
     }

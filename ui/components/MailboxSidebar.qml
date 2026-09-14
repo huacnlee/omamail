@@ -224,7 +224,7 @@ Item {
       color: entry.selected ? root.textColor
         : (entry.selectable ? root.dimColor
           : Qt.rgba(root.dimColor.r, root.dimColor.g, root.dimColor.b, root.dimColor.a * 0.6))
-      visible: !(entry.showsNumber && root.collapsed)
+      objectName: "mailbox-entry-icon"
     }
 
     // The fold, at the end of the row so the name keeps its column. Its own
@@ -250,19 +250,17 @@ Item {
       TapHandler { onTapped: entry.foldRequested() }
     }
 
-    // Held Alt names every row. Collapsed there is no room beside the glyph, so
-    // it stands where the glyph was; open it takes the count's place, because a
-    // 148px rail cannot hold both and the count is the one you can get back by
-    // letting go.
+    // Modifier hints sit above the icon at the corner of a collapsed row.
     Rectangle {
       id: slotChip
       objectName: "mailbox-shortcut-chip"
       visible: entry.showsNumber
-      anchors.verticalCenter: parent.verticalCenter
-      anchors.horizontalCenter: root.collapsed ? parent.horizontalCenter : undefined
-      anchors.right: root.collapsed ? undefined : parent.right
-      anchors.rightMargin: root.collapsed ? 0 : Style.space(6)
-      width: Style.space(16)
+      anchors.verticalCenter: root.collapsed ? undefined : parent.verticalCenter
+      anchors.top: root.collapsed ? parent.top : undefined
+      anchors.topMargin: Style.space(1)
+      anchors.right: parent.right
+      anchors.rightMargin: root.collapsed ? Style.space(1) : Style.space(6)
+      width: Style.space(root.collapsed ? 10 : 16)
       height: width
       radius: Style.cornerRadius
       // This names a shortcut; it is not another selected state layered over
@@ -275,7 +273,7 @@ Item {
         text: entry.numberText
         color: root.textColor
         font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
+        font.pixelSize: root.collapsed ? Style.font.caption * 0.8 : Style.font.caption
         font.bold: true
       }
     }
