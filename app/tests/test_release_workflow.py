@@ -17,6 +17,12 @@ APP_JOBS = {
     "app-windows-x86_64": ("windows-2022", "omamail-app-windows-x86_64.zip"),
 }
 
+CI_APP_JOBS = {
+    "standalone-app-macos": ("macos-15", "macos-aarch64", "omamail-app-macos-aarch64.tar.gz"),
+    "standalone-app-linux": ("ubuntu-22.04", "linux-x86_64", "omamail-app-linux-x86_64.tar.gz"),
+    "standalone-app-windows": ("windows-2022", "windows-x86_64", "omamail-app-windows-x86_64.zip"),
+}
+
 
 def job_block(source, name):
     match = re.search(rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)", source)
@@ -82,6 +88,32 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertIn("test_install.sh", block)
                     self.assertIn("package-release.sh", block)
                     self.assertIn('--host "$PWD/build/app/omamail-app"', block)
+
+    def test_pull_requests_build_and_exercise_each_production_standalone_archive(self):
+        forbidden = ("gh release create", "gh release edit", "publish-backend.sh")
+        for job, (runner, target, archive) in CI_APP_JOBS.items():
+            with self.subTest(job=job):
+                block = job_block(self.ci_workflow, job)
+                self.assertIn(f"runs-on: {runner}", block)
+                self.assertIn("--no-default-features --features standalone", block)
+                self.assertIn("cmake -S app", block)
+                self.assertIn("ctest --test-dir", block)
+                self.assertIn("-input app/tests/qml/tst_host_contract.qml", block)
+                self.assertIn("test_backend_api.py", block)
+                self.assertIn("--standalone", block)
+                self.assertIn("--check-resources", block)
+                self.assertIn("--smoke-test", block)
+                self.assertIn(archive, block)
+                if target == "windows-x86_64":
+                    self.assertIn("package-release.ps1", block)
+                    self.assertIn("Test-Package.ps1", block)
+                    self.assertIn("Test-Install.ps1", block)
+                else:
+                    self.assertIn(f"package-release.sh {target}", block)
+                    self.assertIn("test_package.py", block)
+                    self.assertIn("test_install.sh", block)
+                for command in forbidden:
+                    self.assertNotIn(command, block)
 
     def test_every_build_is_required_before_the_only_publisher_can_pin(self):
         publish = job_block(self.workflow, "publish-and-pin")
