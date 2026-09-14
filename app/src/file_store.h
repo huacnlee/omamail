@@ -7,7 +7,7 @@
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
-class FileStore final : public QObject {
+class FileStore : public QObject {
     Q_OBJECT
     QML_NAMED_ELEMENT(NativeFileStore)
     QML_SINGLETON

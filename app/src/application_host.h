@@ -10,7 +10,7 @@
 
 #include <memory>
 
-class ApplicationHost final : public QObject {
+class ApplicationHost : public QObject {
     Q_OBJECT
     QML_NAMED_ELEMENT(NativeHost)
     QML_SINGLETON
