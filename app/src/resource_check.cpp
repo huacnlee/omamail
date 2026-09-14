@@ -43,14 +43,25 @@ bool readable(const QString &path)
     return file.open(QIODevice::ReadOnly);
 }
 
-void drainStderr(QProcess &process, QByteArray &stderrTail)
+void drainStderr(QProcess &process, QByteArray &stderrTail, SmokeMetrics *metrics)
 {
-    stderrTail.append(process.readAllStandardError());
-    if (stderrTail.size() > maximumStderrBytes)
-        stderrTail.remove(0, stderrTail.size() - maximumStderrBytes);
+    const QProcess::ProcessChannel previous = process.readChannel();
+    process.setReadChannel(QProcess::StandardError);
+    while (process.bytesAvailable() > 0) {
+        const QByteArray chunk = process.read(qMin<qint64>(process.bytesAvailable(), 64 * 1024));
+        if (chunk.isEmpty()) break;
+        stderrTail.append(chunk);
+        if (stderrTail.size() > maximumStderrBytes)
+            stderrTail.remove(0, stderrTail.size() - maximumStderrBytes);
+        if (metrics)
+            metrics->maximumStderrTailBytes = qMax(metrics->maximumStderrTailBytes,
+                                                   stderrTail.size());
+    }
+    process.setReadChannel(previous);
 }
 
-bool appendBoundedRecords(QByteArray &buffer, const QByteArray &bytes, QString *error)
+bool appendBoundedRecords(QByteArray &buffer, const QByteArray &bytes, QString *error,
+                          SmokeMetrics *metrics = nullptr)
 {
     qsizetype offset = 0;
     while (offset < bytes.size()) {
@@ -62,6 +73,9 @@ bool appendBoundedRecords(QByteArray &buffer, const QByteArray &bytes, QString *
             return false;
         }
         buffer.append(bytes.constData() + offset, length);
+        if (metrics)
+            metrics->maximumStdoutFrameBytes = qMax(metrics->maximumStdoutFrameBytes,
+                                                    buffer.size());
         if (newline < 0) return true;
         buffer.clear();
         offset = newline + 1;
@@ -70,7 +84,7 @@ bool appendBoundedRecords(QByteArray &buffer, const QByteArray &bytes, QString *
 }
 
 bool takeLine(QByteArray &buffer, const QByteArray &bytes, QByteArray *line,
-              bool *complete, QString *error)
+              bool *complete, QString *error, SmokeMetrics *metrics)
 {
     *complete = false;
     const qsizetype newline = bytes.indexOf('\n');
@@ -80,29 +94,33 @@ bool takeLine(QByteArray &buffer, const QByteArray &bytes, QByteArray *line,
         return false;
     }
     buffer.append(bytes.constData(), prefix);
+    if (metrics)
+        metrics->maximumStdoutFrameBytes = qMax(metrics->maximumStdoutFrameBytes,
+                                                buffer.size());
     if (newline < 0) return true;
     *line = buffer;
     buffer.clear();
     *complete = true;
-    return appendBoundedRecords(buffer, bytes.mid(newline + 1), error);
+    return appendBoundedRecords(buffer, bytes.mid(newline + 1), error, metrics);
 }
 
 bool waitForLine(QProcess &process, QByteArray &buffer, QByteArray &stderrTail,
-                 QByteArray *line, int timeoutMilliseconds, QString *error)
+                 QByteArray *line, int timeoutMilliseconds, QString *error,
+                 SmokeMetrics *metrics)
 {
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < timeoutMilliseconds) {
-        drainStderr(process, stderrTail);
+        drainStderr(process, stderrTail, metrics);
         while (process.bytesAvailable() > 0) {
             const QByteArray bytes = process.read(qMin<qint64>(process.bytesAvailable(), 64 * 1024));
             bool complete = false;
-            if (!takeLine(buffer, bytes, line, &complete, error)) return false;
+            if (!takeLine(buffer, bytes, line, &complete, error, metrics)) return false;
             if (complete) return true;
         }
         const int remaining = timeoutMilliseconds - static_cast<int>(timer.elapsed());
         if (!process.waitForReadyRead(qMin(remaining, 100))) {
-            drainStderr(process, stderrTail);
+            drainStderr(process, stderrTail, metrics);
             if (process.state() == QProcess::NotRunning
                 && process.bytesAvailable() == 0) break;
             QCoreApplication::processEvents();
@@ -114,7 +132,7 @@ bool waitForLine(QProcess &process, QByteArray &buffer, QByteArray &stderrTail,
 
 bool request(QProcess &process, QByteArray &buffer, QByteArray &stderrTail,
              const QByteArray &id, const QByteArray &method,
-             QJsonObject *result, QString *error)
+             QJsonObject *result, QString *error, SmokeMetrics *metrics)
 {
     const QByteArray frame = QByteArrayLiteral("{\"jsonrpc\":\"2.0\",\"id\":\"")
         + id + QByteArrayLiteral("\",\"method\":\"") + method
@@ -124,7 +142,7 @@ bool request(QProcess &process, QByteArray &buffer, QByteArray &stderrTail,
         return false;
     }
     QByteArray line;
-    if (!waitForLine(process, buffer, stderrTail, &line, 5000, error)) return false;
+    if (!waitForLine(process, buffer, stderrTail, &line, 5000, error, metrics)) return false;
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
     const QJsonObject reply = document.object();
@@ -140,26 +158,29 @@ bool request(QProcess &process, QByteArray &buffer, QByteArray &stderrTail,
 }
 
 bool waitForCleanExit(QProcess &process, QByteArray &stdoutBuffer,
-                      QByteArray &stderrTail, QString *error)
+                      QByteArray &stderrTail, int timeoutMilliseconds,
+                      QString *error, SmokeMetrics *metrics)
 {
     QElapsedTimer timer;
     timer.start();
-    while (timer.elapsed() < 5000) {
-        drainStderr(process, stderrTail);
+    while (timer.elapsed() < timeoutMilliseconds) {
+        drainStderr(process, stderrTail, metrics);
         while (process.bytesAvailable() > 0) {
             const QByteArray bytes = process.read(
                 qMin<qint64>(process.bytesAvailable(), 64 * 1024));
-            if (!appendBoundedRecords(stdoutBuffer, bytes, error)) return false;
+            if (!appendBoundedRecords(stdoutBuffer, bytes, error, metrics)) return false;
         }
         if (process.state() == QProcess::NotRunning) return true;
-        process.waitForFinished(qMin(10, 5000 - static_cast<int>(timer.elapsed())));
+        const int remaining = timeoutMilliseconds - static_cast<int>(timer.elapsed());
+        if (remaining <= 0) break;
+        process.waitForFinished(qMin(10, remaining));
         QCoreApplication::processEvents();
     }
-    drainStderr(process, stderrTail);
+    drainStderr(process, stderrTail, metrics);
     while (process.bytesAvailable() > 0) {
         const QByteArray bytes = process.read(
             qMin<qint64>(process.bytesAvailable(), 64 * 1024));
-        if (!appendBoundedRecords(stdoutBuffer, bytes, error)) return false;
+        if (!appendBoundedRecords(stdoutBuffer, bytes, error, metrics)) return false;
     }
     if (process.state() == QProcess::NotRunning) return true;
     if (error) *error = QStringLiteral("Backend shutdown timed out");
@@ -250,7 +271,8 @@ ResourceCheck checkResources(const ResourcePaths &paths)
     return result;
 }
 
-bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString *error)
+bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString *error,
+                  int shutdownTimeoutMilliseconds, SmokeMetrics *metrics)
 {
     const ResourceCheck resources = checkResources(paths);
     if (!resources.ok) {
@@ -292,7 +314,8 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
     QByteArray responseBuffer;
     QByteArray stderrTail;
     QJsonObject info;
-    if (!request(backend, responseBuffer, stderrTail, "smoke-info", "system.info", &info, error)) {
+    if (!request(backend, responseBuffer, stderrTail, "smoke-info", "system.info", &info,
+                 error, metrics)) {
         stopProcess(backend);
         return false;
     }
@@ -306,9 +329,11 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
         return false;
     }
     QJsonObject quitResult;
-    if (!request(backend, responseBuffer, stderrTail, "smoke-quit", "system.quit", &quitResult, error)
+    if (!request(backend, responseBuffer, stderrTail, "smoke-quit", "system.quit", &quitResult,
+                 error, metrics)
         || quitResult.value(QStringLiteral("quitReady")).toBool() != true
-        || !waitForCleanExit(backend, responseBuffer, stderrTail, error)
+        || !waitForCleanExit(backend, responseBuffer, stderrTail,
+                             shutdownTimeoutMilliseconds, error, metrics)
         || backend.exitStatus() != QProcess::NormalExit
         || backend.exitCode() != 0) {
         if (error && error->isEmpty()) *error = QStringLiteral("Backend did not shut down cleanly");

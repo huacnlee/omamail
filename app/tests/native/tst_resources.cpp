@@ -1,6 +1,7 @@
 #include "resource_check.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QGuiApplication>
 #include <QJsonDocument>
@@ -47,7 +48,8 @@ private slots:
     void smokeTestLoadsQmlHandshakesAndWritesReadyFile();
     void smokeRejectsOversizedStdoutFrame();
     void smokeDrainsLargeStderr();
-    void smokeDrainsBothChannelsAfterQuitReply();
+    void smokeBoundsBothChannelsAfterQuitReply();
+    void smokeDeadlineCrossedDuringDrainDoesNotWaitForever();
     void bundleDiscoveryDoesNotUseDevelopmentFallbacks();
 };
 
@@ -137,16 +139,39 @@ void ResourcesTest::smokeDrainsLargeStderr()
     qunsetenv("OMAMAIL_SMOKE_FIXTURE");
 }
 
-void ResourcesTest::smokeDrainsBothChannelsAfterQuitReply()
+void ResourcesTest::smokeBoundsBothChannelsAfterQuitReply()
 {
     QTemporaryDir directory;
     ResourcePaths paths = completeLayout(directory);
     paths.backend = QCoreApplication::applicationFilePath();
     qputenv("OMAMAIL_SMOKE_FIXTURE", "flood-after-quit");
     QString error;
-    QVERIFY2(runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error),
-             qPrintable(error));
+    SmokeMetrics metrics;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QVERIFY(!runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error,
+                          100, &metrics));
     qunsetenv("OMAMAIL_SMOKE_FIXTURE");
+    QVERIFY(error.contains(QStringLiteral("timed out")));
+    QVERIFY(elapsed.elapsed() < 2000);
+    QVERIFY(metrics.maximumStdoutFrameBytes <= 1024 * 1024);
+    QVERIFY(metrics.maximumStderrTailBytes <= 64 * 1024);
+    QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("ready.json"))));
+}
+
+void ResourcesTest::smokeDeadlineCrossedDuringDrainDoesNotWaitForever()
+{
+    QTemporaryDir directory;
+    ResourcePaths paths = completeLayout(directory);
+    paths.backend = QCoreApplication::applicationFilePath();
+    qputenv("OMAMAIL_SMOKE_FIXTURE", "flood-after-quit");
+    QString error;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QVERIFY(!runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error, 1));
+    qunsetenv("OMAMAIL_SMOKE_FIXTURE");
+    QVERIFY(error.contains(QStringLiteral("timed out")));
+    QVERIFY(elapsed.elapsed() < 1000);
 }
 
 void ResourcesTest::bundleDiscoveryDoesNotUseDevelopmentFallbacks()
@@ -207,13 +232,12 @@ int main(int argc, char *argv[])
                         || !standardError.open(stderr, QIODevice::WriteOnly)) return 2;
                     const QByteArray stdoutRecord(8 * 1024, 'o');
                     const QByteArray stderrRecord(8 * 1024, 'e');
-                    for (int i = 0; i < 256; ++i) {
+                    for (;;) {
                         standardOutput.write(stdoutRecord);
                         standardOutput.write("\n");
-                        standardOutput.flush();
                         standardError.write(stderrRecord);
                         standardError.write("\n");
-                        standardError.flush();
+                        if (!standardOutput.flush() || !standardError.flush()) return 0;
                     }
                 }
                 return 0;

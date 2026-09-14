@@ -16,9 +16,15 @@ struct ResourceCheck {
     QStringList errors;
 };
 
+struct SmokeMetrics {
+    qsizetype maximumStdoutFrameBytes = 0;
+    qsizetype maximumStderrTailBytes = 0;
+};
+
 bool developmentResourcesEnabled();
 ResourcePaths defaultResourcePaths(const QString &executablePath = {},
                                    bool developmentMode = false);
 ResourceCheck checkResources(const ResourcePaths &paths);
 bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile,
-                  QString *error = nullptr);
+                  QString *error = nullptr, int shutdownTimeoutMilliseconds = 5000,
+                  SmokeMetrics *metrics = nullptr);
