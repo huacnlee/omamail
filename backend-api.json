@@ -1,6 +1,6 @@
 {
   "apiVersion": 3,
-  "releasedApiVersion": 2,
+  "releasedApiVersion": 3,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -181,23 +181,49 @@
     {
       "name": "mail action rejects malformed HEY IDs before preview",
       "method": "mail.act",
-      "params": {"account": "hey:sender@example.org", "operation": "read", "ids": ["1:INBOX"]},
+      "params": {
+        "account": "hey:sender@example.org",
+        "operation": "read",
+        "ids": [
+          "1:INBOX"
+        ]
+      },
       "errorCode": -32602,
-      "equals": {"message": "Invalid params"}
+      "equals": {
+        "message": "Invalid params"
+      }
     },
     {
       "name": "mail action rejects malformed IMAP IDs before execution",
       "method": "mail.act",
-      "params": {"account": "imap:sender@example.org", "operation": "read", "ids": ["1:INBOX", "bad"], "execute": true},
+      "params": {
+        "account": "imap:sender@example.org",
+        "operation": "read",
+        "ids": [
+          "1:INBOX",
+          "bad"
+        ],
+        "execute": true
+      },
       "errorCode": -32602,
-      "equals": {"message": "Invalid params"}
+      "equals": {
+        "message": "Invalid params"
+      }
     },
     {
       "name": "mail action rejects out-of-range Outlook UIDs before preview",
       "method": "mail.act",
-      "params": {"account": "outlook:sender@example.org", "operation": "trash", "ids": ["4294967296:INBOX"]},
+      "params": {
+        "account": "outlook:sender@example.org",
+        "operation": "trash",
+        "ids": [
+          "4294967296:INBOX"
+        ]
+      },
       "errorCode": -32602,
-      "equals": {"message": "Invalid params"}
+      "equals": {
+        "message": "Invalid params"
+      }
     },
     {
       "name": "mail list requires an account",
@@ -257,7 +283,7 @@
           "recipient@example.org"
         ],
         "subject": "Contract preview",
-        "body": "Hello 合成\nSecond line"
+        "body": "Hello \u5408\u6210\nSecond line"
       },
       "equals": {
         "dryRun": true,
@@ -268,7 +294,7 @@
           "recipient@example.org"
         ],
         "subject": "Contract preview",
-        "body": "Hello 合成\nSecond line",
+        "body": "Hello \u5408\u6210\nSecond line",
         "attachments": []
       }
     },
@@ -305,7 +331,9 @@
       "params": {
         "account": "contract@example.org",
         "operation": "star",
-        "ids": ["opaque:id"],
+        "ids": [
+          "opaque:id"
+        ],
         "unexpected": true,
         "execute": true
       },
@@ -319,7 +347,9 @@
       "method": "mail.send",
       "params": {
         "account": "imap:sender@example.org",
-        "to": ["recipient@example.org"],
+        "to": [
+          "recipient@example.org"
+        ],
         "body": "Preview",
         "unexpected": true,
         "execute": true
@@ -617,29 +647,7 @@
     }
   ],
   "unreleased": {
-    "methods": [
-      "mail.list",
-      "mail.read",
-      "mail.act",
-      "mail.send"
-    ],
-    "cases": [
-      "mail action rejects malformed HEY IDs before preview",
-      "mail action rejects malformed IMAP IDs before execution",
-      "mail action rejects out-of-range Outlook UIDs before preview",
-      "mail list requires an account",
-      "mail read requires an account",
-      "mail action dry run",
-      "mail send dry run",
-      "mail list rejects unknown fields",
-      "mail read rejects unknown fields",
-      "mail act rejects unknown fields",
-      "mail send rejects unknown fields",
-      "mail act rejects nonboolean execution",
-      "mail send rejects nonboolean execution",
-      "recovery preserves empty edited draft",
-      "recovery reads edit history",
-      "recovery rejects invalid edit history"
-    ]
+    "methods": [],
+    "cases": []
   }
 }
