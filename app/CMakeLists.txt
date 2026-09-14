@@ -117,7 +117,13 @@ if(BUILD_TESTING)
       set_target_properties(${name} PROPERTIES WIN32_EXECUTABLE FALSE)
     endif()
     target_link_libraries(${name} PRIVATE omamail_native Qt6::Test)
-    add_test(NAME ${name} COMMAND ${name})
+    if(WIN32)
+      add_test(NAME ${name} COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_native_test.py"
+        "$<TARGET_FILE:${name}>")
+    else()
+      add_test(NAME ${name} COMMAND ${name})
+    endif()
   endfunction()
 
   omamail_native_test(tst_process tst_process.cpp)
