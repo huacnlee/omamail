@@ -1482,6 +1482,23 @@ const alsoDeep = { id: "m", a: { b: { c: { d: { e: 1 } } } } }
 assert.strictEqual(model.sameSummaries([deep], [alsoDeep]), false,
   "the comparison stops rather than following an unbounded structure")
 
+// ------------------------------------------------------------ reload depth
+
+// A first load is a page. A reload of a list Load more has extended asks for
+// the rows the view reached, so the answer replaces it at that depth rather
+// than at page one — which is what a poll, a push or F5 used to do.
+assert.strictEqual(model.reloadLimit(25, 0), 25)
+assert.strictEqual(model.reloadLimit(25, 25), 25)
+assert.strictEqual(model.reloadLimit(25, 50), 50, "two pages in, two pages back")
+assert.strictEqual(model.reloadLimit(25, 63), 63,
+  "rows trashed since do not round the depth down to a page")
+assert.strictEqual(model.reloadLimit(50, 150), 100, "bounded by the IMAP window")
+assert.strictEqual(model.reloadLimit(100, 300), 100)
+assert.strictEqual(model.reloadLimit(25, -5), 25)
+assert.strictEqual(model.reloadLimit(25, "nonsense"), 25)
+assert.strictEqual(model.reloadLimit(0, 40), 40, "a page of nothing still asks for what was shown")
+assert.strictEqual(model.reloadLimit(null, null), 1)
+
 assert.strictEqual(model.activityStatus({}), "", "nothing in flight says nothing")
 assert.strictEqual(model.activityStatus({ sending: 1 }), "Sending")
 assert.strictEqual(model.activityStatus({ sending: 2, queuedSends: 3 }), "Sending 2 \u00b7 3 queued to send")

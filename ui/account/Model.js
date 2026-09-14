@@ -1363,6 +1363,30 @@ function badgeCount(summary) {
   return block && block.count >= Conversation.MINIMUM_MEMBERS ? block.count : 0
 }
 
+// ------------------------------------------------------------ reload depth
+
+// How many rows a reload asks for.
+//
+// Load more extends a list a page at a time, and everything that reloads the
+// list — the poll, F5, a push, the revalidation after an action — used to ask
+// for page one again and replace the whole list with the answer, so the rows
+// the user had paged down to vanished under them the moment any of those ran.
+// Opening an unread message was enough: its quiet mark-read is a write, the
+// server pushes the change, and the push is a reload.
+//
+// So a reload asks for as many rows as the view had reached, and the answer
+// replaces the list at that depth. Bounded, because IMAP answers at most a
+// hundred rows in one window and a reload should never cost more than the
+// user's own paging did.
+var RELOAD_CEILING = 100
+
+function reloadLimit(pageSize, loadedDepth) {
+  var page = Math.max(1, Math.floor(Number(pageSize)) || 1)
+  var depth = Math.floor(Number(loadedDepth)) || 0
+  if (depth <= page) return page
+  return Math.min(Math.max(page, RELOAD_CEILING), depth)
+}
+
 function resultSummary(list, estimate, hasMore) {
   var shown = Array.isArray(list) ? list.length : 0
   if (shown === 0) return "No messages"
