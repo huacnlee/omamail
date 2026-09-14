@@ -112,17 +112,17 @@ async fn mail_send_preview_reads_google_identity_without_mutation_or_local_write
     )
     .unwrap();
     std::fs::set_permissions(&client_file, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let helper = fixture.root.join("secret-tool");
-    std::fs::write(&helper, r#"#!/usr/bin/python3
-import os, sys
-expected = ['lookup','service','omamail','kind','refresh-token','client-id','123-audit.apps.googleusercontent.com','account','audit@example.org','grant','calendar-events-v1']
-if sys.argv[1:] != expected or sys.stdin.read() != '':
-    open(os.path.join(os.environ['HOME'], 'forbidden-process'), 'w').write('unexpected invocation')
-    sys.exit(99)
-print('synthetic-refresh-token')
-"#).unwrap();
-    std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
-    unsafe { std::env::set_var("PATH", &fixture.root) };
+    let _credential =
+        crate::credentials::tests::isolated_store(crate::credentials::tests::SingleCredential {
+            key: crate::credentials::CredentialKey {
+                provider: "gmail".into(),
+                account_id: "audit@example.org".into(),
+                kind: crate::credentials::CredentialKind::GoogleRefreshToken {
+                    client_id: "123-audit.apps.googleusercontent.com".into(),
+                },
+            },
+            secret: crate::credentials::Secret::new(b"synthetic-refresh-token".to_vec()).unwrap(),
+        });
     for directory in ["cache", "state"] {
         let directory = fixture.root.join(directory).join("omamail");
         std::fs::create_dir_all(&directory).unwrap();

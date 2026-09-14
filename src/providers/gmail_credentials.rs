@@ -1,10 +1,12 @@
 //! Existing desktop OAuth client and current-grant keyring compatibility.
+use crate::credentials::{
+    CredentialKey, CredentialKind, CredentialStore, Error as StoreError, NativeStore, Secret,
+};
 use serde_json::Value;
 use std::{
     io::Read,
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 pub struct Client {
@@ -112,11 +114,11 @@ pub fn read_for_account(account: &str) -> Result<Client, &'static str> {
         .ok_or("config_home_invalid")?;
     read_path(&home.join(".config/omamail/credentials.json"), account)
 }
-fn lookup_with(
+pub(super) fn lookup_with(
     client: &Client,
     account: &str,
-    run: impl FnOnce(&[String]) -> Result<Vec<u8>, &'static str>,
-) -> Result<String, &'static str> {
+    run: impl FnOnce(&CredentialKey) -> Result<Secret, StoreError>,
+) -> Result<zeroize::Zeroizing<String>, &'static str> {
     if account.chars().any(char::is_control)
         || account.len() > 1024
         || client.client_id.is_empty()
@@ -125,49 +127,37 @@ fn lookup_with(
         return Err("gmail_token_account_invalid");
     }
     let account = account.trim().to_lowercase();
-    let args: Vec<String> = [
-        "lookup",
-        "service",
-        "omamail",
-        "kind",
-        "refresh-token",
-        "client-id",
-        &client.client_id,
-        "account",
-        if account.is_empty() {
-            "default"
+    let key = CredentialKey {
+        provider: "gmail".into(),
+        account_id: if account.is_empty() {
+            "default".into()
         } else {
-            &account
+            account
         },
-        "grant",
-        "calendar-events-v1",
-    ]
-    .into_iter()
-    .map(String::from)
-    .collect();
-    let bytes = run(&args)?;
-    let bytes = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
-    let token = std::str::from_utf8(bytes).map_err(|_| "gmail_token_invalid")?;
+        kind: CredentialKind::GoogleRefreshToken {
+            client_id: client.client_id.clone(),
+        },
+    };
+    let secret = run(&key).map_err(|error| match error {
+        StoreError::Missing => "gmail_token_missing",
+        StoreError::InvalidKey => "gmail_token_account_invalid",
+        StoreError::InvalidSecret | StoreError::TooLarge => "gmail_token_invalid",
+        StoreError::Unavailable | StoreError::Ambiguous => "gmail_keyring_failed",
+    })?;
+    let token = secret.text().map_err(|_| "gmail_token_invalid")?;
     if token.is_empty()
         || token.len() > 16384
         || token.chars().any(|c| c.is_control() || c.is_whitespace())
     {
         return Err("gmail_token_invalid");
     }
-    Ok(token.into())
+    Ok(zeroize::Zeroizing::new(token.into()))
 }
-pub fn lookup_refresh_token(client: &Client, account: &str) -> Result<String, &'static str> {
-    lookup_with(client, account, |args| {
-        crate::process::run("secret-tool", args, b"", Duration::from_secs(15), 16385).map_err(
-            |error| {
-                if error == "process_failed" {
-                    "gmail_token_missing"
-                } else {
-                    error
-                }
-            },
-        )
-    })
+pub fn lookup_refresh_token(
+    client: &Client,
+    account: &str,
+) -> Result<zeroize::Zeroizing<String>, &'static str> {
+    lookup_with(client, account, |key| NativeStore.get(key))
 }
 
 #[cfg(test)]
@@ -251,40 +241,35 @@ mod tests {
     #[test]
     fn lookup_is_account_and_current_grant_bound() {
         let c = parse_client(SINGLE, "one@example.org").ok().unwrap();
-        let token = lookup_with(&c, "ONE@example.org", |args| {
+        let token = lookup_with(&c, "ONE@example.org", |key| {
             assert_eq!(
-                args,
-                [
-                    "lookup",
-                    "service",
-                    "omamail",
-                    "kind",
-                    "refresh-token",
-                    "client-id",
-                    "123-abc.apps.googleusercontent.com",
-                    "account",
-                    "one@example.org",
-                    "grant",
-                    "calendar-events-v1"
-                ]
+                key,
+                &CredentialKey {
+                    provider: "gmail".into(),
+                    account_id: "one@example.org".into(),
+                    kind: CredentialKind::GoogleRefreshToken {
+                        client_id: "123-abc.apps.googleusercontent.com".into()
+                    },
+                }
             );
-            Ok(b"synthetic-token\n".to_vec())
+            Secret::new(b"synthetic-token".to_vec())
         })
         .unwrap();
-        assert_eq!(token, "synthetic-token");
+        assert_eq!(token.as_str(), "synthetic-token");
     }
     #[test]
     fn refuses_controls_without_keyring_and_noncanonical_token_output() {
         let c = parse_client(SINGLE, "one@example.org").ok().unwrap();
         assert!(lookup_with(&c, "one@example.org\n", |_| panic!("must not execute")).is_err());
         for bytes in [
-            b"token\n\n".as_slice(),
+            b"token\n".as_slice(),
+            b"token\n\n",
             b"token\0",
             b"token\r\n",
             b" token\n",
             b"\xff",
         ] {
-            assert!(lookup_with(&c, "one@example.org", |_| Ok(bytes.to_vec())).is_err());
+            assert!(lookup_with(&c, "one@example.org", |_| Secret::new(bytes.to_vec())).is_err());
         }
     }
 }

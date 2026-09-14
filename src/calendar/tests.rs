@@ -185,3 +185,48 @@ async fn independent_calendar_requests_progress_concurrently() {
     assert!(one.is_ok() && two.is_ok() && three.is_ok());
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn credentials_failure_sends_no_calendar_network_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let params = json!({"source":{"kind":"caldav","id":"synthetic-source", "username":"synthetic-user",
+        "url":format!("https://{}/dav/", listener.local_addr().unwrap())},
+        "operation":"list", "body":"<calendar/>"});
+    for (error, expected) in [
+        (
+            crate::credentials::Error::Missing,
+            "calendar_password_missing",
+        ),
+        (
+            crate::credentials::Error::Unavailable,
+            "calendar_keyring_failed",
+        ),
+    ] {
+        let result = call_inner_with(&params, None, |key| async move {
+            assert_eq!(key.provider, "caldav");
+            assert_eq!(key.account_id, "synthetic-source");
+            Err(error)
+        })
+        .await;
+        assert_eq!(result, Err(expected));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), listener.accept())
+                .await
+                .is_err(),
+            "failed credential lookup connected to the calendar server"
+        );
+    }
+}
+
+#[tokio::test]
+async fn credentials_are_not_read_for_a_cross_origin_calendar_href() {
+    let params = json!({"source":{"kind":"caldav","id":"synthetic-source", "username":"synthetic-user",
+        "url":"https://calendar.example/dav/"}, "operation":"delete", "href":"https://attacker.example/event.ics"});
+    assert!(
+        call_inner_with(&params, None, |_| async {
+            panic!("invalid origin accessed credentials")
+        })
+        .await
+        .is_err()
+    );
+}

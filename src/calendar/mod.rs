@@ -177,38 +177,51 @@ pub async fn call(params: &Value, token: Option<&str>) -> Result<Value, &'static
 }
 
 async fn call_inner(params: &Value, token: Option<&str>) -> Result<Value, &'static str> {
+    call_inner_with(params, token, crate::credentials::get).await
+}
+
+async fn call_inner_with<F, Fut>(
+    params: &Value,
+    token: Option<&str>,
+    lookup: F,
+) -> Result<Value, &'static str>
+where
+    F: FnOnce(crate::credentials::CredentialKey) -> Fut,
+    Fut:
+        std::future::Future<Output = Result<crate::credentials::Secret, crate::credentials::Error>>,
+{
     let request = prepare(params)?;
     let password = if request.kind == "caldav" {
-        let id = request.source_id.clone();
-        Some(
-            tokio::task::spawn_blocking(move || {
-                let args = [
-                    "lookup",
-                    "service",
-                    "omamail",
-                    "kind",
-                    "calendar-password",
-                    "source",
-                    &id,
-                ]
-                .map(String::from);
-                let bytes =
-                    crate::process::run("secret-tool", &args, b"", Duration::from_secs(5), 65536)?;
-                let value = String::from_utf8(bytes).map_err(|_| "calendar_password_missing")?;
-                if value.is_empty() || value.chars().any(char::is_control) {
-                    return Err("calendar_password_missing");
-                }
-                Ok(value)
-            })
-            .await
-            .map_err(|_| "calendar_password_missing")??,
-        )
+        let key = crate::credentials::CredentialKey {
+            provider: "caldav".into(),
+            account_id: request.source_id.clone(),
+            kind: crate::credentials::CredentialKind::CalendarPassword,
+        };
+        let secret = lookup(key).await.map_err(|error| match error {
+            crate::credentials::Error::Missing => "calendar_password_missing",
+            _ => "calendar_keyring_failed",
+        })?;
+        let value = secret.text().map_err(|_| "calendar_password_invalid")?;
+        if value.is_empty() || value.chars().any(char::is_control) {
+            return Err("calendar_password_invalid");
+        }
+        Some(secret)
     } else {
         None
     };
     let paginated = params["operation"] == "list" && request.kind != "caldav";
     let origin = request.url.clone();
-    let mut result = execute(client()?, request, token, password.as_deref()).await?;
+    let mut result = execute(
+        client()?,
+        request,
+        token,
+        password
+            .as_ref()
+            .map(|value| value.text())
+            .transpose()
+            .map_err(|_| "calendar_password_invalid")?,
+    )
+    .await?;
     if !paginated {
         return Ok(result);
     }

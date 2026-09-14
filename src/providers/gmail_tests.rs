@@ -306,3 +306,48 @@ async fn invalidate_is_idempotent_without_config_or_keyring() {
         Err("invalid_params")
     );
 }
+
+#[tokio::test]
+async fn credentials_failure_prevents_refresh_and_mail_network_requests() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let transport = reqwest::Client::builder().no_proxy().build().unwrap();
+    let session = Session::default();
+    let client = gmail_credentials::Client {
+        client_id: "123-synthetic.apps.googleusercontent.com".into(),
+        client_secret: "synthetic-client-secret".into(),
+    };
+    gmail_http::with_test_transport(transport, origin, async {
+        for (failure, expected) in [
+            (crate::credentials::Error::Missing, "gmail_token_missing"),
+            (
+                crate::credentials::Error::Unavailable,
+                "gmail_keyring_failed",
+            ),
+        ] {
+            let result = session
+                .get_with(
+                    "synthetic@example.org",
+                    || async {
+                        let refresh = gmail_credentials::lookup_with(
+                            &client,
+                            "synthetic@example.org",
+                            |_| Err(failure),
+                        )?;
+                        gmail_http::refresh(&client.client_id, &client.client_secret, &refresh)
+                            .await
+                    },
+                    |token| async move { gmail_http::get(&["profile"], &[], &token).await },
+                )
+                .await;
+            assert_eq!(result, Err(expected));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), listener.accept())
+                    .await
+                    .is_err(),
+                "failed credential lookup opened a network connection"
+            );
+        }
+    })
+    .await;
+}

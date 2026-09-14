@@ -1,6 +1,8 @@
 //! Optional GUI binding to the same executable and signed-in identity it displays.
 use serde_json::Value;
-use std::{os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::{path::PathBuf, time::Duration};
 
 pub async fn checked_params(params: &Value) -> Result<Value, &'static str> {
     let mut fields = params.as_object().ok_or("invalid_params")?.clone();
@@ -56,6 +58,7 @@ pub async fn checked_params(params: &Value) -> Result<Value, &'static str> {
     Ok(Value::Object(fields))
 }
 
+#[cfg(unix)]
 fn resolve_program() -> Option<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let fallback = std::env::var_os("HOME")
@@ -80,4 +83,11 @@ pub fn program() -> Result<String, &'static str> {
     resolve_program()
         .and_then(|p| p.to_str().map(str::to_owned))
         .ok_or("hey_unavailable")
+}
+
+// The official HEY client is not a Windows provider dependency. Never fall back
+// to a private API or an unrelated executable with the same name.
+#[cfg(not(unix))]
+fn resolve_program() -> Option<PathBuf> {
+    None
 }
