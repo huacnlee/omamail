@@ -79,6 +79,8 @@ class ReleaseWorkflowContract(unittest.TestCase):
                 for needle in required:
                     self.assertIn(needle, block)
                 if "windows" in job:
+                    self.assertNotRegex(block, r"(?i)\$host\s*=")
+                    self.assertIn("& $appExecutable --smoke-test", block)
                     self.assertIn("Test-Package.ps1", block)
                     self.assertIn("Test-Install.ps1", block)
                     self.assertIn("package-release.ps1", block)
@@ -109,6 +111,8 @@ class ReleaseWorkflowContract(unittest.TestCase):
                 self.assertIn(archive, block)
                 if target == "windows-x86_64":
                     self.assertIn("package-release.ps1", block)
+                    self.assertNotRegex(block, r"(?i)\$host\s*=")
+                    self.assertIn("& $appExecutable --smoke-test", block)
                     self.assertIn("Test-Package.ps1", block)
                     self.assertIn("Test-Install.ps1", block)
                     self.assertIn('-G "Visual Studio 17 2022" -A x64', block)

@@ -190,11 +190,11 @@ jobs:
           & app/tests/Test-Install.ps1
           $smoke = Join-Path $env:RUNNER_TEMP "omamail-smoke"
           Expand-Archive dist/omamail-app-windows-x86_64.zip -DestinationPath $smoke
-          $host = Join-Path $smoke "omamail/bin/omamail-app.exe"
+          $appExecutable = Join-Path $smoke "omamail/bin/omamail-app.exe"
           $backend = Join-Path $smoke "omamail/bin/omamail.exe"
-          & $host --check-resources
+          & $appExecutable --check-resources
           if ($LASTEXITCODE -ne 0) { throw "resource check failed" }
-          & $host --smoke-test (Join-Path $env:RUNNER_TEMP "omamail-ready.json")
+          & $appExecutable --smoke-test (Join-Path $env:RUNNER_TEMP "omamail-ready.json")
           if ($LASTEXITCODE -ne 0) { throw "live smoke failed" }
           python tests/test_backend_api.py --binary $backend --expected-version $version --standalone
           if ($LASTEXITCODE -ne 0) { throw "packaged backend API contract failed" }
