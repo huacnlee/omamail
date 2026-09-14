@@ -212,11 +212,13 @@ ResourcePaths defaultResourcePaths(const QString &executablePath, bool developme
     QStringList standaloneCandidates{
         QStringLiteral(":/omamail/app/qml/Main.qml"),
         executableDir.filePath(QStringLiteral("qml/Main.qml")),
-        executableDir.filePath(QStringLiteral("../Resources/qml/Main.qml"))};
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../qml/Main.qml"))),
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../Resources/qml/Main.qml")))};
     QStringList sharedCandidates{
         QStringLiteral(":/omamail/ui/Service.qml"),
         executableDir.filePath(QStringLiteral("ui/Service.qml")),
-        executableDir.filePath(QStringLiteral("../Resources/ui/Service.qml"))};
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../ui/Service.qml"))),
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../Resources/ui/Service.qml")))};
     if (developmentMode) {
         standaloneCandidates.prepend(sourceRoot.filePath(QStringLiteral("app/qml/Main.qml")));
         sharedCandidates.prepend(sourceRoot.filePath(QStringLiteral("ui/Service.qml")));
@@ -225,7 +227,9 @@ ResourcePaths defaultResourcePaths(const QString &executablePath, bool developme
     paths.sharedUi = firstExisting(sharedCandidates);
     QStringList platformCandidates{
         executableDir.filePath(QStringLiteral("plugins/platforms/%1").arg(pluginName)),
-        executableDir.filePath(QStringLiteral("../PlugIns/platforms/%1").arg(pluginName))};
+        executableDir.filePath(QStringLiteral("platforms/%1").arg(pluginName)),
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../plugins/platforms/%1").arg(pluginName))),
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../PlugIns/platforms/%1").arg(pluginName)))};
     if (developmentMode)
         platformCandidates.append(QDir(QLibraryInfo::path(QLibraryInfo::PluginsPath))
             .filePath(QStringLiteral("platforms/%1").arg(pluginName)));
@@ -246,7 +250,8 @@ ResourcePaths defaultResourcePaths(const QString &executablePath, bool developme
     QStringList manifestCandidates{
         QStringLiteral(":/omamail/manifest.json"),
         executableDir.filePath(QStringLiteral("manifest.json")),
-        executableDir.filePath(QStringLiteral("../Resources/manifest.json"))};
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../manifest.json"))),
+        QDir::cleanPath(executableDir.filePath(QStringLiteral("../Resources/manifest.json")))};
     if (developmentMode)
         manifestCandidates.prepend(sourceRoot.filePath(QStringLiteral("manifest.json")));
     paths.manifest = firstExisting(manifestCandidates);

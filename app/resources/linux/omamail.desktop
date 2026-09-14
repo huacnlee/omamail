@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Omamail
+Comment=Mail and calendar
+Exec=omamail
+Icon=omamail
+Terminal=false
+Categories=Network;Email;Office;
+StartupNotify=true

@@ -57,6 +57,7 @@ private slots:
     void smokeDeadlineCrossedDuringDrainDoesNotWaitForever();
     void bundleDiscoveryDoesNotUseDevelopmentFallbacks();
     void developmentDiscoveryUsesExplicitSourceAndBackend();
+    void bundleDiscoveryAcceptsPortableRootLayout();
 };
 
 void ResourcesTest::acceptsCompleteReadableLayout()
@@ -239,6 +240,42 @@ void ResourcesTest::developmentDiscoveryUsesExplicitSourceAndBackend()
     QCOMPARE(paths.sharedUi,
              QDir(QStringLiteral(OMAMAIL_SOURCE_ROOT)).filePath(QStringLiteral("ui/Service.qml")));
     QCOMPARE(paths.backend, QString::fromUtf8(backend));
+}
+
+void ResourcesTest::bundleDiscoveryAcceptsPortableRootLayout()
+{
+    QTemporaryDir staged;
+    const QString executable = staged.filePath(QStringLiteral("omamail.app/bin/omamail-app"));
+    QVERIFY(writeFile(executable));
+    QVERIFY(writeFile(staged.filePath(QStringLiteral("omamail.app/qml/Main.qml"))));
+    QVERIFY(writeFile(staged.filePath(QStringLiteral("omamail.app/ui/Service.qml"))));
+#ifdef Q_OS_WIN
+    const QString plugin = QStringLiteral("qwindows.dll");
+#elif defined(Q_OS_MACOS)
+    const QString plugin = QStringLiteral("libqcocoa.dylib");
+#else
+    const QString plugin = QStringLiteral("libqxcb.so");
+#endif
+    QVERIFY(writeFile(staged.filePath(QStringLiteral("omamail.app/plugins/platforms/") + plugin)));
+    const QString backend = staged.filePath(
+#ifdef Q_OS_WIN
+        QStringLiteral("omamail.app/bin/omamail.exe")
+#else
+        QStringLiteral("omamail.app/bin/omamail")
+#endif
+    );
+    QVERIFY(writeFile(backend, "#!/bin/sh\nexit 0\n"));
+    QFile backendFile(backend);
+    backendFile.setPermissions(backendFile.permissions() | QFileDevice::ExeOwner);
+
+    const ResourcePaths paths = defaultResourcePaths(executable, false);
+    QCOMPARE(paths.standaloneQml,
+             staged.filePath(QStringLiteral("omamail.app/qml/Main.qml")));
+    QCOMPARE(paths.sharedUi,
+             staged.filePath(QStringLiteral("omamail.app/ui/Service.qml")));
+    QCOMPARE(paths.platformPlugin,
+             staged.filePath(QStringLiteral("omamail.app/plugins/platforms/") + plugin));
+    QCOMPARE(paths.backend, backend);
 }
 
 int main(int argc, char *argv[])
