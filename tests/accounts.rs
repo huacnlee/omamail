@@ -1,17 +1,56 @@
-use std::process::Command;
+#![cfg(unix)]
+
+use std::{path::Path, process::Command};
+
+fn platform_config_root(root: &Path, home: &Path) -> std::path::PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = root;
+        home.join("Library/Application Support")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = home;
+        root.join("config")
+    }
+}
+
+fn isolated_cli(root: &Path, home: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_omamail"));
+    command
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_CACHE_HOME", root.join("cache"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("XDG_RUNTIME_DIR", root.join("runtime"))
+        .env("TMPDIR", root.join("tmp"));
+    command
+}
 
 #[test]
 fn cli_reads_only_bounded_regular_files_without_writing() {
     let temp = Command::new("mktemp").arg("-d").output().unwrap();
     assert!(temp.status.success());
-    let root = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim());
-    let directory = root.join("omamail");
-    std::fs::create_dir(&directory).unwrap();
+    let root = std::path::PathBuf::from(String::from_utf8(temp.stdout).unwrap().trim())
+        .canonicalize()
+        .unwrap();
+    let home = root.join("home");
+    for directory in [
+        home.clone(),
+        root.join("config"),
+        root.join("cache"),
+        root.join("state"),
+        root.join("runtime"),
+        root.join("tmp"),
+    ] {
+        std::fs::create_dir_all(directory).unwrap();
+    }
+    let directory = platform_config_root(&root, &home).join("omamail");
+    std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join("accounts.json");
     let run = || {
-        Command::new(env!("CARGO_BIN_EXE_omamail"))
+        isolated_cli(&root, &home)
             .args(["accounts", "list"])
-            .env("XDG_CONFIG_HOME", &root)
             .output()
             .unwrap()
     };
@@ -42,9 +81,8 @@ fn cli_reads_only_bounded_regular_files_without_writing() {
     }
     assert!(text.contains("世界") && text.contains("\\r\\n") && text.contains("\\|"));
     assert!(!text.contains("synthetic-secret"));
-    let machine = Command::new(env!("CARGO_BIN_EXE_omamail"))
+    let machine = isolated_cli(&root, &home)
         .args(["accounts", "list", "--json"])
-        .env("XDG_CONFIG_HOME", &root)
         .output()
         .unwrap();
     assert!(machine.status.success());
@@ -73,6 +111,5 @@ fn cli_reads_only_bounded_regular_files_without_writing() {
     assert!(!run().status.success());
     std::fs::remove_file(path).unwrap();
     std::fs::remove_file(target).unwrap();
-    std::fs::remove_dir(directory).unwrap();
-    std::fs::remove_dir(root).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }
