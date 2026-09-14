@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQuickStyle>
 #include <QTextStream>
 
 namespace {
@@ -52,11 +53,20 @@ int main(int argc, char *argv[])
     if (const int status = reportResourceCheck(paths); status != 0) return status;
     initializeNotificationActivation();
 
+    // Native platform styles can draw a light system scrollbar over a dark
+    // Omarchy palette. Keep controls in the standalone process on our small
+    // semantic style; the shell plugin continues to use the shell's style.
+    QQuickStyle::setStyle(QStringLiteral("Omamail"));
+    QQuickStyle::setFallbackStyle(QStringLiteral("Basic"));
+
     QQmlApplicationEngine engine;
     engine.addImportPath(QFileInfo(paths.sharedUi).absolutePath());
     engine.addImportPath(paths.standaloneQml.startsWith(QStringLiteral(":"))
         ? QStringLiteral("qrc:/omamail/app/qml/imports")
         : QFileInfo(paths.standaloneQml).dir().filePath(QStringLiteral("imports")));
+    engine.addImportPath(paths.standaloneQml.startsWith(QStringLiteral(":"))
+        ? QStringLiteral("qrc:/omamail/app/qml/styles")
+        : QFileInfo(paths.standaloneQml).dir().filePath(QStringLiteral("styles")));
     const QUrl mainUrl = paths.standaloneQml.startsWith(QStringLiteral(":"))
         ? QUrl(QStringLiteral("qrc") + paths.standaloneQml)
         : QUrl::fromLocalFile(paths.standaloneQml);
