@@ -1,9 +1,10 @@
 use serde_json::Value;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     fs,
     io::Write,
-    os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
@@ -152,12 +153,8 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
         .to_string(),
     )
     .unwrap();
-    fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
-    fs::set_permissions(
-        config.join("accounts.json"),
-        fs::Permissions::from_mode(0o600),
-    )
-    .unwrap();
+    set_mode(&config, 0o700);
+    set_mode(&config.join("accounts.json"), 0o600);
     let bin = root.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let secret_tool = bin.join("secret-tool");
@@ -170,7 +167,16 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
         },
     )
     .unwrap();
-    fs::set_permissions(&secret_tool, fs::Permissions::from_mode(0o700)).unwrap();
+    set_mode(&secret_tool, 0o700);
+    fs::write(
+        root.join("integration-credential"),
+        if keyring_succeeds {
+            "synthetic\n"
+        } else {
+            "missing\n"
+        },
+    )
+    .unwrap();
     MailListFixture(root)
 }
 
@@ -180,6 +186,14 @@ fn call_mail_list(root: &Path, account: &str) -> Output {
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("HOME", root.join("home"))
         .env("PATH", root.join("bin"))
+        .env(
+            "OMAMAIL_INTEGRATION_CREDENTIAL_FILE",
+            root.join("integration-credential"),
+        )
+        .env(
+            "OMAMAIL_INTEGRATION_CREDENTIAL_TRACE",
+            root.join("credential-touched"),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -205,6 +219,14 @@ fn call_mail_read(root: &Path, account: &str, id: &str) -> Output {
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("HOME", root.join("home"))
         .env("PATH", root.join("bin"))
+        .env(
+            "OMAMAIL_INTEGRATION_CREDENTIAL_FILE",
+            root.join("integration-credential"),
+        )
+        .env(
+            "OMAMAIL_INTEGRATION_CREDENTIAL_TRACE",
+            root.join("credential-touched"),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -224,22 +246,41 @@ fn call_mail_read(root: &Path, account: &str, id: &str) -> Output {
     child.wait_with_output().unwrap()
 }
 
-fn metadata(path: &Path) -> (u32, (i64, i64), (i64, i64)) {
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+#[cfg(windows)]
+fn set_mode(_: &Path, _: u32) {}
+
+#[cfg(unix)]
+fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
     let metadata = fs::metadata(path).unwrap();
     (
-        metadata.mode(),
+        metadata.mode() as u64,
         (metadata.mtime(), metadata.mtime_nsec()),
         (metadata.ctime(), metadata.ctime_nsec()),
     )
 }
+#[cfg(windows)]
+fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
+    let metadata = fs::metadata(path).unwrap();
+    (metadata.len(), (0, 0), (0, 0))
+}
 
 type FixtureSnapshot = Vec<(
     std::path::PathBuf,
-    (u32, (i64, i64), (i64, i64)),
+    (u64, (i64, i64), (i64, i64)),
     Option<Vec<u8>>,
 )>;
 fn fixture_snapshot(root: &Path) -> FixtureSnapshot {
     fn visit(path: &Path, snapshot: &mut FixtureSnapshot) {
+        if path
+            .file_name()
+            .is_some_and(|name| name == "credential-touched")
+        {
+            return;
+        }
         snapshot.push((
             path.to_owned(),
             metadata(path),
@@ -706,6 +747,14 @@ fn root_mail(root: &Path, args: &[&str], body: &[u8]) -> Output {
         .env("XDG_STATE_HOME", root.join("state"))
         .env("HOME", root.join("home"))
         .env("PATH", root.join("bin"))
+        .env(
+            "OMAMAIL_INTEGRATION_CREDENTIAL_FILE",
+            root.join("integration-credential"),
+        )
+        .env(
+            "OMAMAIL_INTEGRATION_CREDENTIAL_TRACE",
+            root.join("credential-touched"),
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -897,6 +946,7 @@ fn send_previews_repeatable_inputs_and_strict_bounded_utf8_without_writes() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn invalid_send_inputs_never_reach_credentials_or_outbox_even_with_execute() {
     use std::os::unix::fs::symlink;
@@ -970,6 +1020,14 @@ fn only_send_consumes_stdin_and_human_previews_escape_untrusted_text() {
             .env("XDG_CONFIG_HOME", fixture.0.join("config"))
             .env("HOME", fixture.0.join("home"))
             .env("PATH", fixture.0.join("bin"))
+            .env(
+                "OMAMAIL_INTEGRATION_CREDENTIAL_FILE",
+                fixture.0.join("integration-credential"),
+            )
+            .env(
+                "OMAMAIL_INTEGRATION_CREDENTIAL_TRACE",
+                fixture.0.join("credential-touched"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1073,6 +1131,14 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
             .env("XDG_CACHE_HOME", fixture.0.join("cache"))
             .env("HOME", fixture.0.join("home"))
             .env("PATH", fixture.0.join("bin"))
+            .env(
+                "OMAMAIL_INTEGRATION_CREDENTIAL_FILE",
+                fixture.0.join("integration-credential"),
+            )
+            .env(
+                "OMAMAIL_INTEGRATION_CREDENTIAL_TRACE",
+                fixture.0.join("credential-touched"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

@@ -3,6 +3,9 @@
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
+#[cfg(all(feature = "integration-test-credentials", not(debug_assertions)))]
+compile_error!("integration-test-credentials must never be enabled in a release build");
+
 pub mod rpc;
 
 #[cfg(target_os = "macos")]
@@ -75,6 +78,10 @@ pub struct NativeStore;
 impl CredentialStore for NativeStore {
     fn get(&self, key: &CredentialKey) -> Result<Secret, Error> {
         key.attributes()?;
+        #[cfg(feature = "integration-test-credentials")]
+        if let Some(result) = fixture_secret() {
+            return result;
+        }
         #[cfg(test)]
         if let Some(store) = tests::override_store() {
             return store.get(key);
@@ -99,6 +106,25 @@ impl CredentialStore for NativeStore {
         }
         platform::delete(key)
     }
+}
+
+#[cfg(feature = "integration-test-credentials")]
+fn fixture_secret() -> Option<Result<Secret, Error>> {
+    let path = std::env::var_os("OMAMAIL_INTEGRATION_CREDENTIAL_FILE")?;
+    if let Some(trace) = std::env::var_os("OMAMAIL_INTEGRATION_CREDENTIAL_TRACE") {
+        if std::fs::write(trace, b"get\n").is_err() {
+            return Some(Err(Error::Unavailable));
+        }
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return Some(Err(Error::Unavailable)),
+    };
+    Some(match bytes.as_slice() {
+        b"missing\n" => Err(Error::Missing),
+        b"synthetic\n" => Secret::new(b"synthetic".to_vec()),
+        _ => Err(Error::Unavailable),
+    })
 }
 
 fn validate_secret(bytes: &[u8]) -> Result<(), Error> {

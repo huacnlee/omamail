@@ -103,7 +103,7 @@ test-backend-process:
 
 .PHONY: test-rust backend
 test-rust:
-	cargo test --locked
+	cargo test --locked --features integration-test-credentials
 
 backend:
 	cargo build --locked --release --target-dir "$(CURDIR)/target" --bin omamail
