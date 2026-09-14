@@ -112,6 +112,7 @@ backend:
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
 	node app/tests/test_theme.js
+	node app/tests/test_shell_theme.js
 	node ui/tests/test_backend_wire.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js
