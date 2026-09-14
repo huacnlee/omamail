@@ -492,20 +492,24 @@ pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
     let mut out = Vec::new();
     let mut first = true;
     loop {
-        if unsafe {
-            GetFileInformationByHandleEx(
+        let mut status = IO_STATUS_BLOCK::default();
+        let result = unsafe {
+            nt::NtQueryDirectoryFile(
                 stream.as_raw_handle(),
-                if first {
-                    FileIdBothDirectoryRestartInfo
-                } else {
-                    FileIdBothDirectoryInfo
-                },
+                ptr::null_mut(),
+                None,
+                ptr::null(),
+                &mut status,
                 buffer.as_mut_ptr().cast(),
                 capacity as u32,
+                nt::FileIdBothDirectoryInformation,
+                false,
+                ptr::null(),
+                first,
             )
-        } == 0
-        {
-            return if unsafe { GetLastError() } == ERROR_NO_MORE_FILES {
+        };
+        if result < 0 {
+            return if result as u32 == 0x80000006 {
                 Ok(out)
             } else {
                 Err("cache_unavailable")
@@ -514,8 +518,8 @@ pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
         first = false;
         let mut offset = 0;
         loop {
-            let name_offset = offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
-            if offset + size_of::<FILE_ID_BOTH_DIR_INFO>() > capacity {
+            let name_offset = offset_of!(nt::FILE_ID_BOTH_DIR_INFORMATION, FileName);
+            if offset + size_of::<nt::FILE_ID_BOTH_DIR_INFORMATION>() > capacity {
                 return Err("cache_unsafe_path");
             }
             let info = unsafe {
@@ -523,7 +527,7 @@ pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
                     .as_ptr()
                     .cast::<u8>()
                     .add(offset)
-                    .cast::<FILE_ID_BOTH_DIR_INFO>()
+                    .cast::<nt::FILE_ID_BOTH_DIR_INFORMATION>()
             };
             let length = info.FileNameLength as usize;
             if length % 2 != 0 || length > 510 || offset + name_offset + length > capacity {

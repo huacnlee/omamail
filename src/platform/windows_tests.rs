@@ -98,7 +98,7 @@ fn junction(path: &Path, target: &Path) {
     data.extend(0u16.to_le_bytes());
     data.extend(0u16.to_le_bytes()); // SubstituteNameOffset
     data.extend(((name.len() * 2) as u16).to_le_bytes());
-    data.extend(((name.len() * 2) as u16).to_le_bytes()); // Empty print name at NUL.
+    data.extend((((name.len() + 1) * 2) as u16).to_le_bytes()); // Print name follows substitute NUL.
     data.extend(0u16.to_le_bytes());
     // The path buffer carries separately terminated substitute and print
     // names, even though the latter is empty.

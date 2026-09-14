@@ -18,7 +18,7 @@ use windows_sys::Win32::{
     Foundation::*,
     Security::*,
     Storage::FileSystem::SECURITY_IDENTIFICATION,
-    System::{Pipes::*, Threading::*},
+    System::{IO::CancelIoEx, Pipes::*, Threading::*},
 };
 type Result<T> = std::result::Result<T, &'static str>;
 const HANDSHAKE: u8 = 1;
@@ -130,6 +130,17 @@ pub(crate) struct LocalListener {
     _dir: File,
     name: String,
     pending: Mutex<NamedPipeServer>,
+}
+impl Drop for LocalListener {
+    fn drop(&mut self) {
+        let pending = self.pending.get_mut();
+        unsafe {
+            // Cancel any IOCP registration and disconnect before closing the
+            // last instance, so FIRST_PIPE_INSTANCE can reclaim the namespace.
+            CancelIoEx(pending.as_raw_handle(), ptr::null());
+            DisconnectNamedPipe(pending.as_raw_handle());
+        }
+    }
 }
 impl LocalListener {
     pub(crate) async fn accept(&self) -> std::io::Result<(NamedPipeServer, ())> {
