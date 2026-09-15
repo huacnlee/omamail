@@ -1593,9 +1593,9 @@ Item {
 
         // Kept below the header controls so their own pointer handlers win.
         // Empty title-bar space starts the platform's native move operation.
-        // DragHandler with no target: a MouseArea keeps the grab and delivers
+        // A DragHandler with no target: a MouseArea keeps the grab and feeds
         // moves into QML while the compositor is already dragging, which is
-        // the lag of a window that does not follow the pointer.
+        // the lag of a window that trails the pointer.
         MouseArea {
           id: windowMoveArea
           objectName: "app-title-bar-drag-area"
@@ -1603,8 +1603,7 @@ Item {
           enabled: root.standaloneWindowChrome
           acceptedButtons: Qt.NoButton
           hoverEnabled: false
-          // Exposed for tests: a handler that moves this Item fights the
-          // compositor drag and is the lag of a window that trails the pointer.
+          // Exposed for tests: a target would fight the compositor drag.
           readonly property bool dragsTheWindow: windowMoveHandler.target === null
 
           DragHandler {
