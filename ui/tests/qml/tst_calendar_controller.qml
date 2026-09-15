@@ -53,10 +53,13 @@ Item {
   TestCase {
     name: "CalendarController"
 
+    property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
+
     function init() {
       // Reset here rather than at the end of each case: a failed compare aborts
       // the function, so a restore on its last line does not run and one real
       // failure becomes a cascade that hides it.
+      mailService.accountSummaries = JSON.parse(JSON.stringify(originalSummaries))
       mailService.requests = []
       mailService.credentialWrites = []
       mailService.unifiedCalendarView = false
@@ -175,6 +178,32 @@ Item {
         accountId:"caldav:team",clientId:"",secret:"new-secret"}])
       compare(controller.pendingRangeStart, 1000)
       compare(controller.pendingRangeEnd, 2000)
+    }
+
+    // Google and Microsoft calendars arrive with their account's sign-in,
+    // after a view that was already open asked for its range.
+    function test_a_calendar_arriving_with_a_sign_in_reloads_the_range() {
+      var summaries = JSON.parse(JSON.stringify(mailService.accountSummaries))
+      summaries[1].signedIn = false
+      mailService.accountSummaries = summaries
+      controller.accountId = "one@gmail.com"
+      var cache = null
+      for (var i = 0; i < controller.children.length; i++) {
+        if (controller.children[i].cacheName !== undefined) cache = controller.children[i]
+      }
+      verify(cache !== null, "the controller owns an event cache")
+      cache.loaded = true
+      controller.refresh(1000, 2000)
+      mailService.requests = []
+      mailService.accountSummaries = JSON.parse(JSON.stringify(summaries))
+      compare(mailService.requests.length, 0, "a poll that changes nothing asks nothing")
+      summaries = JSON.parse(JSON.stringify(summaries))
+      summaries[1].signedIn = true
+      mailService.accountSummaries = summaries
+      var asked = mailService.requests.map(function(r) { return r.params.source.id })
+      verify(asked.indexOf("google:one@gmail.com") >= 0, "asked " + JSON.stringify(asked))
+      compare(mailService.requests[0].params.start, new Date(1000).toISOString())
+      cache.loaded = false
     }
 
     // The sources file is watched, and its directory is touched by the

@@ -1583,9 +1583,8 @@ Item {
     barCalendar.events, Date.now(), 2)
 
   function refreshCalendarPreview() {
-    var now = new Date()
-    barCalendar.refresh(now.getTime(),
-      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 31).getTime())
+    var range = Preview.previewRange(Date.now())
+    barCalendar.refresh(range[0], range[1])
   }
 
   function openCalendarEditor() {

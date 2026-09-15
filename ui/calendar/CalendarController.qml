@@ -95,6 +95,16 @@ Item {
   // the two inputs separately got both of those wrong in opposite directions.
   onCalendarScopeChanged: reloadVisibleRange()
 
+  // The calendars the scope would ask, as one string. Google and Microsoft
+  // calendars arrive with their account's sign-in, after a view that was
+  // already open asked for its range; and an account poll rebuilds the
+  // summaries twice a cycle with no calendar having come or gone, which a
+  // string compares away where the array would not.
+  readonly property string enabledSourceKey: contextSources.sources.filter(function(source) {
+    return source && source.enabled
+  }).map(function(source) { return String(source.id || "") }).join("\n")
+  onEnabledSourceKeyChanged: reloadVisibleRange()
+
   // No `eventCache.loaded` guard, and it is not missing. `refresh` refuses on
   // an unloaded cache and `eventCache.onRestored` runs one as soon as it is
   // there, so the only thing the guard changed was whether an empty list was
@@ -607,11 +617,12 @@ Item {
     path: root.configPath
     watchChanges: true
     printErrors: false
+    // No refresh here: a file that brings calendars changes
+    // `enabledSourceKey`, which reloads the range, and one that brings none
+    // leaves nothing to ask for.
     onLoaded: {
-      var firstLoad = !root.sourcesLoaded
       root.sourceList = Sources.load(text())
       root.sourcesLoaded = true
-      if (firstLoad && root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
     }
     onFileChanged: reload()
     // Hearing again that the file is absent is not a change. The file's

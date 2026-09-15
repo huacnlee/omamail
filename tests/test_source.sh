@@ -504,8 +504,8 @@ grep -q 'function setSourceColor' calendar/CalendarController.qml \
   || fail "calendar colors must persist through the controller"
 grep -q 'property bool sourcesLoaded' calendar/CalendarController.qml \
   || fail "calendar refresh must wait for the saved source list"
-grep -q 'if (firstLoad && root.rangeStart && root.rangeEnd)' calendar/CalendarController.qml \
-  || fail "calendar events must load automatically after startup source discovery"
+grep -q 'onEnabledSourceKeyChanged: reloadVisibleRange()' calendar/CalendarController.qml \
+  || fail "calendar events must load automatically when a source is discovered"
 grep -q 'function onSourcesLoadedChanged' components/CalendarView.qml \
   || fail "the calendar view must refresh when its saved sources become ready"
 grep -q 'property double pendingRangeStart' calendar/CalendarController.qml \

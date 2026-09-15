@@ -51,4 +51,16 @@ assert.strictEqual(preview.upcomingEvents([
     location: "http://192.168.1.1/join" }
 ], now, 1)[0].callUrl, "")
 
+
+// The range is the cache key. Starting it at the moment of the call made
+// every refresh a miss, and the cache kept eight copies of the same month.
+const morning = new Date(2026, 8, 15, 9, 41, 7, 250).getTime()
+const evening = new Date(2026, 8, 15, 22, 3, 0, 0).getTime()
+assert.strictEqual(JSON.stringify(preview.previewRange(morning)),
+  JSON.stringify(preview.previewRange(evening)))
+assert.strictEqual(preview.previewRange(morning)[0], new Date(2026, 8, 15).getTime())
+assert.strictEqual(preview.previewRange(morning)[1], new Date(2026, 8, 15 + 31).getTime())
+assert.notStrictEqual(preview.previewRange(morning)[0],
+  preview.previewRange(new Date(2026, 8, 16, 0, 0, 1).getTime())[0])
+
 console.log("test_bar_preview.js ok")
