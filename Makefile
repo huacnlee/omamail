@@ -171,6 +171,7 @@ test-shell-portable:
 	python3 tests/test_app_make.py
 	python3 tests/test_diagnostics.py
 	python3 tests/test_network_migration.py
+	python3 tests/test_calendar_tls_fixture.py
 	python3 tests/test_plugin_workflow.py
 	python3 tests/test_backend_runtime.py
 	python3 tests/test_backend_release.py
