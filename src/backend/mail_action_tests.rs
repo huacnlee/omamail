@@ -42,7 +42,7 @@ impl Peer {
         output.read_line(&mut cert).unwrap();
         let cert = fs::read(cert.trim()).unwrap();
         let endpoint = format!("https://localhost:{}", port.trim().parse::<u16>().unwrap());
-        let client = crate::test_net::localhost_loopback(reqwest::Client::builder())
+        let client = reqwest::Client::builder()
             .no_proxy()
             .default_headers(reqwest::header::HeaderMap::from_iter([(
                 reqwest::header::AUTHORIZATION,

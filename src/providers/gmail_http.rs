@@ -44,16 +44,13 @@ fn client() -> Result<&'static reqwest::Client, &'static str> {
 }
 
 fn client_builder() -> reqwest::ClientBuilder {
-    let builder = reqwest::Client::builder()
+    reqwest::Client::builder()
         .https_only(true)
         .hickory_dns(true)
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(DEADLINE);
-    #[cfg(test)]
-    let builder = crate::test_net::localhost_loopback(builder);
-    builder
+        .timeout(DEADLINE)
 }
 
 fn build_client() -> Result<reqwest::Client, &'static str> {

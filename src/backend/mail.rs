@@ -967,7 +967,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(preview["targetIds"], json!(["e1"]));
-        let report_client = crate::test_net::localhost_loopback(reqwest::Client::builder())
+        let report_client = reqwest::Client::builder()
             .add_root_certificate(
                 reqwest::Certificate::from_pem(&fs::read(certificate.trim()).unwrap()).unwrap(),
             )
