@@ -260,95 +260,91 @@ jobs:
           path: dist/omamail-app-linux-x86_64.tar.gz
           if-no-files-found: error
 
-  # TEMPORARILY DISABLED: the Windows standalone app is not released yet.
-  # Restore this job, the publish-and-pin dependency, publish-backend.sh, and
-  # package-backend.py APP_ASSETS together when it ships.
-#   app-windows-x86_64:
-#     name: Standalone app (Windows x86_64)
-#     needs: prepare
-#     runs-on: windows-2022
-#     timeout-minutes: 45
-#     steps:
-#       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-#       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-#         with:
-#           python-version: "3.13.5"
-#       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-#         with:
-#           toolchain: "1.98.1"
-#       - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
-#         with:
-#           version: "6.8.3"
-#           cache: true
-#           aqtversion: "==3.3.0"
-#           py7zrversion: "==1.0.0"
-#       - name: Install pinned CMake and Ninja
-#         shell: pwsh
-#         run: python -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
-#       - name: Exercise the native Credential Manager contract
-#         shell: pwsh
-#         run: |
-#           cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
-#           if ($LASTEXITCODE -ne 0) { throw "native credential contract failed" }
-#       - name: Test and build the standalone backend and Qt host
-#         shell: pwsh
-#         env:
-#           QT_QPA_PLATFORM: offscreen
-#           QT_QUICK_CONTROLS_STYLE: Omamail
-#           QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
-#         run: |
-#           $ErrorActionPreference = "Stop"
-#           cargo build --release --locked --no-default-features --features standalone
-#           if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
-#           cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
-#           if ($LASTEXITCODE -ne 0) { throw "Qt configuration failed" }
-#           cmake --build build/app --config Release
-#           if ($LASTEXITCODE -ne 0) { throw "Qt build failed" }
-#           ctest --test-dir build/app -C Release --output-on-failure
-#           if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
-#           python app/tests/test_qml_inventory.py
-#           if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
-#           qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-#           if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
-#           python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version "${{ needs.prepare.outputs.version }}" --standalone
-#           if ($LASTEXITCODE -ne 0) { throw "backend API contract failed" }
-#       - name: Package, unpack, and test the Windows archive and installer
-#         shell: pwsh
-#         env:
-#           QT_QPA_PLATFORM: windows
-#         run: |
-#           $ErrorActionPreference = "Stop"
-#           & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe `
-#             -Backend target/release/omamail.exe
-#           if ($LASTEXITCODE -ne 0) { throw "Windows package failed" }
-#           & app/tests/Test-Package.ps1
-#           & app/tests/Test-Install.ps1
-#           $smoke = Join-Path $env:RUNNER_TEMP "omamail-smoke"
-#           Expand-Archive dist/omamail-app-windows-x86_64.zip -DestinationPath $smoke
-#           $appExecutable = Join-Path $smoke "omamail/bin/omamail-app.exe"
-#           $backend = Join-Path $smoke "omamail/bin/omamail.exe"
-#           & $appExecutable --check-resources
-#           if ($LASTEXITCODE -ne 0) { throw "resource check failed" }
-#           $ready = Join-Path $env:RUNNER_TEMP "omamail-ready.json"
-#           Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue
-#           & $appExecutable --smoke-test $ready
-#           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ready -PathType Leaf)) { throw "live smoke failed" }
-#           $readyValue = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
-#           $apiIsInteger = (($readyValue.apiVersion -is [int]) -or ($readyValue.apiVersion -is [long]))
-#           if ([string]$readyValue.version -ne "${{ needs.prepare.outputs.version }}" -or -not $apiIsInteger) { throw "live smoke returned invalid readiness metadata" }
-#           $reported = & $backend --version
-#           if ($LASTEXITCODE -ne 0 -or $reported -ne "omamail ${{ needs.prepare.outputs.version }}") { throw "backend version mismatch" }
-#           python tests/test_backend_api.py --binary $backend --expected-version "${{ needs.prepare.outputs.version }}" --standalone
-#           if ($LASTEXITCODE -ne 0) { throw "packaged backend API contract failed" }
-#       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-#         with:
-#           name: app-windows-x86_64
-#           path: dist/omamail-app-windows-x86_64.zip
-#           if-no-files-found: error
+  app-windows-x86_64:
+    name: Standalone app (Windows x86_64)
+    needs: prepare
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13.5"
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: "1.98.1"
+      - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
+        with:
+          version: "6.8.3"
+          cache: true
+          aqtversion: "==3.3.0"
+          py7zrversion: "==1.0.0"
+      - name: Install pinned CMake and Ninja
+        shell: pwsh
+        run: python -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
+      - name: Exercise the native Credential Manager contract
+        shell: pwsh
+        run: |
+          cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "native credential contract failed" }
+      - name: Test and build the standalone backend and Qt host
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_CONTROLS_STYLE: Omamail
+          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build --release --locked --no-default-features --features standalone
+          if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
+          cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Qt configuration failed" }
+          cmake --build build/app --config Release
+          if ($LASTEXITCODE -ne 0) { throw "Qt build failed" }
+          ctest --test-dir build/app -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
+          python app/tests/test_qml_inventory.py
+          if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
+          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
+          if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
+          python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          if ($LASTEXITCODE -ne 0) { throw "backend API contract failed" }
+      - name: Package, unpack, and test the Windows archive and installer
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+        run: |
+          $ErrorActionPreference = "Stop"
+          & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe `
+            -Backend target/release/omamail.exe
+          if ($LASTEXITCODE -ne 0) { throw "Windows package failed" }
+          & app/tests/Test-Package.ps1
+          & app/tests/Test-Install.ps1
+          $smoke = Join-Path $env:RUNNER_TEMP "omamail-smoke"
+          Expand-Archive dist/omamail-app-windows-x86_64.zip -DestinationPath $smoke
+          $appExecutable = Join-Path $smoke "omamail/bin/omamail-app.exe"
+          $backend = Join-Path $smoke "omamail/bin/omamail.exe"
+          & $appExecutable --check-resources
+          if ($LASTEXITCODE -ne 0) { throw "resource check failed" }
+          $ready = Join-Path $env:RUNNER_TEMP "omamail-ready.json"
+          Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue
+          & $appExecutable --smoke-test $ready
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ready -PathType Leaf)) { throw "live smoke failed" }
+          $readyValue = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
+          $apiIsInteger = (($readyValue.apiVersion -is [int]) -or ($readyValue.apiVersion -is [long]))
+          if ([string]$readyValue.version -ne "${{ needs.prepare.outputs.version }}" -or -not $apiIsInteger) { throw "live smoke returned invalid readiness metadata" }
+          $reported = & $backend --version
+          if ($LASTEXITCODE -ne 0 -or $reported -ne "omamail ${{ needs.prepare.outputs.version }}") { throw "backend version mismatch" }
+          python tests/test_backend_api.py --binary $backend --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          if ($LASTEXITCODE -ne 0) { throw "packaged backend API contract failed" }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: app-windows-x86_64
+          path: dist/omamail-app-windows-x86_64.zip
+          if-no-files-found: error
 
   publish-and-pin:
-    # app-windows-x86_64 is temporarily excluded until the Windows app ships.
-    needs: [prepare, build, app-macos-aarch64, app-linux-x86_64]
+    needs: [prepare, build, app-macos-aarch64, app-linux-x86_64, app-windows-x86_64]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -16,7 +16,7 @@ PLUGIN_ASSETS = tuple(f'omamail-linux-{arch}.tar.gz' for arch in ARCHES)
 APP_ASSETS = (
     'omamail-app-macos-aarch64.tar.gz',
     'omamail-app-linux-x86_64.tar.gz',
-    # 'omamail-app-windows-x86_64.zip',  # temporarily not released
+    'omamail-app-windows-x86_64.zip',
 )
 INSTALLER_ASSETS = ('install.sh', 'install.ps1')
 HASHED_RELEASE_ASSETS = tuple(sorted(PLUGIN_ASSETS + APP_ASSETS + INSTALLER_ASSETS))

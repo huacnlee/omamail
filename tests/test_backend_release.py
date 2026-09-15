@@ -418,7 +418,7 @@ class ReleaseTests(unittest.TestCase):
         names = (
             'omamail-linux-x86_64.tar.gz', 'omamail-linux-aarch64.tar.gz',
             'omamail-app-macos-aarch64.tar.gz', 'omamail-app-linux-x86_64.tar.gz',
-            'install.sh', 'install.ps1')
+            'omamail-app-windows-x86_64.zip', 'install.sh', 'install.ps1')
         for index, name in enumerate(names):
             (out / name).write_bytes(f'asset {index}'.encode())
         (out / 'backend-api.json').write_text('{}\n')
@@ -439,7 +439,7 @@ class ReleaseTests(unittest.TestCase):
         names = (
             'omamail-linux-x86_64.tar.gz', 'omamail-linux-aarch64.tar.gz',
             'omamail-app-macos-aarch64.tar.gz', 'omamail-app-linux-x86_64.tar.gz',
-            'install.sh', 'install.ps1')
+            'omamail-app-windows-x86_64.zip', 'install.sh', 'install.ps1')
         for name in names:
             (out / name).write_bytes(name.encode())
         (out / 'backend-api.json').write_text('{}\n')

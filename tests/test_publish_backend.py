@@ -69,7 +69,7 @@ class PublicationTests(unittest.TestCase):
         app_assets = {
             'app-macos-aarch64': 'omamail-app-macos-aarch64.tar.gz',
             'app-linux-x86_64': 'omamail-app-linux-x86_64.tar.gz',
-            # 'app-windows-x86_64': 'omamail-app-windows-x86_64.zip',  # temporarily not released
+            'app-windows-x86_64': 'omamail-app-windows-x86_64.zip',
         }
         for artifact_name, asset_name in app_assets.items():
             artifact = self.repo / 'artifacts' / artifact_name
@@ -101,7 +101,7 @@ elif args[:2] == ['release', 'create']:
     assert uploaded == {
         'omamail-linux-x86_64.tar.gz', 'omamail-linux-aarch64.tar.gz',
         'omamail-app-macos-aarch64.tar.gz', 'omamail-app-linux-x86_64.tar.gz',
-        'install.sh', 'install.ps1',
+        'omamail-app-windows-x86_64.zip', 'install.sh', 'install.ps1',
         'SHA256SUMS', 'backend-api.json', 'backend-build.json'}
     tag = subprocess.check_output(['git', 'ls-remote', 'origin', 'refs/tags/v0.2.0'], text=True).split()[0]
     assert tag == os.environ['GITHUB_SHA']
