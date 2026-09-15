@@ -8,6 +8,11 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <chrono>
+#include <thread>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 class SettingsTest : public QObject {
     Q_OBJECT
@@ -18,6 +23,7 @@ private slots:
     void invalidJsonIsPreserved();
     void rejectsCredentialAndUnknownFields();
     void fileStoreReadsWritesAndWatches();
+    void fileStoreWriteOutlastsABriefShareLock();
     void watchReportsExternalCreation();
     void watchReportsDirectoryMutation();
     void watchSettlesAfterDirectoryMutation();
@@ -107,6 +113,32 @@ void SettingsTest::fileStoreReadsWritesAndWatches()
     QVERIFY(written.value(QStringLiteral("ok")).toBool());
     QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
     QCOMPARE(changed.last().at(0).toString(), path);
+}
+
+// A file just written is briefly held by the virus scanner or the indexer on
+// Windows, and replacing it in that moment failed with a sharing violation:
+// a settings save that "sometimes" did nothing. The write waits it out.
+void SettingsTest::fileStoreWriteOutlastsABriefShareLock()
+{
+#ifdef Q_OS_WIN
+    QTemporaryDir directory;
+    const QString path = directory.filePath(QStringLiteral("held.txt"));
+    FileStore store;
+    QVERIFY(store.write(path, QStringLiteral("one"), true).value(QStringLiteral("ok")).toBool());
+    const HANDLE held = CreateFileW(reinterpret_cast<const wchar_t *>(path.utf16()), GENERIC_READ, 0,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    QVERIFY(held != INVALID_HANDLE_VALUE);
+    std::thread release([held] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+        CloseHandle(held);
+    });
+    const auto written = store.write(path, QStringLiteral("two"), true);
+    release.join();
+    QVERIFY2(written.value(QStringLiteral("ok")).toBool(), qPrintable(written.value(QStringLiteral("error")).toString()));
+    QCOMPARE(store.read(path).value(QStringLiteral("text")).toString(), QStringLiteral("two"));
+#else
+    QSKIP("share locks are a Windows matter");
+#endif
 }
 
 void SettingsTest::environmentUsesFixedAllowlist()

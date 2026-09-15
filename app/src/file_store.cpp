@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QThread>
 
 namespace {
 constexpr qint64 maximumTextFileBytes = 16 * 1024 * 1024;
@@ -120,11 +121,23 @@ QVariantMap FileStore::write(const QString &path, const QString &text, bool atom
     QString error;
     bool ok = false;
     if (atomic) {
-        QSaveFile file(path);
-        ok = file.open(QIODevice::WriteOnly);
-        if (ok) file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-        ok = ok && file.write(bytes) == bytes.size() && file.commit();
-        if (!ok) error = file.errorString();
+        // Replacing a file on Windows fails with a sharing violation while
+        // the virus scanner or the indexer still holds the one it replaces,
+        // which is often the case a moment after it was written. A few short
+        // waits outlast that; a file held for good still fails.
+#ifdef Q_OS_WIN
+        const int attempts = 8;
+#else
+        const int attempts = 1;
+#endif
+        for (int attempt = 0; attempt < attempts && !ok; ++attempt) {
+            if (attempt > 0) QThread::msleep(25 * attempt);
+            QSaveFile file(path);
+            ok = file.open(QIODevice::WriteOnly);
+            if (ok) file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+            ok = ok && file.write(bytes) == bytes.size() && file.commit();
+            if (!ok) error = file.errorString();
+        }
     } else {
         QFile file(path);
         ok = file.open(QIODevice::WriteOnly | QIODevice::Truncate);
