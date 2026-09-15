@@ -30,7 +30,13 @@ private:
         paths.standaloneQml = directory.filePath(QStringLiteral("qml/Main.qml"));
         paths.sharedUi = directory.filePath(QStringLiteral("ui/Service.qml"));
         paths.platformPlugin = directory.filePath(QStringLiteral("plugins/platforms/platform.fixture"));
+        // Windows judges a file executable by its extension, so the fixture
+        // backend is named the way the packaged one is there.
+#ifdef Q_OS_WIN
+        paths.backend = directory.filePath(QStringLiteral("bin/omamail.exe"));
+#else
         paths.backend = directory.filePath(QStringLiteral("bin/omamail"));
+#endif
         paths.manifest = directory.filePath(QStringLiteral("manifest.json"));
         writeFile(paths.standaloneQml, "import QtQuick\nItem {}\n");
         writeFile(paths.sharedUi, "import QtQuick\nItem {}\n");
@@ -131,8 +137,16 @@ void ResourcesTest::rejectsBackendWithoutExecutePermission()
 {
     QTemporaryDir directory;
     ResourcePaths paths = completeLayout(directory);
+#ifdef Q_OS_WIN
+    // No execute bit to take away: a backend that is not executable on
+    // Windows is one without an executable extension.
+    const QString renamed = directory.filePath(QStringLiteral("bin/omamail"));
+    QVERIFY(QFile::rename(paths.backend, renamed));
+    paths.backend = renamed;
+#else
     QFile backend(paths.backend);
     backend.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+#endif
     const ResourceCheck result = checkResources(paths);
     QVERIFY(!result.ok);
     QVERIFY(result.errors.join(QStringLiteral("\n")).contains(QStringLiteral("executable")));
@@ -205,7 +219,10 @@ void ResourcesTest::smokeBoundsBothChannelsAfterQuitReply()
                           100, &metrics));
     qunsetenv("OMAMAIL_SMOKE_FIXTURE");
     QVERIFY(error.contains(QStringLiteral("timed out")));
-    QVERIFY(elapsed.elapsed() < 2000);
+    // The fixture floods without end, so any finite bound is the point. The
+    // wall time is QML loading, a process spawn and a kill-wait of up to a
+    // second, which a busy runner has stretched past three seconds.
+    QVERIFY(elapsed.elapsed() < 10000);
     QVERIFY(metrics.maximumStdoutFrameBytes <= 1024 * 1024);
     QVERIFY(metrics.maximumStderrTailBytes <= 64 * 1024);
     QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("ready.json"))));
@@ -226,7 +243,7 @@ void ResourcesTest::smokeDeadlineCrossedDuringDrainDoesNotWaitForever()
     // The 1ms argument is only the post-quit drain. runSmokeTest still loads
     // QML, spawns the fixture, and kill-waits up to 1000ms, the same wall
     // budget the flood-after-quit bound uses.
-    QVERIFY(elapsed.elapsed() < 2000);
+    QVERIFY(elapsed.elapsed() < 10000);
 }
 
 void ResourcesTest::bundleDiscoveryDoesNotUseDevelopmentFallbacks()

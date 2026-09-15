@@ -49,8 +49,12 @@ void SettingsTest::atomicSettingsRoundTrip()
     const QFileDevice::Permissions permissions = QFileInfo(path).permissions();
     QVERIFY(permissions.testFlag(QFileDevice::ReadOwner));
     QVERIFY(permissions.testFlag(QFileDevice::WriteOwner));
+#ifndef Q_OS_WIN
+    // NTFS has no group and other bits; Qt reports the file readable by both
+    // whatever the ACL says, so the private mode is a POSIX assertion.
     QVERIFY(!permissions.testFlag(QFileDevice::ReadGroup));
     QVERIFY(!permissions.testFlag(QFileDevice::ReadOther));
+#endif
 }
 
 void SettingsTest::invalidJsonIsPreserved()
