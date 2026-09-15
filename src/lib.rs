@@ -20,3 +20,17 @@ pub mod providers;
 pub mod public_http;
 pub mod sync;
 pub mod tls;
+
+#[cfg(test)]
+pub(crate) mod test_net {
+    /// The synthetic peers listen on 127.0.0.1 and hold a certificate for
+    /// `localhost`, so the tests connect by that name. Resolving it on a CI
+    /// host has cost ten seconds a connection: the IPv6 loopback answer
+    /// comes first and the attempt on it is left to time out before IPv4 is
+    /// tried, which turned a thirty-second suite into ten minutes on macOS.
+    /// The name is pinned to the address the peer actually has; the
+    /// certificate is still checked against the name.
+    pub(crate) fn localhost_loopback(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        builder.resolve("localhost", std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+    }
+}

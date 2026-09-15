@@ -97,12 +97,15 @@ impl Session {
     }
 }
 fn client_builder() -> reqwest::ClientBuilder {
-    Client::builder()
+    let builder = Client::builder()
         .no_proxy()
         .hickory_dns(true)
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
-        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_idle_timeout(Duration::from_secs(90));
+    #[cfg(test)]
+    let builder = crate::test_net::localhost_loopback(builder);
+    builder
 }
 impl Session {
     async fn native_cancellable(
