@@ -54,12 +54,22 @@ Column {
     return ({ y: item.y, height: item.height })
   }
 
+  // The model is a COUNT, not the array. The list is handed a new array
+  // whenever anything about any message changes — a row opened half a
+  // second ago comes back read, a poll lands — and a Repeater fed the array
+  // tore every row down and built it again each time: a pointer pressed on
+  // a row at that moment was pressed on nothing, and the click was lost.
+  // With the count, a row stays while its summary is read again by index.
   Repeater {
     id: rows
-    model: root.service.messages
+    model: root.service.messages.length
 
     MessageRow {
-      required property var modelData
+      required property int index
+      // The array and its count change together, but a row's binding can be
+      // asked between the two; an empty summary for that instant draws an
+      // empty row rather than throwing on every field.
+      readonly property var modelData: root.service.messages[index] || ({})
 
       summary: modelData
       textColor: root.textColor
