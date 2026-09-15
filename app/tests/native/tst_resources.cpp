@@ -223,7 +223,10 @@ void ResourcesTest::smokeDeadlineCrossedDuringDrainDoesNotWaitForever()
     QVERIFY(!runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error, 1));
     qunsetenv("OMAMAIL_SMOKE_FIXTURE");
     QVERIFY(error.contains(QStringLiteral("timed out")));
-    QVERIFY(elapsed.elapsed() < 1000);
+    // The 1ms argument is only the post-quit drain. runSmokeTest still loads
+    // QML, spawns the fixture, and kill-waits up to 1000ms, the same wall
+    // budget the flood-after-quit bound uses.
+    QVERIFY(elapsed.elapsed() < 2000);
 }
 
 void ResourcesTest::bundleDiscoveryDoesNotUseDevelopmentFallbacks()

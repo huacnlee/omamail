@@ -44,11 +44,13 @@ bool readable(const QString &path)
     return file.open(QIODevice::ReadOnly);
 }
 
-void drainStderr(QProcess &process, QByteArray &stderrTail, SmokeMetrics *metrics)
+void drainStderr(QProcess &process, QByteArray &stderrTail, SmokeMetrics *metrics,
+                 const QElapsedTimer *timer = nullptr, int timeoutMilliseconds = 0)
 {
     const QProcess::ProcessChannel previous = process.readChannel();
     process.setReadChannel(QProcess::StandardError);
     while (process.bytesAvailable() > 0) {
+        if (timer && timer->elapsed() >= timeoutMilliseconds) break;
         const QByteArray chunk = process.read(qMin<qint64>(process.bytesAvailable(), 64 * 1024));
         if (chunk.isEmpty()) break;
         stderrTail.append(chunk);
@@ -165,8 +167,8 @@ bool waitForCleanExit(QProcess &process, QByteArray &stdoutBuffer,
     QElapsedTimer timer;
     timer.start();
     while (timer.elapsed() < timeoutMilliseconds) {
-        drainStderr(process, stderrTail, metrics);
-        while (process.bytesAvailable() > 0) {
+        drainStderr(process, stderrTail, metrics, &timer, timeoutMilliseconds);
+        while (process.bytesAvailable() > 0 && timer.elapsed() < timeoutMilliseconds) {
             const QByteArray bytes = process.read(
                 qMin<qint64>(process.bytesAvailable(), 64 * 1024));
             if (!appendBoundedRecords(stdoutBuffer, bytes, error, metrics)) return false;
@@ -177,15 +179,19 @@ bool waitForCleanExit(QProcess &process, QByteArray &stdoutBuffer,
         process.waitForFinished(qMin(10, remaining));
         QCoreApplication::processEvents();
     }
+    // A still-running flood must not be drained after the deadline: reading
+    // while the child keeps writing can spin until the pipe finally stalls.
+    if (process.state() != QProcess::NotRunning) {
+        if (error) *error = QStringLiteral("Backend shutdown timed out");
+        return false;
+    }
     drainStderr(process, stderrTail, metrics);
     while (process.bytesAvailable() > 0) {
         const QByteArray bytes = process.read(
             qMin<qint64>(process.bytesAvailable(), 64 * 1024));
         if (!appendBoundedRecords(stdoutBuffer, bytes, error, metrics)) return false;
     }
-    if (process.state() == QProcess::NotRunning) return true;
-    if (error) *error = QStringLiteral("Backend shutdown timed out");
-    return false;
+    return true;
 }
 
 void stopProcess(QProcess &process)
