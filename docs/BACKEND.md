@@ -260,6 +260,10 @@ blocking workers so parsing and composition do not occupy async network workers.
 Outgoing composition has a separate 32 MiB wire limit and preserves the UI’s
 20 MiB attachment allowance; incoming MIME parsing retains its 16 MiB limit.
 
+Native message preparation decodes supported MIME and RFC 2047 charsets with `encoding_rs`, including Windows-1251 and GB2312. Transfer-decoded attachment and resource bytes stay unchanged; only displayed text is converted to Unicode. The existing strict UTF-8 check still repairs UTF-8 sent under an ASCII, ISO-8859, or Windows-125x label (including supported aliases); other encodings honor their declaration. WHATWG compatibility aliases map GB2312 to GBK and Latin-1/ASCII to Windows-1252, rather than strictly validating those historical character sets. Malformed known legacy sequences become replacement characters; UTF-8 and unknown labels retain the existing permissive fallback. Charset decoding happens before HTML sanitization, never instead of it.
+
+Cached resources are decoded again when opened, so charset fixes apply without deleting their source bytes. Pre-native decoded body records do not supply ordinary reader text; old list summaries are replaced on the next successful list revalidation and may remain stale while offline. Calendar invitation interpretation still uses the separate QML decoder and is not covered by native mail charset support.
+
 The principal shared-domain RPC families are:
 
 | Methods | Result and ownership |
