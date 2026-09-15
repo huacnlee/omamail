@@ -1015,14 +1015,19 @@ footer p:last-child { margin-bottom: 0; }
       <div class="install-tabs" role="tablist" aria-label="Platform">
         <button type="button" role="tab" id="install-tab-macos" aria-controls="install-macos" aria-selected="true">macOS</button>
         <button type="button" role="tab" id="install-tab-linux" aria-controls="install-linux" aria-selected="false" tabindex="-1">Linux</button>
+        <button type="button" role="tab" id="install-tab-windows" aria-controls="install-windows" aria-selected="false" tabindex="-1">Windows</button>
       </div>
       <div class="install-platform" role="tabpanel" id="install-macos" aria-labelledby="install-tab-macos">
         <span class="kind" data-zh="APPLE SILICON · TAR.GZ · 未签名">APPLE SILICON · TAR.GZ · UNSIGNED</span>
-        <pre class="block"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh</pre>
+        <pre class="block"><span class="prompt">$ </span>curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh</pre>
       </div>
       <div class="install-platform" role="tabpanel" id="install-linux" aria-labelledby="install-tab-linux" hidden>
         <span class="kind" data-zh="X86_64 · GLIBC 2.35+ · 仅 TAR.GZ">X86_64 · GLIBC 2.35+ · TAR.GZ ONLY</span>
-        <pre class="block"><span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/huacnlee/omamail/main/install.sh | sh</pre>
+        <pre class="block"><span class="prompt">$ </span>curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh</pre>
+      </div>
+      <div class="install-platform" role="tabpanel" id="install-windows" aria-labelledby="install-tab-windows" hidden>
+        <span class="kind" data-zh="X86_64 · ZIP · 未签名 · POWERSHELL">X86_64 · ZIP · UNSIGNED · POWERSHELL</span>
+        <pre class="block"><span class="prompt">&gt; </span>irm https://huacnlee.github.io/omamail/install.ps1 | iex</pre>
       </div>
     </div>
     <div class="install-source">
@@ -1157,6 +1162,8 @@ footer p:last-child { margin-bottom: 0; }
   });
   if (tabs.length && /linux/i.test(navigator.platform || "") && !/android/i.test(navigator.userAgent || "")) {
     selectTab(document.getElementById("install-tab-linux"));
+  } else if (tabs.length && /win/i.test(navigator.platform || "")) {
+    selectTab(document.getElementById("install-tab-windows"));
   }
 
   var copy = document.querySelector(".copy");

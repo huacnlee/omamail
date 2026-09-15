@@ -6,6 +6,8 @@ on:
     paths:
       - docs/index.html
       - docs/images/**
+      - install.sh
+      - install.ps1
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -32,11 +34,16 @@ jobs:
       # The page is one file, but every screenshot, icon and the og:image it
       # points at lives in docs/images. Staging only the HTML published a site
       # whose images all 404, so the whole image directory ships with it.
+      #
+      # The installers are served from the site as well, so the install
+      # commands name a stable address rather than a branch of the repository.
       - name: Stage the site
         run: |
           mkdir -p _site
           cp docs/index.html _site/index.html
           cp -R docs/images _site/images
+          cp install.sh _site/install.sh
+          cp install.ps1 _site/install.ps1
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

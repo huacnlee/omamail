@@ -29,10 +29,16 @@ The standalone app includes mail, calendar, and native desktop notifications. It
 macOS & Linux:
 
 ```bash
-curl -fsSL https://github.com/huacnlee/omamail/raw/refs/heads/main/install.sh | sh
+curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh
 ```
 
-The macOS app and Windows executable are unsigned. The macOS installer removes quarantine only after verifying the downloaded archive. See [standalone runtime and release details](docs/BACKEND-RUNTIME.md#standalone-bundled-backend) for package layout, platform integration, installer behavior, and security checks.
+Windows (PowerShell):
+
+```powershell
+irm https://huacnlee.github.io/omamail/install.ps1 | iex
+```
+
+Each installer verifies the release package before replacing an existing version. The macOS app and Windows executable are unsigned. The macOS installer removes quarantine only after verifying the downloaded archive. See [standalone runtime and release details](docs/BACKEND-RUNTIME.md#standalone-bundled-backend) for package layout, platform integration, installer behavior, and security checks.
 
 ## Run from source
 
