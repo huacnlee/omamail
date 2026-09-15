@@ -183,9 +183,15 @@ ApplicationWindow {
   // platform's own close chord — Cmd+W here, Ctrl+W elsewhere — is the one
   // thing the desktop still expects to work. It leaves the window the way the
   // app's own Back does at the root: through the host, not around it.
+  //
+  // ApplicationShortcut, not the default WindowShortcut: Qt's own Close/Quit
+  // examples use that context, and WindowShortcut is silent when focusWindow
+  // is not this window. KeyRouter's Instantiator set is whatever the current
+  // key-context table is — compose, search, and calendar do not bind Close.
   Shortcut {
     objectName: "standalone-close-window"
     sequences: [StandardKey.Close]
+    context: Qt.ApplicationShortcut
     onActivated: mailApp.requestClose()
   }
 

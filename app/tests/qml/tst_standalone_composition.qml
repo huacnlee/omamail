@@ -249,20 +249,104 @@ TestCase {
     compare(composition.boundedWindowDimension(1600, 1024, 760, 1200), 1200)
   }
 
+  function closeShortcut(composition) {
+    return findChild(composition, "standalone-close-window")
+  }
+
+  function keyRouter(composition) {
+    return findChild(composition, "key-router")
+  }
+
+  function focusScopeOf(composition) {
+    function walk(item) {
+      if (!item) return null
+      if (item.keyContext !== undefined && typeof item.applyContextFocus === "function")
+        return item
+      var kids = item.children || []
+      for (var i = 0; i < kids.length; i++) {
+        var found = walk(kids[i])
+        if (found) return found
+      }
+      return null
+    }
+    return walk(composition.app)
+  }
+
+  function activateComposition(composition) {
+    composition.requestActivate()
+    tryVerify(function() { return composition.active })
+  }
+
+  function sendCloseChord(composition) {
+    var close = closeShortcut(composition)
+    verify(close, "the standalone window must own the platform close chord")
+    compare(close.context, Qt.ApplicationShortcut,
+      "Close must stay live when KeyRouter's Instantiator set is another context")
+    activateComposition(composition)
+    keySequence(StandardKey.Close)
+  }
+
+  function assertHiddenNotQuit(composition) {
+    compare(composition.app.opened, false)
+    compare(host.hidden, true)
+    compare(host.quitCalled, false)
+  }
+
   function test_close_chord_shuts_the_window_through_the_host() {
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)
     verify(composition.app.opened)
-    composition.requestActivate()
-    tryVerify(function() { return composition.active })
-    keySequence(StandardKey.Close)
-    compare(composition.app.opened, false)
-    compare(host.hidden, true)
-    compare(host.quitCalled, false)
+    sendCloseChord(composition)
+    assertHiddenNotQuit(composition)
     // The Dock brings it back through the same door the launcher uses.
     host.reopenRequested()
     compare(composition.app.opened, true)
     verify(composition.visible)
+  }
+
+  function test_close_chord_stays_live_with_a_focused_compose_field() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.app.opened)
+    var scope = focusScopeOf(composition)
+    verify(scope)
+    scope.enabled = true
+    composition.app.backToList()
+    composition.app.startCompose("new")
+    var router = keyRouter(composition)
+    verify(router)
+    router.context = "compose"
+    wait(30)
+    compare(router.context, "compose")
+    var field = findChild(composition, "compose-subject-field")
+    verify(field, "compose must expose the subject field the close chord has to survive")
+    activateComposition(composition)
+    field.forceActiveFocus()
+    tryVerify(function() { return field.activeFocus })
+    compare(scope.keyContext, "compose")
+    var close = closeShortcut(composition)
+    verify(close)
+    compare(close.context, Qt.ApplicationShortcut)
+    keySequence(StandardKey.Close)
+    assertHiddenNotQuit(composition)
+  }
+
+  function test_close_chord_stays_live_in_calendar_context() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.app.opened)
+    var scope = focusScopeOf(composition)
+    verify(scope)
+    scope.enabled = true
+    composition.app.showCalendar()
+    var router = keyRouter(composition)
+    verify(router)
+    router.context = "calendar"
+    wait(30)
+    compare(router.context, "calendar")
+    compare(scope.keyContext, "calendar")
+    sendCloseChord(composition)
+    assertHiddenNotQuit(composition)
   }
 
   function test_non_windowed_size_does_not_replace_saved_normal_size() {

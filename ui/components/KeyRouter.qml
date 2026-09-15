@@ -68,6 +68,9 @@ Item {
     delegate: Shortcut {
       required property var modelData
       sequence: modelData.sequence
+      // Window-scoped so mailbox keys cannot match or ambiguously consume the
+      // standalone close chord, which is application-wide on purpose.
+      context: Qt.WindowShortcut
       enabled: Keymap.isSequenceEnabled(modelData.binding, modelData.sequence,
         root.context, root.overlay)
       onActivated: root.triggered(modelData.id, modelData.sequence)

@@ -247,6 +247,18 @@ Item {
       compare(host.lastId, "mailView")
     }
 
+    // Bare `w` is week view. The platform close chord is Ctrl+W / Cmd+W, and
+    // the two must not share a Shortcut: an ambiguous match swallows Close.
+    function test_calendar_week_is_not_the_close_chord() {
+      host.context = "calendar"
+      wait(20)
+      keyClick(Qt.Key_W)
+      compare(host.lastId, "calendarWeek")
+      host.lastId = ""
+      keyClick(Qt.Key_W, Qt.ControlModifier)
+      compare(host.lastId, "", "Ctrl/Cmd+W is Close, not week view")
+    }
+
     // One press, not a chord: it opens a list the keyboard then walks, so
     // getting to it should not itself be a sequence.
     function test_the_switcher_opens_on_one_press() {
