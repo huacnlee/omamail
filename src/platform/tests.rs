@@ -124,15 +124,23 @@ mod unix {
                 .ctime_nsec(),
         );
         assert_eq!(before, after);
-        fs::set_permissions(
-            temp.0.join("omamail/record"),
-            fs::Permissions::from_mode(0o644),
-        )
-        .unwrap();
-        open_private(&dir, "record", false).unwrap().unwrap();
+        for wrong in [0o644, 0o2600] {
+            fs::set_permissions(
+                temp.0.join("omamail/record"),
+                fs::Permissions::from_mode(wrong),
+            )
+            .unwrap();
+            open_private(&dir, "record", false).unwrap().unwrap();
+            assert_eq!(
+                fs::metadata(temp.0.join("omamail/record")).unwrap().mode() & 0o7777,
+                0o600
+            );
+        }
+        fs::set_permissions(temp.0.join("omamail"), fs::Permissions::from_mode(0o2700)).unwrap();
+        directories(&temp.0, &["omamail"], false).unwrap().unwrap();
         assert_eq!(
-            fs::metadata(temp.0.join("omamail/record")).unwrap().mode() & 0o777,
-            0o600
+            fs::metadata(temp.0.join("omamail")).unwrap().mode() & 0o7777,
+            0o700
         );
     }
     #[test]

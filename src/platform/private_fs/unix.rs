@@ -198,8 +198,11 @@ fn regular_impl(dir: &File, name: &str, writable: bool) -> Result<Option<File>> 
 
 /// Re-asserting a mode that already holds would still rewrite the inode's
 /// change time, and a directory watcher reads that as activity on every open.
+/// The whole mode is compared: a set-group-ID bit inherited from the parent
+/// is one the assertion used to clear, and a job directory made under it
+/// inherits it too.
 fn ensure_mode(file: &File, metadata: &std::fs::Metadata, mode: u32) -> Result<()> {
-    if metadata.mode() & 0o777 == mode {
+    if metadata.mode() & 0o7777 == mode {
         return Ok(());
     }
     file.set_permissions(std::fs::Permissions::from_mode(mode))
