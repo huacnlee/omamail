@@ -11,6 +11,9 @@ QtObject {
   property var store: Quickshell.fileStore
   property string _text: ""
   property string _watchedPath: ""
+  // The store announces a failed read as well as returning it. The read
+  // that this view started reports through its result alone.
+  property bool _reading: false
 
   signal loaded()
   signal fileChanged()
@@ -32,7 +35,9 @@ QtObject {
       loadFailed()
       return
     }
+    _reading = true
     var result = store.read(path) || ({})
+    _reading = false
     if (!result.ok) {
       report(result.error)
       loadFailed()
@@ -74,7 +79,7 @@ QtObject {
       if (String(changedPath) === root.path) root.fileChanged()
     }
     function onFailed(failedPath, error) {
-      if (String(failedPath) !== root.path) return
+      if (root._reading || String(failedPath) !== root.path) return
       root.report(error)
       root.loadFailed()
     }

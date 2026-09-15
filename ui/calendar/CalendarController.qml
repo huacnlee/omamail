@@ -614,8 +614,14 @@ Item {
       if (firstLoad && root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
     }
     onFileChanged: reload()
+    // Hearing again that the file is absent is not a change. The file's
+    // directory is touched whenever the backend reads its registry, which a
+    // calendar refresh does, and announcing a fresh empty list started the
+    // next refresh.
     onLoadFailed: {
-      root.sourceList = Sources.emptyList()
+      if (!root.sourceList || !Array.isArray(root.sourceList.sources)
+          || root.sourceList.sources.length > 0)
+        root.sourceList = Sources.emptyList()
       root.sourcesLoaded = true
     }
   }

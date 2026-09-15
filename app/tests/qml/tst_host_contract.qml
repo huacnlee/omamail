@@ -393,6 +393,17 @@ TestCase {
     compare(changes, 1)
   }
 
+  function test_file_view_reports_a_failed_read_once() {
+    var file = createTemporaryObject(fileComponent, testCase, { store: host, path: "/fixture/missing" })
+    verify(file)
+    var failures = 0
+    file.loadFailed.connect(function() { failures++ })
+    file.reload()
+    compare(failures, 1)
+    host.failed("/fixture/missing", "external")
+    compare(failures, 2)
+  }
+
   function test_process_adapts_native_lines_and_lifecycle() {
     var nativeProcess = nativeProcessComponent.createObject(testCase)
     var process = createTemporaryObject(processComponent, testCase, {

@@ -20,6 +20,7 @@ private slots:
     void fileStoreReadsWritesAndWatches();
     void watchReportsExternalCreation();
     void watchReportsDirectoryMutation();
+    void watchSettlesAfterDirectoryMutation();
     void environmentUsesFixedAllowlist();
     void applicationPathsMatchBackendRoots();
     void applicationPathsRejectTraversalAndRemoteUrls();
@@ -182,6 +183,46 @@ void SettingsTest::watchReportsDirectoryMutation()
     file.close();
     QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
     QCOMPARE(changed.last().at(0).toString(), watchedDirectory);
+}
+
+// A directory event used to re-arm every watch, and re-arming the directory
+// raised another directory event: one metadata tick on a sibling file kept
+// the store emitting for the rest of the process's life.
+void SettingsTest::watchSettlesAfterDirectoryMutation()
+{
+    QTemporaryDir directory;
+    const QString missing = directory.filePath(QStringLiteral("calendars.json"));
+    const QString present = directory.filePath(QStringLiteral("credentials.json"));
+    QFile seed(present);
+    QVERIFY(seed.open(QIODevice::WriteOnly));
+    QCOMPARE(seed.write("{}"), qint64(2));
+    seed.close();
+    // The backend keeps lock files beside its registry. Qt's FSEvents engine
+    // lists a directory without hidden entries when a watch is added and with
+    // them when it checks the directory, so a hidden sibling makes every
+    // re-armed watch report the directory as changed once more.
+    QFile lock(directory.filePath(QStringLiteral(".accounts.lock")));
+    QVERIFY(lock.open(QIODevice::WriteOnly));
+    lock.close();
+    FileStore store;
+    QSignalSpy changed(&store, &FileStore::changed);
+    store.watch(missing, true);
+    store.watch(present, true);
+    QTest::qWait(300);
+    changed.clear();
+
+    // The backend re-asserts private modes on every read, which touches only
+    // the ctime of the directory and of the file it opened.
+    QVERIFY(QFile::setPermissions(directory.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+    QVERIFY(QFile::setPermissions(present, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+    QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
+    QTest::qWait(500);
+    const int settled = changed.count();
+    QTest::qWait(1000);
+    QCOMPARE(changed.count(), settled);
+    // A handful for two coalesced events over two watched paths; the loop
+    // produced hundreds and was still going.
+    QVERIFY2(settled <= 16, qPrintable(QString::number(settled)));
 }
 
 QTEST_MAIN(SettingsTest)

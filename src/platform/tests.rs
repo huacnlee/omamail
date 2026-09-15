@@ -99,6 +99,42 @@ mod unix {
         assert!(directories(&unsafe_root, &["escape"], true).is_err());
         assert!(!unsafe_root.join("escape").exists());
     }
+    // Every read re-asserted the private modes, which rewrote the inode's
+    // change time even when nothing changed. A watcher on the directory saw
+    // that as activity on every registry read.
+    #[test]
+    fn reading_already_private_entries_leaves_their_change_time_alone() {
+        use std::os::unix::fs::MetadataExt;
+        let temp = Temp::new();
+        let dir = directories(&temp.0, &["omamail"], true).unwrap().unwrap();
+        atomic_replace(&dir, "record", b"{}").unwrap();
+        let before = (
+            fs::metadata(temp.0.join("omamail")).unwrap().ctime_nsec(),
+            fs::metadata(temp.0.join("omamail/record"))
+                .unwrap()
+                .ctime_nsec(),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let dir = directories(&temp.0, &["omamail"], false).unwrap().unwrap();
+        open_private(&dir, "record", false).unwrap().unwrap();
+        let after = (
+            fs::metadata(temp.0.join("omamail")).unwrap().ctime_nsec(),
+            fs::metadata(temp.0.join("omamail/record"))
+                .unwrap()
+                .ctime_nsec(),
+        );
+        assert_eq!(before, after);
+        fs::set_permissions(
+            temp.0.join("omamail/record"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        open_private(&dir, "record", false).unwrap().unwrap();
+        assert_eq!(
+            fs::metadata(temp.0.join("omamail/record")).unwrap().mode() & 0o777,
+            0o600
+        );
+    }
     #[test]
     fn atomic_writers_keep_whole_records_and_pinned_roots_survive_rename() {
         let temp = Temp::new();

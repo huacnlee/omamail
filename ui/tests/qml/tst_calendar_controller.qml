@@ -176,5 +176,30 @@ Item {
       compare(controller.pendingRangeStart, 1000)
       compare(controller.pendingRangeEnd, 2000)
     }
+
+    // The sources file is watched, and its directory is touched by the
+    // backend on every registry read. Learning again that the file is still
+    // absent is not a change of sources: announcing one refreshed every
+    // calendar, which read the registry, which touched the directory.
+    function test_a_still_missing_sources_file_is_not_a_change() {
+      var sourcesFile = null
+      for (var i = 0; i < controller.data.length; i++) {
+        if (controller.data[i] && typeof controller.data[i].loadFailed === "function")
+          sourcesFile = controller.data[i]
+      }
+      verify(sourcesFile !== null, "the controller watches its sources file")
+      var originalList = controller.sourceList
+      var announced = 0
+      var count = function() { announced++ }
+      controller.sourceListChanged.connect(count)
+      sourcesFile.loadFailed()
+      compare(announced, 1, "an absent file empties a loaded list once")
+      sourcesFile.loadFailed()
+      sourcesFile.loadFailed()
+      controller.sourceListChanged.disconnect(count)
+      controller.sourceList = originalList
+      compare(announced, 1)
+      compare(controller.sourcesLoaded, true)
+    }
   }
 }

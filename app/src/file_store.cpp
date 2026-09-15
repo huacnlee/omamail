@@ -155,18 +155,26 @@ void FileStore::watch(const QString &path, bool enabled)
     restoreWatches();
 }
 
+// Only the difference is applied. Re-adding a directory that is already
+// watched makes Qt's FSEvents engine list it afresh, and it lists without
+// hidden entries then checks with them, so a directory holding a dotfile
+// (the backend's lock files) reported itself changed after every re-arm.
+// With every directory event re-arming the watches, that never ended.
 void FileStore::restoreWatches()
 {
-    const QStringList old = m_watcher.files() + m_watcher.directories();
-    if (!old.isEmpty()) m_watcher.removePaths(old);
-    QSet<QString> paths;
+    QSet<QString> wanted;
     for (const QString &file : std::as_const(m_watchedFiles)) {
         const bool exists = QFileInfo::exists(file);
         m_lastExists.insert(file, exists);
-        if (exists) paths.insert(file);
-        paths.insert(QFileInfo(file).absolutePath());
+        if (exists) wanted.insert(file);
+        wanted.insert(QFileInfo(file).absolutePath());
     }
-    if (!paths.isEmpty()) m_watcher.addPaths(paths.values());
+    const QSet<QString> current = QSet<QString>(m_watcher.files().cbegin(), m_watcher.files().cend())
+        | QSet<QString>(m_watcher.directories().cbegin(), m_watcher.directories().cend());
+    const QStringList stale = (current - wanted).values();
+    if (!stale.isEmpty()) m_watcher.removePaths(stale);
+    const QStringList missing = (wanted - current).values();
+    if (!missing.isEmpty()) m_watcher.addPaths(missing);
 }
 
 SettingsStore::SettingsStore(QString path)

@@ -69,8 +69,11 @@ QtObject {
   }
   function read(path) {
     var key = String(path)
-    if (!Object.prototype.hasOwnProperty.call(files, key))
+    if (!Object.prototype.hasOwnProperty.call(files, key)) {
+      // The native store announces a failed read as well as returning it.
+      failed(key, "missing")
       return ({ ok: false, text: "", error: "missing" })
+    }
     return ({ ok: true, text: String(files[key]), error: "" })
   }
   function exists(path) {

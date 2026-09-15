@@ -60,11 +60,11 @@ pub(crate) fn open_dir(
     let file = unsafe { File::from_raw_fd(fd) };
     validate_acl(&file, private)?;
     if private {
-        if file.metadata().map_err(|_| "cache_unavailable")?.uid() != unsafe { libc::geteuid() } {
+        let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
+        if metadata.uid() != unsafe { libc::geteuid() } {
             return Err("cache_unsafe_path");
         }
-        file.set_permissions(std::fs::Permissions::from_mode(0o700))
-            .map_err(|_| "cache_unavailable")?;
+        ensure_mode(&file, &metadata, 0o700)?;
     }
     Ok(Some(file))
 }
@@ -192,9 +192,18 @@ fn regular_impl(dir: &File, name: &str, writable: bool) -> Result<Option<File>> 
         return Err("cache_unsafe_path");
     }
     validate_acl(&file, true)?;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .map_err(|_| "cache_unavailable")?;
+    ensure_mode(&file, &metadata, 0o600)?;
     Ok(Some(file))
+}
+
+/// Re-asserting a mode that already holds would still rewrite the inode's
+/// change time, and a directory watcher reads that as activity on every open.
+fn ensure_mode(file: &File, metadata: &std::fs::Metadata, mode: u32) -> Result<()> {
+    if metadata.mode() & 0o777 == mode {
+        return Ok(());
+    }
+    file.set_permissions(std::fs::Permissions::from_mode(mode))
+        .map_err(|_| "cache_unavailable")
 }
 
 pub(crate) fn regular_readonly(dir: &File, name: &str) -> Result<Option<File>> {
