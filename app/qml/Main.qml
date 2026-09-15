@@ -225,20 +225,26 @@ ApplicationWindow {
       { name: "bottom-left", edges: Qt.BottomEdge | Qt.LeftEdge, cursor: Qt.SizeBDiagCursor },
       { name: "bottom-right", edges: Qt.BottomEdge | Qt.RightEdge, cursor: Qt.SizeFDiagCursor }
     ]
-    delegate: MouseArea {
+    delegate: Item {
       required property var modelData
       objectName: "standalone-resize-corner-" + modelData.name
       readonly property int edges: modelData.edges
+      property int cursorShape: modelData.cursor
       z: windowBorder.z + 1
       visible: windowBorder.visible
       width: 12
       height: 12
       x: (edges & Qt.RightEdge) ? root.width - width : 0
       y: (edges & Qt.BottomEdge) ? root.height - height : 0
-      cursorShape: modelData.cursor
-      acceptedButtons: Qt.LeftButton
-      onPressed: function(mouse) {
-        if (!root.startSystemResize(edges)) mouse.accepted = false
+
+      HoverHandler { cursorShape: parent.cursorShape }
+      DragHandler {
+        enabled: parent.visible
+        target: null
+        dragThreshold: 0
+        acceptedButtons: Qt.LeftButton
+        cursorShape: parent.cursorShape
+        onActiveChanged: if (active) root.startSystemResize(edges)
       }
     }
   }

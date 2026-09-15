@@ -1592,17 +1592,32 @@ Item {
         visible: !root.composing
 
         // Kept below the header controls so their own pointer handlers win.
-        // Empty title-bar space starts the platform's native move operation,
-        // preserving compositor snapping instead of updating x/y ourselves.
+        // Empty title-bar space starts the platform's native move operation.
+        // DragHandler with no target: a MouseArea keeps the grab and delivers
+        // moves into QML while the compositor is already dragging, which is
+        // the lag of a window that does not follow the pointer.
         MouseArea {
           id: windowMoveArea
           objectName: "app-title-bar-drag-area"
           anchors.fill: parent
           enabled: root.standaloneWindowChrome
-          acceptedButtons: Qt.LeftButton
-          onPressed: function(mouse) {
-            var nativeWindow = header.Window.window
-            if (!nativeWindow || !nativeWindow.startSystemMove()) mouse.accepted = false
+          acceptedButtons: Qt.NoButton
+          hoverEnabled: false
+          // Exposed for tests: a handler that moves this Item fights the
+          // compositor drag and is the lag of a window that trails the pointer.
+          readonly property bool dragsTheWindow: windowMoveHandler.target === null
+
+          DragHandler {
+            id: windowMoveHandler
+            enabled: windowMoveArea.enabled
+            target: null
+            dragThreshold: 0
+            acceptedButtons: Qt.LeftButton
+            onActiveChanged: {
+              if (!active) return
+              var nativeWindow = header.Window.window
+              if (nativeWindow) nativeWindow.startSystemMove()
+            }
           }
         }
 

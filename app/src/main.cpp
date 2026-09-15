@@ -1,6 +1,7 @@
 #include "app_icon.h"
 #include "notifications.h"
 #include "resource_check.h"
+#include "window.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -9,7 +10,9 @@
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
+#include <QQuickWindow>
 #include <QTextStream>
+#include <QWindow>
 
 namespace {
 int reportResourceCheck(const ResourcePaths &paths)
@@ -44,6 +47,7 @@ int main(int argc, char *argv[])
 
     if (!readyFile.isEmpty() && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
+    QQuickWindow::setDefaultAlphaBuffer(false);
     QGuiApplication application(argc, argv);
     // The host decides when the process ends: the app menu's Quit, or the
     // shell hiding a window it has no way to bring back. Qt's own reflex of
@@ -92,5 +96,9 @@ int main(int argc, char *argv[])
         : QUrl::fromLocalFile(paths.standaloneQml);
     engine.load(mainUrl);
     if (engine.rootObjects().isEmpty()) return 1;
+    for (QObject *object : engine.rootObjects()) {
+        if (auto *window = qobject_cast<QWindow *>(object))
+            prepareNativeWindow(window);
+    }
     return application.exec();
 }

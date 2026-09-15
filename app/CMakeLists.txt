@@ -77,7 +77,12 @@ else()
   target_compile_definitions(omamail_native PUBLIC OMAMAIL_BACKEND_PATH="")
 endif()
 
-set(OMAMAIL_APP_SOURCES src/main.cpp)
+set(OMAMAIL_APP_SOURCES src/main.cpp src/window.h)
+if(APPLE)
+  list(APPEND OMAMAIL_APP_SOURCES src/window_macos.mm)
+else()
+  list(APPEND OMAMAIL_APP_SOURCES src/window_stub.cpp)
+endif()
 if(WIN32)
   configure_file(resources/windows/omamail.rc.in
     "${CMAKE_CURRENT_BINARY_DIR}/omamail.rc" @ONLY)
@@ -87,6 +92,9 @@ qt_add_executable(omamail-app ${OMAMAIL_APP_SOURCES})
 target_compile_definitions(omamail-app PRIVATE OMAMAIL_APP_VERSION="${PROJECT_VERSION}")
 target_link_libraries(omamail-app PRIVATE
   omamail_nativeplugin Qt6::Quick Qt6::QuickControls2)
+if(APPLE)
+  target_link_libraries(omamail-app PRIVATE "-framework AppKit")
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qml/Main.qml")
   file(GLOB_RECURSE OMAMAIL_STANDALONE_QML CONFIGURE_DEPENDS

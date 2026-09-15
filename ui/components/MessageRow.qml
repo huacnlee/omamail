@@ -103,7 +103,10 @@ Rectangle {
   MouseArea {
     id: mouse
     anchors.fill: parent
-    hoverEnabled: true
+    // HoverHandler already owns `hot`. hoverEnabled here re-enters every row
+    // when the window moves under a still pointer, which is extra scene work
+    // during a system drag.
+    hoverEnabled: false
     acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
     onWheel: function(wheel) { wheel.accepted = false }
     onClicked: function(event) {

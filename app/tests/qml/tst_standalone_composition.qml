@@ -167,7 +167,11 @@ TestCase {
     composition.visibility = Window.Maximized
     compare(resizeCorner("top-left").visible, false)
     composition.visibility = Window.Windowed
-    verify(findChild(composition, "app-title-bar-drag-area").enabled)
+    var dragArea = findChild(composition, "app-title-bar-drag-area")
+    verify(dragArea)
+    verify(dragArea.enabled)
+    compare(dragArea.dragsTheWindow, true,
+      "a DragHandler that moves its parent fights the compositor drag")
     verify(composition.app.opened)
     compare(composition.service.capabilities.agent, false)
     compare(composition.service.capabilities.tray, false)
