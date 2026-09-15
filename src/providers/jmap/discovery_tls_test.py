@@ -1,5 +1,6 @@
 """Controlled HTTPS discovery peer; records authorization presence, never values."""
 import http.server
+import socketserver
 import json
 import pathlib
 import ssl
@@ -28,7 +29,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             threading.Thread(target=self.server.shutdown, daemon=True).start()
 
 
-server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+# HTTPServer.server_bind resolves the bound address to a name: a reverse lookup
+# that a CI host's resolver leaves to time out, ten seconds a start. The peer
+# has no use for a name.
+class LoopbackServer(http.server.HTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.socket.getsockname()[:2]
+
+server = LoopbackServer(("127.0.0.1", 0), Handler)
 server.timeout = 10
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(root / "server.pem", root / "server-key.pem")
