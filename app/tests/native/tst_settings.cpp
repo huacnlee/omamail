@@ -8,8 +8,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
-#include <chrono>
-#include <thread>
+#include <QThread>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -128,12 +127,14 @@ void SettingsTest::fileStoreWriteOutlastsABriefShareLock()
     const HANDLE held = CreateFileW(reinterpret_cast<const wchar_t *>(path.utf16()), GENERIC_READ, 0,
                                     nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     QVERIFY(held != INVALID_HANDLE_VALUE);
-    std::thread release([held] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    QThread *release = QThread::create([held] {
+        QThread::msleep(120);
         CloseHandle(held);
     });
+    release->start();
     const auto written = store.write(path, QStringLiteral("two"), true);
-    release.join();
+    release->wait();
+    delete release;
     QVERIFY2(written.value(QStringLiteral("ok")).toBool(), qPrintable(written.value(QStringLiteral("error")).toString()));
     QCOMPARE(store.read(path).value(QStringLiteral("text")).toString(), QStringLiteral("two"));
 #else
