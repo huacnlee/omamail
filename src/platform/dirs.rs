@@ -336,9 +336,17 @@ mod override_tests {
 #[cfg(windows)]
 fn known_folder(id: &windows_sys::core::GUID) -> Result<PathBuf, &'static str> {
     use std::{os::windows::ffi::OsStringExt, ptr};
-    use windows_sys::Win32::{System::Com::CoTaskMemFree, UI::Shell::SHGetKnownFolderPath};
+    use windows_sys::Win32::{
+        System::Com::CoTaskMemFree,
+        UI::Shell::{KF_FLAG_DONT_VERIFY, SHGetKnownFolderPath},
+    };
     let mut raw = ptr::null_mut();
-    if unsafe { SHGetKnownFolderPath(id, 0, ptr::null_mut(), &mut raw) } < 0 {
+    // The path, not proof that it exists: every root is resolved together,
+    // and a Downloads folder the user removed would otherwise take the
+    // registry and the caches down with it. Whoever writes there creates it
+    // or reports that it could not.
+    let flags = KF_FLAG_DONT_VERIFY as u32;
+    if unsafe { SHGetKnownFolderPath(id, flags, ptr::null_mut(), &mut raw) } < 0 {
         return Err("home_missing");
     }
     let mut length = 0;
