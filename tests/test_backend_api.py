@@ -315,10 +315,16 @@ def main():
             # What mkdir made here inherits the runner's ACL and, from an
             # elevated token, belongs to Administrators. The whole fixture home
             # is made private the same way, files included.
+            #
+            # One object at a time: an inheritance flag on a file's ACE makes
+            # it inherit-only, which grants the file's own reader nothing.
             user = os.environ['USERNAME']
-            for options in (['/setowner', user, '/T', '/Q'],
-                            ['/inheritance:r', '/grant:r', user + ':(OI)(CI)F', '/T', '/Q']):
-                subprocess.run(['icacls', str(home)] + options, check=True, capture_output=True)
+            subprocess.run(['icacls', str(home), '/setowner', user, '/T', '/Q'],
+                           check=True, capture_output=True)
+            for path in [home] + sorted(home.rglob('*')):
+                grant = user + (':(OI)(CI)F' if path.is_dir() else ':F')
+                subprocess.run(['icacls', str(path), '/inheritance:r', '/grant:r', grant, '/Q'],
+                               check=True, capture_output=True)
         process = subprocess.Popen(['node', '-e', HARNESS], env=env, cwd=home,
                                    **process_group_options())
         try:
