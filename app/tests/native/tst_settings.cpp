@@ -215,10 +215,17 @@ void SettingsTest::watchSettlesAfterDirectoryMutation()
     QTest::qWait(300);
     changed.clear();
 
-    // The backend re-asserts private modes on every read, which touches only
-    // the ctime of the directory and of the file it opened.
+    // A sibling written is a directory event everywhere. The backend's own
+    // touch, re-asserting a private mode that already holds, moves only a
+    // ctime, which is nothing Windows reports.
+    QFile sibling(directory.filePath(QStringLiteral("accounts.json")));
+    QVERIFY(sibling.open(QIODevice::WriteOnly));
+    QCOMPARE(sibling.write("outside"), qint64(7));
+    sibling.close();
+#ifndef Q_OS_WIN
     QVERIFY(QFile::setPermissions(directory.path(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
     QVERIFY(QFile::setPermissions(present, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+#endif
     QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
     QTest::qWait(500);
     const int settled = changed.count();
