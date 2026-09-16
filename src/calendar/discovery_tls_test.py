@@ -11,13 +11,24 @@ from pathlib import Path
 
 with tempfile.TemporaryDirectory(prefix="omamail-discovery-tls-") as directory:
     cert, key = Path(directory) / "cert.pem", Path(directory) / "key.pem"
-    subprocess.run([
-        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-        "-keyout", str(key), "-out", str(cert), "-days", "1",
-        "-subj", "/CN=caldav.icloud.com",
-        "-addext", "basicConstraints=critical,CA:FALSE",
-        "-addext", "subjectAltName=DNS:caldav.icloud.com,DNS:p37-caldav.icloud.com,DNS:graph.microsoft.com,DNS:outside.example.test",
-    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    request, extensions = Path(directory) / "request.pem", Path(directory) / "extensions.cnf"
+    # The peer presents this certificate as an end entity, so it must say
+    # CA:FALSE — and say it once. `req -x509` adds its own basicConstraints
+    # (CA:TRUE, which webpki refuses on a leaf), and LibreSSL on macOS keeps
+    # it beside an -addext copy, a duplicate the OpenSSL that Python loads
+    # the chain with refuses outright. Signing a request with an explicit
+    # extension file yields exactly these extensions on either toolkit.
+    extensions.write_text(
+        "basicConstraints=critical,CA:FALSE\n"
+        "subjectAltName=DNS:caldav.icloud.com,DNS:p37-caldav.icloud.com,DNS:graph.microsoft.com,DNS:outside.example.test\n")
+    for command in ([
+        "openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(key), "-out", str(request), "-subj", "/CN=caldav.icloud.com",
+    ], [
+        "openssl", "x509", "-req", "-in", str(request), "-signkey", str(key),
+        "-out", str(cert), "-days", "1", "-extfile", str(extensions),
+    ]):
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
     state = {"responses": [], "requests": [], "connections": 0}
 
     class Handler(http.server.BaseHTTPRequestHandler):
