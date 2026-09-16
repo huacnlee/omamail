@@ -718,10 +718,25 @@
       "equals": {
         "message": "Invalid params"
       }
+    },
+    {
+      "name": "gmail message mutation answers with a queue ticket",
+      "method": "gmail.trash",
+      "params": {"accountId": "contract@example.org", "id": "contract-message"},
+      "equals": {"queued": true},
+      "types": {"ticket": "string"}
+    },
+    {
+      "name": "gmail batch mutation answers with a queue ticket",
+      "method": "gmail.batchModify",
+      "params": {"accountId": "contract@example.org", "ids": ["contract-message"], "addLabelIds": ["STARRED"], "removeLabelIds": []},
+      "equals": {"queued": true},
+      "types": {"ticket": "string"}
     }
   ],
   "unreleased": {
     "methods": ["outlook.connectionCheck", "calendar.discover"],
-    "cases": ["missing Outlook connection", "strict calendar discovery parameters", "iCloud request refuses an external credential origin"]
+    "cases": ["missing Outlook connection", "strict calendar discovery parameters", "iCloud request refuses an external credential origin",
+      "gmail message mutation answers with a queue ticket", "gmail batch mutation answers with a queue ticket"]
   }
 }

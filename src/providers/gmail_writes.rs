@@ -1,4 +1,5 @@
-//! Gmail mutation planning and bounded draft lookup. No mutation is retried.
+//! Gmail mutation planning and bounded draft lookup. A mutation is resent only
+//! when Gmail refused it for rate limiting, never after a timeout.
 use super::*;
 use reqwest::Method;
 
@@ -208,6 +209,38 @@ where
 }
 
 impl Session {
+    /// Books a message mutation on the account's queue; the ticket settles later.
+    pub(super) async fn enqueue_write(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<(u64, tokio::sync::oneshot::Receiver<queue::Outcome>), &'static str> {
+        let plan = plan(method, params)?;
+        let account = field(params, "accountId", true)?.to_lowercase();
+        let accounts = tokio::task::spawn_blocking(crate::account::list)
+            .await
+            .map_err(|_| "session_failed")??;
+        if !accounts["accounts"].as_array().is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|a| a["id"] == account && a["provider"] == "gmail")
+        }) {
+            return Err("gmail_account_unknown");
+        }
+        let session = self.account(&account)?;
+        self.queue.enqueue(
+            &account,
+            session,
+            queue::Job {
+                method: method.to_owned(),
+                http: plan.method,
+                path: plan.path,
+                body: plan.body,
+                cost: quota_cost(method),
+            },
+        )
+    }
+
     pub(super) async fn write_call(
         &self,
         method: &str,
@@ -226,21 +259,11 @@ impl Session {
             return Err("gmail_account_unknown");
         }
         let session = self.account(&account)?;
-        let token = session
-            .token_with(|| async {
-                let (client, refresh) = tokio::task::spawn_blocking(move || {
-                    let client = gmail_credentials::read_for_account(&account)?;
-                    let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
-                    Ok::<_, &'static str>((client, refresh))
-                })
-                .await
-                .map_err(|_| "session_failed")??;
-                gmail_http::refresh(&client.client_id, &client.client_secret, &refresh).await
-            })
-            .await?;
+        let token = session.token_with(|| refresh_grant(account)).await?;
         if let Some(message) = plan.draft_message {
             let found = resolve_draft(&message, |cursor| async {
                 session.check()?;
+                session.pace(quota_cost("gmail.listDrafts")).await?;
                 gmail_http::get(
                     &["drafts"],
                     &[
@@ -261,6 +284,8 @@ impl Session {
             };
             plan.path = vec!["drafts".into(), id];
         }
+        session.check()?;
+        session.pace(quota_cost(method)).await?;
         session.check()?;
         let path: Vec<&str> = plan.path.iter().map(String::as_str).collect();
         let answer = gmail_http::write(plan.method, &path, plan.body.as_ref(), &token.value).await;

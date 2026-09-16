@@ -79,6 +79,7 @@ async fn process_frames(
     // before its RPC response, but its notification must still reach the writer.
     let mut notifications = session.mail.subscribe();
     let mut outbox_notifications = session.outbox.subscribe();
+    let mut gmail_notifications = session.gmail.subscribe();
     let scheduler = schedule(receiver, responses.clone(), |frame| async move {
         super::rpc::handle(&frame.bytes, session, frame.deadline)
             .await
@@ -89,6 +90,12 @@ async fn process_frames(
         tokio::select! {
             result = &mut scheduler => break result,
             event = outbox_notifications.recv() => {
+                if let Ok(event) = event
+                    && responses.send(event).await.is_err() {
+                    break Err(io::Error::other("output closed"));
+                }
+            }
+            event = gmail_notifications.recv() => {
                 if let Ok(event) = event
                     && responses.send(event).await.is_err() {
                     break Err(io::Error::other("output closed"));
@@ -105,6 +112,7 @@ async fn process_frames(
     };
     // No watch can write after the accepted requests drain or after quit.
     session.mail.shutdown().await;
+    session.gmail.shutdown();
     let outbox_result = session.outbox.shutdown().await;
     let cache_result = session.queries.shutdown().await;
     outbox_result.map_err(io::Error::other)?;

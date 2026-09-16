@@ -351,3 +351,81 @@ async fn credentials_failure_prevents_refresh_and_mail_network_requests() {
     })
     .await;
 }
+
+// Gmail meters each user at 250 quota units per second and answers a burst
+// past that with 403 rateLimitExceeded. Trashing a screen of conversations
+// fires one 5-unit call per message, so the session paces every account
+// below that line instead of letting the burst reach Google.
+#[tokio::test(start_paused = true)]
+async fn quota_pacing_lets_a_page_through_and_spreads_a_bulk_trash() {
+    let session = Session::default();
+    let account = session.account("one").unwrap();
+    let started = tokio::time::Instant::now();
+    // A page load: one list plus 25 metadata reads, well inside one second.
+    for _ in 0..26 {
+        account.pace(5).await.unwrap();
+    }
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    // 100 concurrent trash calls are 500 units: at most a burst now, the rest
+    // released at the sustained rate rather than all at once.
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..100 {
+        let account = Arc::clone(&account);
+        tasks.spawn(async move {
+            account.pace(5).await.unwrap();
+            tokio::time::Instant::now()
+        });
+    }
+    let mut finished = Vec::new();
+    while let Some(at) = tasks.join_next().await {
+        finished.push(at.unwrap());
+    }
+    finished.sort();
+    let immediate = finished.iter().filter(|at| **at == started).count();
+    assert!(
+        immediate <= 40,
+        "{immediate} calls burst past the quota line"
+    );
+    let last = finished.last().unwrap().duration_since(started);
+    assert!(
+        last >= Duration::from_millis(1500),
+        "bulk trash finished in {last:?}"
+    );
+    assert!(
+        last <= Duration::from_millis(3500),
+        "bulk trash took {last:?}"
+    );
+
+    // A cost above the burst size still runs, after the bucket has filled.
+    account.pace(u32::MAX).await.unwrap();
+    let after = tokio::time::Instant::now();
+    account.pace(5).await.unwrap();
+    assert!(tokio::time::Instant::now() > after);
+
+    // Accounts do not share a bucket.
+    let other = session.account("two").unwrap();
+    let before = tokio::time::Instant::now();
+    other.pace(5).await.unwrap();
+    assert_eq!(tokio::time::Instant::now(), before);
+
+    // A queue deeper than the IPC deadline fails its tail now, not after a
+    // timeout that would read as a mutation of unknown outcome.
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..1000 {
+        let other = Arc::clone(&other);
+        tasks.spawn(async move { other.pace(5).await });
+    }
+    let mut refused = 0;
+    while let Some(result) = tasks.join_next().await {
+        refused += usize::from(result.unwrap() == Err("gmail_rate_limited"));
+    }
+    assert!(
+        refused > 0,
+        "5000 units at 200/s all waited past the deadline"
+    );
+    assert!(
+        tokio::time::Instant::now().duration_since(before)
+            <= QUOTA_MAX_WAIT + Duration::from_secs(1),
+        "refused calls waited anyway"
+    );
+}

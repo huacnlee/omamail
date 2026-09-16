@@ -80,7 +80,8 @@ impl MutationAdapter for ProviderMutation<'_> {
     ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
         Box::pin(async move {
             if method.starts_with("gmail.") {
-                self.session.gmail.call(method, &params).await
+                // The CLI has no notification to wait for: it holds the line.
+                self.session.gmail.call_settled(method, &params).await
             } else if method.starts_with("jmap.") {
                 self.session
                     .jmap

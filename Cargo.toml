@@ -34,6 +34,9 @@ serde_json = { version = "1", features = ["raw_value"] }
 rustls-native-certs = "0.8"
 zeroize = "1"
 
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "3", features = ["OSX_10_15"] }
 

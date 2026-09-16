@@ -101,6 +101,11 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(wire.notification(JSON.stringif
 for (const params of [{revision:""},{revision:"a".repeat(63)},{revision:"G".repeat(64)},{revision:42},{revision:"a".repeat(64),registry:{clientSecret:"forbidden"}}])
   assert.strictEqual(wire.notification(JSON.stringify({...changed,params})),null)
 
+const settled = {jsonrpc:"2.0",method:"gmail.settled",params:{accountId:"a@example.org",ticket:"7",method:"gmail.trash",ok:false,error:"gmail_rate_limited"}}
+assert.deepStrictEqual(JSON.parse(JSON.stringify(wire.notification(JSON.stringify(settled)))), settled)
+for (const params of [{ticket:7,ok:true,error:"",accountId:"a"},{ticket:"7",ok:"yes",error:"",accountId:"a"},{ticket:"7",ok:true,accountId:"a"},{ticket:"7",ok:true,error:""}])
+  assert.strictEqual(wire.notification(JSON.stringify({...settled,params})),null)
+
 // Exercise Backend.receive itself and count actual parser calls in each module.
 const fs = require('fs')
 const vm = require('vm')

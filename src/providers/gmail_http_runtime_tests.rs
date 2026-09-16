@@ -22,19 +22,26 @@ impl Drop for Server {
 }
 
 async fn server(response: Vec<u8>, delay: Duration) -> Server {
+    server_sequence(vec![response], delay).await
+}
+
+// Answers the n-th request with the n-th response; the last one repeats.
+async fn server_sequence(responses: Vec<Vec<u8>>, delay: Duration) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/messages/abc", listener.local_addr().unwrap());
     let requests = Arc::new(Mutex::new(Vec::new()));
     let connections = Arc::new(AtomicUsize::new(0));
     let seen = requests.clone();
     let accepted = connections.clone();
+    let served = Arc::new(AtomicUsize::new(0));
     let task = tokio::spawn(async move {
         let mut handlers = tokio::task::JoinSet::new();
         loop {
             let (mut stream, _) = listener.accept().await.unwrap();
             accepted.fetch_add(1, Ordering::SeqCst);
             let seen = seen.clone();
-            let response = response.clone();
+            let responses = responses.clone();
+            let served = served.clone();
             handlers.spawn(async move {
                 loop {
                     let mut request = Vec::new();
@@ -64,7 +71,10 @@ async fn server(response: Vec<u8>, delay: Duration) -> Server {
                         .unwrap()
                         .push(String::from_utf8(request).unwrap());
                     tokio::time::sleep(delay).await;
-                    if stream.write_all(&response).await.is_err() {
+                    let index = served
+                        .fetch_add(1, Ordering::SeqCst)
+                        .min(responses.len() - 1);
+                    if stream.write_all(&responses[index]).await.is_err() {
                         return;
                     }
                 }
@@ -320,9 +330,19 @@ async fn timeout_and_response_bounds_are_enforced_on_actual_streams() {
 #[tokio::test]
 async fn auth_and_invalid_json_return_only_static_errors() {
     let client = client_builder().https_only(false).build().unwrap();
+    // Gmail reports per-user rate limiting as 403 with a usageLimits reason,
+    // not only as 429. Any other 403 is a permission problem.
+    let limited = r#"{"error":{"errors":[{"domain":"usageLimits","reason":"userRateLimitExceeded","message":"User-rate limit exceeded. Retry after 2026-09-16T00:00:00Z"}],"code":403,"message":"User-rate limit exceeded."}}"#;
+    let global = r#"{"error":{"errors":[{"domain":"usageLimits","reason":"rateLimitExceeded","message":"Rate Limit Exceeded"}],"code":403,"message":"Rate Limit Exceeded"}}"#;
+    let daily = r#"{"error":{"errors":[{"domain":"usageLimits","reason":"dailyLimitExceeded","message":"Daily Limit Exceeded"}],"code":403,"message":"Daily Limit Exceeded"}}"#;
+    let scope = r#"{"error":{"errors":[{"domain":"global","reason":"insufficientPermissions","message":"Insufficient Permission"}],"code":403,"message":"Insufficient Permission"}}"#;
     for (status, body, error) in [
         (401, "synthetic-secret", "gmail_unauthorized"),
         (403, "synthetic-secret", "gmail_forbidden"),
+        (403, scope, "gmail_forbidden"),
+        (403, daily, "gmail_forbidden"),
+        (403, limited, "gmail_rate_limited"),
+        (403, global, "gmail_rate_limited"),
         (411, "synthetic-secret", "gmail_length_required"),
         (429, "synthetic-secret", "gmail_rate_limited"),
         (200, "[]", "gmail_invalid_response"),
@@ -337,11 +357,173 @@ async fn auth_and_invalid_json_return_only_static_errors() {
             Duration::ZERO,
         )
         .await;
+        // A deadline shorter than the first backoff leaves no room to retry.
+        let started = std::time::Instant::now();
         assert_eq!(
-            execute(&client, local(&target, get_request()), DEADLINE).await,
+            execute(
+                &client,
+                local(&target, get_request()),
+                Duration::from_millis(500)
+            )
+            .await,
             Err(error)
         );
+        assert!(started.elapsed() < Duration::from_millis(400));
+        assert_eq!(target.requests.lock().unwrap().len(), 1);
     }
+}
+
+// A message mutation answers with a ticket, is sent from the account's queue
+// with the real credential reader, token refresh and serializer, and settles
+// as a notification; the in-process caller holds the line for the answer.
+#[tokio::test]
+async fn queued_mutation_settles_by_notification_and_in_process() {
+    use crate::mail::tests::{account_fixture, isolated};
+    use serde_json::json;
+    if isolated() {
+        return;
+    }
+    let fixture = account_fixture(json!({"version":1,"activeId":"queue@example.org",
+        "accounts":[{"provider":"gmail","email":"queue@example.org"}]}));
+    let credentials = crate::platform::private_fs::directories(
+        &fixture.config,
+        &[crate::platform::dirs::APP_DIRECTORY],
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    crate::platform::private_fs::atomic_replace(
+        &credentials,
+        "credentials.json",
+        json!({"installed":{
+        "client_id":"123-queue.apps.googleusercontent.com",
+        "client_secret":"synthetic-client-secret"}})
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    let _credential =
+        crate::credentials::tests::isolated_store(crate::credentials::tests::SingleCredential {
+            key: crate::credentials::CredentialKey {
+                provider: "gmail".into(),
+                account_id: "queue@example.org".into(),
+                kind: crate::credentials::CredentialKind::GoogleRefreshToken {
+                    client_id: "123-queue.apps.googleusercontent.com".into(),
+                },
+            },
+            secret: crate::credentials::Secret::new(b"synthetic-refresh-token".to_vec()).unwrap(),
+        });
+    let grant = json!({"access_token":"synthetic-access-token","expires_in":3600}).to_string();
+    let peer = server_sequence(
+        vec![
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{grant}",
+                grant.len()
+            )
+            .into_bytes(),
+            ok(),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let transport = client_builder().https_only(false).build().unwrap();
+    let origin = peer.url.strip_suffix("/messages/abc").unwrap().to_owned();
+    let session = crate::backend::Session::default();
+    let mut events = session.gmail.subscribe();
+    let params = json!({"accountId":"queue@example.org","id":"abc"});
+    with_test_transport(transport, origin, async {
+        let answer = session.dispatch("gmail.trash", &params).await.unwrap();
+        assert_eq!(answer["queued"], true);
+        let ticket = answer["ticket"].as_str().unwrap().to_owned();
+        let settled = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("settlement announced")
+            .unwrap();
+        assert_eq!(settled["method"], "gmail.settled");
+        assert_eq!(settled["params"]["accountId"], "queue@example.org");
+        assert_eq!(settled["params"]["ticket"], ticket);
+        assert_eq!(settled["params"]["ok"], true);
+        assert_eq!(
+            session.gmail.call_settled("gmail.trash", &params).await,
+            Ok(json!({"ok":true}))
+        );
+        assert_eq!(
+            session
+                .gmail
+                .call_settled(
+                    "gmail.trash",
+                    &json!({"accountId":"other@example.org","id":"abc"})
+                )
+                .await,
+            Err("gmail_account_unknown")
+        );
+    })
+    .await;
+    let requests = peer.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3, "one refresh and two sends");
+    assert!(requests[0].starts_with("POST /token "));
+    assert!(requests[1].starts_with("POST /gmail/v1/users/me/messages/abc/trash "));
+    assert!(requests[2].starts_with("POST /gmail/v1/users/me/messages/abc/trash "));
+    assert!(
+        requests[1..]
+            .iter()
+            .all(|r| r.contains("Bearer synthetic-access-token"))
+    );
+}
+
+// A rate-limited request was rejected before it ran, so resending it — even
+// a mutation — cannot duplicate anything. Google asks for exponential backoff
+// starting at a second; the retry budget stays inside the request deadline.
+#[tokio::test]
+async fn rate_limited_requests_back_off_and_resend_within_the_deadline() {
+    let client = client_builder().https_only(false).build().unwrap();
+    let limited = b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 2\r\n\r\n{}".to_vec();
+    let target =
+        server_sequence(vec![limited.clone(), limited.clone(), ok()], Duration::ZERO).await;
+    let request = prepare_write(
+        reqwest::Method::POST,
+        &["messages", "abc", "trash"],
+        None,
+        "synthetic-token",
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(
+        execute_with_backoff(
+            &client,
+            local(&target, request),
+            DEADLINE,
+            Duration::from_millis(20)
+        )
+        .await,
+        Ok(serde_json::json!({"ok":true}))
+    );
+    // 20ms, then 40ms: exponential, not a tight loop.
+    assert!(started.elapsed() >= Duration::from_millis(60));
+    let requests = target.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.starts_with("POST /messages/abc "))
+    );
+
+    // Persistent limiting gives up after a bounded number of attempts.
+    let target = server(limited, Duration::ZERO).await;
+    assert_eq!(
+        execute_with_backoff(
+            &client,
+            local(&target, get_request()),
+            DEADLINE,
+            Duration::from_millis(1)
+        )
+        .await,
+        Err("gmail_rate_limited")
+    );
+    assert_eq!(
+        target.requests.lock().unwrap().len(),
+        1 + RATE_LIMIT_RETRIES
+    );
 }
 
 #[tokio::test]

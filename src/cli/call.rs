@@ -10,6 +10,10 @@ pub(super) async fn dispatch(
     method: &str,
     params: &Value,
 ) -> Result<Value, &'static str> {
+    // A queued Gmail mutation would die with this process: wait for it here.
+    if method.starts_with("gmail.") {
+        return session.gmail.call_settled(method, params).await;
+    }
     let mut result = session.dispatch(method, params).await?;
     if method == "mail.send" && result["executed"] == true {
         session.finish_cli_send(&mut result).await?;

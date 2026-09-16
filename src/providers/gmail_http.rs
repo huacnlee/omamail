@@ -6,6 +6,7 @@ use std::{sync::OnceLock, time::Duration};
 #[path = "gmail_http_runtime_tests.rs"]
 mod runtime_tests;
 
+#[derive(Clone)]
 struct Request {
     url: String,
     method: reqwest::Method,
@@ -17,6 +18,13 @@ struct Request {
 const MAX_INPUT: usize = 64 * 1024;
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(20);
+// Gmail meters each user at 250 quota units per second and rejects the excess
+// with 403 rateLimitExceeded or 429. Google asks for exponential backoff
+// starting at one second. A rejected request never ran, so resending it —
+// even a mutation — cannot duplicate anything; a timeout is different and is
+// never retried.
+const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(1);
+const RATE_LIMIT_RETRIES: usize = 3;
 static CLIENT: OnceLock<Result<reqwest::Client, &'static str>> = OnceLock::new();
 
 // The integration fixture exercises the real dispatcher, credential reader and
@@ -25,6 +33,12 @@ static CLIENT: OnceLock<Result<reqwest::Client, &'static str>> = OnceLock::new()
 #[cfg(test)]
 tokio::task_local! {
     static TEST_TRANSPORT: (reqwest::Client, String);
+}
+
+/// The queue drainer runs in its own task and inherits the scope explicitly.
+#[cfg(test)]
+pub(crate) fn current_test_transport() -> Option<(reqwest::Client, String)> {
+    TEST_TRANSPORT.try_with(Clone::clone).ok()
 }
 
 #[cfg(test)]
@@ -85,6 +99,16 @@ async fn execute(
     request: Request,
     deadline: Duration,
 ) -> Result<Value, &'static str> {
+    execute_with_backoff(client, request, deadline, RATE_LIMIT_BACKOFF).await
+}
+
+/// The whole retry budget, waits included, stays inside `deadline`.
+async fn execute_with_backoff(
+    client: &reqwest::Client,
+    request: Request,
+    deadline: Duration,
+    backoff: Duration,
+) -> Result<Value, &'static str> {
     #[cfg(test)]
     let test_transport = TEST_TRANSPORT.try_with(Clone::clone).ok();
     #[cfg(test)]
@@ -105,6 +129,37 @@ async fn execute(
     } else {
         (client, request)
     };
+    let started = std::time::Instant::now();
+    for retry in 0..=RATE_LIMIT_RETRIES {
+        let remaining = deadline.saturating_sub(started.elapsed());
+        let answer = attempt(client, request.clone(), remaining).await;
+        if answer != Err("gmail_rate_limited") || retry == RATE_LIMIT_RETRIES {
+            return answer;
+        }
+        // Jitter from the clock keeps a screen of parallel calls from
+        // returning as the same burst that was just refused.
+        let jitter = backoff.as_nanos() as u64 / 2;
+        let jitter = Duration::from_nanos(
+            (std::time::SystemTime::UNIX_EPOCH
+                .elapsed()
+                .map_or(0, |t| t.subsec_nanos() as u64)
+                ^ started.elapsed().subsec_nanos() as u64)
+                % jitter.max(1),
+        );
+        let wait = backoff.saturating_mul(1 << retry) + jitter;
+        if started.elapsed() + wait >= deadline {
+            return answer;
+        }
+        tokio::time::sleep(wait).await;
+    }
+    unreachable!()
+}
+
+async fn attempt(
+    client: &reqwest::Client,
+    request: Request,
+    deadline: Duration,
+) -> Result<Value, &'static str> {
     tokio::time::timeout(deadline, async {
         let empty_success =
             request.authorization.is_some() && request.method != reqwest::Method::GET;
@@ -132,6 +187,7 @@ async fn execute(
         }
         if !response.status().is_success() {
             return Err(match response.status().as_u16() {
+                403 if rate_limited(&mut response).await => "gmail_rate_limited",
                 403 => "gmail_forbidden",
                 411 => "gmail_length_required",
                 429 => "gmail_rate_limited",
@@ -162,6 +218,33 @@ async fn execute(
     })
     .await
     .map_err(|_| "gmail_timeout")?
+}
+
+// Gmail signals per-user throttling as 403 with a usageLimits reason, in the
+// same shape as a scope refusal. Only the reason tells the two apart, and only
+// throttling is worth a retry: a daily quota does not come back in seconds.
+async fn rate_limited(response: &mut reqwest::Response) -> bool {
+    let mut bytes = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if chunk.len() > MAX_INPUT - bytes.len() {
+            return false;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let Ok(body) = serde_json::from_slice::<Value>(&bytes) else {
+        return false;
+    };
+    body["error"]["errors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|error| {
+            error["domain"] == "usageLimits"
+                && matches!(
+                    error["reason"].as_str(),
+                    Some("rateLimitExceeded" | "userRateLimitExceeded")
+                )
+        })
 }
 
 fn valid(value: &str) -> Result<(), &'static str> {

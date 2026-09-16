@@ -11,6 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "gmail_queue.rs"]
+mod queue;
 #[path = "gmail_resources.rs"]
 mod resources;
 #[cfg(test)]
@@ -23,12 +25,71 @@ struct Token {
     expires: Instant,
 }
 
+// Gmail meters each user at 250 quota units per second, a moving average
+// that tolerates short bursts. Every call is paced below that line here so a
+// screen of trashed conversations — one 5-unit call per message — reaches
+// Google as a stream rather than a burst it answers with 403 rateLimitExceeded.
+// The margin leaves room for another omamail process on the same account.
+const QUOTA_UNITS_PER_SECOND: f64 = 200.0;
+const QUOTA_BURST: f64 = 200.0;
+// A call whose turn would come after the IPC deadline fails now, as rate
+// limited, instead of timing out as a mutation of unknown outcome.
+const QUOTA_MAX_WAIT: Duration = Duration::from_secs(15);
+
+struct Quota {
+    units: f64,
+    refilled: Instant,
+}
+
 struct AccountSession {
     valid: AtomicBool,
     token: tokio::sync::Mutex<Option<Arc<Token>>>,
+    quota: tokio::sync::Mutex<Quota>,
 }
 
 impl AccountSession {
+    fn new() -> Self {
+        AccountSession {
+            valid: AtomicBool::new(true),
+            token: tokio::sync::Mutex::new(None),
+            quota: tokio::sync::Mutex::new(Quota {
+                units: QUOTA_BURST,
+                refilled: Instant::now(),
+            }),
+        }
+    }
+
+    /// Spends `cost` quota units, waiting for its turn when the bucket is in
+    /// debt. The debt is booked under the lock and slept off outside it, so
+    /// each caller's wait is its position in the whole queue, not just its
+    /// own deficit — which is what lets a hopeless tail fail now.
+    async fn pace(&self, cost: u32) -> Result<(), &'static str> {
+        self.pace_within(cost, QUOTA_MAX_WAIT).await
+    }
+
+    /// The queue drainer has no request deadline to protect and waits it out.
+    async fn pace_within(&self, cost: u32, max_wait: Duration) -> Result<(), &'static str> {
+        let cost = f64::from(cost).min(QUOTA_BURST);
+        let wait = {
+            let mut quota = self.quota.lock().await;
+            let now = Instant::now();
+            let refill = now.duration_since(quota.refilled).as_secs_f64() * QUOTA_UNITS_PER_SECOND;
+            quota.units = (quota.units + refill).min(QUOTA_BURST);
+            quota.refilled = now;
+            let debt = cost - quota.units;
+            let wait = Duration::from_secs_f64(debt.max(0.0) / QUOTA_UNITS_PER_SECOND);
+            if wait > max_wait {
+                return Err("gmail_rate_limited");
+            }
+            quota.units -= cost;
+            wait
+        };
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+        Ok(())
+    }
+
     fn check(&self) -> Result<(), &'static str> {
         if self.valid.load(Ordering::Acquire) {
             Ok(())
@@ -82,9 +143,62 @@ impl AccountSession {
     }
 }
 
-#[derive(Default)]
 pub struct Session {
     accounts: Mutex<HashMap<String, Arc<AccountSession>>>,
+    queue: queue::Queue,
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Session {
+            accounts: Mutex::default(),
+            queue: queue::Queue::new(Arc::new(|session, account, job| {
+                Box::pin(async move { send_job(&session, &account, &job).await })
+            })),
+        }
+    }
+}
+
+/// A fresh access token for a registered account's stored grant.
+async fn refresh_grant(account: String) -> Result<Value, &'static str> {
+    let (client, refresh) = tokio::task::spawn_blocking(move || {
+        let client = gmail_credentials::read_for_account(&account)?;
+        let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
+        Ok::<_, &'static str>((client, refresh))
+    })
+    .await
+    .map_err(|_| "session_failed")??;
+    gmail_http::refresh(&client.client_id, &client.client_secret, &refresh).await
+}
+
+/// One queued send: token, quota turn, the round trip, and one fresh grant
+/// after a 401 — a refused request never ran, so resending cannot double it.
+async fn send_job(
+    session: &AccountSession,
+    account: &str,
+    job: &queue::Job,
+) -> Result<Value, &'static str> {
+    let path: Vec<&str> = job.path.iter().map(String::as_str).collect();
+    let mut token = session
+        .token_with(|| refresh_grant(account.to_owned()))
+        .await?;
+    for retry in [true, false] {
+        session.pace_within(job.cost, Duration::MAX).await?;
+        session.check()?;
+        let answer =
+            gmail_http::write(job.http.clone(), &path, job.body.as_ref(), &token.value).await;
+        session.check()?;
+        if answer != Err("gmail_unauthorized") {
+            return answer;
+        }
+        session.reject(&token).await?;
+        if retry {
+            token = session
+                .token_with(|| refresh_grant(account.to_owned()))
+                .await?;
+        }
+    }
+    Err("gmail_unauthorized")
 }
 
 fn field<'a>(params: &'a Value, key: &str, required: bool) -> Result<&'a str, &'static str> {
@@ -105,6 +219,18 @@ fn validate_field(value: &str, required: bool) -> Result<(), &'static str> {
         return Err("invalid_params");
     }
     Ok(())
+}
+
+/// Quota units Google charges per call, from the Gmail API usage limits.
+fn quota_cost(method: &str) -> u32 {
+    match method {
+        "gmail.labels" | "gmail.labelCounts" | "gmail.profile" => 1,
+        "gmail.batchModify" => 50,
+        "gmail.send" => 100,
+        "gmail.saveDraft" | "gmail.deleteDraft" => 10,
+        "gmail.updateDraft" => 15,
+        _ => 5,
+    }
 }
 
 pub(crate) fn validate_message_id(id: &str) -> Result<(), &'static str> {
@@ -131,10 +257,7 @@ impl Session {
         if accounts.len() >= 32 {
             return Err("gmail_session_limit");
         }
-        let session = Arc::new(AccountSession {
-            valid: AtomicBool::new(true),
-            token: tokio::sync::Mutex::new(None),
-        });
+        let session = Arc::new(AccountSession::new());
         accounts.insert(account.into(), Arc::clone(&session));
         Ok(session)
     }
@@ -182,23 +305,35 @@ impl Session {
             return Err("gmail_account_unknown");
         }
         let session = self.account(&account)?;
-        let token = session
-            .token_with(|| async {
-                let (client, refresh) = tokio::task::spawn_blocking(move || {
-                    let client = gmail_credentials::read_for_account(&account)?;
-                    let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
-                    Ok::<_, &'static str>((client, refresh))
-                })
-                .await
-                .map_err(|_| "session_failed")??;
-                gmail_http::refresh(&client.client_id, &client.client_secret, &refresh).await
-            })
-            .await?;
+        let token = session.token_with(|| refresh_grant(account)).await?;
         session.check()?;
         Ok(token.value.clone())
     }
 
+    /// Settlements of queued mutations, as `gmail.settled` notifications.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Value> {
+        self.queue.subscribe()
+    }
+
+    pub fn shutdown(&self) {
+        self.queue.shutdown();
+    }
+
+    /// The RPC surface: a message mutation answers with a ticket at once.
+    /// The in-process surface: a message mutation answers when it has landed.
+    pub async fn call_settled(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+        if !queue::queued(method) {
+            return self.call(method, params).await;
+        }
+        let (_, outcome) = self.enqueue_write(method, params).await?;
+        outcome.await.map_err(|_| "gmail_queue_dropped")?
+    }
+
     pub async fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+        if queue::queued(method) {
+            let (ticket, _outcome) = self.enqueue_write(method, params).await?;
+            return Ok(json!({"queued":true,"ticket":ticket.to_string()}));
+        }
         if writes::supports(method) {
             return self.write_call(method, params).await;
         }
@@ -232,6 +367,7 @@ impl Session {
             {
                 session.valid.store(false, Ordering::Release);
             }
+            self.queue.invalidate(&account);
             return Ok(json!({"invalidated":true}));
         }
         let mut query = Vec::new();
@@ -291,20 +427,11 @@ impl Session {
         }) {
             return Err("gmail_account_unknown");
         }
+        self.account(&account)?.pace(quota_cost(method)).await?;
         let answer = self
             .get_with(
                 &account,
-                || async {
-                    let account = account.clone();
-                    let (client, refresh) = tokio::task::spawn_blocking(move || {
-                        let client = gmail_credentials::read_for_account(&account)?;
-                        let refresh = gmail_credentials::lookup_refresh_token(&client, &account)?;
-                        Ok::<_, &'static str>((client, refresh))
-                    })
-                    .await
-                    .map_err(|_| "session_failed")??;
-                    gmail_http::refresh(&client.client_id, &client.client_secret, &refresh).await
-                },
+                || refresh_grant(account.clone()),
                 |token| {
                     let path = &path;
                     let query = &query;

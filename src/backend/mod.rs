@@ -14,7 +14,7 @@ pub struct Session {
     #[cfg(all(feature = "agent", target_os = "linux"))]
     agent_context: crate::agent::context::Contexts,
     upload_jobs: tokio::sync::Semaphore,
-    gmail: std::sync::Arc<crate::providers::gmail::Session>,
+    pub(crate) gmail: std::sync::Arc<crate::providers::gmail::Session>,
     mail: crate::sync::Sync,
     auth: crate::auth::Session,
     jmap: std::sync::Arc<crate::providers::jmap::Session>,

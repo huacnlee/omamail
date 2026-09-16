@@ -30,7 +30,7 @@ function notification(line) {
 
 function notificationValue(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-      || value.jsonrpc !== "2.0" || ["mail.updated", "accounts.changed", "outbox.changed"].indexOf(value.method) < 0
+      || value.jsonrpc !== "2.0" || ["mail.updated", "accounts.changed", "outbox.changed", "gmail.settled"].indexOf(value.method) < 0
       || Object.prototype.hasOwnProperty.call(value, "id")
       || !value.params || typeof value.params !== "object" || Array.isArray(value.params)
       || Object.keys(value).some(function(key) { return ["jsonrpc", "method", "params"].indexOf(key) < 0 })) return null
@@ -39,5 +39,8 @@ function notificationValue(value) {
           || !/^[a-f0-9]{64}$/.test(value.params.revision))) return null
   if (value.method === "outbox.changed"
       && (typeof value.params.accountId !== "string" || !Array.isArray(value.params.entries))) return null
+  if (value.method === "gmail.settled"
+      && (typeof value.params.accountId !== "string" || typeof value.params.ticket !== "string"
+          || typeof value.params.ok !== "boolean" || typeof value.params.error !== "string")) return null
   return value
 }

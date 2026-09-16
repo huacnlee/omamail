@@ -63,7 +63,9 @@ Item {
       return "Gmail authorization expired. Sign in again."
     if (code === "gmail_forbidden") return "Gmail refused this request (HTTP 403). Check account permissions."
     if (code === "gmail_length_required") return "Gmail rejected the request format (HTTP 411)."
-    if (code === "gmail_rate_limited") return "Gmail is receiving too many requests (HTTP 429). Try again later."
+    if (code === "gmail_rate_limited") return "Gmail is rate limiting this account (HTTP 403/429). Wait a moment, then try again."
+    if (code === "gmail_queue_full") return "Too many changes are still waiting for Gmail. Wait a moment, then try again."
+    if (code === "gmail_queue_lost") return "The change was not sent before the mail backend stopped"
     if (code === "gmail_draft_missing") return "That draft is no longer in the mailbox"
     return "Gmail backend could not complete this request"
   }
@@ -84,7 +86,7 @@ Item {
     params.accountId = account
     root.inFlight++
     var settled = false
-    backend.call(method, params, function(result, error) {
+    function deliver(result, error) {
       if (!root || settled) return
       settled = true
       root.inFlight = Math.max(0, root.inFlight - 1)
@@ -92,8 +94,54 @@ Item {
           || !auth.loggedIn || String(auth.accountId || "") !== account) return
       if (typeof callback === "function")
         callback(error ? null : result, error ? backendError(error, method) : "")
+    }
+    backend.call(method, params, function(result, error) {
+      if (!error && result && result.queued === true && String(result.ticket || "") !== "") {
+        root.park(String(result.ticket), method, deliver)
+        return
+      }
+      deliver(result, error)
     })
     return handle
+  }
+
+  // A message mutation answers with a ticket: the backend sends it from a
+  // per-account queue, paced and retried, and announces the outcome as a
+  // `gmail.settled` notification. The request stays in flight until then.
+  property var parked: ({})
+
+  function park(ticket, method, deliver) {
+    var watchdog = progressTimerComponent.createObject(root, { interval: 180000 })
+    watchdog.triggered.connect(function() { root.settle({ ticket: ticket, ok: false, error: "gmail_queue_lost" }) })
+    watchdog.start()
+    var next = Object.assign({}, parked)
+    next[ticket] = { method: method, deliver: deliver, watchdog: watchdog }
+    parked = next
+  }
+
+  function settle(params) {
+    var ticket = String(params && params.ticket || "")
+    var entry = parked[ticket]
+    if (!entry) return
+    var next = Object.assign({}, parked)
+    delete next[ticket]
+    parked = next
+    entry.watchdog.stop()
+    entry.watchdog.destroy()
+    if (params.ok === true) entry.deliver({}, null)
+    else entry.deliver(null, { message: String(params.error || "gmail_queue_lost") })
+  }
+
+  // The backend that held the queue is gone with it.
+  function settleAll(error) {
+    var tickets = Object.keys(parked)
+    for (var i = 0; i < tickets.length; i++) settle({ ticket: tickets[i], ok: false, error: error })
+  }
+
+  Connections {
+    target: root.backend
+    function onNotification(method, params) { if (method === "gmail.settled") root.settle(params) }
+    function onReadyChanged() { if (!root.backend.ready) root.settleAll("gmail_queue_lost") }
   }
 
   function abortRequest(handle) {

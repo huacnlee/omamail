@@ -142,3 +142,5 @@ for (const [code,status] of [['gmail_forbidden','403'],['gmail_length_required',
   assert(shown.includes(status))
   assert(!shown.includes('synthetic-secret'))
 }
+for (const code of ['gmail_queue_full','gmail_queue_lost'])
+  assert(!context.backendError({message:code},'gmail.trash').includes('could not complete'),code)
