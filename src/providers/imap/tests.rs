@@ -1,11 +1,11 @@
 use super::*;
 use tokio::net::TcpListener;
-async fn server() -> (TcpListener, u16) {
+pub(super) async fn server() -> (TcpListener, u16) {
     let s = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let p = s.local_addr().unwrap().port();
     (s, p)
 }
-fn params(port: u16) -> Value {
+pub(super) fn params(port: u16) -> Value {
     json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true},"credential":"synthetic:password","folder":"INBOX","commands":["UID FETCH 1 (UID BODY.PEEK[])"]})
 }
 #[tokio::test]

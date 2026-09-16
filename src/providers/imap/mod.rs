@@ -1,5 +1,6 @@
 //! Native asynchronous IMAP and SMTP. Credentials never cross a process boundary.
 mod cancel;
+pub(crate) mod idle;
 mod mutation;
 mod read;
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -43,12 +44,12 @@ async fn acquire(p: &Value) -> Result<(Wire, String)> {
     // Capabilities are negotiated afresh after authentication/TLS, and ID is
     // sent once on this connection before any mailbox can be selected.
     let capabilities = command(&mut wire, "CAPABILITY").await?;
-    if advertises_id(&capabilities) {
+    if advertises(&capabilities, "ID") {
         command(&mut wire, "ID (\"name\" \"Omamail\")").await?;
     }
     Ok((wire, key))
 }
-fn advertises_id(response: &[u8]) -> bool {
+fn advertises(response: &[u8], capability: &str) -> bool {
     response.split(|b| *b == b'\n').any(|line| {
         let mut words = line
             .split(|b| b.is_ascii_whitespace())
@@ -57,7 +58,7 @@ fn advertises_id(response: &[u8]) -> bool {
             && words
                 .next()
                 .is_some_and(|word| word.eq_ignore_ascii_case(b"CAPABILITY"))
-            && words.any(|word| word.eq_ignore_ascii_case(b"ID"))
+            && words.any(|word| word.eq_ignore_ascii_case(capability.as_bytes()))
     })
 }
 async fn release(wire: Wire, key: String) {
@@ -140,11 +141,7 @@ async fn response(w: &mut Wire, tag: &str, continuation: bool) -> Result<Vec<u8>
             }
             return Err("imap_unexpected_continuation");
         }
-        let literal = text
-            .trim_end_matches(['\r', '\n'])
-            .rsplit_once('{')
-            .and_then(|(_, s)| s.strip_suffix('}'))
-            .map(|s| s.trim_end_matches('+').parse::<usize>());
+        let literal = literal_length(&text);
         out.extend_from_slice(&l);
         if let Some(n) = literal {
             let n = n.map_err(|_| "imap_invalid_response")?;
@@ -158,6 +155,13 @@ async fn response(w: &mut Wire, tag: &str, continuation: bool) -> Result<Vec<u8>
                 .map_err(|_| "mail_network_failed")?;
         }
     }
+}
+/// The octet count a line announces with a trailing `{n}` or `{n+}` literal.
+fn literal_length(line: &str) -> Option<std::result::Result<usize, std::num::ParseIntError>> {
+    line.trim_end_matches(['\r', '\n'])
+        .rsplit_once('{')
+        .and_then(|(_, s)| s.strip_suffix('}'))
+        .map(|s| s.trim_end_matches('+').parse::<usize>())
 }
 async fn command(w: &mut Wire, cmd: &str) -> Result<Vec<u8>> {
     write(w, format!("O1 {cmd}\r\n").as_bytes()).await?;

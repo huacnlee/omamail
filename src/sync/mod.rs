@@ -20,6 +20,12 @@ pub(crate) type Check = Arc<
         + std::marker::Sync,
 >;
 
+/// A provider's own change notifications for one account, or `None` where it
+/// has none. The future runs for as long as the watch does and wakes the check
+/// loop through the trigger it is handed; polling continues regardless.
+pub(crate) type Push =
+    Arc<dyn Fn(String, Arc<Notify>) -> Option<BoxFuture<'static, ()>> + Send + std::marker::Sync>;
+
 #[derive(Clone)]
 pub(crate) struct Event {
     account: String,
@@ -37,6 +43,13 @@ struct Watch {
     trigger: Arc<Notify>,
     checking: bool,
     task: Option<JoinHandle<()>>,
+    push: Option<JoinHandle<()>>,
+}
+
+impl Watch {
+    fn tasks(self) -> impl Iterator<Item = JoinHandle<()>> {
+        self.task.into_iter().chain(self.push)
+    }
 }
 
 #[derive(Default)]
@@ -51,6 +64,7 @@ struct Inner {
     operations: tokio::sync::Mutex<()>,
     events: broadcast::Sender<Event>,
     check: Check,
+    push: Option<Push>,
     warm: Option<preload::Warm>,
     registry_task: Mutex<Option<JoinHandle<()>>>,
 }
@@ -127,6 +141,13 @@ where
         }
         token = next.to_owned();
     }
+}
+
+/// IMAP and Outlook idle on INBOX; every other provider only polls here.
+fn provider_push(account: String, trigger: Arc<Notify>) -> Option<BoxFuture<'static, ()>> {
+    (account.starts_with("imap:") || account.starts_with("outlook:")).then(|| {
+        Box::pin(crate::providers::imap::idle::watch(account, trigger)) as BoxFuture<'static, ()>
+    })
 }
 
 impl Sync {
@@ -214,7 +235,9 @@ impl Sync {
                 Ok(json!({"estimate":estimate,"messages":messages}))
             })
         }));
-        Arc::get_mut(&mut sync.inner).unwrap().warm = Some(warm);
+        let inner = Arc::get_mut(&mut sync.inner).unwrap();
+        inner.warm = Some(warm);
+        inner.push = Some(Arc::new(provider_push));
         sync.watch_registry = true;
         sync
     }
@@ -227,6 +250,7 @@ impl Sync {
                 operations: tokio::sync::Mutex::new(()),
                 events,
                 check,
+                push: None,
                 warm: None,
                 registry_task: Mutex::new(None),
             }),
@@ -237,6 +261,13 @@ impl Sync {
     #[cfg(test)]
     pub(crate) fn for_test(check: Check) -> Self {
         Self::with_checker(check)
+    }
+
+    #[cfg(test)]
+    fn for_test_with_push(check: Check, push: Push) -> Self {
+        let mut sync = Self::with_checker(check);
+        Arc::get_mut(&mut sync.inner).unwrap().push = Some(push);
+        sync
     }
 
     #[cfg(test)]
@@ -332,7 +363,7 @@ impl Sync {
                 .map_err(|_| "session_failed")?
                 .watches
                 .remove(&account);
-            if let Some(task) = watch.and_then(|watch| watch.task) {
+            for task in watch.into_iter().flat_map(Watch::tasks) {
                 task.abort();
                 let _ = task.await;
             }
@@ -382,7 +413,7 @@ impl Sync {
             }
             state.watches.remove(&account)
         };
-        if let Some(task) = old.and_then(|watch| watch.task) {
+        for task in old.into_iter().flat_map(Watch::tasks) {
             task.abort();
             let _ = task.await;
         }
@@ -403,10 +434,12 @@ impl Sync {
                 trigger: trigger.clone(),
                 checking: true,
                 task: None,
+                push: None,
             },
         );
         let inner = self.inner.clone();
         let key = account.clone();
+        let push_trigger = trigger.clone();
         let task = tokio::spawn(async move {
             loop {
                 {
@@ -507,7 +540,15 @@ impl Sync {
                 }
             }
         });
-        state.watches.get_mut(&key).unwrap().task = Some(task);
+        let push = self
+            .inner
+            .push
+            .as_ref()
+            .and_then(|push| push(key.clone(), push_trigger))
+            .map(tokio::spawn);
+        let watch = state.watches.get_mut(&key).unwrap();
+        watch.task = Some(task);
+        watch.push = push;
         Ok(snapshot)
     }
 
@@ -530,7 +571,7 @@ impl Sync {
             .unwrap_or_else(|e| e.into_inner())
             .watches
             .drain()
-            .filter_map(|(_, watch)| watch.task)
+            .flat_map(|(_, watch)| watch.tasks())
             .collect();
         for task in &tasks {
             task.abort();
@@ -571,7 +612,7 @@ impl Drop for Sync {
         }
         if let Ok(mut state) = self.inner.state.lock() {
             for (_, watch) in state.watches.drain() {
-                if let Some(task) = watch.task {
+                for task in watch.tasks() {
                     task.abort();
                 }
             }
@@ -582,7 +623,7 @@ impl Drop for Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::sync::Semaphore;
 
     // Gmail's own shape: a truncated first page whose estimate is a
@@ -893,6 +934,88 @@ mod tests {
         );
         sync.shutdown().await;
     }
+
+    /// Dropped with the push future, so a test can see the task was cancelled.
+    struct Stopped(Arc<AtomicBool>);
+    impl Drop for Stopped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn pushing(stopped: Arc<AtomicBool>) -> Push {
+        Arc::new(move |_, trigger| {
+            let stopped = Stopped(stopped.clone());
+            Some(Box::pin(async move {
+                let _stopped = stopped;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                trigger.notify_one();
+                std::future::pending::<()>().await
+            }))
+        })
+    }
+
+    #[tokio::test]
+    async fn a_provider_push_checks_again_without_waiting_for_the_interval() {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let sync = Sync::for_test_with_push(
+            Arc::new(|_, _| Box::pin(async { Ok(json!({"estimate":0,"messages":[]})) })),
+            pushing(stopped.clone()),
+        );
+        let mut events = sync.subscribe();
+        sync.watch("one".into(), "".into(), 3600).await.unwrap();
+        let first = event(&mut events).await;
+        let pushed = event(&mut events).await;
+        assert!(
+            pushed.value["params"]["sequence"].as_u64()
+                > first.value["params"]["sequence"].as_u64()
+        );
+        sync.shutdown().await;
+        assert!(stopped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn unwatching_replacing_or_dropping_a_watch_stops_its_push() {
+        let stopped = Arc::new(AtomicBool::new(false));
+        let sync = Sync::for_test_with_push(
+            Arc::new(|_, _| Box::pin(async { Ok(json!({"estimate":0,"messages":[]})) })),
+            pushing(stopped.clone()),
+        );
+        sync.watch("one".into(), "".into(), 3600).await.unwrap();
+        assert!(!stopped.load(Ordering::SeqCst));
+        sync.watch("one".into(), "is:unread".into(), 3600)
+            .await
+            .unwrap();
+        assert!(stopped.swap(false, Ordering::SeqCst), "replacement");
+        sync.call("mail.unwatch", &json!({"accountId":"one"}))
+            .await
+            .unwrap();
+        assert!(stopped.swap(false, Ordering::SeqCst), "unwatch");
+
+        // Dropping the session without a shutdown aborts the task, which is
+        // cancelled the next time the runtime would have polled it.
+        sync.watch("one".into(), "".into(), 3600).await.unwrap();
+        drop(sync);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !stopped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("drop");
+    }
+
+    #[test]
+    fn only_imap_and_outlook_accounts_idle() {
+        // Building the future opens nothing; it is dropped unpolled.
+        for account in ["imap:a@example.org", "outlook:a@example.org"] {
+            assert!(provider_push(account.into(), Arc::new(Notify::new())).is_some());
+        }
+        for account in ["a@example.org", "jmap:a@example.org", "hey:a@example.org"] {
+            assert!(provider_push(account.into(), Arc::new(Notify::new())).is_none());
+        }
+    }
+
     #[tokio::test]
     async fn registry_watcher_emits_only_revision_on_change_and_stops_on_shutdown() {
         let revision = Arc::new(AtomicUsize::new(1));

@@ -260,8 +260,8 @@ from pathlib import Path
 text = Path("src/providers/imap/mod.rs").read_text()
 acquire = text[text.index("async fn acquire("):text.index("async fn release(")]
 assert 'command(&mut wire, "CAPABILITY")' in acquire
-assert 'if advertises_id(&capabilities)' in acquire
-assert acquire.index('if advertises_id(&capabilities)') < acquire.index('"ID (')
+assert 'if advertises(&capabilities, "ID")' in acquire
+assert acquire.index('if advertises(&capabilities, "ID")') < acquire.index('"ID (')
 assert 'p["identify"]' not in text
 assert 'native_id_gate_is_checked_once_before_select' in Path("src/providers/imap/tests.rs").read_text()
 SRC
