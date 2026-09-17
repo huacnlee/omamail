@@ -92,6 +92,29 @@ fn credentials_and_quoting_reject_controls() {
     assert_eq!(quote("a\\\"雪").unwrap(), "\"a\\\\\\\"雪\"");
 }
 #[tokio::test]
+async fn only_a_tagged_refusal_is_an_auth_failure() {
+    for (reply, expected) in [
+        (
+            &b"O1 NO [AUTHENTICATIONFAILED] bad\r\n"[..],
+            "mail_auth_failed",
+        ),
+        (&b"* BYE going away\r\n"[..], "mail_connection_closed"),
+        (&b""[..], "mail_connection_closed"),
+    ] {
+        let (a, mut b) = tokio::io::duplex(4096);
+        let server = tokio::spawn(async move {
+            let mut buf = [0u8; 256];
+            let n = b.read(&mut buf).await.unwrap();
+            assert!(buf[..n].starts_with(b"O1 LOGIN"));
+            b.write_all(reply).await.unwrap();
+            drop(b);
+        });
+        let mut w: Wire = BufReader::new(Box::new(a));
+        assert_eq!(login(&mut w, &params(1)).await, Err(expected));
+        server.await.unwrap();
+    }
+}
+#[tokio::test]
 async fn sequential_requests_reuse_authenticated_connection() {
     let (listener, port) = server().await;
     let server = tokio::spawn(async move {

@@ -290,15 +290,23 @@ async fn login(w: &mut Wire, p: &Value) -> Result<()> {
         }
         let auth = STANDARD.encode(format!("user={user}\x01auth=Bearer {secret}\x01\x01"));
         write(w, format!("{auth}\r\n").as_bytes()).await?;
-        response(w, "O1", false)
-            .await
-            .map_err(|_| "mail_auth_failed")?;
+        response(w, "O1", false).await.map_err(refused)?;
     } else {
         command(w, &format!("LOGIN {} {}", quote(&user)?, quote(&secret)?))
             .await
-            .map_err(|_| "mail_auth_failed")?;
+            .map_err(refused)?;
     }
     Ok(())
+}
+/// Only a tagged NO/BAD means the credentials were refused. A dropped
+/// connection or a BYE during the exchange is a transport failure, which
+/// callers retry sooner than they would a bad password.
+fn refused(error: &'static str) -> &'static str {
+    if error == "imap_command_failed" {
+        "mail_auth_failed"
+    } else {
+        error
+    }
 }
 /// Read live LIST/SPECIAL-USE facts without touching the folder cache or
 /// persistent account metadata. Execution retains these exact destinations.
