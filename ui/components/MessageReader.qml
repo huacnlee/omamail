@@ -685,12 +685,18 @@ Item {
         root.openLink(link)
       }
 
-      // NoButton so selecting text still works; this exists only to turn the
-      // I-beam into a hand while a link is under the pointer.
+      // Only the right button, so selecting text still works: the left one
+      // passes through to the TextEdit. The hover half turns the I-beam into
+      // a hand while a link is under the pointer; the press half opens the
+      // text menu, naming the link the click landed on if there is one.
       MouseArea {
         anchors.fill: parent
-        acceptedButtons: Qt.NoButton
+        acceptedButtons: Qt.RightButton
         cursorShape: bodyText.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor
+        onPressed: function(mouse) {
+          var scene = bodyText.mapToGlobal(mouse.x, mouse.y)
+          textMenu.openAt(bodyText, scene.x, scene.y, bodyText.linkAt(mouse.x, mouse.y))
+        }
         onWheel: function(wheel) {
           if (!(wheel.modifiers & Qt.ControlModifier)) {
             wheel.accepted = false
@@ -1007,6 +1013,21 @@ Item {
       height: parent.height
       color: modeTrack.border.color
     }
+  }
+
+  // The body's own menu: Copy, and the link under the pointer. Placed here
+  // rather than in App so the menu can be tested with the body it reads.
+  TextMenu {
+    id: textMenu
+    objectName: "reader-text-menu"
+    textColor: root.textColor
+    popupBackgroundColor: root.popupBackgroundColor
+    popupBorderColor: root.popupBorderColor
+    panelFontFamily: root.panelFontFamily
+    onCopyRequested: function(text) {
+      if (root.service && typeof root.service.copyText === "function") root.service.copyText(text)
+    }
+    onOpenLinkRequested: function(url) { root.openLink(url) }
   }
 
   ImagePopover {

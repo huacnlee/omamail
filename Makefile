@@ -55,7 +55,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/LabelMenu.qml \
 	ui/components/LabelMovePicker.qml \
 	ui/components/NamePrompt.qml \
-	ui/components/AddressMenu.qml \
+	ui/components/AddressMenu.qml ui/components/TextMenu.qml \
 	ui/components/ComposeAgent.qml \
 	ui/agent/AgentRunner.qml ui/agent/AgentContext.qml \
 	ui/agent/EventSuggester.qml ui/components/EventSuggestionCard.qml \

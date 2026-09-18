@@ -1279,6 +1279,7 @@ DropArea {
       TextField {
         id: toField
         objectName: "compose-to-field"
+        TextMenuTrigger {}
         onTextEdited: root.noteUserModified()
         anchors.left: toLabel.right
         anchors.leftMargin: root.formLabelGap
@@ -1364,6 +1365,7 @@ DropArea {
       TextField {
         id: ccField
         objectName: "compose-cc-field"
+        TextMenuTrigger {}
         onTextEdited: root.noteUserModified()
         anchors.left: ccLabel.right
         anchors.leftMargin: root.formLabelGap
@@ -1443,6 +1445,7 @@ DropArea {
       TextField {
         id: bccField
         objectName: "compose-bcc-field"
+        TextMenuTrigger {}
         onTextEdited: root.noteUserModified()
         anchors.left: bccLabel.right
         anchors.leftMargin: root.formLabelGap
@@ -1522,6 +1525,7 @@ DropArea {
       TextField {
         id: replyToField
         objectName: "compose-reply-to-field"
+        TextMenuTrigger {}
         onTextEdited: root.noteUserModified()
         anchors.left: replyToLabel.right
         anchors.leftMargin: root.formLabelGap
@@ -1566,6 +1570,7 @@ DropArea {
       TextField {
         id: subjectField
         objectName: "compose-subject-field"
+        TextMenuTrigger {}
         onTextEdited: root.noteUserModified()
         anchors.left: subjectLabel.right
         anchors.leftMargin: root.formLabelGap
@@ -1814,6 +1819,7 @@ DropArea {
     TextEdit {
       id: bodyEdit
       objectName: "compose-body-editor"
+      TextMenuTrigger {}
       activeFocusOnTab: true
       width: bodyFlick.width
       // Tall enough to fill the visible area even when the draft is short.
@@ -2004,5 +2010,37 @@ DropArea {
       }
     }
 
+  }
+
+  // -------------------------------------------------------------- text menu
+  //
+  // One menu for every field: the trigger names the field it sits in, and
+  // Paste takes the route Ctrl+V takes — the clipboard is tried for an image
+  // first, and text goes into whichever field has focus, so the clicked one
+  // is given it before the ask.
+  component TextMenuTrigger: MouseArea {
+    anchors.fill: parent
+    acceptedButtons: Qt.RightButton
+    onPressed: function(mouse) {
+      var scene = parent.mapToGlobal(mouse.x, mouse.y)
+      textMenu.openAt(parent, scene.x, scene.y, "")
+    }
+  }
+
+  TextMenu {
+    id: textMenu
+    objectName: "compose-text-menu"
+    editable: true
+    textColor: root.textColor
+    popupBackgroundColor: root.popupBackgroundColor
+    popupBorderColor: root.popupBorderColor
+    panelFontFamily: root.panelFontFamily
+    onCopyRequested: function(text) {
+      if (root.service && typeof root.service.copyText === "function") root.service.copyText(text)
+    }
+    onPasteRequested: function(target) {
+      if (target) target.forceActiveFocus()
+      root.paste()
+    }
   }
 }
