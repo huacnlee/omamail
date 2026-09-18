@@ -25,6 +25,15 @@ impl Drop for Daemon {
 struct Service {
     denial: bool,
     missing: bool,
+    /// Reports the item as present but locked, which the daemon answers over a
+    /// connection that is still good.
+    locked: bool,
+    /// Counts negotiated sessions, which is what tells a reused connection from
+    /// one rebuilt per operation.
+    sessions: Arc<AtomicUsize>,
+    searches: Arc<AtomicUsize>,
+    /// Searches to fail before answering, for exercising reconnection.
+    failures: Arc<AtomicUsize>,
 }
 #[zbus::interface(name = "org.freedesktop.Secret.Service")]
 impl Service {
@@ -36,23 +45,62 @@ impl Service {
         if self.denial {
             return Err(zbus::fdo::Error::AccessDenied("synthetic denial".into()));
         }
+        self.sessions.fetch_add(1, Ordering::SeqCst);
         Ok((
             Value::from(vec![2u8]).try_into().unwrap(),
             path("/org/freedesktop/secrets/session/one"),
         ))
     }
+    fn read_alias(&self, _name: &str) -> OwnedObjectPath {
+        path("/org/freedesktop/secrets/collection/default")
+    }
     fn search_items(
         &self,
         _attributes: HashMap<String, String>,
-    ) -> (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) {
-        (
+    ) -> zbus::fdo::Result<(Vec<OwnedObjectPath>, Vec<OwnedObjectPath>)> {
+        self.searches.fetch_add(1, Ordering::SeqCst);
+        if self
+            .failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(zbus::fdo::Error::Failed("synthetic failure".into()));
+        }
+        if self.locked {
+            return Ok((vec![], vec![path("/org/freedesktop/secrets/item/one")]));
+        }
+        Ok((
             if self.missing {
                 vec![]
             } else {
                 vec![path("/org/freedesktop/secrets/item/one")]
             },
             vec![],
-        )
+        ))
+    }
+}
+/// The default collection, so a Put reaches CreateItem. It counts the calls
+/// that actually reached the daemon, then refuses, which is the shape of a
+/// write the daemon commits and the client never hears about.
+struct Collection {
+    creates: Arc<AtomicUsize>,
+}
+#[zbus::interface(name = "org.freedesktop.Secret.Collection")]
+impl Collection {
+    #[zbus(property)]
+    fn locked(&self) -> bool {
+        false
+    }
+    fn create_item(
+        &self,
+        _properties: HashMap<String, zbus::zvariant::OwnedValue>,
+        _secret: (OwnedObjectPath, Vec<u8>, Vec<u8>, String),
+        _replace: bool,
+    ) -> zbus::fdo::Result<(OwnedObjectPath, OwnedObjectPath)> {
+        self.creates.fetch_add(1, Ordering::SeqCst);
+        Err(zbus::fdo::Error::Failed("synthetic write failure".into()))
     }
 }
 struct Item;
@@ -81,10 +129,22 @@ struct Fixture {
     connection: zbus::Connection,
     address: String,
     prompts: Arc<AtomicUsize>,
+    sessions: Arc<AtomicUsize>,
+    searches: Arc<AtomicUsize>,
+    creates: Arc<AtomicUsize>,
     _daemon: Daemon,
 }
 impl Fixture {
     fn new(denial: bool, missing: bool) -> Self {
+        Self::build(denial, missing, false, 0)
+    }
+    fn with_failures(denial: bool, missing: bool, failures: usize) -> Self {
+        Self::build(denial, missing, false, failures)
+    }
+    fn with_locked_item() -> Self {
+        Self::build(false, false, true, 0)
+    }
+    fn build(denial: bool, missing: bool, locked: bool, failures: usize) -> Self {
         let mut daemon = Daemon(
             Command::new("dbus-daemon")
                 .args([
@@ -104,6 +164,10 @@ impl Fixture {
             .unwrap();
         let address = address.trim().to_owned();
         let prompts = Arc::new(AtomicUsize::new(0));
+        let sessions = Arc::new(AtomicUsize::new(0));
+        let searches = Arc::new(AtomicUsize::new(0));
+        let failures = Arc::new(AtomicUsize::new(failures));
+        let creates = Arc::new(AtomicUsize::new(0));
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -114,9 +178,26 @@ impl Fixture {
                 .unwrap()
                 .name("org.freedesktop.secrets")
                 .unwrap()
-                .serve_at("/org/freedesktop/secrets", Service { denial, missing })
+                .serve_at(
+                    "/org/freedesktop/secrets",
+                    Service {
+                        denial,
+                        missing,
+                        locked,
+                        sessions: sessions.clone(),
+                        searches: searches.clone(),
+                        failures: failures.clone(),
+                    },
+                )
                 .unwrap()
                 .serve_at("/org/freedesktop/secrets/item/one", Item)
+                .unwrap()
+                .serve_at(
+                    "/org/freedesktop/secrets/collection/default",
+                    Collection {
+                        creates: creates.clone(),
+                    },
+                )
                 .unwrap()
                 .serve_at(
                     "/org/freedesktop/secrets/prompt/stuck",
@@ -132,6 +213,9 @@ impl Fixture {
             connection,
             address,
             prompts,
+            sessions,
+            searches,
+            creates,
             _daemon: daemon,
         }
     }
@@ -232,4 +316,179 @@ fn credentials_native_linux_denial_and_unavailability_are_not_missing() {
         run_with(&key(), Operation::Get, failed, DEADLINE),
         Err(Error::Unavailable)
     ));
+}
+
+/// The regression test for the per-operation session. Opening a session for
+/// every credential read and force-closing it afterwards races
+/// gnome-keyring's own handshake, which aborts the daemon holding every
+/// credential on the machine. Against the unfixed code this counts three.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_reuses_one_session_across_operations() {
+    let fixture = Fixture::new(false, true);
+    let shared = Shared::new().unwrap();
+
+    for _ in 0..3 {
+        assert!(matches!(
+            run_on(
+                &shared,
+                &key(),
+                Operation::Get,
+                || fixture.client(),
+                DEADLINE
+            ),
+            Err(Error::Missing)
+        ));
+    }
+
+    assert_eq!(
+        fixture.sessions.load(Ordering::SeqCst),
+        1,
+        "each credential operation negotiated its own session"
+    );
+}
+
+/// A session the daemon has forgotten fails like an absent one, so the
+/// operation has to survive it rather than report a failure the caller cannot
+/// act on. Without the retry the first read after a daemon restart just fails.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_reconnects_after_a_transport_failure() {
+    let fixture = Fixture::with_failures(false, true, 1);
+    let shared = Shared::new().unwrap();
+
+    assert!(
+        matches!(
+            run_on(
+                &shared,
+                &key(),
+                Operation::Get,
+                || fixture.client(),
+                DEADLINE
+            ),
+            Err(Error::Missing)
+        ),
+        "a transport failure was reported instead of being retried"
+    );
+    assert_eq!(
+        fixture.sessions.load(Ordering::SeqCst),
+        2,
+        "the failed session was reused rather than replaced"
+    );
+}
+
+/// Missing is an answer, not a transport failure: it must neither drop the
+/// session nor spend the retry, or every absent credential would cost a
+/// reconnection and a second search.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_keeps_the_session_when_an_item_is_missing() {
+    let fixture = Fixture::new(false, true);
+    let shared = Shared::new().unwrap();
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Get,
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Missing)
+    ));
+
+    assert_eq!(
+        fixture.searches.load(Ordering::SeqCst),
+        1,
+        "a missing item was retried as though the transport had failed"
+    );
+    assert_eq!(fixture.sessions.load(Ordering::SeqCst), 1);
+}
+
+/// A write is never repeated. A request already on the socket cannot be
+/// retracted, so a `CreateItem` the daemon committed before the connection
+/// failed would be made a second time, leaving two items with the same
+/// attributes; `find` answers `Ambiguous` for both from then on, and the
+/// credential can no longer be read or deleted by Omamail at all. The daemon
+/// counts the calls that reached it, so this asserts the forbidden effect did
+/// not happen rather than only that an error came back.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_a_failed_write_reaches_the_daemon_once() {
+    let fixture = Fixture::new(false, true);
+    let shared = Shared::new().unwrap();
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Put(b"synthetic"),
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Unavailable)
+    ));
+    assert_eq!(
+        fixture.creates.load(Ordering::SeqCst),
+        1,
+        "the daemon was asked to create the item twice for one put"
+    );
+}
+
+/// A locked keyring is an answer, not a broken connection. Dropping the session
+/// for it would renegotiate a session on every read in exactly the state where
+/// the daemon is least able to survive one.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_a_locked_item_keeps_the_session() {
+    let fixture = Fixture::with_locked_item();
+    let shared = Shared::new().unwrap();
+
+    for _ in 0..2 {
+        assert!(matches!(
+            run_on(
+                &shared,
+                &key(),
+                Operation::Get,
+                || fixture.client(),
+                DEADLINE
+            ),
+            Err(Error::Unavailable)
+        ));
+    }
+
+    assert_eq!(
+        fixture.sessions.load(Ordering::SeqCst),
+        1,
+        "a locked item was treated as a failed connection and renegotiated"
+    );
+    assert_eq!(fixture.searches.load(Ordering::SeqCst), 2);
+}
+
+/// One operation costs the caller one deadline. Opening the session and running
+/// the operation share a single budget, so a connect that never answers cannot
+/// be waited for once and then waited for again.
+#[test]
+fn credentials_native_linux_a_stalled_connect_costs_one_deadline() {
+    let shared = Shared::new().unwrap();
+    let deadline = Duration::from_millis(300);
+
+    let started = std::time::Instant::now();
+    let result = run_on(
+        &shared,
+        &key(),
+        Operation::Get,
+        || async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Err(Error::Unavailable)
+        },
+        deadline,
+    );
+    let elapsed = started.elapsed();
+
+    assert!(matches!(result, Err(Error::Unavailable)));
+    assert!(
+        elapsed < deadline + deadline / 2,
+        "one credential operation waited {elapsed:?} for a {deadline:?} deadline"
+    );
 }
