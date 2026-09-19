@@ -409,8 +409,30 @@ function htmlToText(html) {
     .replace(/^\s+|\s+$/g, "")
 }
 
+// A signature logo, a tracking pixel, a pasted chart: an image the message
+// embeds rather than a file somebody chose to send. It reaches the body through
+// a Content-ID the markup points at, or simply declares itself inline, and the
+// reader already has it — listing it as an attachment buries the one real file
+// under a column of logos. An explicit `attachment` disposition always wins, so
+// a photograph sent as an attachment is still listed however it is drawn.
+function embeddedImage(part) {
+  if (!part) return false
+  if (!/^image\//i.test(String(part.mimeType || ""))) return false
+  var disposition = ""
+  var contentId = ""
+  var headers = Array.isArray(part.headers) ? part.headers : []
+  for (var i = 0; i < headers.length; i++) {
+    var name = String(headers[i].name || "").toLowerCase()
+    if (name === "content-disposition") disposition = String(headers[i].value || "")
+    else if (name === "content-id") contentId = String(headers[i].value || "")
+  }
+  if (/attachment/i.test(disposition)) return false
+  return /inline/i.test(disposition) || contentId.trim().length > 0
+}
+
 function isAttachment(part) {
   if (!part) return false
+  if (embeddedImage(part)) return false
   if (part.filename && String(part.filename).length > 0) return true
   var disposition = ""
   var headers = Array.isArray(part.headers) ? part.headers : []
