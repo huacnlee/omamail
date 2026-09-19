@@ -15,6 +15,11 @@ Rectangle {
   required property color textColor
   required property color accentColor
   required property color dimColor
+  // This row's mailbox colour, where the list is made of several. Its own
+  // property rather than the accent, because two mailboxes drawn the same are
+  // two mailboxes the eye has to read to tell apart. Defaults to the accent so
+  // a single-mailbox list is unchanged.
+  property color accountColor: root.accentColor
   property color urgentColor: accentColor
   required property string panelFontFamily
   // Passed down rather than read off a service: a row draws one message and
@@ -165,7 +170,7 @@ Rectangle {
         id: sender
         objectName: "message-sender"
         anchors.left: parent.left
-        anchors.right: source.visible ? source.left
+        anchors.right: source.visible ? (sourceDot.visible ? sourceDot.left : source.left)
           : (count.visible ? count.left : time.left)
         anchors.rightMargin: (source.visible || count.visible) ? Style.space(4) : Style.space(8)
         textFormat: Text.PlainText
@@ -175,6 +180,22 @@ Rectangle {
         font.pixelSize: Style.font.bodySmall
         elide: Text.ElideRight
         horizontalAlignment: root.textAlignment
+      }
+
+      // The mailbox's colour, a dot beside the name rather than the name
+      // alone: a theme may put two palette entries close together, and the
+      // name is what decides when it does.
+      Rectangle {
+        id: sourceDot
+        objectName: "message-source-dot"
+        visible: root.sourceLabel !== ""
+        anchors.right: source.left
+        anchors.rightMargin: Style.space(4)
+        anchors.verticalCenter: source.verticalCenter
+        width: Style.space(5)
+        height: width
+        radius: width / 2
+        color: root.accountColor
       }
 
       // Never colour alone: the mailbox is named in words, because a theme
@@ -198,7 +219,7 @@ Rectangle {
         width: Math.min(implicitWidth, Math.floor(parent.width / 3))
         textFormat: Text.PlainText
         text: root.sourceLabel
-        color: root.accentColor
+        color: root.accountColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight

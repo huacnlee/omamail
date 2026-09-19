@@ -2744,6 +2744,7 @@ Item {
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
+        service: root.service
         accounts: root.service ? root.service.accountSummaries : []
         unifiedActive: !!root.service && root.service.unified
         onAccountChosen: function(index) {

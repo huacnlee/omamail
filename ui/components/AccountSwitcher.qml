@@ -21,6 +21,10 @@ Item {
   required property color popupBackgroundColor
   required property color popupBorderColor
   required property string panelFontFamily
+  // The mail service, for the host's Omarchy palette path behind each
+  // mailbox's colour. Null in a host that does not supply one, where the
+  // avatars draw generated identity colours instead.
+  property var service: null
 
   // [{ id, email, label, unread, active, signedIn, busy, error }]
   property var accounts: []
@@ -311,6 +315,12 @@ Item {
           // Drawing both as in use said the window was in two places.
           readonly property bool inUse: modelData.active && !root.unifiedActive
 
+          // This mailbox's own colour, the same one the merged list draws it
+          // with. The initial stays the theme's text colour, so the disc reads
+          // on any palette entry a theme supplies.
+          readonly property color accountColor: themePalette.colorForIdentity(
+            "account:" + String(modelData.id || ""))
+
           width: menu.width - menu.leftPadding - menu.rightPadding
           implicitHeight: Style.space(40)
           radius: Style.cornerRadius
@@ -332,7 +342,9 @@ Item {
             width: Style.space(22)
             height: width
             radius: width / 2
-            color: Style.selectedFillFor(root.textColor, root.accentColor)
+            color: Qt.rgba(row.accountColor.r, row.accountColor.g, row.accountColor.b, 0.18)
+            border.width: 1
+            border.color: row.accountColor
 
             Text {
               anchors.centerIn: parent
@@ -429,6 +441,18 @@ Item {
         }
       }
     }
+  }
+
+  // The Omarchy palette behind every avatar's colour. The mailboxes are the
+  // same identities the merged list draws, so the two views agree on which
+  // colour belongs to which mailbox.
+  ThemePalette {
+    id: themePalette
+    palettePath: root.service ? String(root.service.calendarPalettePath || "") : ""
+    textColor: root.textColor
+    accentColor: root.accentColor
+    urgentColor: root.urgentColor
+    dimColor: root.dimColor
   }
 
   component MenuRow: Rectangle {
