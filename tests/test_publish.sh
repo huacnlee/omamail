@@ -62,7 +62,7 @@ fresh_checkout
 main_sha="$(git -C "$root/clone" rev-parse HEAD)"
 publish 0.2.0 >"$root/out"
 test "$(git -C "$root/clone" log -1 --format=%s)" = "Version 0.2.0"
-test "$(git -C "$root/clone" show --format= --name-only HEAD | sort | tr '\n' ' ')" = "Cargo.lock Cargo.toml app/CMakeLists.txt manifest.json "
+test "$(git -C "$root/clone" show --format= --name-only HEAD | LC_ALL=C sort | tr '\n' ' ')" = "Cargo.lock Cargo.toml app/CMakeLists.txt manifest.json "
 grep -F 'version = "0.2.0"' "$root/clone/Cargo.toml" >/dev/null
 head_sha="$(git -C "$root/clone" rev-parse HEAD)"
 test "$(git -C "$root/origin.git" rev-parse refs/heads/main)" = "$main_sha"
