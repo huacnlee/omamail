@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
+import "Credentials.js" as Credentials
 import "JmapProtocol.js" as Jmap
 
 // A JMAP account's sign-in, which is an address and one secret.
@@ -107,6 +108,11 @@ Item {
 
   property var credentialWaiters: []
   property bool lookupHandled: false
+  property int credentialRetryAttempt: 0
+  // Whether a failed credential read is waiting to be tried again. A mailbox
+  // in this state is not signed out, it is unread.
+  readonly property bool credentialRetryArmed: credentialRetry.running
+  readonly property int credentialRetryInterval: credentialRetry.interval
   property string pendingSecret: ""
 
   signal loginSucceeded()
@@ -177,13 +183,26 @@ Item {
     startSecretLookup()
   }
 
+  // Only a store that did not answer. A duplicate entry, a malformed key or a
+  // backend too old to hold credentials are all refusals that stay refused,
+  // and asking again forever would hide them behind a mailbox that looks busy
+  // rather than broken.
+  function scheduleCredentialRetry(error) {
+    if (error !== "credential_store_unavailable") return
+    if (credentialRetry.running) return
+    credentialRetry.interval = Credentials.storeRetryDelay(credentialRetryAttempt)
+    credentialRetryAttempt++
+    credentialRetry.start()
+  }
+
   function startSecretLookup() {
+    credentialRetry.stop()
+    lookupHandled = false
     var boundAccount = accountId
     if (!platform || typeof platform.credentialGet !== "function" || boundAccount === "") {
       handleSecretLookup("", "credential_store_unavailable")
       return
     }
-    lookupHandled = false
     var serial = ++credentialLookupSerial
     credentialLookupBusy = true
     platform.credentialGet("jmap-secret", boundAccount, "", function(value, error) {
@@ -201,9 +220,15 @@ Item {
       secretChecked = false
       lastError = "The credential store is unavailable"
       finishWaiters(null, lastError)
+      // The store answering again is what ends this, and nothing else asks: a
+      // mailbox that never signed in is not polled, so without this the
+      // mailbox stays disconnected until the plugin is restarted.
+      scheduleCredentialRetry(error)
       if (configured) sessionUnavailable(lastError)
       return
     }
+    credentialRetry.stop()
+    credentialRetryAttempt = 0
     secretChecked = true
     var value = String(line || "")
     if (value === "") {
@@ -270,6 +295,12 @@ Item {
     }
     serverNeeded = false
     sendingOffered = !result || result.canSend !== false
+    // The credential arrived by another route, so a retry armed by an earlier
+    // store failure has nothing left to fetch. Left running it would re-read
+    // the keyring behind this sign-in and overwrite the secret just verified
+    // with whatever the store still held.
+    credentialRetry.stop()
+    credentialRetryAttempt = 0
     secret = pendingSecret
     pendingSecret = ""
     secretChecked = true
@@ -315,6 +346,10 @@ Item {
 
   function logout() {
     var boundAccount = accountId
+    // A retry armed by an earlier store failure would otherwise fire after the
+    // credential has been deleted and ask the user to sign in again.
+    credentialRetry.stop()
+    credentialRetryAttempt = 0
     secret = ""
     pendingSecret = ""
     secretChecked = true
@@ -348,12 +383,30 @@ Item {
     // credential in front of the new one's server.
     secret = ""
     secretChecked = false
+    // The accounts Instantiator rebinds a surviving delegate rather than
+    // destroying it, so a retry armed for the previous mailbox would fire
+    // against this one.
+    credentialRetry.stop()
+    credentialRetryAttempt = 0
     lookupHandled = false
     credentialLookupSerial++
     credentialLookupBusy = false
     finishWaiters(null, "The mailbox changed before its credential was loaded")
     if (credentialWriteBusy && credentialWriteAccount !== "")
       pendingCredentialDelete = credentialWriteAccount
+  }
+
+
+  // Reads the credential again once the store has had time to come up. Only
+  // armed by a store failure, and stopped as soon as any read settles.
+  Timer {
+    id: credentialRetry
+    repeat: false
+    // Guarded rather than trusted: a credential that arrived while this was
+    // waiting means there is nothing to fetch, and re-reading would race
+    // whatever wrote it. A sign-in still being verified holds none yet, so it
+    // is named separately.
+    onTriggered: if (root.secret === "" && !root.loginBusy) root.startSecretLookup()
   }
 
 }
