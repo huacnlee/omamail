@@ -2516,8 +2516,7 @@ Item {
         return index < accounts.length ? accounts[index] : null
       }
 
-      notificationForeground: root.shell && root.shell.bar
-        ? root.shell.bar.barForeground : Color.foreground
+      notificationForeground: Color.foreground
       notificationAccent: Color.accent
       pluginDir: root.pluginDir
       accountId: entry ? entry.id : ""
