@@ -20,13 +20,37 @@ QtObject {
   readonly property bool recoveryNeedsUpdate: !!service && !!service.backend
     && service.backend.ready && !recoverySupported
   readonly property string recoveryUpdateNotice: "Draft recovery needs an updated backend. Keep this window open."
+  // The composer says one thing at a time, so a failed save hides whatever the
+  // window was already warning about. Remember that line for as long as the
+  // failure is the line on screen and put it back when a write lands. Anything
+  // else that speaks owns the slot from then on, and takes the memory with it:
+  // a warning raised after the failure is current, and must not be written over
+  // by what an older failure happened to cover.
+  property bool recoverySaveFailurePending: false
+  property string noticeBehindSaveFailure: ""
+  property bool saveFailureHidUpdateNotice: false
   onRecoverySupportedChanged: { if (recoverySupported) root.readComposeRecovery() }
   onRecoveryNeedsUpdateChanged: {
     if (recoveryNeedsUpdate && root.composeWriteQueued) showRecoveryNotice(recoveryUpdateNotice, true)
   }
   function showRecoveryNotice(message, needsUpdate) {
+    controller.forgetNoticeBehindSaveFailure()
     root.composeRecoveryUpdateNoticePending = needsUpdate === true
     root.composeRecoveryNotice = message
+  }
+  function showSaveFailureNotice() {
+    var owned = controller.recoverySaveFailurePending
+    var behind = owned ? controller.noticeBehindSaveFailure : root.composeRecoveryNotice
+    var hidUpdate = owned ? controller.saveFailureHidUpdateNotice : root.composeRecoveryUpdateNoticePending
+    showRecoveryNotice("Draft recovery could not be saved. Keep this window open.")
+    controller.recoverySaveFailurePending = true
+    controller.noticeBehindSaveFailure = behind
+    controller.saveFailureHidUpdateNotice = hidUpdate
+  }
+  function forgetNoticeBehindSaveFailure() {
+    controller.recoverySaveFailurePending = false
+    controller.noticeBehindSaveFailure = ""
+    controller.saveFailureHidUpdateNotice = false
   }
   function reconcileComposeReceipts() {
     if (root.composeReceiptChecking) return
@@ -203,6 +227,11 @@ QtObject {
   function clearComposeRecovery(expectedRevision) {
     if (expectedRevision !== undefined
         && Number(expectedRevision) !== root.composeRecoveryRevision) return false
+    // The draft is going, so a line that warned about it has nothing to come back
+    // to. The failure's own warning is not the draft's and still needs the write
+    // that answers it, so the memory goes and the ownership stays.
+    controller.noticeBehindSaveFailure = ""
+    controller.saveFailureHidUpdateNotice = false
     composeRecoveryTimer.stop()
     root.composeRecovery = Recovery.empty()
     root.composeRecoveryRevision++
@@ -236,12 +265,19 @@ QtObject {
         // instance's saved recovery just by retrying with a fresh revision.
         root.composeWriteQueued = true
         root.composeRecoveryConflict = !!error && error.message === "recovery_conflict"
-        showRecoveryNotice("Draft recovery could not be saved. Keep this window open.")
+        controller.showSaveFailureNotice()
         return
       }
       root.composeStorageRevision = String(result.revision || "")
       root.composeCommittedRevision = Math.max(root.composeCommittedRevision, mine)
-      if (root.composeRecoveryUpdateNoticePending) controller.showRecoveryNotice("")
+      if (controller.recoverySaveFailurePending) {
+        // This write answers the warning about it, and the "needs an updated
+        // backend" line it may have covered, but not a delivery warning.
+        controller.showRecoveryNotice(
+          controller.saveFailureHidUpdateNotice ? "" : controller.noticeBehindSaveFailure)
+      } else if (root.composeRecoveryUpdateNoticePending) {
+        controller.showRecoveryNotice("")
+      }
       root.acknowledgeComposeReceipts()
       if (mine === root.composeRecoveryRevision && !root.composeWriteQueued) {
         root.composeRecovery = result.record

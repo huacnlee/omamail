@@ -483,6 +483,91 @@ Item {
       compare(app.composeRecovery.draft.body,"New local edit")
       compare(recoveryBackend.requests.length,3)
     }
+    function test_native_recovery_failure_notice_clears_once_a_save_lands() {
+      beginNativeRecovery()
+      app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})
+      recoveryBackend.requests[1].done(null,{message:"recovery_unavailable"})
+      verify(app.draftSavedNotice.indexOf("could not be saved") >= 0)
+      app.saveComposeRecovery({body:"Second edit",accountId:"one@example.org"})
+      var saved = lastNativeRequest("compose.recoverySave")
+      verify(saved !== recoveryBackend.requests[1])
+      saved.done({record:saved.params.record,revision:"durable"},null)
+      compare(app.draftSavedNotice,"","a durable save answers its own failure warning")
+    }
+    function test_native_recovery_save_gives_back_the_delivery_warning_it_covered() {
+      recoveryBackend.ready = true
+      lastNativeRequest("compose.recoveryRead").done({record:recoveredPending(),revision:"r1"},null)
+      lastNativeRequest("outbox.snapshot").done({accountId:"me@example.com",entries:[{id:"receipt-one",state:"unknown"}]},null)
+      tryVerify(function(){return lastNativeRequest("compose.recoverySave") !== null})
+      var reconciled = lastNativeRequest("compose.recoverySave")
+      reconciled.done({record:reconciled.params.record,revision:"r2"},null)
+      app.opened = true
+      app.restoreComposeRecovery()
+      var warning = app.draftSavedNotice
+      verify(warning.indexOf("Delivery status is unknown") >= 0)
+      app.saveComposeRecovery({body:"Edited after recovery",accountId:"me@example.com"})
+      var failed = lastNativeRequest("compose.recoverySave")
+      verify(failed !== reconciled)
+      failed.done(null,{message:"recovery_unavailable"})
+      verify(app.draftSavedNotice.indexOf("could not be saved") >= 0)
+      app.saveComposeRecovery({body:"Edited once more",accountId:"me@example.com"})
+      var durable = lastNativeRequest("compose.recoverySave")
+      verify(durable !== failed)
+      durable.done({record:durable.params.record,revision:"r3"},null)
+      compare(app.draftSavedNotice,warning,"a save answers its own warning, not the one it covered")
+    }
+    function test_native_recovery_failure_notice_is_answered_after_the_draft_goes() {
+      beginNativeRecovery()
+      app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})
+      var refused = recoveryBackend.requests[1]
+      refused.done(null,{message:"recovery_unavailable"})
+      verify(app.draftSavedNotice.indexOf("could not be saved") >= 0)
+      verify(app.clearComposeRecovery())
+      var tombstone = lastNativeRequest("compose.recoverySave")
+      verify(tombstone !== refused)
+      compare(tombstone.params.record.active,false)
+      tombstone.done({record:{active:false},revision:"cleared"},null)
+      compare(app.draftSavedNotice,"","the write that discards the draft answers the warning too")
+    }
+    function test_native_recovery_save_keeps_a_warning_raised_after_the_failure() {
+      recoveryBackend.ready = true
+      lastNativeRequest("compose.recoveryRead").done({record:recoveredPending(),revision:"r1"},null)
+      lastNativeRequest("outbox.snapshot").done({accountId:"me@example.com",entries:[{id:"receipt-one",state:"unknown"}]},null)
+      tryVerify(function(){return lastNativeRequest("compose.recoverySave") !== null})
+      var refused = lastNativeRequest("compose.recoverySave")
+      // The window is shut, so the failure covers nothing at all.
+      compare(app.draftSavedNotice,"")
+      refused.done(null,{message:"recovery_unavailable"})
+      verify(app.draftSavedNotice.indexOf("could not be saved") >= 0)
+      app.opened = true
+      app.restoreComposeRecovery()
+      var warning = app.draftSavedNotice
+      verify(warning.indexOf("Delivery status is unknown") >= 0)
+      app.saveComposeRecovery({body:"Edited after recovery",accountId:"me@example.com"})
+      var durable = lastNativeRequest("compose.recoverySave")
+      verify(durable !== refused)
+      durable.done({record:durable.params.record,revision:"r2"},null)
+      compare(app.draftSavedNotice,warning,"a warning raised after the failure is the current one")
+    }
+    function test_native_recovery_save_answers_the_update_notice_it_covered() {
+      recoveryBackend.apiVersion = 2
+      recoveryBackend.ready = true
+      app.writeComposeRecovery(JSON.stringify({version:1,active:true,draft:{userModified:true,body:"Keep this draft"}}))
+      verify(app.draftSavedNotice.indexOf("needs an updated backend") >= 0)
+      verify(app.composeRecoveryUpdateNoticePending)
+      recoveryBackend.apiVersion = 3
+      tryVerify(function(){return lastNativeRequest("compose.recoveryRead") !== null})
+      lastNativeRequest("compose.recoveryRead").done({record:{active:false},revision:"initial"},null)
+      var refused = lastNativeRequest("compose.recoverySave")
+      verify(refused !== null)
+      refused.done(null,{message:"recovery_unavailable"})
+      verify(app.draftSavedNotice.indexOf("could not be saved") >= 0)
+      app.saveComposeRecovery({body:"Edited once more",accountId:"one@example.org"})
+      var durable = lastNativeRequest("compose.recoverySave")
+      verify(durable !== refused)
+      durable.done({record:durable.params.record,revision:"durable"},null)
+      compare(app.draftSavedNotice,"","the write answers the old backend warning it covered")
+    }
     function test_ai_dock_reserves_space_and_escape_keeps_the_draft() {
       app.open("{}")
       app.startCompose("new")
