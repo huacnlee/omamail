@@ -2516,7 +2516,13 @@ Item {
         return index < accounts.length ? accounts[index] : null
       }
 
+      // The scoped shell's `bar` is the scalar window-positioning view
+      // (PluginBarStateApi: barHidden/barSize/fontFamily/position); it does not
+      // carry barForeground. Reading it yielded undefined, which left this
+      // string property empty, and notify-mail.py rejects an empty colour, so
+      // new-mail notifications were dropped. Fall back to a real colour.
       notificationForeground: root.shell && root.shell.bar
+          && root.shell.bar.barForeground !== undefined
         ? root.shell.bar.barForeground : Color.foreground
       notificationAccent: Color.accent
       pluginDir: root.pluginDir
