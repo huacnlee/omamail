@@ -1378,6 +1378,43 @@ function reloadLimit(pageSize, loadedDepth) {
   return Math.min(Math.max(page, RELOAD_CEILING), depth)
 }
 
+// ---------------------------------------------------- conversation projection
+
+// The rail a projection source is about, as one key: the account that holds
+// the thread, the thread's id, and the mailbox it is viewed from. The source
+// names a thread when the reader is inside one; two sources with the same key
+// are asking about the same rail.
+//
+// The account is part of it because a thread id is the provider's, not the
+// world's. All mailboxes composes a message id with its account on the way
+// out and leaves `thread.id` as it came, so two accounts can each hold a
+// thread called `t1` in their Inbox — and a reader moving from one to the
+// other is moving between two rails, not asking again about one. The parts
+// are JSON-encoded so no id can run into the next.
+function projectionKey(source) {
+  var fields = source && typeof source === "object" ? source : ({})
+  var thread = fields.thread
+  var id = thread && typeof thread === "object" && thread.id ? String(thread.id) : ""
+  return JSON.stringify([String(fields.accountId || ""), id, String(fields.mailboxKey || "")])
+}
+
+// What the reader draws while a new projection is in flight. About the same
+// rail, the one in hand stays up — its stops and its caption — and only the
+// ways along it go: the navigation, and the first and last stop that `n` and
+// `p` fall back to when the open message has no entry there. So a stale next
+// or previous cannot be followed before the answer lands, and neither can an
+// end be jumped to. About a different rail, nothing: its stops are not this
+// one's. A blank is built afresh each time, lists included, so nothing drawn
+// from one can reach into another.
+function blankProjection() {
+  return { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] }
+}
+
+function pendingProjection(projection, sameRail) {
+  if (!sameRail || !projection || typeof projection !== "object") return blankProjection()
+  return Object.assign({}, projection, { navigation: {}, first: "", last: "" })
+}
+
 function resultSummary(list, estimate, hasMore) {
   var shown = Array.isArray(list) ? list.length : 0
   if (shown === 0) return "No messages"
