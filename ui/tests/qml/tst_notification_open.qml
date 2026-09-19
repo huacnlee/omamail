@@ -14,7 +14,7 @@ Item {
   QtObject {
     id: host
     property QtObject bar: QtObject {
-      property color barForeground: Qt.rgba(0.9, 0.8, 0.7, 1)
+      property int barSize: 30
     }
     property int opens: 0
     function updateEntryInline(id, entry) {}
@@ -123,17 +123,22 @@ Item {
       compare(host.opens, 2)
     }
 
-    function test_new_notifications_follow_bar_colors() {
+    function test_new_notifications_follow_theme_without_bar_foreground() {
       var account = service.findAccount(second)
       var firstNotice = notification(account, [{ id: "one" }])
-      compare(firstNotice.command[2], String(host.bar.barForeground))
+      compare(firstNotice.command[2], String(Color.foreground))
       compare(firstNotice.command[3], String(Color.accent))
-      host.bar.barForeground = Qt.rgba(0.1, 0.2, 0.3, 1)
-      var nextNotice = notification(account, [{ id: "two" }])
-      compare(nextNotice.command[2], String(host.bar.barForeground))
-      verify(firstNotice.command[2] !== nextNotice.command[2])
-      finish(firstNotice, "")
-      finish(nextNotice, "")
+      var previous = Color.foreground
+      try {
+        Color.foreground = Qt.rgba(0.1, 0.2, 0.3, 1)
+        var nextNotice = notification(account, [{ id: "two" }])
+        compare(nextNotice.command[2], String(Color.foreground))
+        verify(firstNotice.command[2] !== nextNotice.command[2])
+        finish(firstNotice, "")
+        finish(nextNotice, "")
+      } finally {
+        Color.foreground = previous
+      }
     }
 
     function test_removed_account_is_ignored() {
