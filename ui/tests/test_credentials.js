@@ -457,4 +457,21 @@ deepEqual(credentials.accountIds(damaged), ["three@work.com"])
     "nothing configured stays nothing")
 }
 
+
+// -------------------------------------------------- credential store retry
+
+// A store that refuses to answer recovers on its own, so the read is repeated
+// rather than leaving the mailbox disconnected until the plugin restarts.
+assert.strictEqual(credentials.storeRetryDelay(0), 5000)
+assert.strictEqual(credentials.storeRetryDelay(1), 10000)
+assert.strictEqual(credentials.storeRetryDelay(2), 20000)
+// Capped, so a keyring unlocked long after login is still picked up.
+assert.strictEqual(credentials.storeRetryDelay(6), 300000)
+assert.strictEqual(credentials.storeRetryDelay(100), 300000)
+// Nonsense is a first attempt, never a zero-length wait that would spin.
+assert.strictEqual(credentials.storeRetryDelay(-5), 5000)
+assert.strictEqual(credentials.storeRetryDelay("x"), 5000)
+assert.strictEqual(credentials.storeRetryDelay(null), 5000)
+assert.strictEqual(credentials.storeRetryDelay(undefined), 5000)
+
 console.log("test_credentials.js ok")

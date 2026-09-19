@@ -1,5 +1,7 @@
 .pragma library
 
+.import "OAuth.js" as OAuth
+
 // Gmail has no shared public client the way Spotify does: every user brings
 // their own Google Cloud OAuth client. This module turns whatever they have in
 // hand — the JSON file the Cloud console hands out, a pasted client id, or an
@@ -535,4 +537,17 @@ function describe(credentials) {
   var head = id.substring(0, id.indexOf("-") < 0 ? 8 : id.indexOf("-"))
   var project = trimmed(credentials.projectId)
   return project ? project + " · " + head : head
+}
+
+// How long to wait before reading a credential again after the store refused
+// to answer. The store being unavailable is a condition that ends by itself —
+// the keyring daemon finishes starting, or the collection is unlocked — so the
+// read is worth repeating, and nothing else in the plugin will repeat it: a
+// mailbox that failed this read is not being polled to ask again.
+//
+// The same curve a refresh retry uses, delegated rather than copied so the cap
+// has one definition. The cap matters more here than the pace: a keyring
+// unlocked an hour after login should still bring the mailbox back.
+function storeRetryDelay(attempt) {
+  return OAuth.refreshRetryDelay(attempt)
 }
