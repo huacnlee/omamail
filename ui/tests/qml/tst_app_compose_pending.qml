@@ -476,12 +476,63 @@ Item {
       compare(app.composeRecovery.draft.body,"Keep local draft")
       app.saveComposeRecovery({body:"New local edit"})
       compare(recoveryBackend.requests.length,2)
+      wait(1200)
+      compare(recoveryBackend.requests.length,2,"a conflict is owned by another instance and is never retried")
       recoveryBackend.ready = false
       recoveryBackend.ready = true
       compare(recoveryBackend.requests.length,3)
       recoveryBackend.requests[2].done({record:{active:true,draft:{body:"Other instance"}},revision:"other"},null)
       compare(app.composeRecovery.draft.body,"New local edit")
       compare(recoveryBackend.requests.length,3)
+    }
+    function test_native_recovery_retries_a_failed_save_without_another_edit_data() {
+      return [{tag:"the backend refused it",code:-32000,message:"recovery_unavailable"},
+              {tag:"the host never sent it",code:-32011,message:"Too many pending requests"}]
+    }
+    function test_native_recovery_retries_a_failed_save_without_another_edit(data) {
+      beginNativeRecovery()
+      app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})
+      compare(recoveryBackend.requests.length,2)
+      recoveryBackend.requests[1].done(null,{code:data.code,message:data.message})
+      compare(app.composeRecoveryConflict,false)
+      verify(app.composeWriteQueued)
+      app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})
+      compare(recoveryBackend.requests.length,2,"an unchanged draft produces no second write of its own")
+      tryVerify(function(){return recoveryBackend.requests.length === 3},3000,"the refused save retries on its own")
+      var retry = recoveryBackend.requests[2]
+      compare(retry.method,"compose.recoverySave")
+      compare(retry.params.record.draft.body,"Keep local draft")
+      compare(retry.params.expectedRevision,"initial")
+      retry.done({record:retry.params.record,revision:"durable"},null)
+      compare(app.composeWriteQueued,false)
+      compare(app.composeWritePayload,"")
+    }
+    function test_native_recovery_leaves_an_unanswered_save_to_the_reconnect() {
+      beginNativeRecovery()
+      app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})
+      compare(recoveryBackend.requests.length,2)
+      // The host, not the backend: this write may have landed and lost only its
+      // answer, so sending it again on the same revision would collide with it.
+      recoveryBackend.requests[1].done(null,{code:-32010,message:"Backend unavailable"})
+      verify(app.composeWriteQueued)
+      wait(1200)
+      compare(recoveryBackend.requests.length,2,"an unanswered write is not replayed on a stale revision")
+      recoveryBackend.ready = false
+      recoveryBackend.ready = true
+      compare(recoveryBackend.requests.length,3)
+      compare(recoveryBackend.requests[2].method,"compose.recoveryRead",
+        "reconnecting reads the revision before it writes again")
+    }
+    function test_native_recovery_retry_that_finds_a_conflict_stops_there() {
+      beginNativeRecovery()
+      app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})
+      recoveryBackend.requests[1].done(null,{code:-32000,message:"recovery_unavailable"})
+      tryVerify(function(){return recoveryBackend.requests.length === 3},3000)
+      recoveryBackend.requests[2].done(null,{code:-32000,message:"recovery_conflict"})
+      compare(app.composeRecoveryConflict,true)
+      wait(1200)
+      compare(recoveryBackend.requests.length,3,"a retry that meets another instance's record writes no more")
+      compare(app.composeRecovery.draft.body,"Keep local draft")
     }
     function test_ai_dock_reserves_space_and_escape_keeps_the_draft() {
       app.open("{}")

@@ -10,6 +10,21 @@ QtObject {
   required property var composer
   required property var recoveryTimer
   readonly property var composeRecoveryTimer: recoveryTimer
+  // A refusal the write provably never survived can go again on the revision
+  // this window already holds: the backend answered it and left the record
+  // alone, or the host refused to send it at all with too many requests in
+  // flight. A transport failure proves nothing — the write may have landed and
+  // taken the answer with it — and its reconnect re-reads the revision first.
+  readonly property var unsentRefusals: [-32000, -32011]
+  // Six attempts, doubling from one second to 32: an outage that outlasts that
+  // is not one more writes will fix, and the warning stays up to say so.
+  readonly property int maxRecoveryRetries: 6
+  property int recoveryRetries: 0
+  readonly property Timer recoveryRetryTimer: Timer {
+    interval: 1000
+    repeat: false
+    onTriggered: controller.drainComposeRecovery()
+  }
   readonly property var root: app
   readonly property var compose: composer
   readonly property var service: app ? app.service : null
@@ -195,6 +210,24 @@ QtObject {
     return root.composeRecoveryRevision
   }
 
+  // The editor only writes a payload whose text changed, so a refused save is
+  // the one write nothing else repeats. Drain again on a timer, which sends
+  // whatever the composer has queued by then — the failed text if nothing moved,
+  // the newer draft if it did.
+  function scheduleComposeRecoveryRetry() {
+    if (recoveryRetries >= maxRecoveryRetries) return
+    recoveryRetries++
+    recoveryRetryTimer.interval = 1000 * Math.pow(2, recoveryRetries - 1)
+    recoveryRetryTimer.restart()
+  }
+
+  // A write that lands is the only evidence that writing works, so it alone
+  // ends the ladder. A read says nothing about it.
+  function resetComposeRecoveryRetry() {
+    recoveryRetries = 0
+    recoveryRetryTimer.stop()
+  }
+
   function scheduleComposeRecovery() {
     if (root.composeRecoveryRestoring) return
     composeRecoveryTimer.restart()
@@ -237,8 +270,12 @@ QtObject {
         root.composeWriteQueued = true
         root.composeRecoveryConflict = !!error && error.message === "recovery_conflict"
         showRecoveryNotice("Draft recovery could not be saved. Keep this window open.")
+        if (!root.composeRecoveryConflict && error
+            && controller.unsentRefusals.indexOf(error.code) >= 0)
+          controller.scheduleComposeRecoveryRetry()
         return
       }
+      controller.resetComposeRecoveryRetry()
       root.composeStorageRevision = String(result.revision || "")
       root.composeCommittedRevision = Math.max(root.composeCommittedRevision, mine)
       if (root.composeRecoveryUpdateNoticePending) controller.showRecoveryNotice("")
