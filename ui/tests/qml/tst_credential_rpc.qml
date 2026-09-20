@@ -230,6 +230,31 @@ Item {
       compare(auth.password, "verified-password")
     }
 
+    // A retry may come due while the server is still checking a password the
+    // user typed. It must wait rather than disappear: if that sign-in then
+    // fails, the keyring may still recover and restore the saved credential.
+    function test_retry_due_during_sign_in_stays_armed_for_both_password_providers() {
+      var imap = createTemporaryObject(imapFactory, root)
+      var jmap = createTemporaryObject(jmapFactory, root)
+      verify(imap)
+      verify(jmap)
+      imap.restoreSession()
+      credentials.pendingRead("", "credential_store_unavailable")
+      compare(imap.credentialRetryArmed, true)
+      jmap.restoreSession()
+      credentials.pendingRead("", "credential_store_unavailable")
+      compare(jmap.credentialRetryArmed, true)
+
+      verify(imap.signIn("imap-password"))
+      verify(jmap.signIn("jmap-secret"))
+      wait(5500)
+
+      compare(imap.credentialRetryArmed, true,
+        "the IMAP retry waits for an in-flight sign-in to settle")
+      compare(jmap.credentialRetryArmed, true,
+        "the JMAP retry waits for an in-flight sign-in to settle")
+    }
+
     // Signing out deletes the credential, so a retry armed before that would
     // read an item that is gone and ask the user to sign in seconds later.
     function test_logout_disarms_a_pending_retry() {

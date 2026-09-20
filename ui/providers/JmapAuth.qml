@@ -406,7 +406,14 @@ Item {
     // waiting means there is nothing to fetch, and re-reading would race
     // whatever wrote it. A sign-in still being verified holds none yet, so it
     // is named separately.
-    onTriggered: if (root.secret === "" && !root.loginBusy) root.startSecretLookup()
+    onTriggered: {
+      if (root.secret !== "") return
+      if (root.loginBusy) {
+        credentialRetry.start()
+        return
+      }
+      root.startSecretLookup()
+    }
   }
 
 }
