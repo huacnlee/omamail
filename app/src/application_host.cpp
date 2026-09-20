@@ -151,6 +151,11 @@ void ApplicationHost::hide()
     emit hideRequested();
 }
 
+void ApplicationHost::requestClose()
+{
+    emit closeRequested();
+}
+
 void ApplicationHost::quit()
 {
     QCoreApplication::quit();

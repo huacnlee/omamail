@@ -52,6 +52,9 @@ public:
     Q_INVOKABLE QVariantMap takePendingNotificationActivation();
     Q_INVOKABLE void hide();
     Q_INVOKABLE void quit();
+    // The platform close chord arrived at the native layer, ahead of Qt's key
+    // delivery. The window decides what leaving means; the host only relays.
+    void requestClose();
     // The application became active while every window was hidden — a Dock
     // or taskbar click on a process whose window was shut.
     void handleApplicationStateChanged(Qt::ApplicationState state);
@@ -65,6 +68,7 @@ signals:
     void settingsChanged();
     void hideRequested();
     void reopenRequested();
+    void closeRequested();
     void notificationErrorChanged();
     void pendingNotificationActivationChanged();
     void notificationActivated(const QString &accountId, const QString &messageId);

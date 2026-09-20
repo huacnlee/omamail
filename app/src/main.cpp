@@ -1,4 +1,5 @@
 #include "app_icon.h"
+#include "application_host.h"
 #include "notifications.h"
 #include "resource_check.h"
 #include "window.h"
@@ -96,9 +97,13 @@ int main(int argc, char *argv[])
         : QUrl::fromLocalFile(paths.standaloneQml);
     engine.load(mainUrl);
     if (engine.rootObjects().isEmpty()) return 1;
+    auto *host = engine.singletonInstance<ApplicationHost *>(
+        QStringLiteral("Omamail.Native"), QStringLiteral("NativeHost"));
     for (QObject *object : engine.rootObjects()) {
-        if (auto *window = qobject_cast<QWindow *>(object))
+        if (auto *window = qobject_cast<QWindow *>(object)) {
             prepareNativeWindow(window);
+            if (host) watchNativeCloseChord(window, [host] { host->requestClose(); });
+        }
     }
     return application.exec();
 }

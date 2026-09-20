@@ -462,6 +462,44 @@ TestCase {
     assertHiddenNotQuit(composition)
   }
 
+  function test_close_chord_stays_live_while_the_app_menu_is_open() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.app.opened)
+    var menu = findChild(composition, "app-menu")
+    verify(menu, "the composed app must expose the window menu")
+    activateComposition(composition)
+    menu.openAt(10, 10)
+    tryCompare(menu, "opened", true)
+    keySequence(StandardKey.Close)
+    assertHiddenNotQuit(composition)
+  }
+
+  function test_close_chord_stays_live_while_a_tooltip_is_showing() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.app.opened)
+    var tip = findChild(composition, "omamail-tooltip")
+    verify(tip, "the composed app must show a styled tooltip somewhere")
+    activateComposition(composition)
+    tip.visible = true
+    tryCompare(tip, "opened", true, Style.tooltipDelay + 1000)
+    keySequence(StandardKey.Close)
+    assertHiddenNotQuit(composition)
+  }
+
+  // macOS delivers Cmd+W to Qt only after the input method has had it, so
+  // the native host catches the chord itself and asks the window to leave.
+  function test_native_close_chord_from_the_host_shuts_the_window() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.app.opened)
+    host.closeRequested()
+    assertHiddenNotQuit(composition)
+    host.reopenRequested()
+    compare(composition.app.opened, true)
+  }
+
   function test_close_chord_stays_live_in_calendar_context() {
     var composition = createTemporaryObject(compositionComponent, testCase)
     verify(composition)

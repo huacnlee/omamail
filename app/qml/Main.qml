@@ -258,6 +258,11 @@ ApplicationWindow {
     function onReopenRequested() {
       if (!mailApp.opened) shellAdapter.summon(manifestAdapter.value.id, "{}")
     }
+    // The host saw the platform close chord before Qt did — on macOS it takes
+    // Cmd+W off the event stream ahead of the input method, which otherwise
+    // swallows the chord while a composition is pending. Same exit as the
+    // Shortcut below.
+    function onCloseRequested() { mailApp.requestClose() }
   }
 
   Connections {
