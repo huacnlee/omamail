@@ -5,7 +5,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
@@ -27,7 +27,9 @@ struct Service {
     missing: bool,
     /// Reports the item as present but locked, which the daemon answers over a
     /// connection that is still good.
-    locked: bool,
+    locked: Arc<AtomicBool>,
+    unlock_denial: bool,
+    unlocks: Arc<AtomicUsize>,
     /// Counts negotiated sessions, which is what tells a reused connection from
     /// one rebuilt per operation.
     sessions: Arc<AtomicUsize>,
@@ -68,7 +70,7 @@ impl Service {
         {
             return Err(zbus::fdo::Error::Failed("synthetic failure".into()));
         }
-        if self.locked {
+        if self.locked.load(Ordering::SeqCst) {
             return Ok((vec![], vec![path("/org/freedesktop/secrets/item/one")]));
         }
         Ok((
@@ -79,6 +81,19 @@ impl Service {
             },
             vec![],
         ))
+    }
+    fn unlock(
+        &self,
+        objects: Vec<OwnedObjectPath>,
+    ) -> zbus::fdo::Result<(Vec<OwnedObjectPath>, OwnedObjectPath)> {
+        self.unlocks.fetch_add(1, Ordering::SeqCst);
+        if self.unlock_denial {
+            return Err(zbus::fdo::Error::AccessDenied(
+                "synthetic unlock denial".into(),
+            ));
+        }
+        self.locked.store(false, Ordering::SeqCst);
+        Ok((objects, path("/")))
     }
 }
 /// The default collection, so a Put reaches CreateItem. It counts the calls
@@ -131,20 +146,30 @@ struct Fixture {
     prompts: Arc<AtomicUsize>,
     sessions: Arc<AtomicUsize>,
     searches: Arc<AtomicUsize>,
+    unlocks: Arc<AtomicUsize>,
     creates: Arc<AtomicUsize>,
     _daemon: Daemon,
 }
 impl Fixture {
     fn new(denial: bool, missing: bool) -> Self {
-        Self::build(denial, missing, false, 0)
+        Self::build(denial, missing, false, false, 0)
     }
     fn with_failures(denial: bool, missing: bool, failures: usize) -> Self {
-        Self::build(denial, missing, false, failures)
+        Self::build(denial, missing, false, false, failures)
     }
     fn with_locked_item() -> Self {
-        Self::build(false, false, true, 0)
+        Self::build(false, false, true, false, 0)
     }
-    fn build(denial: bool, missing: bool, locked: bool, failures: usize) -> Self {
+    fn with_refused_unlock() -> Self {
+        Self::build(false, false, true, true, 0)
+    }
+    fn build(
+        denial: bool,
+        missing: bool,
+        locked: bool,
+        unlock_denial: bool,
+        failures: usize,
+    ) -> Self {
         let mut daemon = Daemon(
             Command::new("dbus-daemon")
                 .args([
@@ -166,6 +191,8 @@ impl Fixture {
         let prompts = Arc::new(AtomicUsize::new(0));
         let sessions = Arc::new(AtomicUsize::new(0));
         let searches = Arc::new(AtomicUsize::new(0));
+        let unlocks = Arc::new(AtomicUsize::new(0));
+        let locked = Arc::new(AtomicBool::new(locked));
         let failures = Arc::new(AtomicUsize::new(failures));
         let creates = Arc::new(AtomicUsize::new(0));
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -184,6 +211,8 @@ impl Fixture {
                         denial,
                         missing,
                         locked,
+                        unlock_denial,
+                        unlocks: unlocks.clone(),
                         sessions: sessions.clone(),
                         searches: searches.clone(),
                         failures: failures.clone(),
@@ -215,6 +244,7 @@ impl Fixture {
             prompts,
             sessions,
             searches,
+            unlocks,
             creates,
             _daemon: daemon,
         }
@@ -440,8 +470,8 @@ fn credentials_native_linux_a_failed_write_reaches_the_daemon_once() {
 /// the daemon is least able to survive one.
 #[test]
 #[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
-fn credentials_native_linux_a_locked_item_keeps_the_session() {
-    let fixture = Fixture::with_locked_item();
+fn credentials_native_linux_a_refused_unlock_keeps_the_session() {
+    let fixture = Fixture::with_refused_unlock();
     let shared = Shared::new().unwrap();
 
     for _ in 0..2 {
@@ -463,6 +493,28 @@ fn credentials_native_linux_a_locked_item_keeps_the_session() {
         "a locked item was treated as a failed connection and renegotiated"
     );
     assert_eq!(fixture.searches.load(Ordering::SeqCst), 2);
+}
+
+/// A locked result is still the matching credential. Blank-password Secret
+/// Service collections unlock without a prompt, so the item must be returned
+/// from the same search instead of being discarded as unavailable.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_silently_unlocks_a_locked_item() {
+    let fixture = Fixture::with_locked_item();
+    let attrs: HashMap<_, _> = key().attributes().unwrap().into_iter().collect();
+
+    let found = fixture.runtime.block_on(async {
+        let connection = fixture.client().await.unwrap();
+        let service = SecretService::connect_with_existing(EncryptionType::Dh, connection)
+            .await
+            .unwrap();
+        find(&service, &attrs).await.map(|item| item.is_some())
+    });
+
+    assert!(matches!(found, Ok(true)));
+    assert_eq!(fixture.unlocks.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.searches.load(Ordering::SeqCst), 1);
 }
 
 /// One operation costs the caller one deadline. Opening the session and running

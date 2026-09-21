@@ -271,11 +271,15 @@ async fn find<'a>(
         )
         .await
         .map_err(|_| Fault::Transport)?;
-    if !result.locked.is_empty() {
-        return Err(Fault::Answer(Error::Unavailable));
-    }
-    if result.unlocked.len() > 1 {
+    if result.unlocked.len() + result.locked.len() > 1 {
         return Err(Fault::Answer(Error::Ambiguous));
+    }
+    if let Some(item) = result.locked.into_iter().next() {
+        service
+            .unlock_all(&[&item])
+            .await
+            .map_err(|_| Fault::Answer(Error::Unavailable))?;
+        return Ok(Some(item));
     }
     Ok(result.unlocked.into_iter().next())
 }
