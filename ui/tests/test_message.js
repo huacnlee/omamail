@@ -199,6 +199,30 @@ assert.strictEqual(message.partForAttachment(null, "att1"), null)
 deepEqual(message.extractBody({ mimeType: "image/png", body: {} }), { text: "", source: "" })
 deepEqual(message.extractBody(null), { text: "", source: "" })
 
+const embeddedImages = {
+  mimeType: "multipart/related",
+  parts: [
+    { mimeType: "image/png", filename: "logo.png", headers: [
+      { name: "Content-Disposition", value: "inline" }
+    ], body: { attachmentId: "logo", size: 64 } },
+    { mimeType: "image/gif", filename: "pixel.gif", headers: [
+      { name: "Content-ID", value: "<pixel@example.invalid>" }
+    ], body: { attachmentId: "pixel", size: 64 } },
+    { mimeType: "image/png", filename: "attachment-logo.png", headers: [
+      { name: "Content-Disposition", value: "inline; filename=attachment-logo.png" }
+    ], body: { attachmentId: "named-logo", size: 64 } },
+    { mimeType: "image/jpeg", filename: "photo.jpg", headers: [
+      { name: "Content-Disposition", value: "attachment; filename=photo.jpg" },
+      { name: "Content-ID", value: "<photo@example.invalid>" }
+    ], body: { attachmentId: "photo", size: 64 } },
+    { mimeType: "application/pdf", filename: "document.pdf", headers: [
+      { name: "Content-Disposition", value: "inline" }
+    ], body: { attachmentId: "document", size: 64 } }
+  ]
+}
+deepEqual(message.attachments(embeddedImages).map(function(part) { return part.filename }),
+  ["photo.jpg", "document.pdf"])
+
 assert.strictEqual(message.htmlToText("<p>a&nbsp;&amp;&nbsp;b</p>"), "a & b")
 assert.strictEqual(message.htmlToText("<div>one</div><div>two</div>"), "one\ntwo")
 assert.strictEqual(message.htmlToText("<!-- gone -->kept"), "kept")

@@ -43,3 +43,46 @@ fn input_limits_are_enforced() {
         Err("message_too_large")
     );
 }
+
+#[test]
+fn inline_images_are_embedded_instead_of_listed_as_attachments() {
+    fn part(mime: &str, filename: &str, headers: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "mimeType": mime,
+            "filename": filename,
+            "headers": headers,
+            "body": {"attachmentId": format!("part:{filename}"), "size": 64, "data": ""}
+        })
+    }
+    let message = serde_json::json!({"payload": {
+        "mimeType": "multipart/related",
+        "headers": [],
+        "parts": [
+            part("image/png", "logo.png", serde_json::json!([
+                {"name":"Content-Disposition", "value":"inline"}
+            ])),
+            part("image/gif", "pixel.gif", serde_json::json!([
+                {"name":"Content-ID", "value":"<pixel@example.invalid>"}
+            ])),
+            part("image/png", "attachment-logo.png", serde_json::json!([
+                {"name":"Content-Disposition", "value":"inline; filename=attachment-logo.png"}
+            ])),
+            part("image/jpeg", "photo.jpg", serde_json::json!([
+                {"name":"Content-Disposition", "value":"attachment; filename=photo.jpg"},
+                {"name":"Content-ID", "value":"<photo@example.invalid>"}
+            ])),
+            part("application/pdf", "document.pdf", serde_json::json!([
+                {"name":"Content-Disposition", "value":"inline"}
+            ]))
+        ]
+    }});
+
+    let prepared = super::content::prepare(&message, 0).unwrap();
+    let listed: Vec<_> = prepared["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|attachment| attachment["filename"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, ["photo.jpg", "document.pdf"]);
+}

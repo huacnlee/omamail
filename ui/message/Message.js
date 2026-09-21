@@ -409,16 +409,31 @@ function htmlToText(html) {
     .replace(/^\s+|\s+$/g, "")
 }
 
+function partHeader(part, wanted) {
+  var headers = part && Array.isArray(part.headers) ? part.headers : []
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i].name || "").toLowerCase() === wanted)
+      return String(headers[i].value || "")
+  }
+  return ""
+}
+
+function disposition(part) {
+  return partHeader(part, "content-disposition").split(";")[0].trim().toLowerCase()
+}
+
+function embeddedImage(part) {
+  if (!part || !/^image\//i.test(String(part.mimeType || ""))) return false
+  var kind = disposition(part)
+  return kind !== "attachment"
+    && (kind === "inline" || partHeader(part, "content-id").trim().length > 0)
+}
+
 function isAttachment(part) {
   if (!part) return false
+  if (embeddedImage(part)) return false
   if (part.filename && String(part.filename).length > 0) return true
-  var disposition = ""
-  var headers = Array.isArray(part.headers) ? part.headers : []
-  for (var i = 0; i < headers.length; i++) {
-    if (String(headers[i].name || "").toLowerCase() === "content-disposition")
-      disposition = String(headers[i].value || "")
-  }
-  return /attachment/i.test(disposition)
+  return disposition(part) === "attachment"
 }
 
 // Walks the MIME tree once and keeps the best text it saw. text/plain wins
