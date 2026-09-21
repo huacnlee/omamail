@@ -18,6 +18,7 @@ import "message/Message.js" as Message
 import "components"
 import "compose"
 import "calendar"
+import "keys"
 
 Item {
   id: root
@@ -105,6 +106,15 @@ Item {
     repeat: false
     onTriggered: root.saveComposeRecovery()
   }
+
+  KeybindingsStore {
+    id: keybindings
+    service: root.service
+  }
+
+  // Read by everything that lists, draws or fires a binding: Keymap.js is a
+  // shared library and an override changing emits no signal of its own.
+  readonly property int keymapRevision: keybindings.revision
 
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background
@@ -1990,6 +2000,7 @@ Item {
               accentColor: root.accent
               dimColor: root.dim
               panelFontFamily: root.fontFamily
+              keymapRevision: root.keymapRevision
               cursorId: root.cursorId
               checkedIds: root.checkedIds
               ctrlHeld: focusScope.ctrlHeld
@@ -2074,6 +2085,7 @@ Item {
           popupBorderColor: root.popupBorder
           leadingBoundaryOverlap: listSplitter.visible ? listSplitter.width : 0
           panelFontFamily: root.fontFamily
+          keymapRevision: root.keymapRevision
           zoom: root.bodyZoom
           showBack: root.compact
           bodyMode: root.bodyMode
@@ -2405,6 +2417,8 @@ Item {
               accentColor: root.accent
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
+              keymapRevision: root.keymapRevision
+              keybindings: keybindings
               onClientSetupRequested: root.openClientSetup()
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
@@ -2685,9 +2699,12 @@ Item {
           dimColor: root.dimmer
           accentColor: root.accent
           panelFontFamily: root.fontFamily
-          hints: Keymap.hintsFor(focusScope.keyContext,
-            root.service ? root.service.unavailableActions : [],
-            root.cursorId !== "")
+          hints: {
+            root.keymapRevision // re-read when an override changes
+            return Keymap.hintsFor(focusScope.keyContext,
+              root.service ? root.service.unavailableActions : [],
+              root.cursorId !== "")
+          }
         }
       }
 
@@ -3029,7 +3046,31 @@ Item {
           ? ["askAgent", "assistantSend", "assistantCommandUp",
              "assistantCommandDown", "assistantChooseCommand"]
           : []
+        keymapRevision: root.keymapRevision
         onDismissed: root.dismissHelp()
+      }
+
+      // One condition, read twice: the router stands down for exactly as long
+      // as the catcher is up, and two spellings could drift into a suspended
+      // router with nothing on screen and no key left to recover with.
+      readonly property bool capturingKey: root.showSettings && settings.capturingKey
+
+      KeyCapture {
+        objectName: "key-capture"
+        anchors.fill: parent
+        z: 200
+        active: focusScope.capturingKey
+        label: settings.captureBindingLabel
+        textColor: root.foreground
+        backgroundColor: root.background
+        panelFontFamily: root.fontFamily
+        onCaptured: function(key, modifiers, text) {
+          settings.deliverCapture(key, modifiers, text)
+        }
+        onCancelled: {
+          settings.cancelCapture()
+          focusScope.parkKeyboard()
+        }
       }
 
       // ---------------------------------------------------------- keyboard
@@ -3039,6 +3080,8 @@ Item {
         objectName: "key-router"
         context: root.backendUnavailable ? "" : focusScope.keyContext
         overlay: root.shortcutHelpVisible
+        keymapRevision: root.keymapRevision
+        suspended: focusScope.capturingKey
         onTriggered: function(id, sequence) { root.runShortcut(id, sequence) }
       }
     }

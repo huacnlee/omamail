@@ -423,7 +423,7 @@ Item {
   }
 
   function writeConfig(name, text, callback) {
-    var allowed = ["credentials.json", "window.json", "calendars.json"]
+    var allowed = ["credentials.json", "window.json", "calendars.json", "keybindings.json"]
     if (allowed.indexOf(String(name || "")) < 0) {
       if (typeof callback === "function") callback(false, "Invalid configuration file")
       return false

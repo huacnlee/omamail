@@ -115,6 +115,11 @@ Generated from `ui/keys/Keymap.js`. `ui/tests/test_keymap.js` asserts this table
 matches it, so the two cannot drift — three hand-written copies of this list
 used to exist, and they had.
 
+This table is the **defaults**. A user can move most of these keys from the
+Keyboard section of Settings; see [The overrides](#the-overrides) below. The
+override is a filter in front of one accessor, so the table stays the single
+description of what a key means and only which key carries a meaning changes.
+
 <!-- BEGIN BINDINGS -->
 | id | keys | contexts | action |
 |---|---|---|---|
@@ -350,10 +355,95 @@ them. Typing a letter into a visible field never fired a shortcut. The old
 hand-written "is the user typing" guard was not holding that line, and removing
 it changed no behaviour.
 
+## The overrides
+
+The rows were always data, and nothing consumed a second copy of them — so a
+user override is a filter in front of one accessor, `effectiveKeys`, not a
+merge every reader has to learn. `keys/Keymap.js` holds a map of id → keys that
+starts empty; everything that lists, draws, or fires a binding reads
+`effectiveKeys(row)` rather than `row.keys`, so an override reaches the router,
+the help sheet and the status hints together.
+
+- **The table is still the defaults.** An override is dropped the moment it
+  equals the row's own keys, so a reset is the absence of an entry rather than
+  a copy of the default sitting on top of it. `keys/Keymap.js` is the only
+  description of what a key *means*; the override map only changes which key
+  carries it.
+- **The file is `keybindings.json`**, beside the other non-secret preferences
+  — `shell.json` is world-readable, so plugin settings were never the home for
+  it. `{ "version": 1, "bindings": { "archive": ["z"] } }`. It is read and
+  written by `keys/KeybindingsStore.qml` — beside the table rather than in
+  `components/`, which draws what it is given and decides nothing. It goes
+  through `Service.writeConfig` rather than running `scripts/config-store.sh`
+  itself: the standalone app has no plugin directory and no shell scripts, and
+  reaches the same file through its native host. A write that fails says so on
+  `saveError`, because the rebind is live either way and would otherwise be
+  gone at the next launch with nothing having said why. `Keymap.setOverrides`
+  sanitises whatever it is handed — unknown ids, structural ids, empty lists,
+  letter case and modifier order — so no hand-edited file can leave the
+  keyboard unusable. It is not a validator: a string `QKeySequence` cannot
+  parse costs that one row its key until it is reset, which is what the Reset
+  in the Keyboard section is for.
+- **What is the user's to move:** everything that is not structural and does
+  not live in a text-entry context. `back` (Escape) and the two numbered rails
+  are structural. A binding that lives in `search`, `compose`, or `page` is out
+  because a text-entry context binds no bare key but Escape — a rebind there
+  would have to carry a modifier and mean something Qt hands the field first
+  anyway, which is the same reason the table never put a bare key in one.
+  `assistant` and `assistantCommands` are out for the same reason and one
+  more: the bare keys the table does put there are reachable only through
+  `KeyRouter.routeKeyEvent`, which decodes `Up`, `Down`, `Return` and `Enter`
+  and nothing else, so a row moved onto any other key in the dock would report
+  success and then never fire. `Keymap.isRebindable` decides this from the
+  contexts, not a second list, so a row that gains a text context stops being
+  rebindable on its own.
+- **A rebind replaces the row's whole key list.** `open` answers to `Return`,
+  `Enter` and `o`; recording `p` for it leaves `p` and nothing else. The
+  settings row shows the keys before and after, so it is visible, but there is
+  no way to add a second key to a row — one capture, one key, and Reset to get
+  the row's own list back.
+- **`Ctrl+W` and `Ctrl+F4` are refused.** They are `StandardKey.Close`, which
+  `app/qml/Main.qml` declares application-wide while `KeyRouter`'s delegates
+  are deliberately window-scoped so a mailbox key can never tie with it. Qt
+  answers a tie by firing neither, so an override landing there would take the
+  standalone window's Close with it.
+- **A recorded collision is refused before it reaches the file.**
+  `Keymap.checkBinding` applies the candidate tentatively, runs the same
+  `conflicts()` scan the table already trusts, reverts, and returns the sentence
+  the settings row shows — rather than a second copy of the context-overlap
+  logic.
+- **A collision that gets in another way is shown, not silent.** A Reset does
+  not pass through `checkBinding`, so resetting a binding back to a default that
+  another binding has since been moved onto — or loading a hand-edited
+  `keybindings.json` — can still put two actions on one key. `Keymap.conflictReport`
+  reads `conflicts()` back and the Keyboard section lists each one: the key,
+  where, the two actions, and a Reset for whichever side carries the override.
+  A Reset is never itself refused — there always has to be a way back to the
+  defaults.
+- **Recording a key** is `keys/Capture.js`: a Qt key event becomes the sequence
+  string the table and `QKeySequence` both speak. It is ASCII only, because a
+  sequence Qt can bind and round-trip is Latin. The catcher that reads the
+  press is `components/KeyCapture.qml` — that one *is* a view — held by the window rather than by the
+  settings row — a window `Shortcut` beats a focused item's `Keys` handler, so
+  `KeyRouter` stands its Shortcuts down (`suspended`) while a key is being
+  recorded and the catcher takes what is left. It knows nothing about
+  bindings: it reports a press and a cancel, and the window decides what
+  either means.
+- **Nudging the consumers.** `Keymap.js` is a shared library and its override
+  map changing emits no QML signal, so `KeybindingsStore` bumps a revision,
+  `App.qml` publishes it as `keymapRevision`, and `KeyRouter`, `ShortcutHelp`,
+  the status hints, the empty reader's legend and the row's select tooltip read
+  it to know they have to rebuild from the new keys. Anything that draws a key
+  and does not read it will quietly go on naming the old one.
+
 ## Not here
 
-**User-configurable bindings.** The table makes it possible — the rows are data
-— but nothing has asked for it, and a config file for bindings needs a merge
-story and a conflict story this does not need.
+**Chords, and rebinding onto one.** The capture field records a single
+sequence, and the table has no chord in it — see *Why the rail is numbered and
+not chorded* above.
+
+**Per-context overrides.** One id, one key, everywhere that id already means
+something. A row that is live in the mailbox and the calendar moves in both or
+neither.
 
 The AI dock occupies the right side and reduces the mail/composer area. Its own text-entry context prevents mailbox keys from firing while asking AI. Clicking back into the draft restores its normal editing context. Escape closes the dock before leaving the underlying mail or draft, and restores the previous focus.

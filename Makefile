@@ -27,6 +27,8 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/MessageMenu.qml \
 	ui/components/MenuActionRow.qml ui/components/MenuSeparatorLine.qml \
 	ui/components/KeyRouter.qml \
+	ui/components/KeyCapture.qml \
+	ui/keys/KeybindingsStore.qml \
 	ui/components/WheelScroller.qml \
 	ui/components/ActionIcon.qml \
 	ui/components/IconButton.qml \
@@ -152,6 +154,7 @@ test-js:
 	node ui/tests/test_conversation.js
 	node tests/test_reader_pipeline.js
 	node ui/tests/test_keymap.js
+	node ui/tests/test_capture.js
 	node ui/tests/test_accounts.js
 	node ui/tests/test_unified.js
 	node ui/tests/test_aliases.js

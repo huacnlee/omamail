@@ -20,6 +20,10 @@ Item {
   required property color dimColor
   required property color dimmerColor
   required property string panelFontFamily
+  // Bumped by App.qml when a binding is rebound. Keymap.js is a shared library
+  // and its override map changing emits no QML signal, so the legend below has
+  // to be told to read the keys again.
+  property int keymapRevision: 0
 
   readonly property bool searching: !!service && service.searchQuery !== ""
   readonly property string mailboxName: searching
@@ -42,15 +46,25 @@ Item {
     && (height - centeredColumn.height) / 2
        >= versionLabel.implicitHeight + Style.space(12) + Style.space(12)
 
-  readonly property var keys: [
-    { key: "j / k", action: "Move through the list" },
-    { key: "Enter or o", action: "Open the selected message" },
-    { key: "e", action: "Archive" },
-    { key: "d", action: "Move to trash" },
-    { key: Keymap.hintKeyFor(Keymap.byId("toggleCheck")), action: "Select or deselect a message" },
-    { key: "r", action: "Reply" },
-    { key: "c", action: "Compose" }
-  ]
+  // Read off the table rather than written out, so a rebind reaches this
+  // legend with the help sheet and the status hints. The wording stays here:
+  // these are phrased for someone looking at an empty reader, not for the
+  // sheet that lists every key.
+  readonly property var keys: {
+    root.keymapRevision // re-read when an override changes; Keymap.js emits no signal
+    function shown(id) { return Keymap.hintKeyFor(Keymap.byId(id)) }
+    return [
+      { key: shown("cursorDown"), action: "Move through the list" },
+      // `open`'s hintKey is "o" alone — short enough for the status bar. This
+      // pane has room to name Enter too, so it enumerates instead.
+      { key: Keymap.displayFor(Keymap.byId("open")), action: "Open the selected message" },
+      { key: shown("archive"), action: "Archive" },
+      { key: shown("trash"), action: "Move to trash" },
+      { key: shown("toggleCheck"), action: "Select or deselect a message" },
+      { key: shown("reply"), action: "Reply" },
+      { key: shown("compose"), action: "Compose" }
+    ]
+  }
 
   Column {
     id: centeredColumn
@@ -150,7 +164,10 @@ Item {
       Text {
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
-        text: "? for every shortcut"
+        text: {
+          root.keymapRevision // re-read when an override changes
+          return Keymap.hintKeyFor(Keymap.byId("help")) + " for every shortcut"
+        }
         color: root.dimmerColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

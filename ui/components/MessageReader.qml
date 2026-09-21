@@ -6,6 +6,7 @@ import "../message/Direction.js" as Direction
 import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
+import "../keys/Keymap.js" as Keymap
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -25,6 +26,9 @@ Item {
   required property real leadingBoundaryOverlap
   required property color dimmerColor
   required property string panelFontFamily
+  // Bumped by App.qml when a binding is rebound; passed down so the blank
+  // slate's legend re-reads the keys. Keymap.js emits no signal of its own.
+  property int keymapRevision: 0
   // Which of the three ways of reading a message this window is set to. The
   // window's preference, not this message's: it may not be the one on screen,
   // because a message can be too heavy to draw the chosen way.
@@ -260,6 +264,7 @@ Item {
     anchors.fill: parent
     visible: !root.summary && !(root.service && root.service.detailLoading)
     service: root.service
+    keymapRevision: root.keymapRevision
     textColor: root.textColor
     accentColor: root.accentColor
     dimColor: root.dimColor
@@ -341,7 +346,11 @@ Item {
       visible: !root.isDraft
       iconName: "star"
       filled: !!root.summary && root.summary.starred
-      tooltipText: (root.summary && root.summary.starred ? "Unstar" : "Star") + " · s"
+      tooltipText: {
+        root.keymapRevision // re-read when an override changes
+        return (root.summary && root.summary.starred ? "Unstar" : "Star") + " · "
+          + Keymap.hintKeyFor(Keymap.byId("star"))
+      }
       foreground: root.summary && root.summary.starred ? root.accentColor : root.dimColor
       hoverColor: root.accentColor
       fontFamily: root.panelFontFamily

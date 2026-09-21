@@ -408,4 +408,198 @@ deepEqual(keymap.helpColumns(0), [keymap.helpGroups()])
 deepEqual(keymap.helpColumns(-3), [keymap.helpGroups()])
 deepEqual(keymap.helpColumns(99).length, all.length, "never more columns than groups")
 
+// ------------------------------------------------------------ user overrides
+//
+// The rows are data at runtime, not only at authoring time: keybindings.json
+// names a few of them and the effective keys follow. Everything is a filter in
+// front of `effectiveKeys`, so an override reaches the router, the sheet and
+// the hints together and the defaults in this file are still the defaults.
+
+// What is the user's to move, and what is not.
+assert.ok(keymap.isRebindable(byId("archive")), "a bare mailbox key can be rebound")
+assert.ok(keymap.isRebindable(byId("search")), "so can the one in the mailbox on `/`")
+assert.ok(!keymap.isRebindable(byId("back")), "Escape is the way out of everywhere")
+assert.ok(!keymap.isRebindable(byId("goMailbox")), "a numbered rail is a range, not a key")
+assert.ok(!keymap.isRebindable(byId("send")), "a key in a draft would need a modifier Qt eats first")
+assert.ok(!keymap.isRebindable(byId("settings")), "nor one bound in every context")
+assert.ok(!keymap.isRebindable(byId("undoSend")))
+keymap.rebindable().forEach(function (row) {
+  assert.ok(keymap.isRebindable(row), "rebindable() lists only rebindable rows")
+})
+
+// An override changes what a row answers to, everywhere a row is read from.
+keymap.setOverrides({ archive: ["z"] })
+assert.ok(keymap.isOverridden("archive"))
+assert.strictEqual(keymap.displayFor(byId("archive")), "z",
+  "the sheet shows the override")
+deepEqual(keymap.effectiveKeys(byId("archive")), ["z"])
+assert.strictEqual(keymap.slotFor("archive", "z"), 0)
+assert.ok(keymap.sequencesFor("list").some(function (s) {
+  return s.id === "archive" && s.sequence === "z"
+}), "the router binds the override")
+assert.ok(!keymap.sequencesFor("list").some(function (s) {
+  return s.id === "archive" && s.sequence === "e"
+}), "and not the default it replaced")
+// The default is untouched: a reset is the absence of an entry.
+deepEqual(byId("archive").keys, ["e"], "keys/Keymap.js still holds the default")
+
+// A rebound row loses its hand-written status hint and falls to its real keys.
+assert.strictEqual(keymap.hintKeyFor(byId("archive")), "z")
+
+// conflicts() sees overrides, so checkBinding can ask it one edit ahead.
+keymap.setOverrides({ archive: ["j"] })
+assert.ok(keymap.conflicts().some(function (c) {
+  return c.ids.indexOf("archive") >= 0 && c.ids.indexOf("cursorDown") >= 0
+}), "an override onto j collides with Move down")
+keymap.resetAll()
+deepEqual(keymap.conflicts(), [], "and the collision is gone once it is cleared")
+
+// checkBinding: "" to allow, a sentence to refuse — and it leaves no trace.
+assert.strictEqual(keymap.checkBinding("archive", ["z"]), "", "a free key is allowed")
+assert.ok(!keymap.isOverridden("archive"), "checkBinding does not commit")
+assert.ok(keymap.checkBinding("archive", ["j"]).indexOf("move down") >= 0,
+  "a taken key names what already holds it")
+assert.ok(keymap.checkBinding("back", ["q"]).length > 0, "a fixed action refuses")
+assert.ok(keymap.checkBinding("archive", []).length > 0, "nothing pressed refuses")
+assert.strictEqual(keymap.checkBinding("archive", ["e"]), "",
+  "rebinding a row to its own default is allowed and clears the override")
+
+// applyOverride commits after checkBinding has approved; a default clears it.
+keymap.applyOverride("archive", ["z"])
+assert.ok(keymap.isOverridden("archive"))
+keymap.applyOverride("archive", ["e"])
+assert.ok(!keymap.isOverridden("archive"), "the default is not an override")
+keymap.applyOverride("archive", ["z"])
+keymap.applyOverride("archive", [])
+assert.ok(!keymap.isOverridden("archive"), "an empty list is a reset")
+
+// The file round-trips through parse/serialize, and setOverrides sanitises it.
+keymap.setOverrides({ archive: ["z"], trash: ["Ctrl+D"] })
+const written = keymap.serializeOverrides()
+assert.deepStrictEqual(JSON.parse(written), { version: 1, bindings: { archive: ["z"], trash: ["Ctrl+D"] } })
+keymap.resetAll()
+keymap.setOverrides(keymap.parseOverrides(written))
+assert.strictEqual(keymap.displayFor(byId("trash")), "Ctrl+D")
+deepEqual(keymap.parseOverrides(""), {}, "no file is no overrides")
+deepEqual(keymap.parseOverrides("not json"), {}, "and neither is a broken one")
+deepEqual(keymap.parseOverrides('{"bindings":42}'), {})
+keymap.setOverrides({ back: ["q"], nonesuch: ["z"], archive: ["Escape"] })
+assert.ok(!keymap.isOverridden("back"), "a structural id is dropped on load")
+assert.ok(!keymap.isOverridden("nonesuch"), "an unknown id is dropped on load")
+assert.ok(!keymap.isOverridden("archive"), "an entry that cleans to nothing is dropped")
+keymap.resetAll()
+
+// A Reset does not go through checkBinding, so a conflict can outlive the
+// capture flow: move Archive off e, put Reply on e, then reset Archive back to
+// its default and both answer to e. conflictReport() is what the settings
+// section shows for exactly this.
+deepEqual(keymap.conflictReport(), [], "a clean table reports no conflicts")
+keymap.applyOverride("archive", ["z"])
+keymap.applyOverride("reply", ["e"])
+deepEqual(keymap.conflictReport(), [], "no clash while Archive is on z")
+keymap.applyOverride("archive", []) // the Reset that checkBinding never sees
+const report = keymap.conflictReport()
+assert.strictEqual(report.length, 1, "one clash, not one per mailbox context")
+assert.strictEqual(report[0].key, "e")
+assert.strictEqual(report[0].where, "the mailbox")
+const labels = report[0].actions.map(function (a) { return a.label }).sort()
+deepEqual(labels, ["Archive", "Reply"])
+const replySide = report[0].actions.filter(function (a) { return a.id === "reply" })[0]
+const archiveSide = report[0].actions.filter(function (a) { return a.id === "archive" })[0]
+assert.strictEqual(replySide.overridden, true, "Reply is the one to offer a reset for")
+assert.strictEqual(archiveSide.overridden, false, "Archive is back on its default")
+keymap.applyOverride("reply", []) // resolving it by backing the other side out
+deepEqual(keymap.conflictReport(), [], "and the section clears")
+keymap.resetAll()
+
+// The hand-written short form names two rows' keys: "j / k" is Move down's
+// hint and half of it is Move up's key. Rebinding either side has to drop it.
+assert.strictEqual(keymap.hintKeyFor(byId("cursorDown")), "j / k")
+keymap.applyOverride("cursorUp", ["p"])
+assert.strictEqual(keymap.hintKeyFor(byId("cursorDown")), "j, Down",
+  "a rebind of the partner row drops the short form")
+keymap.resetAll()
+keymap.applyOverride("calendarPrevious", ["p"])
+assert.strictEqual(keymap.hintKeyFor(byId("calendarNext")), "j, Down",
+  "and the same for the calendar pair")
+keymap.resetAll()
+
+// Qt reads "J" and "j" as one key, so a hand-edited file that spells a binding
+// the other way would be an ambiguous Shortcut, not a conflict anyone can see.
+// Every write path runs through cleanKeyList, so normalising there covers all.
+deepEqual(keymap.cleanKeyList(["J"]), ["j"], "a bare letter binds lower-case")
+deepEqual(keymap.cleanKeyList(["Ctrl+e"]), ["Ctrl+E"], "a modified one upper")
+deepEqual(keymap.cleanKeyList(["j", "J"]), ["j"], "and the two are one key")
+deepEqual(keymap.cleanKeyList(["escape"]), [], "escape goes whatever its case")
+keymap.rebindable().forEach(function (binding) {
+  deepEqual(keymap.cleanKeyList(binding.keys), binding.keys,
+    binding.id + " is already spelled the way cleanKeyList spells it")
+})
+keymap.setOverrides(keymap.parseOverrides('{"version":1,"bindings":{"archive":["J"]}}'))
+assert.strictEqual(keymap.displayFor(byId("archive")), "j", "loaded case-folded")
+assert.strictEqual(keymap.conflictReport().length, 1,
+  "so the clash with Move down is one the settings section can show")
+keymap.resetAll()
+
+// Modifier order is the same hazard as letter case and needs the same answer:
+// Qt reads "Meta+Ctrl+A" and "Ctrl+Meta+A" as one chord, so two rows spelled
+// the two ways are an ambiguous Shortcut rather than a conflict conflicts()
+// can see. Canonical order is Ctrl, Alt, Meta, Shift — what keys/Capture.js
+// records in, not what Qt prints.
+deepEqual(keymap.cleanKeyList(["Meta+Ctrl+A"]), ["Ctrl+Meta+A"], "modifiers sort")
+deepEqual(keymap.cleanKeyList(["shift+ctrl+alt+meta+b"]), ["Ctrl+Alt+Meta+Shift+B"])
+deepEqual(keymap.cleanKeyList(["Ctrl+Meta+A", "Meta+Ctrl+A"]), ["Ctrl+Meta+A"],
+  "and the two spellings are one key")
+deepEqual(keymap.cleanKeyList(["Hyper+A"]), ["Hyper+A"],
+  "a prefix we do not know is left alone rather than rewritten")
+keymap.setOverrides({ archive: ["Meta+Ctrl+A"], trash: ["Ctrl+Meta+A"] })
+assert.strictEqual(keymap.conflictReport().length, 1,
+  "so the section can show it instead of Qt quietly firing neither")
+keymap.resetAll()
+
+// StandardKey.Close is an application shortcut in the standalone host, and Qt
+// answers a tie by firing neither, so a rebind onto it would take the window's
+// Close with it.
+assert.strictEqual(keymap.checkBinding("archive", ["Ctrl+W"]),
+  "Ctrl+W closes the window")
+assert.strictEqual(keymap.checkBinding("archive", ["Ctrl+F4"]),
+  "Ctrl+F4 closes the window")
+assert.strictEqual(keymap.checkBinding("archive", ["z"]), "",
+  "and an ordinary free key is still fine")
+
+// The AI dock is a text-entry context, and its bare keys are reachable only
+// through KeyRouter.routeKeyEvent, which decodes Up, Down, Return and Enter
+// and nothing else — so a row moved onto any other key there would report
+// success and then never fire.
+;["assistantSend", "assistantCommandUp", "assistantCommandDown",
+  "assistantChooseCommand"].forEach(function (id) {
+  assert.ok(byId(id), id + " is in the table")
+  assert.strictEqual(keymap.isRebindable(byId(id)), false,
+    id + " is not the user's to move")
+  assert.strictEqual(keymap.checkBinding(id, ["z"]), "This action's keys are fixed")
+})
+assert.ok(!keymap.rebindable().some(function (b) {
+  return (b.contexts || []).some(function (c) {
+    return c === "assistant" || c === "assistantCommands"
+  })
+}), "and the settings section offers none of them")
+
+// Every hand-written short form that names a second row's key has to say which
+// row, or a rebind of that row leaves the hint naming a key nobody is bound to.
+keymap.BINDINGS.forEach(function (binding) {
+  if (!binding.hintKey || binding.hintKey.indexOf(" / ") < 0) return
+  assert.ok(binding.hintWith,
+    binding.id + "'s hint names another row's key and must name the row")
+  assert.ok(byId(binding.hintWith), binding.id + " names a row that exists")
+})
+keymap.applyOverride("scrollUp", ["Shift+P"])
+assert.strictEqual(keymap.hintKeyFor(byId("scrollDown")), "Shift+J",
+  "the reader hint drops the short form when its partner moves")
+keymap.resetAll()
+
+// Nothing above leaked into the defaults the rest of the suite trusts.
+deepEqual(keymap.conflicts(), [], "back to a clean table")
+deepEqual(keymap.conflictReport(), [])
+assert.strictEqual(keymap.displayFor(byId("archive")), "e")
+
 console.log("test_keymap.js ok")

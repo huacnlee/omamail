@@ -981,6 +981,39 @@ grep -q 'width: implicitWidth' components/ReaderNotice.qml \
 if grep -q 'Ctrl+Enter sends' components/ComposeView.qml; then
   fail "Compose must render shortcut hints from Keymap instead of hand-writing a second copy"
 fi
+
+# A rebind has to reach everything that draws a key. Keymap.js is a shared
+# library and its override map changing emits no QML signal, so a view that
+# asks it for a key without also reading the revision keeps drawing the old
+# one. That is not a visible break — the sheet and the hints update, one
+# tooltip or legend quietly does not — which is exactly how the empty reader
+# spent a release naming keys nobody was bound to. Anything that reads a key
+# reads keymapRevision too, one name on purpose: App.qml has an unrelated
+# `revision` argument, and a looser match let it pass while reading nothing.
+for source in $(grep -rlE 'Keymap\.(displayFor|hintKeyFor|hintsFor|helpColumns|sequencesFor)' \
+    --include='*.qml' . | sort); do
+  grep -q 'keymapRevision' "$source" \
+    || fail "$source draws a key from Keymap without reading keymapRevision"
+done
+
+# The other half of the same rule, for the views that never call Keymap at all
+# because the key is spelled into the string: `"Star · s"`. Those do not fail
+# the check above — there is nothing to pair a revision with — and they went on
+# naming `s` after the user moved it. Escape is allowed by name because `back`
+# is structural and cannot be moved.
+if grep -rnE 'tooltipText:.*" · [A-Za-z0-9+]{1,4}"' --include='*.qml' . \
+    | grep -v '" · esc"'; then
+  fail "the lines above spell a key into a tooltip; read it off keys/Keymap.js"
+fi
+
+# keybindings.json is written through Service.writeConfig, which is how the
+# standalone app reaches the same file without a plugin directory or the shell
+# scripts. Both hosts keep their own allowlist, and a name missing from either
+# is a Keyboard section that silently cannot save.
+grep -q '"keybindings.json"' Service.qml \
+  || fail "Service.writeConfig must allow keybindings.json"
+grep -q '"keybindings.json"' ../app/qml/StandaloneShell.qml \
+  || fail "the standalone host must allow keybindings.json"
 grep -q 'visible: !root.showPage && !root.composing' App.qml \
   || fail "mailbox header commands must stand down while Compose owns the task"
 awk '

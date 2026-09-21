@@ -5,6 +5,8 @@ import qs.Ui
 import "../message/Direction.js" as Direction
 import "../settings/Appearance.js" as Appearance
 import "../message/Html.js" as Html
+import "../keys/Keymap.js" as Keymap
+import "../keys/Capture.js" as Capture
 
 // Where mailboxes are managed.
 //
@@ -29,6 +31,72 @@ Column {
   signal addRequested()
   signal editRequested(int index)
 
+  // The window's KeybindingsStore. `rebind` returns "" when it took or a
+  // sentence to show on the row; the resets return nothing. `keymapRevision`
+  // bumps whenever the override map changes, so the row list redraws with the
+  // new keys.
+  property var keybindings: null
+  property int keymapRevision: 0
+
+  // Which binding is being recorded, and what went wrong last time. The catcher
+  // that reads the key lives in App.qml — a window Shortcut beats a Keys
+  // handler here, so the capture cannot.
+  property string captureId: ""
+  property string captureBindingLabel: ""
+  property string captureError: ""
+  property string captureErrorId: ""
+  readonly property bool capturingKey: captureId !== ""
+
+  function beginCapture(id, label) {
+    captureError = ""
+    captureErrorId = ""
+    captureBindingLabel = label
+    captureId = id
+  }
+
+  function cancelCapture() {
+    captureId = ""
+    captureBindingLabel = ""
+  }
+
+  function deliverCapture(key, modifiers, text) {
+    var id = captureId
+    if (id === "") return
+    var sequence = Capture.sequenceFromEvent(key, modifiers, text)
+    // A lone modifier or an unmappable key: keep waiting.
+    if (sequence === "") return
+    cancelCapture()
+    var problem = keybindings ? keybindings.rebind(id, [sequence])
+      : "Rebinding is unavailable"
+    captureErrorId = problem === "" ? "" : id
+    captureError = problem
+  }
+
+  // The rebindable rows, in table order, with their keys as the sheet shows
+  // them. The Repeater's model names keymapRevision so this re-runs on a
+  // change.
+  function keyboardRows() {
+    var out = []
+    var list = Keymap.rebindable()
+    for (var i = 0; i < list.length; i++) {
+      out.push({
+        id: list[i].id,
+        label: list[i].label,
+        keys: Keymap.displayFor(list[i]),
+        overridden: Keymap.isOverridden(list[i].id)
+      })
+    }
+    return out
+  }
+
+  readonly property bool anyBindingOverridden: {
+    root.keymapRevision // re-read when an override changes
+    var list = Keymap.rebindable()
+    for (var i = 0; i < list.length; i++)
+      if (Keymap.isOverridden(list[i].id)) return true
+    return false
+  }
+
   readonly property var accounts: service ? service.accountSummaries : []
   // A separate list on purpose: accountSummaries carries live mailbox state and
   // is replaced on a poll, which would rebuild the field being typed in.
@@ -49,6 +117,7 @@ Column {
         || String(root.service.notificationError || "") !== "")
       values.push({ key: "notifications", title: "Notifications", y: notificationsHeading.y })
     values.push({ key: "writing", title: "Writing", y: writingHeading.y })
+    values.push({ key: "keyboard", title: "Keyboard", y: keyboardHeading.y })
     values.push({ key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y })
     values.push({ key: "calendars", title: "Calendars", y: calendarsSection.y })
     values.push({ key: "oauth", title: "Google OAuth client", y: oauthHeading.y })
@@ -992,6 +1061,215 @@ Column {
     }
 
     Component.onDestruction: root.saveSignature()
+  }
+
+  // -------------------------------------------------------------- keyboard
+
+  Text {
+    id: keyboardHeading
+    text: "KEYBOARD"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Text {
+    width: parent.width
+    text: {
+      root.keymapRevision // the help key is movable too
+      return "Change what a key does in the mailbox, the reader and the calendar. "
+        + "Escape, the numbered rails, and the keys used while writing a message "
+        + "or talking to the assistant keep their defaults. Press "
+        + Keymap.hintKeyFor(Keymap.byId("help")) + " in the mailbox for the full list."
+    }
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+    textFormat: Text.PlainText
+  }
+
+  // The rebind is live in this session whether or not the file took it, so a
+  // failed write has to say so here or the key is silently gone at the next
+  // launch.
+  Text {
+    width: parent.width
+    visible: text !== ""
+    text: root.keybindings ? root.keybindings.saveError : ""
+    color: root.urgentColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+    textFormat: Text.PlainText
+  }
+
+  // Two actions on one key. `checkBinding` refuses to make one from a capture,
+  // but a Reset onto a default another binding has taken, or an edited
+  // keybindings.json, still can. Each is named here with a way to back one
+  // side out; the row below carries Change... for the other way.
+  Column {
+    width: parent.width
+    spacing: Style.space(2)
+
+    Repeater {
+      model: {
+        root.keymapRevision // re-read when an override changes
+        return Keymap.conflictReport()
+      }
+
+      Rectangle {
+        id: conflictRow
+        required property var modelData
+
+        width: parent.width
+        implicitHeight: Math.max(conflictText.implicitHeight, conflictActions.implicitHeight)
+          + Style.space(16)
+        radius: Style.cornerRadius
+        color: Style.normalFillFor(root.textColor, root.accentColor)
+        border.width: 1
+        border.color: root.urgentColor
+
+        Text {
+          id: conflictText
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(12)
+          anchors.right: conflictActions.left
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          text: conflictRow.modelData.key + " runs two actions in "
+            + conflictRow.modelData.where + ": "
+            + conflictRow.modelData.actions[0].label + " and "
+            + conflictRow.modelData.actions[1].label
+            + ". Reset one, or give it another key."
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+        }
+
+        Row {
+          id: conflictActions
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(8)
+
+          Repeater {
+            model: conflictRow.modelData.actions
+
+            IconTextButton {
+              required property var modelData
+              visible: modelData.overridden
+              text: "Reset " + modelData.label
+              foreground: root.dimColor
+              fontFamily: root.panelFontFamily
+              tooltipText: "Put " + modelData.label + " back to its default key"
+              onClicked: if (root.keybindings) root.keybindings.resetBinding(modelData.id)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  Column {
+    width: parent.width
+    spacing: Style.space(2)
+
+    Repeater {
+      model: {
+        root.keymapRevision // re-read when an override changes
+        return root.keyboardRows()
+      }
+
+      Rectangle {
+        id: bindingRow
+        required property var modelData
+
+        width: parent.width
+        implicitHeight: Math.max(bindingText.implicitHeight, bindingActions.implicitHeight)
+          + Style.space(16)
+        radius: Style.cornerRadius
+        color: Style.normalFillFor(root.textColor, root.accentColor)
+
+        Column {
+          id: bindingText
+          anchors.left: parent.left
+          anchors.leftMargin: Style.space(12)
+          anchors.right: bindingActions.left
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(2)
+
+          Text {
+            width: parent.width
+            text: bindingRow.modelData.label
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+          }
+
+          Text {
+            width: parent.width
+            visible: root.captureErrorId === bindingRow.modelData.id
+              && root.captureError !== ""
+            text: root.captureError
+            color: root.urgentColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+          }
+        }
+
+        Row {
+          id: bindingActions
+          anchors.right: parent.right
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(8)
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: bindingRow.modelData.keys
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+
+          IconTextButton {
+            text: "Change..."
+            foreground: root.textColor
+            fontFamily: root.panelFontFamily
+            tooltipText: "Record a new key for " + bindingRow.modelData.label
+            onClicked: root.beginCapture(bindingRow.modelData.id,
+              bindingRow.modelData.label)
+          }
+
+          IconTextButton {
+            visible: bindingRow.modelData.overridden
+            text: "Reset"
+            foreground: root.dimColor
+            fontFamily: root.panelFontFamily
+            tooltipText: "Back to the default key"
+            onClicked: if (root.keybindings) root.keybindings.resetBinding(bindingRow.modelData.id)
+          }
+        }
+      }
+    }
+  }
+
+  IconTextButton {
+    visible: root.anyBindingOverridden
+    text: "Reset all keys"
+    foreground: root.dimColor
+    fontFamily: root.panelFontFamily
+    onClicked: if (root.keybindings) root.keybindings.resetAll()
   }
 
   // ------------------------------------------------------------- mailboxes

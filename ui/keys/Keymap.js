@@ -29,14 +29,15 @@ var BINDINGS = [
   { id: "cursorDown", keys: ["j", "Down"], contexts: MAIL,
     survivesOverlay: true,
     group: "Moving", label: "Move down",
-    hintKey: "j / k", hint: { list: "move" } },
+    hintKey: "j / k", hintWith: "cursorUp", hint: { list: "move" } },
   { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
     survivesOverlay: true,
     group: "Moving", label: "Move up" },
   { id: "scrollDown", keys: ["Shift+J"], contexts: ["reader"],
     survivesOverlay: true,
     group: "Moving", label: "Scroll down",
-    hintKey: "Shift+J / Shift+K", hint: { reader: "scroll" } },
+    hintKey: "Shift+J / Shift+K", hintWith: "scrollUp",
+    hint: { reader: "scroll" } },
   { id: "scrollUp", keys: ["Shift+K"], contexts: ["reader"],
     survivesOverlay: true,
     group: "Moving", label: "Scroll up" },
@@ -115,7 +116,7 @@ var BINDINGS = [
     group: "Writing", label: "Create an event", hint: { calendar: "create" } },
   { id: "calendarNext", keys: ["j", "Down"], contexts: ["calendar"],
     group: "Calendar", label: "Select the next event",
-    hintKey: "j / k", hint: { calendar: "select" } },
+    hintKey: "j / k", hintWith: "calendarPrevious", hint: { calendar: "select" } },
   { id: "calendarPrevious", keys: ["k", "Up"], contexts: ["calendar"],
     group: "Calendar", label: "Select the previous event" },
   { id: "openCalendarEvent", keys: ["Return", "o"], contexts: ["calendar"],
@@ -244,12 +245,230 @@ function byId(id) {
   return null
 }
 
+// ------------------------------------------------------------ user overrides
+//
+// The one part of this table that is data at runtime and not only at authoring
+// time. The rows were always data and nothing consumed a second copy of them,
+// so an override is a filter in front of one accessor — `effectiveKeys` — and
+// not a merge that every reader would have to learn. App.qml fills OVERRIDES
+// from ~/.config/omamail/keybindings.json when the window opens and rewrites
+// that file when the Keyboard section of Settings changes one.
+//
+// `keys/Keymap.js` stays the source of the defaults: an override is dropped
+// the moment it equals the row's own keys, so a reset is the absence of an
+// entry rather than a copy of the default sitting on top of it.
+var OVERRIDES = ({})
+
+// Not the user's to move. `back` is Escape — the only key bound in every
+// context and the way out of every one of them. The two digit rails are ranges
+// the sheet renders by holding a modifier rather than single keys, so there is
+// nothing a capture field could record against them. Everything else that is
+// off limits is off limits because it lives in a text-entry context, which the
+// contexts check below decides rather than a list.
+var STRUCTURAL = ["back", "goMailbox", "goAccount"]
+
+// A binding is the user's to rebind when it is not structural and does not live
+// in a text-entry context. A text-entry context binds no bare key but Escape,
+// so a rebind there would have to carry a modifier and mean something Qt hands
+// the field first anyway — the same reason the table never put a bare key in
+// one. Keeping the rule as "which contexts" rather than a second locked list
+// means a row that gains a text context stops being rebindable on its own.
+//
+// The AI dock is two of those contexts. The table does put bare keys there —
+// Return sends, Up and Down walk the command list — but they are reachable
+// only through `KeyRouter.routeKeyEvent`, which decodes those four keys and
+// nothing else, so a row moved onto any other key there would report success
+// and then never fire.
+function isRebindable(binding) {
+  if (!binding) return false
+  if (STRUCTURAL.indexOf(binding.id) >= 0) return false
+  var contexts = binding.contexts || []
+  for (var i = 0; i < contexts.length; i++) {
+    var context = contexts[i]
+    if (context === "*" || context === "search" || context === "compose"
+        || context === "page" || context === "assistant"
+        || context === "assistantCommands") return false
+  }
+  return true
+}
+
+// The rows a Keyboard settings section offers, in table order.
+function rebindable() {
+  var out = []
+  for (var i = 0; i < BINDINGS.length; i++)
+    if (isRebindable(BINDINGS[i])) out.push(BINDINGS[i])
+  return out
+}
+
+function sameKeys(a, b) {
+  if (a.length !== b.length) return false
+  for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+// Qt parses "J" and "j" as the same key, and it parses "Ctrl+Meta+A" and
+// "Meta+Ctrl+A" as the same chord, so a keybindings.json written by hand
+// could hold one while the table holds the other — and that is not a collision
+// `conflicts()` can see, it is two Shortcuts on one sequence, which Qt calls
+// ambiguous and answers by firing neither. Spelled the way `keys/Capture.js`
+// records a press, so a captured key is already in this form: a bare letter
+// lower-case, a modified one upper. Everything else is left alone.
+var MODIFIER_ORDER = ["Ctrl", "Alt", "Meta", "Shift"]
+
+function normalizeKey(key) {
+  var at = key.lastIndexOf("+")
+  var base = at < 0 ? key : key.substring(at + 1)
+  var mods = []
+  if (at >= 0) {
+    var given = key.substring(0, at).split("+")
+    for (var i = 0; i < MODIFIER_ORDER.length; i++)
+      for (var j = 0; j < given.length; j++)
+        if (given[j].toLowerCase() === MODIFIER_ORDER[i].toLowerCase()) {
+          mods.push(MODIFIER_ORDER[i])
+          break
+        }
+    // A prefix this does not recognise is left exactly as it was: better a
+    // key that does not work than one silently rewritten into another.
+    if (mods.length !== given.length) mods = given
+  }
+  var prefix = mods.length > 0 ? mods.join("+") + "+" : ""
+  if (!(/^[A-Za-z]$/).test(base)) return prefix + base
+  return prefix === "" ? base.toLowerCase() : prefix + base.toUpperCase()
+}
+
+function cleanKeyList(keys) {
+  var out = []
+  var seen = ({})
+  var list = Array.isArray(keys) ? keys : []
+  for (var i = 0; i < list.length; i++) {
+    var key = normalizeKey(String(list[i] || ""))
+    // Case-insensitively, because Qt is: `back` is the only way out of every
+    // context and an "escape" that got in by hand would make it ambiguous.
+    if (key === "" || key.toLowerCase() === "escape" || seen[key]) continue
+    seen[key] = true
+    out.push(key)
+  }
+  return out
+}
+
+// The keys a row answers to now: its override when one is set, otherwise the
+// keys the table declares. Everything that lists, draws, or fires a binding
+// reads this rather than `.keys`, so an override reaches the router, the help
+// sheet and the status hints together.
+function effectiveKeys(binding) {
+  if (!binding) return []
+  var over = OVERRIDES[binding.id]
+  if (over && over.length > 0) return over
+  return binding.keys || []
+}
+
+function isOverridden(id) {
+  return !!OVERRIDES[id] && OVERRIDES[id].length > 0
+}
+
+// Set or clear one row's override. An empty list, or one equal to the row's
+// own keys, clears it. Call `checkBinding` first — this does not re-validate.
+function applyOverride(id, keys) {
+  var row = byId(id)
+  if (!row || !isRebindable(row)) return
+  var clean = cleanKeyList(keys)
+  if (clean.length === 0 || sameKeys(clean, row.keys || [])) delete OVERRIDES[id]
+  else OVERRIDES[id] = clean
+}
+
+// Replace the whole set, from a parsed keybindings.json. Silently drops an
+// entry naming an unknown, structural, or text-context id, or carrying no
+// usable key — a file a later version wrote, or one edited by hand, cannot
+// break the keyboard by being loaded.
+function setOverrides(map) {
+  OVERRIDES = ({})
+  if (!map || typeof map !== "object") return
+  for (var id in map) {
+    var row = byId(id)
+    if (!row || !isRebindable(row)) continue
+    var clean = cleanKeyList(map[id])
+    if (clean.length > 0 && !sameKeys(clean, row.keys || [])) OVERRIDES[id] = clean
+  }
+}
+
+function resetAll() {
+  OVERRIDES = ({})
+}
+
+// id -> keys, only the rows that actually carry an override.
+function overrideSet() {
+  var out = ({})
+  for (var id in OVERRIDES) out[id] = OVERRIDES[id].slice()
+  return out
+}
+
+// The keybindings.json body. `version` is here so a future format change has
+// something to switch on rather than guessing from shape.
+function serializeOverrides() {
+  return JSON.stringify({ version: 1, bindings: overrideSet() })
+}
+
+// The overrides in a keybindings.json string, or {} for anything unreadable.
+// `setOverrides` still sanitises what this returns, so a malformed entry that
+// parses as JSON is handled the same as one that does not.
+function parseOverrides(raw) {
+  var text = String(raw || "")
+  if (text === "") return ({})
+  var data
+  try { data = JSON.parse(text) } catch (error) { return ({}) }
+  if (!data || typeof data !== "object") return ({})
+  if (!data.bindings || typeof data.bindings !== "object") return ({})
+  return data.bindings
+}
+
+// Whether `id` may answer to exactly `keys`, asked one edit ahead of the
+// table. Returns "" when it may, or a sentence naming what stops it. The
+// collision half runs the same `conflicts()` scan the table already trusts —
+// applied tentatively, read back, reverted — rather than a second copy of the
+// context-overlap logic.
+// `app/qml/Main.qml` declares StandardKey.Close as an application shortcut,
+// and `KeyRouter`'s delegates are deliberately window-scoped so a mailbox key
+// can never tie with it. An override is the one way a key could land on it
+// anyway, and Qt answers a tie by firing neither — so the rebind would take
+// the standalone window's Close with it.
+var RESERVED = ["Ctrl+W", "Ctrl+F4"]
+
+function checkBinding(id, keys) {
+  var row = byId(id)
+  if (!row) return "That action does not exist"
+  if (!isRebindable(row)) return "This action's keys are fixed"
+  var clean = cleanKeyList(keys)
+  if (clean.length === 0) return "Press a key to bind it"
+  for (var r = 0; r < clean.length; r++)
+    if (RESERVED.indexOf(clean[r]) >= 0)
+      return readableSequence(clean[r]) + " closes the window"
+
+  var had = OVERRIDES.hasOwnProperty(id)
+  var saved = OVERRIDES[id]
+  OVERRIDES[id] = clean
+  var clash = ""
+  var list = conflicts()
+  for (var i = 0; i < list.length && clash === ""; i++) {
+    if (list[i].ids.indexOf(id) < 0) continue
+    var otherId = list[i].ids[0] === id ? list[i].ids[1] : list[i].ids[0]
+    var other = byId(otherId)
+    var where = list[i].context === "list" || list[i].context === "reader"
+      ? "the mailbox" : "the " + list[i].context
+    var named = clean.length === 1 ? readableSequence(clean[0]) : "That key"
+    clash = named + " is already "
+      + (other ? other.label.toLowerCase() : otherId) + " in " + where
+  }
+  if (had) OVERRIDES[id] = saved
+  else delete OVERRIDES[id]
+  return clash
+}
+
 // Which of a row's keys fired, as a zero-based position in the row's own list.
 // Derived rather than parsed: `Ctrl+3` is the third entry because the table
 // says so, and changing the modifier would need nothing here.
 function slotFor(id, sequence) {
   var row = byId(id)
-  var keys = row ? row.keys || [] : []
+  var keys = row ? effectiveKeys(row) : []
   return keys.indexOf(String(sequence || ""))
 }
 
@@ -302,7 +521,7 @@ function sequencesFor(context) {
   var out = []
   var rows = BINDINGS
   for (var i = 0; i < rows.length; i++) {
-    var keys = rows[i].keys || []
+    var keys = effectiveKeys(rows[i])
     for (var k = 0; k < keys.length; k++) {
       if (matchesSequenceContext(rows[i], keys[k], context))
         out.push(({ id: rows[i].id, sequence: keys[k], binding: rows[i] }))
@@ -332,7 +551,7 @@ function displayFor(binding) {
   // A row of ten keys reads as a range. Enumerating them would be ten lines of
   // sheet for one idea.
   if (binding.display) return binding.display
-  var keys = binding.keys || []
+  var keys = effectiveKeys(binding)
   var out = []
   // Return and the numpad's Enter are two keys with one keycap name; the
   // sheet names the keycap once.
@@ -349,7 +568,13 @@ function displayFor(binding) {
 // enumerating gave the sheet "j / k  Move down", which is not true of either.
 function hintKeyFor(binding) {
   if (!binding) return ""
-  if (binding.hintKey) return binding.hintKey
+  // The hand-written short form ("j / k") is only right while the keys it
+  // names are still where it says. That is two rows for a pair — "j / k" is
+  // Move down's hint and half of it is Move up's key — so a rebind of either
+  // side drops it and the row falls through to its enumerated keys.
+  if (binding.hintKey && !isOverridden(binding.id)
+      && !(binding.hintWith && isOverridden(binding.hintWith)))
+    return binding.hintKey
   return displayFor(binding)
 }
 
@@ -480,4 +705,42 @@ function conflicts() {
     }
   }
   return found
+}
+
+function conflictSide(id) {
+  var row = byId(id)
+  return ({ id: id, label: row ? row.label : id, overridden: isOverridden(id) })
+}
+
+// The live collisions, phrased for the Keyboard settings section: which key,
+// where, and the two actions fighting over it.
+//
+// `checkBinding` keeps the capture flow from making one, but a Reset back to a
+// default whose key another binding has since been moved onto — or a
+// hand-edited keybindings.json — still can, and nothing was scanning for it
+// afterwards. The section reads this rather than trusting every path to have
+// asked `checkBinding` first, and offers to back one side out.
+function conflictReport() {
+  var out = []
+  var seen = ({})
+  var list = conflicts()
+  for (var i = 0; i < list.length; i++) {
+    var where = list[i].context === "list" || list[i].context === "reader"
+      ? "the mailbox" : "the " + list[i].context
+    var ordered = list[i].ids.slice().sort()
+    // The same pair on the same key in both list and reader is one clash to a
+    // reader who sees "the mailbox" for either.
+    // "\u0000" rather than a literal NUL: a separator no key, context or id
+    // can contain, without making this file binary to grep and the source
+    // checks.
+    var tag = list[i].keys + "\u0000" + where + "\u0000" + ordered.join(",")
+    if (seen[tag]) continue
+    seen[tag] = true
+    out.push(({
+      key: readableSequence(list[i].keys),
+      where: where,
+      actions: [conflictSide(list[i].ids[0]), conflictSide(list[i].ids[1])]
+    }))
+  }
+  return out
 }
