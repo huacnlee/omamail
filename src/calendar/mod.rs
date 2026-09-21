@@ -6,7 +6,7 @@ use std::{sync::OnceLock, time::Duration};
 pub mod attendance;
 mod discovery;
 pub mod reminders;
-pub use discovery::discover;
+pub use discovery::{discover, discover_caldav_server};
 pub use discovery::google as discover_google;
 
 const LIMIT: usize = 16 * 1024 * 1024;

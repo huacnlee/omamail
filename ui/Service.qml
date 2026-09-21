@@ -109,6 +109,7 @@ Item {
   readonly property string calendarReminderError: calendarReminderLoader.item
     ? calendarReminderLoader.item.lastError || calendarReminderLoader.item.inbox.lastError : ""
   readonly property var calendarReminderInbox: calendarReminderLoader.item ? calendarReminderLoader.item.inbox : null
+  readonly property bool backendCanDiscoverCaldavServer: backend.ready && backend.apiVersion >= 7
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
