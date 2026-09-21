@@ -199,6 +199,37 @@ assert.strictEqual(message.partForAttachment(null, "att1"), null)
 deepEqual(message.extractBody({ mimeType: "image/png", body: {} }), { text: "", source: "" })
 deepEqual(message.extractBody(null), { text: "", source: "" })
 
+// An inline image is the message's own layout — a signature logo, a tracking
+// pixel — and is not a file to list. It is named by a Content-ID the markup
+// points at, or declares itself inline. The real attachments beside it remain,
+// including a photograph sent as one however it is drawn.
+const embedded = {
+  mimeType: "multipart/related",
+  parts: [
+    { mimeType: "text/html", body: { data: b64url('<img src="cid:logo@x">') } },
+    { mimeType: "image/png", filename: "logo.png", headers: [
+        { name: "Content-Type", value: "image/png; name=logo.png" },
+        { name: "Content-Disposition", value: "inline" },
+        { name: "Content-ID", value: "<logo@x>" } ],
+      body: { attachmentId: "part:2", size: 1024 } },
+    { mimeType: "image/gif", filename: "pixel.gif", headers: [
+        { name: "Content-ID", value: "<pixel@x>" } ],
+      body: { attachmentId: "part:3", size: 43 } },
+    { mimeType: "image/png", filename: "named.png", headers: [
+        { name: "Content-Disposition", value: "inline" } ],
+      body: { attachmentId: "part:4", size: 80 } },
+    { mimeType: "image/jpeg", filename: "photo.jpg", headers: [
+        { name: "Content-Disposition", value: "attachment; filename=photo.jpg" },
+        { name: "Content-ID", value: "<photo@x>" } ],
+      body: { attachmentId: "part:5", size: 2048 } },
+    { mimeType: "application/pdf", filename: "doc.pdf", body: { attachmentId: "part:6", size: 4096 } }
+  ]
+}
+const embeddedList = message.attachments(embedded)
+assert.strictEqual(embeddedList.length, 2)
+assert.strictEqual(embeddedList[0].filename, "photo.jpg")
+assert.strictEqual(embeddedList[1].filename, "doc.pdf")
+
 assert.strictEqual(message.htmlToText("<p>a&nbsp;&amp;&nbsp;b</p>"), "a & b")
 assert.strictEqual(message.htmlToText("<div>one</div><div>two</div>"), "one\ntwo")
 assert.strictEqual(message.htmlToText("<!-- gone -->kept"), "kept")

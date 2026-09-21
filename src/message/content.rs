@@ -348,7 +348,29 @@ pub fn summarize(message: &Value, now: i64) -> Result<Value> {
         json!({"id":text(&message["id"]),"threadId":text(&message["threadId"]),"from":address(&header(message,"From")),"replyTo":address(&header(message,"Reply-To")),"messageId":header(message,"Message-ID"),"to":addresses(&header(message,"To")),"cc":addresses(&header(message,"Cc")),"bcc":addresses(&header(message,"Bcc")),"inReplyTo":header(message,"In-Reply-To"),"subjectDirection":super::direction::resolve_subject(if subject.is_empty(){"(no subject)"}else{&subject}, super::direction::AUTO),"subject":if subject.is_empty(){"(no subject)"}else{&subject},"snippet":collapse(&html_to_text(text(&message["snippet"]))),"date":date.as_ref().map(|d|d.with_timezone(&Utc).to_rfc3339_opts(chrono::SecondsFormat::Millis,true)),"time":relative(date.as_ref(),now),"fullTime":date.as_ref().map(|d|format!("{} {}, {} {:02}:{:02}",d.format("%b"),d.day(),d.year(),d.hour(),d.minute())).unwrap_or_default(),"thread":thread,"unread":has("UNREAD")||thread["unread"]==true,"starred":has("STARRED")||thread["flagged"]==true,"important":has("IMPORTANT"),"inInbox":has("INBOX"),"inTrash":has("TRASH"),"inSpam":has("SPAM"),"isSent":has("SENT"),"isDraft":has("DRAFT"),"labelIds":labels,"sizeEstimate":number(&message["sizeEstimate"]).floor().max(0.0) as u64}),
     )
 }
+// A signature logo, a tracking pixel, a pasted chart: an image the message
+// embeds rather than a file somebody chose to send. It reaches the body through
+// a Content-ID the markup points at, or simply declares itself inline, and the
+// reader already has it — listing it as an attachment buries the one real file
+// under a column of logos. An explicit `attachment` disposition always wins, so
+// a photograph sent as an attachment is still listed however it is drawn.
+fn embedded_image(part: &Value) -> bool {
+    if !text(&part["mimeType"])
+        .to_ascii_lowercase()
+        .starts_with("image/")
+    {
+        return false;
+    }
+    let disposition = part_header(part, "Content-Disposition").to_ascii_lowercase();
+    if disposition.contains("attachment") {
+        return false;
+    }
+    disposition.contains("inline") || !part_header(part, "Content-ID").trim().is_empty()
+}
 fn attachment(part: &Value) -> bool {
+    if embedded_image(part) {
+        return false;
+    }
     !text(&part["filename"]).is_empty()
         || part_header(part, "Content-Disposition")
             .to_ascii_lowercase()

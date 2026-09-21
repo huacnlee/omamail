@@ -43,3 +43,36 @@ fn input_limits_are_enforced() {
         Err("message_too_large")
     );
 }
+
+#[test]
+fn inline_images_are_embedded_rather_than_listed_as_attachments() {
+    fn part(mime: &str, filename: &str, headers: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"mimeType":mime,"filename":filename,"headers":headers,
+            "body":{"attachmentId":format!("part:{filename}"),"size":64,"data":""}})
+    }
+    let inline = serde_json::json!([{"name":"Content-Disposition","value":"inline"}]);
+    let cid = serde_json::json!([{"name":"Content-ID","value":"<logo@x>"}]);
+    let attachment = serde_json::json!([
+        {"name":"Content-Disposition","value":"attachment; filename=photo.jpg"},
+        {"name":"Content-ID","value":"<photo@x>"}
+    ]);
+    let message = serde_json::json!({"payload":{"mimeType":"multipart/related","headers":[],"parts":[
+        serde_json::json!({"mimeType":"text/html","body":{"data":""}}),
+        part("image/png","logo.png",serde_json::json!([
+            {"name":"Content-Type","value":"image/png; name=logo.png"},
+            {"name":"Content-Disposition","value":"inline"},
+            {"name":"Content-ID","value":"<logo@x>"}])),
+        part("image/gif","pixel.gif",cid.clone()),
+        part("image/png","named.png",inline.clone()),
+        part("image/jpeg","photo.jpg",attachment),
+        part("application/pdf","doc.pdf",serde_json::json!([]))
+    ]}});
+    let prepared = super::content::prepare(&message, 0).unwrap();
+    let listed: Vec<_> = prepared["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["filename"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(listed, vec!["photo.jpg", "doc.pdf"]);
+}
