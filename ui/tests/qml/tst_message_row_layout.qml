@@ -90,5 +90,29 @@ Item {
       compare(findChild(row,"message-conversation-count").visible,data.conversation)
       if(data.source!=="")verify(findChild(row,"message-source").width<=row.width/3)
     }
+
+    // The mailbox colour is drawn as a dot beside its name, and both take the
+    // account's own colour rather than the list accent — which is what tells
+    // two mailboxes in a merged list apart. A row with no mailbox keeps the
+    // accent and hides the dot, so a single-mailbox list is unchanged.
+    function test_mailbox_name_takes_the_account_colour() {
+      row.width=360
+      row.hasCursor=false
+      row.checked=false
+      row.conversations=false
+      row.accountColor=Qt.rgba(0,0.6,0,1)
+      row.summary={id:"one",subject:"Title",from:{display:"Sender"},snippet:"Description",time:"09:14",unread:false,starred:false,sourceLabel:"Work"}
+      waitForRendering(row)
+      var name=findChild(row,"message-source")
+      var dot=findChild(row,"message-source-dot")
+      verify(name.visible)
+      verify(dot.visible)
+      compare(dot.color.toString(),row.accountColor.toString())
+      compare(name.color.toString(),row.accountColor.toString())
+      row.summary={id:"one",subject:"Title",from:{display:"Sender"},snippet:"Description",time:"09:14",unread:false,starred:false}
+      waitForRendering(row)
+      verify(!findChild(row,"message-source-dot").visible)
+      row.accountColor=row.accentColor
+    }
   }
 }

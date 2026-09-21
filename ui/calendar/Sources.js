@@ -1,6 +1,6 @@
 .pragma library
 
-.import "Palette.js" as Palette
+.import "../components/Palette.js" as Palette
 
 var VERSION = 1
 var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]

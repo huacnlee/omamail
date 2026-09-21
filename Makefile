@@ -67,7 +67,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/CalendarSettings.qml \
 	ui/components/CalendarEventComposer.qml \
 	ui/components/CalendarEventDetail.qml \
-	ui/components/CalendarPalette.qml \
+	ui/components/ThemePalette.qml \
 	ui/components/ConfirmDeleteDialog.qml \
 	ui/components/SetupPage.qml \
 	ui/components/ShortcutHelp.qml \
@@ -137,7 +137,7 @@ test-js:
 	node ui/tests/test_calendar_cache.js
 	node ui/tests/test_calendar_feed.js
 	node ui/tests/test_calendar_sources.js
-	node ui/tests/test_calendar_palette.js
+	node ui/tests/test_palette.js
 	node ui/tests/test_bar_preview.js
 	node ui/tests/test_unsubscribe.js
 	node ui/tests/test_mailto.js
