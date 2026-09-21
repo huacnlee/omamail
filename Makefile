@@ -62,6 +62,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/AccountRemovalDialog.qml \
 	ui/components/ComposeExitDialog.qml \
 	ui/components/BackBar.qml \
+	ui/components/MouseBack.qml \
 	ui/components/SettingsPage.qml \
 	ui/components/SettingsSidebar.qml \
 	ui/components/CalendarSettings.qml \
