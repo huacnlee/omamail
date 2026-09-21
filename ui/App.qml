@@ -433,6 +433,10 @@ Item {
     pushEntry("setup", { provider: String(providerId || ""), draft: draft })
   }
   function openClientSetup() {
+    if (!service) return
+    var gmailId = service.gmailAccountId()
+    if (gmailId === "") return chooseProvider("gmail")
+    service.switchTo(gmailId)
     pushEntry("setup", { provider: "gmail", draft: false })
   }
   // Something the window needs to say that no account is reporting — refusing a

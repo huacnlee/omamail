@@ -692,6 +692,15 @@ Item {
     return null
   }
 
+  // The id of the first saved Gmail account, or "" if there is none yet.
+  function gmailAccountId() {
+    var accounts = accountList ? accountList.accounts : []
+    for (var i = 0; i < accounts.length; i++) {
+      if (accounts[i].provider === "gmail") return accounts[i].id
+    }
+    return ""
+  }
+
   function refreshCurrent() {
     var next = activeIndex >= 0 && activeIndex < accountHosts.count
       ? accountHosts.objectAt(activeIndex)
