@@ -48,6 +48,7 @@ Item {
     }
 
     readonly property string imapId: "imap:shawn@example.test"
+    readonly property string gmailId: "ada@example.test"
 
     function named(item, objectName) {
       if (!item) return null
@@ -125,6 +126,40 @@ Item {
       var imapNow = mailService.findAccount(imapId)
       verify(!!imapNow && !!imapNow.auth, "the IMAP host still exists and still has its auth")
       verify(imapNow.auth.loginBusy === false, "and its own sign-in was never disturbed")
+    }
+
+    function test_client_setup_uses_an_existing_gmail_account() {
+      mailService.accountsLoaded = true
+      mailService.accountList = ({
+        version: 1,
+        accounts: [
+          { id: imapId, email: "shawn@example.test", provider: "imap",
+            imap: { imapHost: "imap.example.test", imapPort: 993,
+              smtpHost: "smtp.example.test", smtpPort: 465,
+              username: "shawn@example.test", aliases: [], insecure: false } },
+          { id: gmailId, email: gmailId, provider: "gmail" }
+        ],
+        activeId: imapId
+      })
+      tryCompare(mailService, "accountCount", 2)
+      var gmail = mailService.findAccount(gmailId)
+      verify(!!gmail, "the saved Gmail account has a host")
+      tryVerify(function() { return !!gmail.auth }, 1000, "with its Gmail auth ready")
+      app.resetNavigation()
+      waitForRendering(app)
+
+      app.openSettings()
+      app.openClientSetup()
+      waitForRendering(app)
+
+      compare(app.page, "setup")
+      compare(app.editingProvider, "gmail")
+      tryVerify(function() {
+        return !!mailService.current && mailService.current.accountId === gmailId
+      }, 1000, "the shared client editor switches to the saved Gmail account")
+      compare(mailService.accountCount, 2,
+        "opening the editor does not create a second Gmail row")
+      compare(typeof mailService.auth.saveCredentials, "function")
     }
   }
 }
