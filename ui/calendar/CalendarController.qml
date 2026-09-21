@@ -49,6 +49,21 @@ Item {
   property int discoverySerial: 0
   property bool discoverySaving: false
   property int discoveryPendingCount: 0
+  // A CalDAV server has no signed-in mailbox to own the walk, so this is a
+  // separate, ad hoc discovery: one server address and one set of
+  // credentials, held only in this state until the calendars picked from the
+  // result are saved one at a time through the same addCalDavCalendar every
+  // hand-typed calendar already goes through.
+  property bool caldavServerDiscovering: false
+  property string caldavServerDiscoveryError: ""
+  property var caldavServerDiscoveryResults: []
+  property int caldavServerDiscoverySerial: 0
+  property var caldavAddQueue: []
+  property string caldavAddUsername: ""
+  property string caldavAddPassword: ""
+  property bool caldavAdding: false
+  property int caldavAddTotal: 0
+  property int caldavAddFailed: 0
   property bool clockRunning: false
   property double nowMs: Date.now()
   property bool refreshAfterSourceWrite: false
@@ -125,6 +140,14 @@ Item {
   signal passwordSaved(bool ok, string error)
   signal calendarSaved(bool ok, string error)
   signal discoveryFinished(bool ok, string error, int count)
+  signal caldavServerDiscoveryFinished(bool ok, string error)
+  signal caldavCalendarsAdded(bool ok, string error, int added, int total)
+
+  onCalendarSaved: function(ok, error) {
+    if (!caldavAdding) return
+    if (!ok) root.caldavAddFailed++
+    root.addNextDiscoveredCaldavCalendar()
+  }
   signal eventCreated(bool ok, string error)
   // Somebody wants the composer open with these fields — the reader's
   // suggested event, say. The composer listens; the controller only relays.
@@ -259,6 +282,86 @@ Item {
       root.writeSources()
     })
     return true
+  }
+
+  function caldavServerDiscoveryFailure(error) {
+    var code = String(error && error.message || error || "")
+    if (code === "calendar_auth_refused") return "That username or password was refused"
+    if (code === "calendar_invalid_url") return "Enter an https:// CalDAV server address"
+    if (code === "calendar_origin_refused")
+      return "The server tried to redirect discovery somewhere else and was refused"
+    if (code === "calendar_timeout") return "Calendar discovery timed out"
+    return "No calendars were found at that address"
+  }
+
+  function discoverCaldavServer(url, username, password) {
+    if (savingSource || discoveringCalendars || caldavServerDiscovering || caldavAdding)
+      return false
+    if (!service || !service.backend || !service.backend.ready) {
+      caldavServerDiscoveryError = "Calendar backend is unavailable"
+      caldavServerDiscoveryFinished(false, caldavServerDiscoveryError)
+      return false
+    }
+    if (service.backendCanDiscoverCaldavServer !== true) {
+      caldavServerDiscoveryError = "Update the backend to discover CalDAV calendars"
+      caldavServerDiscoveryFinished(false, caldavServerDiscoveryError)
+      return false
+    }
+    var serial = ++caldavServerDiscoverySerial
+    caldavServerDiscovering = true
+    caldavServerDiscoveryError = ""
+    caldavServerDiscoveryResults = []
+    service.backend.call("calendar.discoverCaldavServer",
+      { url: String(url || ""), username: String(username || ""), password: String(password || "") },
+      function(result, error) {
+        if (serial !== root.caldavServerDiscoverySerial) return
+        root.caldavServerDiscovering = false
+        if (error || !result || !Array.isArray(result.calendars)) {
+          root.caldavServerDiscoveryError = root.caldavServerDiscoveryFailure(error)
+          root.caldavServerDiscoveryFinished(false, root.caldavServerDiscoveryError)
+          return
+        }
+        root.caldavServerDiscoveryResults = result.calendars
+        root.caldavServerDiscoveryFinished(true, "")
+      })
+    return true
+  }
+
+  function addDiscoveredCaldavCalendars(selected, username, password) {
+    if (savingSource || discoveringCalendars || caldavAdding) return false
+    var picked = (Array.isArray(selected) ? selected : []).filter(function(item) {
+      return item && String(item.url || "") !== ""
+    })
+    if (picked.length === 0) return false
+    caldavAddQueue = picked
+    caldavAddUsername = String(username || "")
+    caldavAddPassword = String(password || "")
+    caldavAddTotal = picked.length
+    caldavAddFailed = 0
+    caldavAdding = true
+    addNextDiscoveredCaldavCalendar()
+    return true
+  }
+
+  function addNextDiscoveredCaldavCalendar() {
+    if (caldavAddQueue.length === 0) {
+      var total = caldavAddTotal
+      var failed = caldavAddFailed
+      caldavAdding = false
+      caldavAddPassword = ""
+      caldavAddUsername = ""
+      caldavAddTotal = 0
+      caldavAddFailed = 0
+      caldavCalendarsAdded(failed === 0, failed === 0 ? "" : "Some calendars could not be added",
+        total - failed, total)
+      return
+    }
+    var pending = caldavAddQueue.slice()
+    var next = pending.shift()
+    caldavAddQueue = pending
+    addCalDavCalendar({
+      name: next.name, url: next.url, username: caldavAddUsername, readOnly: next.readOnly === true
+    }, caldavAddPassword)
   }
 
   // `scope` rather than an account id: in the unified view every mailbox reads
