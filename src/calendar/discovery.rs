@@ -193,6 +193,52 @@ fn resolve_icloud(base: &Url, raw: &str) -> Result<Url, &'static str> {
     icloud_url(url.as_str()).map_err(|_| "calendar_origin_refused")
 }
 
+// Same trust rule as `resolve_icloud`, generalized to whatever origin the
+// user entered instead of a hardcoded Apple host allowlist: a hop is trusted
+// only when it names the exact scheme, host and port the account was
+// configured with. This is what stops a malicious or compromised CalDAV
+// server from redirecting discovery into handing this account's credentials
+// to a different origin.
+fn same_origin(a: &Url, b: &Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+fn caldav_url(raw: &str) -> Result<Url, &'static str> {
+    if raw.is_empty() || raw.len() > 8192 || raw.chars().any(char::is_control) || raw.contains('\\')
+    {
+        return Err("calendar_invalid_url");
+    }
+    let url = Url::parse(raw).map_err(|_| "calendar_invalid_url")?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || !url.host_str().is_some_and(|host| !host.is_empty())
+    {
+        return Err("calendar_invalid_url");
+    }
+    Ok(url)
+}
+
+fn resolve_within_origin(origin: &Url, base: &Url, raw: &str) -> Result<Url, &'static str> {
+    if raw.is_empty() || raw.len() > 8192 || raw.chars().any(char::is_control) || raw.contains('\\')
+    {
+        return Err("calendar_invalid_response");
+    }
+    let url = base.join(raw).map_err(|_| "calendar_invalid_response")?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || !same_origin(&url, origin)
+    {
+        return Err("calendar_origin_refused");
+    }
+    Ok(url)
+}
+
 pub(super) fn icloud_username(account: &str) -> Result<String, &'static str> {
     if !account.starts_with("imap:") {
         return Err("calendar_provider_unsupported");
@@ -230,8 +276,9 @@ async fn dav_propfind(
     password: &str,
     depth: &str,
     body: &'static str,
+    resolve: &dyn Fn(&Url, &str) -> Result<Url, &'static str>,
 ) -> Result<(Url, String), &'static str> {
-    dav_propfind_with_client(super::client()?, url, username, password, depth, body).await
+    dav_propfind_with_client(super::client()?, url, username, password, depth, body, resolve).await
 }
 
 async fn dav_propfind_with_client(
@@ -241,6 +288,7 @@ async fn dav_propfind_with_client(
     password: &str,
     depth: &str,
     body: &'static str,
+    resolve: &dyn Fn(&Url, &str) -> Result<Url, &'static str>,
 ) -> Result<(Url, String), &'static str> {
     for _ in 0..4 {
         let response = client
@@ -258,7 +306,7 @@ async fn dav_propfind_with_client(
                 .get(LOCATION)
                 .and_then(|value| value.to_str().ok())
                 .ok_or("calendar_invalid_response")?;
-            url = resolve_icloud(&url, location)?;
+            url = resolve(&url, location)?;
             continue;
         }
         if matches!(response.status().as_u16(), 401 | 403) {
@@ -366,8 +414,9 @@ fn attribute_name(
 fn dav_calendars(
     xml: &str,
     base: &Url,
-    account: &str,
-    username: &str,
+    fallback_name: &str,
+    resolve: &dyn Fn(&Url, &str) -> Result<Url, &'static str>,
+    build: &dyn Fn(&Url, &str, bool) -> Value,
 ) -> Result<Vec<Value>, &'static str> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -447,7 +496,7 @@ fn dav_calendars(
                 if name == b"response" {
                     let value = current.take().ok_or("calendar_invalid_response")?;
                     if value.is_calendar && (!value.saw_component || value.supports_events) {
-                        let url = resolve_icloud(base, &value.href)?;
+                        let url = resolve(base, &value.href)?;
                         if calendars.len() >= MAX_CALENDARS {
                             return Err("calendar_too_many_calendars");
                         }
@@ -455,17 +504,11 @@ fn dav_calendars(
                             || value.name.len() > 1024
                             || value.name.chars().any(char::is_control)
                         {
-                            "iCloud Calendar".to_owned()
+                            fallback_name.to_owned()
                         } else {
                             value.name
                         };
-                        calendars.push(json!({
-                            "sourceId": source_id("icloud", account, url.as_str(), false),
-                            "url": url.as_str(),
-                            "username": username,
-                            "name": name,
-                            "readOnly": !value.writable
-                        }));
+                        calendars.push(build(&url, &name, value.writable));
                     }
                 }
             }
@@ -484,16 +527,33 @@ async fn icloud(account: &str) -> Result<Value, &'static str> {
     let username = icloud_username(account)?;
     let password = crate::auth::password("imap", account).await?;
     let root = icloud_url("https://caldav.icloud.com/")?;
-    let (root, principal_xml) = dav_propfind(root, &username, &password, "0", PRINCIPAL).await?;
+    let (root, principal_xml) =
+        dav_propfind(root, &username, &password, "0", PRINCIPAL, &resolve_icloud).await?;
     let principal = resolve_icloud(
         &root,
         &nested_href(&principal_xml, b"current-user-principal")?,
     )?;
-    let (principal, home_xml) = dav_propfind(principal, &username, &password, "0", HOME).await?;
+    let (principal, home_xml) =
+        dav_propfind(principal, &username, &password, "0", HOME, &resolve_icloud).await?;
     let home = resolve_icloud(&principal, &nested_href(&home_xml, b"calendar-home-set")?)?;
     let (home, collections_xml) =
-        dav_propfind(home, &username, &password, "1", COLLECTIONS).await?;
-    let calendars = dav_calendars(&collections_xml, &home, account, &username)?;
+        dav_propfind(home, &username, &password, "1", COLLECTIONS, &resolve_icloud).await?;
+    let build = |url: &Url, name: &str, writable: bool| {
+        json!({
+            "sourceId": source_id("icloud", account, url.as_str(), false),
+            "url": url.as_str(),
+            "username": username,
+            "name": name,
+            "readOnly": !writable
+        })
+    };
+    let calendars = dav_calendars(
+        &collections_xml,
+        &home,
+        "iCloud Calendar",
+        &resolve_icloud,
+        &build,
+    )?;
     Ok(json!({"provider":"icloud","accountId":account,"calendars":calendars}))
 }
 
@@ -506,6 +566,94 @@ pub async fn discover(params: &Value) -> Result<Value, &'static str> {
             icloud(&account).await
         }
     })
+    .await
+    .map_err(|_| "calendar_timeout")?
+}
+
+fn caldav_server_params(params: &Value) -> Result<(String, String, String), &'static str> {
+    let fields = params.as_object().ok_or("invalid_params")?;
+    if fields.len() != 3
+        || fields
+            .keys()
+            .any(|key| !["url", "username", "password"].contains(&key.as_str()))
+    {
+        return Err("invalid_params");
+    }
+    let url = bounded_text(params, "url").ok_or("invalid_params")?;
+    let username = bounded_text(params, "username").ok_or("invalid_params")?;
+    let password = params["password"]
+        .as_str()
+        .filter(|value| {
+            !value.is_empty() && value.len() <= 1024 && !value.chars().any(char::is_control)
+        })
+        .ok_or("invalid_params")?
+        .to_owned();
+    Ok((url, username, password))
+}
+
+// RFC 6764: a bare server address is expected to answer at its own
+// `.well-known/caldav` with a redirect naming where the real service lives.
+// A server with no well-known support answers with an ordinary failure
+// (commonly 404), which is not itself an error here — discovery falls back
+// to the address the user entered. An authentication refusal or a redirect
+// that tried to leave the entered origin is a real answer and is returned
+// as-is rather than papered over by that fallback.
+async fn resolve_caldav_root(
+    client: &reqwest::Client,
+    origin: &Url,
+    username: &str,
+    password: &str,
+    resolve: &dyn Fn(&Url, &str) -> Result<Url, &'static str>,
+) -> Result<Url, &'static str> {
+    let well_known = origin
+        .join("/.well-known/caldav")
+        .map_err(|_| "calendar_invalid_url")?;
+    match dav_propfind_with_client(client, well_known, username, password, "0", PRINCIPAL, resolve)
+        .await
+    {
+        Ok((resolved, _)) => Ok(resolved),
+        Err("calendar_request_failed") => Ok(origin.clone()),
+        Err(code) => Err(code),
+    }
+}
+
+async fn caldav_server(url: &str, username: &str, password: &str) -> Result<Value, &'static str> {
+    caldav_server_with_client(super::client()?, url, username, password).await
+}
+
+async fn caldav_server_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    username: &str,
+    password: &str,
+) -> Result<Value, &'static str> {
+    let origin = caldav_url(url)?;
+    let resolve = |base: &Url, raw: &str| resolve_within_origin(&origin, base, raw);
+    let root = resolve_caldav_root(client, &origin, username, password, &resolve).await?;
+    let (root, principal_xml) =
+        dav_propfind_with_client(client, root, username, password, "0", PRINCIPAL, &resolve)
+            .await?;
+    let principal = resolve(&root, &nested_href(&principal_xml, b"current-user-principal")?)?;
+    let (principal, home_xml) =
+        dav_propfind_with_client(client, principal, username, password, "0", HOME, &resolve)
+            .await?;
+    let home = resolve(&principal, &nested_href(&home_xml, b"calendar-home-set")?)?;
+    let (home, collections_xml) =
+        dav_propfind_with_client(client, home, username, password, "1", COLLECTIONS, &resolve)
+            .await?;
+    let build = |url: &Url, name: &str, writable: bool| {
+        json!({"url": url.as_str(), "name": name, "readOnly": !writable})
+    };
+    let calendars = dav_calendars(&collections_xml, &home, "Calendar", &resolve, &build)?;
+    Ok(json!({"calendars": calendars}))
+}
+
+pub async fn discover_caldav_server(params: &Value) -> Result<Value, &'static str> {
+    let (url, username, password) = caldav_server_params(params)?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(27),
+        caldav_server(&url, &username, &password),
+    )
     .await
     .map_err(|_| "calendar_timeout")?
 }
@@ -552,7 +700,10 @@ mod tests {
     fn dav_parser_returns_only_event_calendars_and_access() {
         let xml = r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/123/calendars/work/</d:href><d:propstat><d:prop><d:displayname>Work &amp; Travel</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set><d:current-user-privilege-set><d:privilege><d:write-content/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response><d:response><d:href>/123/reminders/</d:href><d:propstat><d:prop><d:resourcetype><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set></d:prop></d:propstat></d:response></d:multistatus>"#;
         let base = Url::parse("https://p37-caldav.icloud.com/123/calendars/").unwrap();
-        let values = dav_calendars(xml, &base, "imap:me@icloud.com", "me@icloud.com").unwrap();
+        let build = |url: &Url, name: &str, writable: bool| {
+            json!({"url": url.as_str(), "name": name, "readOnly": !writable})
+        };
+        let values = dav_calendars(xml, &base, "Calendar", &resolve_icloud, &build).unwrap();
         assert_eq!(values.len(), 1);
         assert_eq!(values[0]["name"], "Work & Travel");
         assert_eq!(values[0]["readOnly"], false);
@@ -570,7 +721,10 @@ mod tests {
     fn dav_parser_reads_an_aggregate_all_privilege_as_writable() {
         let xml = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/123/calendars/home/</d:href><d:propstat><d:prop><d:displayname>Home</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:current-user-privilege-set><d:privilege><d:all/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response><d:response><d:href>/123/calendars/shared/</d:href><d:propstat><d:prop><d:displayname>Shared</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:current-user-privilege-set><d:privilege><d:read/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response></d:multistatus>"#;
         let base = Url::parse("https://p37-caldav.icloud.com/123/calendars/").unwrap();
-        let values = dav_calendars(xml, &base, "imap:me@icloud.com", "me@icloud.com").unwrap();
+        let build = |url: &Url, name: &str, writable: bool| {
+            json!({"url": url.as_str(), "name": name, "readOnly": !writable})
+        };
+        let values = dav_calendars(xml, &base, "Calendar", &resolve_icloud, &build).unwrap();
         assert_eq!(values.len(), 2);
         assert_eq!(values[0]["name"], "Home");
         assert_eq!(values[0]["readOnly"], false);
@@ -585,5 +739,79 @@ mod tests {
             nested_href(xml, b"current-user-principal").unwrap(),
             "/right/"
         );
+    }
+
+    #[test]
+    fn caldav_url_accepts_only_a_plain_https_server_address() {
+        assert!(caldav_url("https://caldav.fastmail.com/").is_ok());
+        assert!(caldav_url("https://caldav.fastmail.com/dav/").is_ok());
+        for url in [
+            "",
+            "http://caldav.fastmail.com/",
+            "https://user:pass@caldav.fastmail.com/",
+            "https://caldav.fastmail.com/#fragment",
+            "not a url",
+            "https://",
+        ] {
+            assert!(caldav_url(url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn generic_caldav_credentials_can_only_reach_the_entered_origin() {
+        let origin = Url::parse("https://caldav.fastmail.com/").unwrap();
+        let base = Url::parse("https://caldav.fastmail.com/dav/calendars/user/me/").unwrap();
+        for href in [
+            "/dav/calendars/user/me/work/",
+            "work/",
+            "https://caldav.fastmail.com/dav/calendars/user/me/personal/",
+        ] {
+            assert!(
+                resolve_within_origin(&origin, &base, href).is_ok(),
+                "{href}"
+            );
+        }
+        for href in [
+            "https://outside.example.test/stolen",
+            "//outside.example.test/stolen",
+            "http://caldav.fastmail.com/stolen",
+            "https://caldav.fastmail.com:8443/stolen",
+            "https://caldav.fastmail.com@outside.example.test/stolen",
+            "https://caldav.fastmail.com/stolen#fragment",
+        ] {
+            assert!(
+                resolve_within_origin(&origin, &base, href).is_err(),
+                "{href}"
+            );
+        }
+    }
+
+    #[test]
+    fn caldav_server_params_require_exactly_url_username_and_password() {
+        assert!(
+            caldav_server_params(&json!({
+                "url": "https://caldav.fastmail.com/",
+                "username": "me@fastmail.com",
+                "password": "app-password"
+            }))
+            .is_ok()
+        );
+        for value in [
+            json!({}),
+            json!({"url": "https://caldav.fastmail.com/"}),
+            json!({
+                "url": "https://caldav.fastmail.com/",
+                "username": "me@fastmail.com",
+                "password": ""
+            }),
+            json!({
+                "url": "https://caldav.fastmail.com/",
+                "username": "me@fastmail.com",
+                "password": "app-password",
+                "extra": true
+            }),
+        ] {
+            assert_eq!(caldav_server_params(&value), Err("invalid_params"));
+        }
     }
 }

@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::{sync::OnceLock, time::Duration};
 
 mod discovery;
-pub use discovery::discover;
+pub use discovery::{discover, discover_caldav_server};
 
 const LIMIT: usize = 16 * 1024 * 1024;
 static CLIENT: OnceLock<Result<Client, &'static str>> = OnceLock::new();

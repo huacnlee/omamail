@@ -1,5 +1,5 @@
 {
-  "apiVersion": 5,
+  "apiVersion": 6,
   "releasedApiVersion": 5,
   "protocolVersion": 1,
   "methods": [
@@ -95,6 +95,7 @@
     "public.unsubscribe",
     "calendar.request",
     "calendar.discover",
+    "calendar.discoverCaldavServer",
     "auth.form",
     "auth.begin",
     "auth.poll",
@@ -205,6 +206,25 @@
       "method": "calendar.discover",
       "params": {},
       "errorCode": -32602
+    },
+    {
+      "name": "strict CalDAV server discovery parameters",
+      "method": "calendar.discoverCaldavServer",
+      "params": {},
+      "errorCode": -32602
+    },
+    {
+      "name": "CalDAV server discovery refuses a non-HTTPS address",
+      "method": "calendar.discoverCaldavServer",
+      "params": {
+        "url": "http://caldav.example.org/",
+        "username": "me@example.org",
+        "password": "app-password"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_url"
+      }
     },
     {
       "name": "missing Outlook connection",
@@ -762,7 +782,10 @@
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": ["calendar.discoverCaldavServer"],
+    "cases": [
+      "strict CalDAV server discovery parameters",
+      "CalDAV server discovery refuses a non-HTTPS address"
+    ]
   }
 }

@@ -87,6 +87,17 @@ impl Peer {
             "synthetic-password",
             "0",
             "<propfind>\n</propfind>",
+            &resolve_icloud,
+        )
+        .await
+    }
+
+    async fn caldav_server(&self, url: &str) -> Result<Value, &'static str> {
+        caldav_server_with_client(
+            &self.client,
+            url,
+            "synthetic@example.test",
+            "synthetic-password",
         )
         .await
     }
@@ -217,4 +228,68 @@ async fn https_graph_redirects_and_next_links_do_not_leak_bearer_tokens() {
         requests[1]["path"],
         "/v1.0/me/calendars?$skiptoken=next%2Bpage"
     );
+}
+
+// Reproduces Fastmail's actual behaviour: the bare server address 404s, and
+// only `/.well-known/caldav` on that same host says where the real service
+// lives. The well-known probe's own redirect target is treated only as
+// "discovery has a root now" — resolve_caldav_root discards that response
+// and the principal is queried fresh at the resolved root — so this walk
+// makes five requests, not three, for one discovered calendar.
+#[tokio::test]
+async fn a_fastmail_like_bare_address_resolves_through_its_own_well_known_redirect() {
+    let mut peer = Peer::new();
+    peer.responses(json!([
+        {"status":301,"location":"/dav/calendars"},
+        {"status":207,"body":"<multistatus/>"},
+        {"status":207,"body":r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/calendars</d:href><d:propstat><d:prop><d:current-user-principal><d:href>/dav/principals/user/me@fastmail.com/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>"#},
+        {"status":207,"body":r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/dav/principals/user/me@fastmail.com/</d:href><d:propstat><d:prop><c:calendar-home-set><d:href>/dav/calendars/user/me@fastmail.com/</d:href></c:calendar-home-set></d:prop></d:propstat></d:response></d:multistatus>"#},
+        {"status":207,"body":r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/dav/calendars/user/me@fastmail.com/abc123/</d:href><d:propstat><d:prop><d:displayname>Personal</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set><d:current-user-privilege-set><d:privilege><d:write-content/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response></d:multistatus>"#}
+    ]));
+    let result = peer
+        .caldav_server("https://caldav.fastmail.com/")
+        .await
+        .unwrap();
+    assert_eq!(result["calendars"][0]["name"], "Personal");
+    assert_eq!(
+        result["calendars"][0]["url"],
+        "https://caldav.fastmail.com/dav/calendars/user/me@fastmail.com/abc123/"
+    );
+    assert_eq!(result["calendars"][0]["readOnly"], false);
+    let requests = peer.requests();
+    assert_eq!(requests.len(), 5, "{requests:?}");
+    for request in &requests {
+        assert_eq!(request["host"], "caldav.fastmail.com");
+        assert!(
+            request["authorization"]
+                .as_str()
+                .unwrap()
+                .starts_with("Basic ")
+        );
+    }
+}
+
+// The well-known redirect is exactly the hop `https_icloud_redirects_never_
+// send_credentials_to_foreign_origins` already distrusts a server-supplied
+// address at — generic discovery must refuse it just as strictly, and must
+// not paper over the refusal as "no well-known here" and silently fall back
+// to the entered address.
+#[tokio::test]
+async fn a_well_known_redirect_leaving_the_entered_origin_is_refused_not_swallowed() {
+    let mut peer = Peer::new();
+    for location in [
+        "https://outside.example.test/stolen",
+        "//outside.example.test/stolen",
+        "http://caldav.fastmail.com/stolen",
+    ] {
+        peer.responses(json!([{"status":301,"location":location}]));
+        assert_eq!(
+            peer.caldav_server("https://caldav.fastmail.com/")
+                .await
+                .err(),
+            Some("calendar_origin_refused"),
+            "{location}"
+        );
+        assert_eq!(peer.requests().len(), 1, "{location}");
+    }
 }
