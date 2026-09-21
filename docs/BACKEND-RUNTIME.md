@@ -40,6 +40,19 @@ to make the override available when the shell constructs the plugin, restarting
 the shell with that environment when needed. This is not a second Quickshell
 application. Rust mail migration remains incomplete; see [BACKEND.md](BACKEND.md).
 
+### Forcing a clean reconnect
+
+The running `omamail serve` process holds its Secret Service session, its
+account hosts and their sign-in state for the life of the Quickshell process
+that started it — a credential store that was locked at startup, an API a
+Cloud project only just enabled, or an OAuth grant that changed underneath it
+are not re-checked on their own. `omarchy plugin disable omamail` followed by
+`omarchy plugin enable omamail` reloads the plugin's QML context and opens a
+fresh backend connection without restarting the shell itself, which is enough
+to pick up a state change made outside the plugin's own knowledge. This is
+the fastest way to confirm whether a failure is a stale connection or a real
+one: if disable/enable clears it, it was the former.
+
 ## Standalone bundled backend
 
 The standalone Qt host under `app/` uses the same `ui/` composition and Rust business modules through small Quickshell compatibility adapters. A production archive places one exact-version `omamail` backend beside `omamail-app`, together with the QML, manifest, Qt libraries, and platform plugin. Production resource lookup accepts that bundled backend only; it does not search PATH, resolve `latest`, or use `OMAMAIL_BIN`. The environment override and source-resource lookup are enabled only when `OMAMAIL_DEVELOPMENT_RESOURCES=1`, which is what `make app-run` sets for a checkout build.
