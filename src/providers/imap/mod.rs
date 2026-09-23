@@ -181,6 +181,12 @@ async fn tls_with_roots(w: Wire, host: &str, roots: impl Into<Arc<RootCertStore>
     .map_err(|_| "mail_tls_failed")?
     .with_root_certificates(roots)
     .with_no_client_auth();
+    tls_with_config(w, host, config).await
+}
+async fn tls_with_config(w: Wire, host: &str, config: ClientConfig) -> Result<Wire> {
+    if !w.buffer().is_empty() {
+        return Err("mail_tls_failed");
+    }
     let name = ServerName::try_from(host.to_owned()).map_err(|_| "invalid_params")?;
     let stream = TlsConnector::from(Arc::new(config))
         .connect(name, w.into_inner())
@@ -188,6 +194,7 @@ async fn tls_with_roots(w: Wire, host: &str, roots: impl Into<Arc<RootCertStore>
         .map_err(|_| "mail_tls_failed")?;
     Ok(BufReader::new(Box::new(stream)))
 }
+mod bridge_tls;
 async fn dial_host(host: &str, port: u16) -> Result<TcpStream> {
     let addresses = async {
         if let Ok(ip) = host.parse::<std::net::IpAddr>() {
@@ -217,6 +224,23 @@ async fn dial_resolved(
     Err("mail_network_failed")
 }
 async fn connect(settings: &Value, smtp: bool) -> Result<Wire> {
+    connect_with_dial(settings, smtp, |host, port| async move {
+        dial_host(&host, port).await
+    })
+    .await
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Transport {
+    Tls,
+    StartTls,
+    #[cfg(any(test, feature = "integration-test-credentials"))]
+    TestPlaintext,
+}
+async fn connect_with_dial<F, Fut>(settings: &Value, smtp: bool, dial: F) -> Result<Wire>
+where
+    F: FnOnce(String, u16) -> Fut,
+    Fut: std::future::Future<Output = Result<TcpStream>>,
+{
     let host = string(settings, if smtp { "smtpHost" } else { "imapHost" })?;
     if host.is_empty()
         || !host
@@ -229,22 +253,44 @@ async fn connect(settings: &Value, smtp: bool) -> Result<Wire> {
         .as_u64()
         .filter(|p| *p > 0 && *p <= 65535)
         .ok_or("invalid_params")? as u16;
-    let local = settings["insecure"] == true && matches!(host, "127.0.0.1" | "::1" | "localhost");
-    // Loopback plaintext is an explicitly configured bridge, never a TLS fallback.
-    let dial = if local && host == "localhost" {
+    let loopback = matches!(host, "127.0.0.1" | "::1" | "localhost");
+    let allow_self_signed = loopback && settings["insecure"] == true;
+    // Bridge supports custom ports. Its clear greeting still requires STARTTLS;
+    // `insecure` relaxes certificate trust, never the encryption requirement.
+    // Remote nonstandard ports retain the existing implicit-TLS convention.
+    let transport = if (smtp && matches!(port, 25 | 587))
+        || (!smtp && port == 143)
+        || (loopback && port != if smtp { 465 } else { 993 })
+    {
+        Transport::StartTls
+    } else {
+        Transport::Tls
+    };
+    // Plain peers are only available in test builds, by explicit fixture opt-in.
+    #[cfg(any(test, feature = "integration-test-credentials"))]
+    let transport = if allow_self_signed && settings["testPlaintext"] == true {
+        Transport::TestPlaintext
+    } else {
+        transport
+    };
+    let dial_host = if host == "localhost" {
         "127.0.0.1"
     } else {
         host
     };
-    let stream = dial_host(dial, port).await?;
-    let mut w: Wire = BufReader::new(Box::new(stream));
-    let upgrade = if smtp {
-        matches!(port, 25 | 587)
-    } else {
-        port == 143
-    };
-    if !local && !upgrade {
-        w = tls(w, host).await?
+    let stream = dial(dial_host.to_owned(), port).await?;
+    let w: Wire = BufReader::new(Box::new(stream));
+    handshake(w, host, smtp, allow_self_signed, transport).await
+}
+async fn handshake(
+    mut w: Wire,
+    host: &str,
+    smtp: bool,
+    allow_self_signed: bool,
+    transport: Transport,
+) -> Result<Wire> {
+    if transport == Transport::Tls {
+        w = secure(w, host, allow_self_signed).await?
     }
     if smtp {
         smtp_response(&mut w, 220).await?;
@@ -254,16 +300,23 @@ async fn connect(settings: &Value, smtp: bool) -> Result<Wire> {
             return Err("imap_invalid_response");
         }
     }
-    if upgrade && !local {
+    if transport == Transport::StartTls {
         if smtp {
             smtp_cmd(&mut w, "EHLO omamail", 250).await?;
             smtp_cmd(&mut w, "STARTTLS", 220).await?;
         } else {
             command(&mut w, "STARTTLS").await?;
         }
-        w = tls(w, host).await?;
+        w = secure(w, host, allow_self_signed).await?;
     }
     Ok(w)
+}
+async fn secure(w: Wire, host: &str, allow_self_signed: bool) -> Result<Wire> {
+    if allow_self_signed {
+        bridge_tls::upgrade(w, host).await
+    } else {
+        tls(w, host).await
+    }
 }
 fn credentials(p: &Value) -> Result<(String, String)> {
     let supplied = string(p, "credential")?;

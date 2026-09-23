@@ -329,6 +329,8 @@ key. What matters while working:
 
 ## Imap.js and the transport
 
+- **Proton Bridge requires STARTTLS.** Native loopback connections upgrade before authentication, including custom Bridge ports; 993/465 select implicit TLS. The explicit `insecure` exception accepts the self-signed certificate only on loopback; it never disables encryption or allows a failed upgrade to fall back to plaintext. Remote connections retain standard STARTTLS ports and implicit TLS on other ports, always with certificate verification. Synthetic plaintext peers require an explicit `testPlaintext` setting compiled only for unit tests or `integration-test-credentials`, never normal builds.
+
 - `Imap.js` is the protocol and nothing else: every string sent to a server and
   every decision about what came back. No transport, and no message format —
   an RFC 822 message is `Message.js`'s subject.

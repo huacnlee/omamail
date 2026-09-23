@@ -61,7 +61,7 @@ async fn select(w: &mut Wire) {
     write(w, b"O1 OK selected\r\n").await.unwrap();
 }
 fn params(port: u16) -> Value {
-    json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true},"credential":"synthetic:secret","oauth":false,"query":"folder:INBOX UNSEEN","limit":3,"progressive":true,"requestToken":"request-1"})
+    json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true,"testPlaintext":true},"credential":"synthetic:secret","oauth":false,"query":"folder:INBOX UNSEEN","limit":3,"progressive":true,"requestToken":"request-1"})
 }
 #[tokio::test]
 async fn sparse_search_emits_numeric_prefix_then_snapshot_continuation() {

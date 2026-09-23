@@ -69,7 +69,7 @@ async fn initialize(w: &mut Wire) {
     write(w,b"* LIST () \"/\" INBOX\r\n* LIST (\\Archive) \"/\" Archive\r\n* LIST (\\Drafts) \"/\" Drafts\r\nO1 OK folders\r\n").await.unwrap();
 }
 fn params(port: u16) -> Value {
-    json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true},"credential":"synthetic:secret","oauth":false})
+    json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true,"testPlaintext":true},"credential":"synthetic:secret","oauth":false})
 }
 async fn planned_group_failure(failure: &str, use_move: bool, flags_only: bool, stall: bool) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
