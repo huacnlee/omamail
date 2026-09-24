@@ -825,6 +825,28 @@ Item {
       compare(named(compose, "compose-body-editor").text, "Keep every word")
     }
 
+    function test_compose_shortcut_focuses_input_data() {
+      return [
+        { tag: "reply", key: Qt.Key_R, field: "compose-body-editor" },
+        { tag: "reply-all", key: Qt.Key_A, field: "compose-body-editor" },
+        { tag: "new", key: Qt.Key_C, field: "compose-to-field" },
+        { tag: "forward", key: Qt.Key_F, field: "compose-to-field" }
+      ]
+    }
+
+    function test_compose_shortcut_focuses_input(data) {
+      app.open("{}")
+      app.cursorId = "message-1"
+      wait(0)
+      keyClick(data.key)
+      var field = named(app, data.field)
+      tryCompare(field, "activeFocus", true)
+      compare(field.cursorPosition, 0)
+      keyClick(Qt.Key_H)
+      keyClick(Qt.Key_I)
+      compare(field.text.substring(0, 2), "hi")
+    }
+
     function test_reply_starts_while_another_send_is_pending() {
       compare(app.composing, false)
       app.startCompose("reply")
