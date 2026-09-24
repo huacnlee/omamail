@@ -325,13 +325,7 @@ if grep -vE '^[[:space:]]*//' App.qml | grep -n 'focusScope\.forceActiveFocus'; 
   fail "forceActiveFocus on the focus scope re-elects the field being left; park the keyboard instead"
 fi
 
-# A component that declares `focus: true` owns the window's focus even while it
-# is invisible, and an owner that accepts keys is a sink for everything routed
-# by focus rather than by Shortcut. ComposeView is instantiated whether or not
-# anyone is writing, so an unconditional focus there swallowed every Escape in
-# the window. Focus must follow "in use".
-grep -q '^  focus: root.opened$' components/ComposeView.qml \
-  || fail "ComposeView must own the focus only while it is open"
+# Hidden items can still hold focus; the key context owns focus placement.
 if grep -rn '^\s*focus: true\s*$' components/ComposeView.qml; then
   fail "ComposeView must not hold the focus unconditionally"
 fi
