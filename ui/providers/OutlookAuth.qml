@@ -529,8 +529,9 @@ Item {
     if (endpoint === "token" && body.indexOf("grant_type=refresh_token") >= 0 && accountId) {
       backend.call("auth.token", { provider: "outlook", accountId: accountId,
         resource: body.indexOf("graph.microsoft.com") >= 0 ? "graph" : "mail" }, function(result, error) {
-        var code = error === "auth_signed_out" ? "invalid_grant" : "temporarily_unavailable"
-        var failure = error === "auth_consent_required"
+        var reason = error ? String(error.message || "") : ""
+        var code = reason === "auth_signed_out" ? "invalid_grant" : "temporarily_unavailable"
+        var failure = reason === "auth_consent_required"
           ? { error: "interaction_required", error_codes: [65001] } : { error: code }
         finish({ status: error ? 400 : 200, body: JSON.stringify(error ? failure : result) }, "")
       })

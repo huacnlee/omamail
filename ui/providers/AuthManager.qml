@@ -321,9 +321,14 @@ Item {
     backend.call("auth.token", { provider: "gmail", accountId: accountId, resource: "mail" }, function(result, error) {
       if (serial !== root.tokenRequestSerial) return
       root.tokenRequest = null
-      var signedOut = error === "gmail_invalid_token" || error === "gmail_token_invalid" || error === "gmail_token_missing" || error === "gmail_unauthorized"
+      var code = error ? String(error.message || "") : ""
+      // Only a dead grant clears the stored token. A malformed answer or a
+      // refused client (401 invalid_client) leaves a valid grant to retry.
+      var signedOut = code === "gmail_signed_out" || code === "gmail_token_invalid" || code === "gmail_token_missing"
+      var reason = signedOut ? "invalid_grant"
+        : (code === "gmail_unauthorized" ? "invalid_client" : "temporarily_unavailable")
       callback(OAuth.parseTokenResponse(error ? 400 : 200,
-        error ? JSON.stringify({ error: signedOut ? "invalid_grant" : "temporarily_unavailable" }) : JSON.stringify(result), ""))
+        error ? JSON.stringify({ error: reason }) : JSON.stringify(result), ""))
     })
   }
 
@@ -403,7 +408,7 @@ Item {
         return
       }
       if (error) {
-        root.failLogin(error === "auth_port_unavailable"
+        root.failLogin(error.message === "auth_port_unavailable"
           ? "Could not listen on port " + OAuth.normalizedPort(root.oauthPort) + ". Close the other listener or change the port in settings"
           : "Could not start secure Google sign-in")
         return

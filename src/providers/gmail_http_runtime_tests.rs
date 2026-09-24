@@ -327,6 +327,39 @@ async fn timeout_and_response_bounds_are_enforced_on_actual_streams() {
     }
 }
 
+// Only the token endpoint's invalid_grant means the saved grant is dead; any
+// other refusal of a refresh may pass once the network or client recovers.
+#[tokio::test]
+async fn refresh_reports_a_revoked_grant_as_signed_out() {
+    let client = client_builder().https_only(false).build().unwrap();
+    let grant =
+        r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#;
+    let request =
+        r#"{"error":"invalid_request","error_description":"Missing required parameter."}"#;
+    let refused = r#"{"error":"invalid_client","error_description":"Unauthorized"}"#;
+    for (status, body, error) in [
+        (400, grant, "gmail_signed_out"),
+        (400, request, "gmail_http_failed"),
+        (401, refused, "gmail_unauthorized"),
+    ] {
+        let target = server(
+            format!(
+                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .into_bytes(),
+            Duration::ZERO,
+        )
+        .await;
+        let refresh = prepare_refresh("123-abc", "synthetic", "synthetic-refresh").unwrap();
+        assert_eq!(
+            execute(&client, local(&target, refresh), Duration::from_millis(500)).await,
+            Err(error)
+        );
+        assert_eq!(target.requests.lock().unwrap().len(), 1);
+    }
+}
+
 #[tokio::test]
 async fn auth_and_invalid_json_return_only_static_errors() {
     let client = client_builder().https_only(false).build().unwrap();
@@ -336,7 +369,11 @@ async fn auth_and_invalid_json_return_only_static_errors() {
     let global = r#"{"error":{"errors":[{"domain":"usageLimits","reason":"rateLimitExceeded","message":"Rate Limit Exceeded"}],"code":403,"message":"Rate Limit Exceeded"}}"#;
     let daily = r#"{"error":{"errors":[{"domain":"usageLimits","reason":"dailyLimitExceeded","message":"Daily Limit Exceeded"}],"code":403,"message":"Daily Limit Exceeded"}}"#;
     let scope = r#"{"error":{"errors":[{"domain":"global","reason":"insufficientPermissions","message":"Insufficient Permission"}],"code":403,"message":"Insufficient Permission"}}"#;
+    let invalid =
+        r#"{"error":{"code":400,"message":"Invalid id value","status":"INVALID_ARGUMENT"}}"#;
     for (status, body, error) in [
+        (400, invalid, "gmail_http_failed"),
+        (400, "synthetic-secret", "gmail_http_failed"),
         (401, "synthetic-secret", "gmail_unauthorized"),
         (403, "synthetic-secret", "gmail_forbidden"),
         (403, scope, "gmail_forbidden"),
