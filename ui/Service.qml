@@ -1291,9 +1291,6 @@ Item {
     if (next === alwaysShowImages) return
     alwaysShowImages = next
     saveWindowPrefs()
-    // The message on screen is the one the answer was given about, so it
-    // answers now rather than at the next message.
-    if (next && current) current.showRemoteImages()
   }
   signal duplicateAccount(string email)
 

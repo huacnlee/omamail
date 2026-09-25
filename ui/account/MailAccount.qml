@@ -220,6 +220,24 @@ Item {
   // message starts. Off, and every message begins blocked and is asked about
   // one at a time.
   property bool alwaysShowImages: false
+  onAlwaysShowImagesChanged: {
+    var allowed = Model.showsRemoteImages(alwaysShowImages, selectionIsPreview)
+    if (allowed !== remoteImagesAllowed) {
+      remoteImagesAllowed = allowed
+      remoteImageData = ({})
+      if (!allowed) {
+        imageFetchSerial++
+        imageFetchQueue = []
+        remoteImagesLoading = false
+        imageBatchDirty = false
+        imagePaintTimer.stop()
+        remoteImageAttempted = ({})
+        selectedDocument = null
+        selectedReaderDocument = null
+      }
+      if (readerSourceKey !== "") renderSource(readerSourceKey)
+    }
+  }
   property bool remoteImagesAllowed: false
   property bool remoteImagesLoading: false
   property var remoteImageData: ({})
@@ -773,12 +791,13 @@ Item {
     function current() { return !handle.aborted && account === root.accountId && client === root.api }
     function read(cached) {
       if (!current()) return
+      var options = root.readerOptions()
       root.backend.call("reader.open", {accountId: account, id: messageId, requestId: request,
-        cacheOnly: cached, now: Date.now(), options: root.readerOptions()}, function(resource, error) {
+        cacheOnly: cached, now: Date.now(), options: options}, function(resource, error) {
         if (!current()) return
         if (!error && resource && resource.nativeContent) {
           resource.nativeSummary = root.hydrateSummary(resource.nativeSummary)
-          callback(resource, "", cached)
+          callback(resource, "", cached, options.allowRemoteImages)
         } else if (!cached) callback(null, "Could not open that message", false)
         if (cached) read(false)
       })
@@ -1299,7 +1318,7 @@ Item {
     detailLive = false
     detailCachedResource = false
 
-    detailHandle = preparedRead(messageId, function(payload, error, cached) {
+    detailHandle = preparedRead(messageId, function(payload, error, cached, readAllowsRemoteImages) {
       if (serial !== root.detailSerial || (cached && root.detailLive)) return
       if (error || !payload) {
         root.detailLoading = false
@@ -1333,7 +1352,7 @@ Item {
       root.selectedHasHtml = !!payload.hasHtml
       root.readerSourceKey = payload.hasHtml ? String(payload.readerKey) : ""
       var ready = payload.nativeRender
-      root.adoptRendered(ready)
+      root.adoptRendered(ready, readAllowsRemoteImages)
         root.detailLoading = false
         root.detailPainted = true
         root.lastError = ""
@@ -1528,7 +1547,14 @@ Item {
     })
   }
 
-  function adoptRendered(ready) {
+  function adoptRendered(ready, readAllowsRemoteImages) {
+    // A preference change may overtake either the cached or the live read.
+    // Render its native source under the current policy before painting it.
+    if (readerSourceKey !== "" && readAllowsRemoteImages !== undefined
+        && readAllowsRemoteImages !== remoteImagesAllowed) {
+      renderSource(readerSourceKey)
+      return
+    }
     // A live response may have been prepared before cached images completed.
     // Keep the painted document until Rust incorporates the approved bytes.
     if (readerSourceKey !== "" && remoteImagesAllowed && Object.keys(remoteImageData).length > 0) {

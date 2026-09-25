@@ -194,6 +194,32 @@ Item {
       compare(backend.cancellations.length,1)
       compare(backend.cancellations[0].requestId,opens[0].params.requestId)
     }
+    function test_image_preference_changed_during_read_rerenders_current_policy() {
+      account.select("one", false)
+      var opens = backend.requests.filter(function(call) { return call.method === "reader.open" })
+      compare(opens[1].params.options.allowRemoteImages, false)
+      account.alwaysShowImages = true
+      var message = resource("one", "<p>Mail</p><img src='https://example.org/picture'>")
+      message.payload.mimeType = "text/html"
+      transport.pending.one(message, "")
+      var renders = backend.requests.filter(function(call) { return call.method === "reader.render" })
+      compare(renders.length, 1, "a read started under the old policy must not settle the reader")
+      compare(renders[0].params.options.allowRemoteImages, true)
+    }
+    function test_disabling_images_during_read_rejects_old_render() {
+      account.alwaysShowImages = true
+      account.select("one", false)
+      var opens = backend.requests.filter(function(call) { return call.method === "reader.open" })
+      compare(opens[1].params.options.allowRemoteImages, true)
+      account.alwaysShowImages = false
+      var message = resource("one", "<p>Mail</p><img src='https://example.org/picture'>")
+      message.payload.mimeType = "text/html"
+      transport.pending.one(message, "")
+      var renders = backend.requests.filter(function(call) { return call.method === "reader.render" })
+      compare(renders.length, 1)
+      compare(renders[0].params.options.allowRemoteImages, false)
+      compare(account.selectedDocument, null, "old allowed projection must stay off screen")
+    }
     function test_stale_cache_reply_cannot_cross_selection_or_account() {
       backend.holdCache=true
       account.select("one",true)

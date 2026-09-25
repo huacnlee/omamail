@@ -149,6 +149,17 @@ Item {
       compare(bob().selectedId, "")
     }
 
+    function test_image_preference_does_not_load_a_unified_preview() {
+      service.setAlwaysShowImages(false)
+      service.select(Unified.unifiedId(bobId, "1"), true)
+      compare(bob().selectionIsPreview, true)
+      bob().readerSourceKey = "native-key"
+      service.setAlwaysShowImages(true)
+      compare(bob().remoteImagesAllowed, false,
+        "a preview must remain blocked when the standing preference changes")
+      compare(bob().remoteImagesLoading, false)
+    }
+
     function test_keyboard_navigation_opens_the_correct_account_without_changing_query() {
       var app = createTemporaryObject(keyboardApp, fixtureRoot, {service: service, shell: fakeShell})
       verify(app)
