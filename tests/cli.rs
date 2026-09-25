@@ -597,6 +597,8 @@ async fn imap_adapter_lists_first_page_without_request_token() {
                 b"O1 OK selected\r\n".as_slice()
             } else if line == b"O1 UID FETCH 1:* (UID)\r\n" {
                 b"* 1 FETCH (UID 7)\r\nO1 OK snapshot\r\n".as_slice()
+            } else if line == b"O1 UID FETCH 7 (UID INTERNALDATE)\r\n" {
+                b"* 1 FETCH (UID 7 INTERNALDATE \"11-Sep-2026 12:00:00 +0000\")\r\nO1 OK snapshot\r\n".as_slice()
             } else if line.starts_with(b"O1 UID FETCH 7 (UID FLAGS ") {
                 b"* 7 FETCH (UID 7 FLAGS () INTERNALDATE \"11-Sep-2026 12:00:00 +0000\" RFC822.SIZE 54 BODY[HEADER.FIELDS (FROM SUBJECT)] {54}\r\nFrom: Test <test@example.org>\r\nSubject: First page\r\n\r\n)\r\nO1 OK fetched\r\n".as_slice()
             } else {
@@ -1667,6 +1669,8 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
                     "O1 OK selected\r\n".into()
                 } else if line == "O1 UID FETCH 1:* (UID)\r\n" {
                     "* 1 FETCH (UID 7)\r\nO1 OK snapshot\r\n".into()
+                } else if line == "O1 UID FETCH 7 (UID INTERNALDATE)\r\n" {
+                    "* 1 FETCH (UID 7 INTERNALDATE \"11-Sep-2026 12:00:00 +0000\")\r\nO1 OK snapshot\r\n".into()
                 } else if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
                     assert!(line.contains("BODY.PEEK["));
                     assert_eq!(line.contains("BODY.PEEK[]"), read);

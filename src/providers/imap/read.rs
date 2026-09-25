@@ -406,22 +406,6 @@ fn query(query: &str) -> Result<(String, String)> {
     }
     Ok((folder, criteria))
 }
-fn fetched_uids(data: &[u8]) -> Result<Vec<u32>> {
-    let mut out = BTreeSet::new();
-    for row in nodes(data)? {
-        if row.len() < 4 || !row[0].is("*") || !row[2].is("FETCH") {
-            continue;
-        }
-        for pair in row[3].list().windows(2) {
-            if pair[0].is("UID")
-                && let Some(uid) = pair[1].number()
-            {
-                out.insert(uid);
-            }
-        }
-    }
-    Ok(out.into_iter().collect())
-}
 fn search_uids(data: &[u8]) -> Result<Vec<u32>> {
     let mut out = BTreeSet::new();
     for row in nodes(data)? {
@@ -435,14 +419,54 @@ fn search_uids(data: &[u8]) -> Result<Vec<u32>> {
     }
     Ok(out.into_iter().collect())
 }
-fn page(found: &[u32], folder: &str, offset: usize, limit: usize, more: bool) -> Value {
-    let ordered: Vec<_> = found
+fn fetched_dates(data: &[u8]) -> Result<BTreeMap<u32, i64>> {
+    let mut dates = BTreeMap::new();
+    for row in nodes(data)? {
+        if row.len() < 4 || !row[0].is("*") || !row[2].is("FETCH") {
+            continue;
+        }
+        let mut uid = None;
+        let mut date = None;
+        for pair in row[3].list().as_chunks::<2>().0 {
+            if pair[0].is("UID") {
+                uid = pair[1].number();
+            } else if pair[0].is("INTERNALDATE") {
+                date = Some(
+                    chrono::DateTime::parse_from_str(
+                        pair[1].string()?.trim(),
+                        "%d-%b-%Y %H:%M:%S %z",
+                    )
+                    .map(|date| date.timestamp_millis())
+                    .unwrap_or(0),
+                );
+            }
+        }
+        if let Some(uid) = uid {
+            if let Some(date) = date {
+                dates.insert(uid, date);
+            } else {
+                // Unsolicited UID/FLAGS updates must not erase an arrival date.
+                dates.entry(uid).or_insert(0);
+            }
+        }
+    }
+    Ok(dates)
+}
+fn page(
+    found: &[u32],
+    dates: &BTreeMap<u32, i64>,
+    folder: &str,
+    offset: usize,
+    limit: usize,
+    more: bool,
+) -> Value {
+    let mut ordered: Vec<_> = found
         .iter()
         .copied()
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .rev()
         .collect();
+    ordered.sort_by_key(|uid| std::cmp::Reverse((dates.get(uid).copied().unwrap_or(0), *uid)));
     let ids: Vec<_> = ordered
         .iter()
         .skip(offset)
@@ -498,38 +522,39 @@ async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
                 .filter(|n| *n <= u32::MAX as u64)
                 .ok_or("invalid_params")? as u32,
         );
-    } else if p["progressive"] == true && !criteria.is_empty() {
-        // Native IMAP can read *:* directly. The old curl-specific STATUS/count workaround is gone.
-        let top = match command(w, "UID FETCH *:* (UID)").await {
-            Ok(data) => fetched_uids(&data)?.into_iter().max(),
-            Err("imap_command_failed") => None,
-            Err(error) => return Err(error),
-        };
-        if let Some(top) = top {
-            let first = top.saturating_sub(4095).max(1);
-            found = search_uids(
-                &command(w, &format!("UID SEARCH UID {first}:{top} {criteria}")).await?,
-            )?;
-            let more = first > 1;
-            let partial = page(&found, &folder, offset, limit, more);
-            if partial["ids"]
-                .as_array()
-                .is_some_and(|ids| ids.len() >= limit)
-                || !more
-            {
-                return Ok(json!({"page":partial}));
-            }
-            let token=URL_SAFE_NO_PAD.encode(serde_json::to_vec(&json!({"folder":folder,"criteria":criteria,"accountId":p["accountId"],"requestToken":p["requestToken"],"found":found,"ceiling":first-1})).map_err(|_|"invalid_params")?);
-            return Ok(json!({"page":partial,"continuation":token}));
-        }
     }
+    // UID order is not arrival order (notably during Proton Bridge imports).
+    // No UID window is a settled newest prefix: collect dates before paging.
     let scan = async {
-        let mut snapshot = fetched_uids(&command(w, "UID FETCH 1:* (UID)").await?)?;
+        // Keep the compact, response-limited UID snapshot. Explicit UID batches
+        // bound the larger date responses without walking gaps in sparse UIDs
+        // or relying on sequence numbers that move when mail is expunged.
+        let mut snapshot: Vec<_> = fetched_dates(&command(w, "UID FETCH 1:* (UID)").await?)?
+            .into_keys()
+            .collect();
+        let mut dates = BTreeMap::new();
+        for window in snapshot.chunks(4096) {
+            let set = window
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            let fetched =
+                fetched_dates(&command(w, &format!("UID FETCH {set} (UID INTERNALDATE)")).await?)?;
+            // Ignore unsolicited updates outside this batch (including arrivals
+            // after the snapshot), and drop messages expunged before this fetch.
+            dates.extend(
+                fetched
+                    .into_iter()
+                    .filter(|(uid, _)| window.binary_search(uid).is_ok()),
+            );
+        }
+        snapshot.retain(|uid| dates.contains_key(uid));
         if let Some(ceiling) = ceiling {
             snapshot.retain(|uid| *uid <= ceiling)
         }
         if criteria.is_empty() {
-            return Ok::<_, &'static str>(snapshot);
+            return Ok::<_, &'static str>((snapshot, dates));
         }
         let mut matches = Vec::new();
         for window in snapshot.chunks(4096).rev() {
@@ -539,17 +564,14 @@ async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
                 &command(w, &format!("UID SEARCH UID {first}:{last} {criteria}")).await?,
             )?);
         }
-        Ok(matches)
+        Ok((matches, dates))
     }
     .await;
-    match scan {
-        Ok(mut matches) => found.append(&mut matches),
-        Err(error) if !found.is_empty() => {
-            return Ok(json!({"page":page(&found,&folder,offset,limit,false),"warning":error}));
-        }
-        Err(error) => return Err(error),
-    }
-    Ok(json!({"page":page(&found,&folder,offset,limit,false)}))
+    let (mut matches, dates) = scan?;
+    found.append(&mut matches);
+    // Ignore continuation UIDs that were expunged since their snapshot.
+    found.retain(|uid| dates.contains_key(uid));
+    Ok(json!({"page":page(&found,&dates,&folder,offset,limit,false)}))
 }
 pub(crate) fn message_id(id: &str) -> Result<(u32, String)> {
     let (uid, folder) = id.split_once(':').ok_or("invalid_params")?;

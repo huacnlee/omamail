@@ -700,10 +700,12 @@ awk '
   || fail "a conversation member must not be given the row's thread block"
 grep -q 'if (ids.length > 0) progress({' providers/ImapClient.qml \
   || fail "IMAP search windows must report ids before the final page"
-grep -q 'UID FETCH \*:\* (UID)' ../src/providers/imap/read.rs \
-  || fail "native IMAP search must read its highest UID before a complete snapshot"
-grep -q 'sparse_search_emits_numeric_prefix_then_snapshot_continuation' ../src/providers/imap/read/tests.rs \
-  || fail "native sparse search needs a tested snapshot continuation"
+grep -q 'UID FETCH {set} (UID INTERNALDATE)' ../src/providers/imap/read.rs \
+  || fail "native IMAP paging must read arrival dates in bounded UID batches"
+grep -q 'sparse_search_orders_by_date_before_paging_even_when_progressive' ../src/providers/imap/read/tests.rs \
+  || fail "native sparse search needs tested date-ordered pagination"
+grep -q 'multi_window_dates_settle_before_paging_and_ignore_unsolicited_flags' ../src/providers/imap/read/tests.rs \
+  || fail "native IMAP ordering needs a bounded multi-window network regression"
 grep -q 'continuation' ../src/providers/imap/read.rs \
   || fail "native streamed IMAP reads must continue through opaque bounded batches"
 grep -q 'fetchQueue\.push(wanted)' account/MailAccount.qml \
@@ -763,7 +765,7 @@ awk '
   END { exit !(checks_ids && clears_page) }
 ' account/MailAccount.qml \
   || fail "ordinary metadata reads must detect holes and close paging"
-grep -q 'Err(error) => return Err(error)' ../src/providers/imap/read.rs \
+grep -Fq 'let (mut matches, dates) = scan?;' ../src/providers/imap/read.rs \
   || fail "an IMAP failure before SEARCH answers must keep the cached preview"
 grep -q 'callback(ordered, firstError)' providers/GmailApiClient.qml \
   || fail "Gmail must report partial metadata failures"
