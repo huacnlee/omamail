@@ -87,12 +87,14 @@ async fn bridge_starttls_encrypts_credentials_and_never_downgrades() {
                     .map_err(|_| "mail_network_failed")
             })
             .await;
+            // Keep the TLS socket alive until the peer has read and reported
+            // the credentials. Closing it here can abort the peer's handshake
+            // on Windows while TLS 1.3 session tickets are still in flight.
+            let mut secure = None;
             if mode == "local" {
-                let mut secure = result.unwrap();
-                write(&mut secure, b"synthetic-credential\r\n")
-                    .await
-                    .unwrap();
-                secure.shutdown().await.unwrap();
+                let mut wire = result.unwrap();
+                write(&mut wire, b"synthetic-credential\r\n").await.unwrap();
+                secure = Some(wire);
             } else {
                 assert!(result.is_err());
             }
@@ -104,9 +106,11 @@ async fn bridge_starttls_encrypts_credentials_and_never_downgrades() {
                     "encrypted-credentials"
                 } else {
                     "no-credentials"
-                }
+                },
+                "smtp={smtp} host={host} port={logical_port} mode={mode}"
             );
             assert!(peer.wait().unwrap().success());
+            drop(secure);
         }
     }
 }
