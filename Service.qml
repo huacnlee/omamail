@@ -43,7 +43,8 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
   readonly property string pluginDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+    ? String(manifest.__sourceDir)
+    : decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/+$/, ""))
   // Shown in the empty reader, so a screenshot in a bug report says which build
   // it came from. The shell's manifest validation requires both fields, so a
   // loaded plugin always has them; the fallbacks are for a harness that
