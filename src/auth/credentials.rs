@@ -77,6 +77,20 @@ fn text_secret(secret: &Secret) -> Result<&str, &'static str> {
     Ok(value)
 }
 
+// The setup page stores an empty string for a personal account's tenant
+// (there is no tenant to name), while a missing field only ever occurs on
+// data from before that field existed. Both mean the same thing here, and
+// must resolve to the same string everywhere it is read: `destination`
+// rejects an empty tenant outright, and a mismatch between this and
+// `change_outlook`'s tenant would hand token rotation two different locks
+// for the same mailbox.
+fn stored_tenant(entry: &Value) -> &str {
+    entry["imap"]["tenant"]
+        .as_str()
+        .filter(|tenant| !tenant.is_empty())
+        .unwrap_or("consumers")
+}
+
 fn outlook_key(client: &str, account: &str) -> CredentialKey {
     CredentialKey {
         provider: "outlook".into(),
@@ -150,15 +164,9 @@ async fn access_token_with(
     if client_id.is_empty() || client_id.len() > 1024 || client_id.chars().any(char::is_control) {
         return Err("auth_client_invalid");
     }
-    let url = destination(
-        &json!({"provider":"outlook", "endpoint":"token", "tenant":entry["imap"]["tenant"].as_str().unwrap_or("consumers")}),
-    )?;
-    let lock = account_tokens(
-        account,
-        client_id,
-        entry["imap"]["tenant"].as_str().unwrap_or("consumers"),
-    )
-    .await?;
+    let tenant = stored_tenant(&entry);
+    let url = destination(&json!({"provider":"outlook", "endpoint":"token", "tenant":tenant}))?;
+    let lock = account_tokens(account, client_id, tenant).await?;
     // One refresh at a time per mailbox, shared by mail and Graph resources:
     // rotating a refresh token must not race another resource's exchange.
     let mut tokens = lock.lock().await;
@@ -262,12 +270,7 @@ pub(super) async fn change_outlook(params: &Value, clear: bool) -> Result<Value,
             .filter(|s| !s.is_empty() && s.len() <= 16384 && !s.chars().any(char::is_control))
             .ok_or("auth_secret_invalid")?
     };
-    let lock = account_tokens(
-        account,
-        client,
-        entry["imap"]["tenant"].as_str().unwrap_or("consumers"),
-    )
-    .await?;
+    let lock = account_tokens(account, client, stored_tenant(&entry)).await?;
     let mut tokens = lock.lock().await;
     let key = outlook_key(client, account);
     if clear {
@@ -412,6 +415,32 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stored_tenant_treats_a_missing_and_an_empty_field_alike() {
+        assert_eq!(stored_tenant(&json!({"imap":{"tenant":""}})), "consumers");
+        assert_eq!(stored_tenant(&json!({"imap":{}})), "consumers");
+        assert_eq!(
+            stored_tenant(&json!({"imap":{"tenant":"organizations"}})),
+            "organizations"
+        );
+    }
+    /// A personal account's setup page writes an empty `tenant`, not a
+    /// missing one (there is no tenant to name). `destination` rejects an
+    /// empty tenant outright, so building its URL straight from the stored
+    /// field failed every refresh for exactly the accounts that are meant to
+    /// use the default authority.
+    #[test]
+    fn a_personal_accounts_stored_tenant_still_builds_a_token_url() {
+        let entry = json!({"imap":{"tenant":""}});
+        let url = destination(
+            &json!({"provider":"outlook","endpoint":"token","tenant":stored_tenant(&entry)}),
+        )
+        .unwrap();
+        assert_eq!(
+            url,
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+        );
+    }
     #[tokio::test]
     async fn outlook_readonly_refresh_never_persists_rotated_credentials() {
         let key = outlook_key("synthetic", "outlook:test@example.org");
