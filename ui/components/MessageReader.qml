@@ -358,6 +358,8 @@ Item {
       spacing: Style.space(4)
 
       Text {
+        id: subjectLine
+        objectName: "reader-subject"
         width: parent.width
         // A stranger wrote this. Qt's default AutoText switches a string that
         // looks like markup into rich text, and rich text with an <img> in it is
@@ -370,6 +372,17 @@ Item {
         font.bold: true
         wrapMode: Text.WordWrap
         horizontalAlignment: root.subjectAlignment
+
+        TapHandler {
+          acceptedButtons: Qt.RightButton
+          onTapped: function(eventPoint) {
+            if (!root.summary) return
+            // Anchor to the line's own lower edge, not the pointer, so the menu
+            // lands in the same place however the line was pressed.
+            var scene = subjectLine.mapToGlobal(0, subjectLine.height)
+            subjectMenu.openAt(root.summary.subject, scene.x, scene.y)
+          }
+        }
       }
 
       Text {
@@ -1048,6 +1061,20 @@ Item {
       if (root.service && typeof root.service.copyText === "function") root.service.copyText(text)
     }
     onOpenLinkRequested: function(url) { root.openLink(url) }
+  }
+
+  // The subject's own menu: one row, the subject as written. Beside the
+  // body's menu for the same reason that menu lives here.
+  SubjectMenu {
+    id: subjectMenu
+    objectName: "reader-subject-menu"
+    textColor: root.textColor
+    popupBackgroundColor: root.popupBackgroundColor
+    popupBorderColor: root.popupBorderColor
+    panelFontFamily: root.panelFontFamily
+    onCopyRequested: function(subject) {
+      if (root.service && typeof root.service.copyText === "function") root.service.copyText(subject)
+    }
   }
 
   ImagePopover {
