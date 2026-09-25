@@ -26,10 +26,31 @@ agent_identifier_too_large agent_parent_not_ready agent_active_limit agent_choos
 agent_storage_unavailable agent_storage_busy agent_unsafe_storage agent_invalid_filename
 agent_state_home_invalid agent_worker_failed agent_worker_unavailable agent_random_failed
 agent_projection_too_large process_unavailable process_timed_out process_output_too_large
-cache_unavailable unknown_error'''.split()) | {
+cache_unavailable unknown_error request_timed_out backend_needs_update
+auth_account_invalid auth_account_missing auth_cancelled auth_client_invalid
+auth_client_missing auth_consent_required auth_flow_missing auth_invalid_callback
+auth_invalid_profile auth_invalid_response auth_keyring_failed auth_listener_failed
+auth_missing_scope auth_offline_access_missing auth_port_unavailable auth_provider_invalid
+auth_random_failed auth_redirect_refused auth_refresh_failed auth_response_too_large
+auth_secret_invalid auth_signed_out auth_timeout auth_too_many_accounts auth_too_many_flows
+auth_transport_failed calendar_auth_refused calendar_auth_required calendar_input_too_large
+calendar_invalid_input calendar_invalid_operation calendar_invalid_response calendar_invalid_url
+calendar_keyring_failed calendar_network_failed calendar_origin_refused calendar_password_invalid
+calendar_password_missing calendar_provider_unsupported calendar_request_failed
+calendar_response_too_large calendar_timeout calendar_too_many_calendars calendar_too_many_pages
+calendar_too_many_redirects gmail_account_unknown gmail_client_invalid gmail_client_missing
+gmail_client_permissions gmail_client_too_large gmail_client_unreadable gmail_draft_missing
+gmail_forbidden gmail_http_failed gmail_invalid_input gmail_invalid_response gmail_invalid_token
+gmail_keyring_failed gmail_length_required gmail_queue_dropped gmail_queue_full gmail_rate_limited
+gmail_response_too_large gmail_session_invalidated gmail_session_limit gmail_timeout
+gmail_token_account_invalid gmail_token_invalid gmail_token_missing gmail_unauthorized
+upload_capacity_exceeded upload_chunk_too_large upload_id_exhausted upload_incomplete
+upload_not_found upload_offset_mismatch upload_size_exceeded
+invalid_upload_encoding'''.split()) | {
     'Backend unavailable', 'Backend stopped', 'Backend response timed out',
     'Backend request timed out', 'Request cancelled', 'Too many pending requests',
-    'Incompatible backend', 'Invalid backend response',
+    'Incompatible backend', 'Invalid backend response', 'Backend is shutting down',
+    'Backend is not ready', 'Invalid params', 'Method not found',
 }
 METHODS = set(json.loads((ROOT / 'backend-api.json').read_text())['methods']) | {'backend.request'}
 
