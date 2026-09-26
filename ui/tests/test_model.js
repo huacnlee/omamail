@@ -1549,6 +1549,54 @@ assert.strictEqual(model.reloadLimit(25, "nonsense"), 25)
 assert.strictEqual(model.reloadLimit(0, 40), 40, "a page of nothing still asks for what was shown")
 assert.strictEqual(model.reloadLimit(null, null), 1)
 
+// ---------------------------------------------------- conversation projection
+
+const adaT1 = { accountId: "ada@example.org", thread: { id: "t1" }, mailboxKey: "inbox" }
+assert.strictEqual(model.projectionKey(adaT1), JSON.stringify(["ada@example.org", "t1", "inbox"]))
+assert.strictEqual(model.projectionKey({ accountId: "ada@example.org", thread: { id: "t1" }, mailboxKey: "archive" }),
+  JSON.stringify(["ada@example.org", "t1", "archive"]),
+  "the same thread viewed from another mailbox is another rail")
+// All mailboxes leaves a thread's id as its provider gave it, so two accounts
+// in one merged view can each hold a `t1` in their Inbox. A reader moving from
+// one to the other is moving between two rails, and the key says so.
+const bobT1 = { accountId: "bob@example.net", thread: { id: "t1" }, mailboxKey: "inbox" }
+assert.strictEqual(model.projectionKey(bobT1), JSON.stringify(["bob@example.net", "t1", "inbox"]))
+assert.notStrictEqual(model.projectionKey(adaT1), model.projectionKey(bobT1),
+  "the same thread id in another account is another rail")
+assert.notStrictEqual(model.projectionKey({ accountId: "a", thread: { id: "b\nc" }, mailboxKey: "d" }),
+  model.projectionKey({ accountId: "a\nb", thread: { id: "c" }, mailboxKey: "d" }),
+  "and no id can run into the part beside it, whatever characters it carries")
+assert.strictEqual(model.projectionKey({ accountId: "ada@example.org", thread: null, mailboxKey: "inbox" }),
+  JSON.stringify(["ada@example.org", "", "inbox"]),
+  "a message outside any thread has no thread in its key")
+assert.strictEqual(model.projectionKey({ thread: { id: "t1" }, mailboxKey: "inbox" }),
+  JSON.stringify(["", "t1", "inbox"]), "a source naming no account is keyed without one")
+assert.strictEqual(model.projectionKey(null), JSON.stringify(["", "", ""]))
+assert.strictEqual(model.projectionKey({ accountId: "ada@example.org", thread: "t1" }),
+  JSON.stringify(["ada@example.org", "", ""]), "a thread that is not an object names nothing")
+
+const drawn = { showsRail: true, stops: [{ id: "a" }, { id: "b" }], caption: "2 messages",
+  navigation: { a: { next: "b" } }, memberIds: ["a", "b"], first: "b", last: "a" }
+deepEqual(model.pendingProjection(drawn, true),
+  { showsRail: true, stops: [{ id: "a" }, { id: "b" }], caption: "2 messages", navigation: {}, memberIds: ["a", "b"],
+    first: "", last: "" },
+  "the same rail keeps its stops and caption and loses the ways along it: the navigation, and the ends the keys fall back to")
+assert.notStrictEqual(model.pendingProjection(drawn, true), drawn, "as a new object, so the view notices")
+deepEqual(drawn.navigation, { a: { next: "b" } }, "and the one in hand is not written to")
+assert.strictEqual(drawn.first, "b")
+deepEqual(model.pendingProjection(drawn, false),
+  { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] },
+  "a different rail starts from nothing")
+deepEqual(model.pendingProjection(null, true), { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] })
+{
+  const one = model.pendingProjection(null, false)
+  const other = model.pendingProjection(null, false)
+  assert.notStrictEqual(one, other, "a blank is a fresh object each time")
+  assert.notStrictEqual(one.stops, other.stops, "down to its lists")
+  assert.notStrictEqual(one.navigation, other.navigation)
+  assert.notStrictEqual(one.memberIds, other.memberIds)
+}
+
 assert.strictEqual(model.activityStatus({}), "", "nothing in flight says nothing")
 assert.strictEqual(model.activityStatus({ sending: 1 }), "Sending")
 assert.strictEqual(model.activityStatus({ sending: 2, queuedSends: 3 }), "Sending 2 \u00b7 3 queued to send")
