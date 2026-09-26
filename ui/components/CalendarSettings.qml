@@ -737,7 +737,7 @@ Column {
         bordered: false
         foreground: root.dimColor
         fontFamily: root.panelFontFamily
-        onClicked: root.caldavOpen = false
+        onClicked: root.closeCaldavDiscovery()
       }
     }
 
@@ -855,7 +855,7 @@ Column {
         bordered: false
         foreground: root.dimColor
         fontFamily: root.panelFontFamily
-        onClicked: root.caldavOpen = false
+        onClicked: root.closeCaldavDiscovery()
       }
     }
 
@@ -870,6 +870,16 @@ Column {
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
     }
+  }
+
+  // Closing the wizard forgets what it was given: a reopened wizard starts at
+  // the address form, never at a stale checklist with a remembered password.
+  function closeCaldavDiscovery() {
+    caldavServerPassword.text = ""
+    root.caldavChecked = ({})
+    root.caldavOpen = false
+    if (root.controller && !root.controller.caldavAdding)
+      root.controller.caldavServerDiscoveryResults = []
   }
 
   function findCaldavCalendars() {
@@ -893,10 +903,7 @@ Column {
       if (ok) {
         caldavServerUrl.text = ""
         caldavServerUsername.text = ""
-        caldavServerPassword.text = ""
-        root.caldavChecked = ({})
-        root.caldavOpen = false
-        if (root.controller) root.controller.caldavServerDiscoveryResults = []
+        root.closeCaldavDiscovery()
       }
     }
   }
