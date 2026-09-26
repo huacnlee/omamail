@@ -16,6 +16,8 @@ Column {
   property bool adding: false
   property string passwordEditingId: ""
   property string colorEditingId: ""
+  property bool caldavOpen: false
+  property var caldavChecked: ({})
 
   function discoverableAccounts() {
     if (!root.service || root.service.backendCanDiscoverCalendars !== true) return []
@@ -457,6 +459,253 @@ Column {
           fontFamily: root.panelFontFamily
           onClicked: root.passwordEditingId = ""
         }
+      }
+    }
+  }
+
+  // No signed-in mailbox owns a CalDAV server, so this is a separate wizard
+  // next to "Add a calendar" rather than another row in the account-discovery
+  // repeater above: one server address and one set of credentials, walked
+  // once, offered back as a checklist. Confirming it saves each checked
+  // calendar through the same addCalDavCalendar a hand-typed one already
+  // uses, so nothing below this form needs to know discovery happened.
+  IconTextButton {
+    visible: !root.adding && !root.caldavOpen
+      && !!root.service && root.service.backendCanDiscoverCaldavServer === true
+    iconName: "plus"
+    text: "Discover calendars"
+    foreground: root.textColor
+    fontFamily: root.panelFontFamily
+    enabled: !!root.controller && !root.controller.savingSource
+      && !root.controller.discoveringCalendars
+    onClicked: {
+      root.colorEditingId = ""
+      root.passwordEditingId = ""
+      caldavResultText.text = ""
+      root.caldavChecked = ({})
+      root.caldavOpen = true
+    }
+  }
+
+  Column {
+    width: parent.width
+    visible: root.caldavOpen
+    spacing: Style.space(6)
+
+    TextField {
+      id: caldavServerUrl
+      width: parent.width
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "CalDAV server address"
+      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+    }
+    TextField {
+      id: caldavServerUsername
+      width: parent.width
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "Username"
+      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+    }
+    TextField {
+      id: caldavServerPassword
+      width: parent.width
+      password: true
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "Password or app password"
+      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+      onAccepted: root.findCaldavCalendars()
+    }
+
+    Row {
+      spacing: Style.space(6)
+      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+      IconTextButton {
+        text: root.controller && root.controller.caldavServerDiscovering ? "Finding..." : "Find calendars"
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        enabled: root.controller && !root.controller.caldavServerDiscovering
+          && !root.controller.savingSource
+        onClicked: root.findCaldavCalendars()
+      }
+      IconTextButton {
+        text: "Cancel"
+        bordered: false
+        foreground: root.dimColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.closeCaldavDiscovery()
+      }
+    }
+
+    Text {
+      width: parent.width
+      visible: root.controller && root.controller.caldavServerDiscoveryResults.length > 0
+      text: "Found " + (root.controller ? root.controller.caldavServerDiscoveryResults.length : 0)
+        + ((root.controller && root.controller.caldavServerDiscoveryResults.length === 1) ? " calendar" : " calendars")
+        + ". Choose which to add:"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+    }
+
+    Repeater {
+      model: root.controller ? root.controller.caldavServerDiscoveryResults : []
+
+      Item {
+        id: caldavResultRow
+        required property var modelData
+        required property int index
+
+        width: root.width
+        implicitHeight: Math.max(caldavResultText2.implicitHeight, caldavResultToggle.implicitHeight)
+
+        Column {
+          id: caldavResultText2
+          anchors.left: parent.left
+          anchors.right: caldavResultToggle.left
+          anchors.rightMargin: Style.space(10)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(2)
+
+          Text {
+            width: parent.width
+            text: String(caldavResultRow.modelData.name || "Calendar")
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
+          Text {
+            width: parent.width
+            text: String(caldavResultRow.modelData.url || "")
+              + (caldavResultRow.modelData.readOnly === true ? " · Read-only" : "")
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideMiddle
+            textFormat: Text.PlainText
+          }
+        }
+
+        Button {
+          id: caldavResultToggle
+          objectName: "calendar-caldav-discovered-" + caldavResultRow.index
+          property bool checked: root.caldavChecked[String(caldavResultRow.modelData.url || "")] !== false
+          signal toggled()
+          focusable: true
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          horizontalPadding: 0
+          verticalPadding: 0
+          implicitWidth: caldavResultSwitch.implicitWidth
+          implicitHeight: caldavResultSwitch.implicitHeight
+          Accessible.role: Accessible.CheckBox
+          Accessible.name: "Add " + String(caldavResultRow.modelData.name || "that calendar")
+          Accessible.checked: checked
+          foreground: root.textColor
+          accent: root.accentColor
+          onClicked: toggled()
+          onToggled: {
+            var next = {}
+            for (var key in root.caldavChecked) next[key] = root.caldavChecked[key]
+            next[String(caldavResultRow.modelData.url || "")] = !checked
+            root.caldavChecked = next
+          }
+          ToggleSwitch {
+            id: caldavResultSwitch
+            anchors.centerIn: parent
+            checked: caldavResultToggle.checked
+            interactive: false
+            cursorRing: true
+            hasCursor: caldavResultToggle.hot || caldavResultToggle.activeFocus
+            foreground: root.textColor
+            accent: root.accentColor
+          }
+        }
+      }
+    }
+
+    Row {
+      spacing: Style.space(6)
+      visible: root.controller && root.controller.caldavServerDiscoveryResults.length > 0
+      IconTextButton {
+        text: root.controller && root.controller.caldavAdding ? "Adding" : "Add selected calendars"
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        enabled: root.controller && !root.controller.caldavAdding && !root.controller.savingSource
+        onClicked: {
+          var selected = []
+          var results = root.controller.caldavServerDiscoveryResults
+          for (var i = 0; i < results.length; i++) {
+            if (root.caldavChecked[String(results[i].url || "")] !== false) selected.push(results[i])
+          }
+          root.controller.addDiscoveredCaldavCalendars(
+            selected, caldavServerUsername.text, caldavServerPassword.text)
+        }
+      }
+      IconTextButton {
+        text: "Cancel"
+        bordered: false
+        foreground: root.dimColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.closeCaldavDiscovery()
+      }
+    }
+
+    Text {
+      id: caldavResultText
+      property bool ok: false
+      width: parent.width
+      visible: text !== ""
+      color: ok ? root.dimColor : root.urgentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+    }
+  }
+
+  // Closing the wizard forgets what it was given: a reopened wizard starts at
+  // the address form, never at a stale checklist with a remembered password.
+  function closeCaldavDiscovery() {
+    caldavServerPassword.text = ""
+    root.caldavChecked = ({})
+    root.caldavOpen = false
+    if (root.controller && !root.controller.caldavAdding)
+      root.controller.caldavServerDiscoveryResults = []
+  }
+
+  function findCaldavCalendars() {
+    caldavResultText.text = ""
+    if (!root.controller) return
+    root.controller.discoverCaldavServer(
+      caldavServerUrl.text, caldavServerUsername.text, caldavServerPassword.text)
+  }
+
+  Connections {
+    target: root.controller
+    function onCaldavServerDiscoveryFinished(ok, error) {
+      caldavResultText.ok = ok
+      caldavResultText.text = ok ? "" : error
+    }
+    function onCaldavCalendarsAdded(ok, error, added, total) {
+      caldavResultText.ok = ok
+      caldavResultText.text = ok
+        ? "Added " + added + (added === 1 ? " calendar" : " calendars")
+        : error
+      if (ok) {
+        caldavServerUrl.text = ""
+        caldavServerUsername.text = ""
+        root.closeCaldavDiscovery()
       }
     }
   }
