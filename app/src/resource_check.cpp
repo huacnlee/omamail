@@ -365,7 +365,7 @@ bool runSmokeTest(const ResourcePaths &paths, const QString &readyFile, QString 
         || !protocol.isDouble() || protocol.toInt() != 1
         || !apiVersion.isDouble()
         || apiVersion.toDouble() != static_cast<double>(apiVersion.toInt())
-        || apiVersion.toInt() != 5) {
+        || apiVersion.toInt() != 6) {
         if (error) *error = QStringLiteral("Bundled backend system.info does not match this app");
         stopProcess(backend);
         return false;

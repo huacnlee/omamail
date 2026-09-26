@@ -184,6 +184,12 @@
   ],
   "contractCases": [
     {
+      "name": "IMAP All mail resolves to account-wide listing",
+      "method": "providers.resolve",
+      "params": {"provider": "imap", "operation": "query", "mailbox": "all"},
+      "equals": {"value": "search:ALL"}
+    },
+    {
       "name": "iCloud request refuses an external credential origin",
       "method": "calendar.request",
       "params": {
@@ -762,14 +768,7 @@
     }
   ],
   "unreleased": {
-    "methods": ["imap.list", "providers.resolve"],
-    "cases": [
-      {
-        "name": "IMAP All mail resolves to account-wide listing",
-        "method": "providers.resolve",
-        "params": {"provider": "imap", "operation": "query", "mailbox": "all"},
-        "equals": {"value": "search:ALL"}
-      }
-    ]
+    "methods": [],
+    "cases": ["IMAP All mail resolves to account-wide listing"]
   }
 }
