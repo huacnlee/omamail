@@ -235,11 +235,11 @@ deepEqual(provider.mailboxes("imap", []).map(box => box.key), imapKeys)
 deepEqual(provider.mailboxes("imap", "archive").map(box => box.key), imapKeys,
   "and so is anything that is not a list")
 
-const withoutArchive = provider.mailboxes("imap", ["archive"])
-assert.strictEqual(withoutArchive.filter(box => box.key === "archive").length, 0)
-assert.strictEqual(withoutArchive.length, imapKeys.length - 1)
-assert.strictEqual(withoutArchive.indexOf(withoutArchive.filter(box => box.key === "spam")[0]),
-  imapKeys.indexOf("spam") - 1, "Junk moves up when Archive is not there")
+const withoutAll = provider.mailboxes("imap", ["all"])
+assert.strictEqual(withoutAll.filter(box => box.key === "all").length, 0)
+assert.strictEqual(withoutAll.length, imapKeys.length - 1)
+assert.strictEqual(withoutAll.indexOf(withoutAll.filter(box => box.key === "spam")[0]),
+  imapKeys.indexOf("spam") - 1, "Junk moves up when All mail is not there")
 
 deepEqual(provider.mailboxes("imap", ["archive", "spam", "trash"]).map(box => box.key),
   imapKeys.filter(key => key !== "archive" && key !== "spam" && key !== "trash"))
@@ -252,8 +252,8 @@ dropped.push({ key: "invented" })
 assert.strictEqual(provider.mailboxes("imap", ["archive"]).length, dropped.length - 1)
 
 assert.strictEqual(provider.hasMailbox("gmail", "all"), true)
-assert.strictEqual(provider.hasMailbox("imap", "all"), false, "IMAP has Archive, not All mail")
-assert.strictEqual(provider.hasMailbox("imap", "archive"), true)
+assert.strictEqual(provider.hasMailbox("imap", "all"), true)
+assert.strictEqual(provider.hasMailbox("imap", "archive"), false, "All mail replaces the separate Archive destination")
 assert.strictEqual(provider.hasMailbox("gmail", "drafts"), true)
 assert.strictEqual(provider.hasMailbox("hey", "drafts"), true)
 assert.strictEqual(provider.hasMailbox("imap", "drafts"), true)

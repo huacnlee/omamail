@@ -31,13 +31,16 @@ function capabilities(values) {
 
 function mailbox(raw) {
   var entry = raw || {}
-  return {
+  var result = {
     key: String(entry.key || ""),
     label: String(entry.label || ""),
     icon: String(entry.icon || ""),
     query: String(entry.query || ""),
     optional: entry.optional === true
   }
+  if (Number(entry.minimumApiVersion || 0) > 0)
+    result.minimumApiVersion = Number(entry.minimumApiVersion)
+  return result
 }
 
 function define(source) {
@@ -120,14 +123,16 @@ function refusal(id, capability, refusals) {
   return String(refusals[String(capability)])
 }
 
-function mailboxes(id, absent) {
+function mailboxes(id, absent, apiVersion) {
   var list = get(id).mailboxes
   var missing = Array.isArray(absent) ? absent : []
   var drop = []
   for (var i = 0; i < missing.length; i++) drop.push(String(missing[i]))
   var out = []
   for (var j = 0; j < list.length; j++) {
-    if (drop.indexOf(list[j].key) < 0) out.push(list[j])
+    if (drop.indexOf(list[j].key) < 0
+        && (apiVersion === undefined || Number(apiVersion) >= Number(list[j].minimumApiVersion || 0)))
+      out.push(list[j])
   }
   return out
 }

@@ -124,7 +124,8 @@ Item {
 
   // The mailboxes this account has, which is a property of its provider rather
   // than of the panel. The sidebar and the tab row draw whatever is here.
-  readonly property var mailboxes: Provider.mailboxes(providerId, absentMailboxes)
+  readonly property var mailboxes: Provider.mailboxes(providerId, absentMailboxes,
+    Number(backend && backend.protocolInfo && backend.protocolInfo.apiVersion || 0))
 
   // What the panel may offer for this account. A button the service cannot
   // honour is worse than a missing one: it fails after the user has committed

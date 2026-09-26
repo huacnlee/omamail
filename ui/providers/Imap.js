@@ -28,19 +28,20 @@ var MAILBOXES = [
     "icon": "star"
   },
   {
-    "key": "sent",
-    "label": "Sent",
-    "icon": "sent"
-  },
-  {
     "key": "drafts",
     "label": "Drafts",
     "icon": "compose"
   },
   {
-    "key": "archive",
-    "label": "Archive",
+    "key": "sent",
+    "label": "Sent",
+    "icon": "sent"
+  },
+  {
+    "key": "all",
+    "label": "All mail",
     "icon": "archive",
+    "minimumApiVersion": 6,
     "optional": true
   },
   {

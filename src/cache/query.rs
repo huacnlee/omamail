@@ -119,6 +119,16 @@ fn matches(row: &Value, terms: &[String]) -> bool {
 }
 fn eligible(provider: &str, query: &str, row: &Value) -> bool {
     if matches!(provider, "imap" | "outlook") {
+        if row["inTrash"] == true
+            || row["inSpam"] == true
+            || row["labelIds"].as_array().is_some_and(|labels| {
+                labels
+                    .iter()
+                    .any(|label| label == "TRASH" || label == "SPAM")
+            })
+        {
+            return false;
+        }
         let source = query.trim();
         let Some(rest) = source.strip_prefix("folder:") else {
             return true;
@@ -142,7 +152,18 @@ fn eligible(provider: &str, query: &str, row: &Value) -> bool {
         } else {
             rest.split_whitespace().next().unwrap_or("").to_owned()
         };
-        return folder.eq_ignore_ascii_case("INBOX");
+        return ![
+            "\\Trash",
+            "\\Junk",
+            "Trash",
+            "Junk",
+            "Spam",
+            "Deleted Items",
+            "Deleted Messages",
+            "Junk Email",
+        ]
+        .iter()
+        .any(|name| folder.eq_ignore_ascii_case(name));
     }
     if provider == "hey" {
         return true;

@@ -1,4 +1,61 @@
 use super::*;
+#[tokio::test]
+async fn account_search_finds_archive_and_custom_folders_but_never_selects_excluded_folders() {
+    for criteria in ["SUBJECT \"1Password\"", "ALL"] {
+        account_wide_page(criteria).await;
+    }
+}
+
+async fn account_wide_page(criteria: &str) {
+    let boxes = parse_folders(b"* LIST () \"/\" INBOX\r\n* LIST (\\Archive) \"/\" Archive\r\n* LIST () \"/\" \"My Projects\"\r\n* LIST () \"/\" Copy\r\n* LIST (\\Trash) \"/\" Bin\r\n* LIST (\\Junk) \"/\" Junkmail\r\n* LIST (\\All) \"/\" Everything\r\n* LIST (\\Noselect) \"/\" Root\r\n* LIST () \"/\" Spam\r\n").unwrap();
+    let (client, server) = tokio::io::duplex(8192);
+    let search = criteria.to_owned();
+    let peer = tokio::spawn(async move {
+        let mut w: Wire = BufReader::new(Box::new(server));
+        for _ in 0..2 {
+            for (folder, day) in [
+                ("INBOX", 23),
+                ("Archive", 25),
+                ("My Projects", 24),
+                ("Copy", 25),
+            ] {
+                assert_eq!(
+                    line(&mut w).await.unwrap(),
+                    format!("O1 SELECT \"{folder}\"\r\n").as_bytes()
+                );
+                write(&mut w, b"O1 OK selected\r\n").await.unwrap();
+                assert_eq!(
+                    line(&mut w).await.unwrap(),
+                    format!("O1 UID SEARCH UNDELETED {search}\r\n").as_bytes()
+                );
+                write(&mut w, b"* SEARCH 7\r\nO1 OK searched\r\n")
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    line(&mut w).await.unwrap(),
+                    b"O1 UID FETCH 7 (UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])\r\n"
+                );
+                let identity = if folder == "Copy" { "Archive" } else { folder };
+                let header = format!(
+                    "Message-ID: <{}@example.org>\r\n\r\n",
+                    identity.replace(' ', "")
+                );
+                write(&mut w, format!("* 1 FETCH (UID 7 INTERNALDATE \"{day}-Sep-2026 12:00:00 +0000\" BODY[HEADER.FIELDS (MESSAGE-ID)] {{{}}}\r\n{header})\r\n* 9 FETCH (UID 999 INTERNALDATE \"26-Sep-2026 12:00:00 +0000\")\r\nO1 OK fetched\r\n", header.len()).as_bytes()).await.unwrap();
+            }
+        }
+    });
+    let mut w: Wire = BufReader::new(Box::new(client));
+    let mut p = json!({"query":format!("search:{criteria}"), "limit":2});
+    let first = list(&mut w, &p, &boxes).await.unwrap();
+    assert_eq!(first["page"]["ids"], json!(["7:Archive", "7:My Projects"]));
+    assert_eq!(first["page"]["estimate"], 3);
+    p["pageToken"] = first["page"]["nextPageToken"].clone();
+    let second = list(&mut w, &p, &boxes).await.unwrap();
+    assert_eq!(second["page"]["ids"], json!(["7:INBOX"]));
+    assert_eq!(second["page"]["nextPageToken"], "");
+    peer.await.unwrap();
+}
+
 #[test]
 fn octet_literals_do_not_create_responses_or_fetch_fields() {
     let raw = b"Subject: test\r\n\r\n* 8 FETCH (UID 999)\r\n\xc3\xa9";
@@ -245,12 +302,14 @@ async fn original_query_controls_are_rejected_before_connecting() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     for suffix in ["\r", "\n", "\r\n", "\0", "\t", "\x7f"] {
-        let mut p = params(port);
-        p["query"] = json!(format!("folder:INBOX UNSEEN{suffix}"));
-        assert_eq!(
-            super::super::call("imap.list", &p).await,
-            Err("invalid_params")
-        );
+        for query in ["folder:INBOX UNSEEN", "search:TEXT \"1Password\""] {
+            let mut p = params(port);
+            p["query"] = json!(format!("{query}{suffix}"));
+            assert_eq!(
+                super::super::call("imap.list", &p).await,
+                Err("invalid_params")
+            );
+        }
     }
     assert!(
         tokio::time::timeout(Duration::from_millis(20), listener.accept())

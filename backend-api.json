@@ -1,5 +1,5 @@
 {
-  "apiVersion": 5,
+  "apiVersion": 6,
   "releasedApiVersion": 5,
   "protocolVersion": 1,
   "methods": [
@@ -762,7 +762,14 @@
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": ["imap.list", "providers.resolve"],
+    "cases": [
+      {
+        "name": "IMAP All mail resolves to account-wide listing",
+        "method": "providers.resolve",
+        "params": {"provider": "imap", "operation": "query", "mailbox": "all"},
+        "equals": {"value": "search:ALL"}
+      }
+    ]
   }
 }
