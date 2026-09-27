@@ -90,7 +90,7 @@ async fn sparse_search_orders_by_date_before_paging_even_when_progressive() {
             write(&mut w, b"* 1 FETCH (UID 7)\r\n* 2 FETCH (UID 1000)\r\n* 3 FETCH (UID 50000)\r\nO1 OK snapshot\r\n").await.unwrap();
             assert_eq!(
                 line(&mut w).await.unwrap(),
-                b"O1 UID FETCH 7,1000,50000 (UID INTERNALDATE)\r\n"
+                b"O1 UID FETCH 7:50000 (UID INTERNALDATE)\r\n"
             );
             write(&mut w,b"* 1 FETCH (UID 7 INTERNALDATE \"23-Sep-2026 12:00:00 +0000\")\r\n* 2 FETCH (UID 1000 INTERNALDATE \"22-Sep-2026 12:00:00 +0000\")\r\n* 3 FETCH (UID 50000 INTERNALDATE \"21-Sep-2026 12:00:00 +0000\")\r\nO1 OK snapshot\r\n").await.unwrap();
             assert_eq!(
@@ -145,10 +145,19 @@ async fn multi_window_dates_settle_before_paging_and_ignore_unsolicited_flags() 
                 let ids: Vec<u32> = if set == "1:*" {
                     (1..=4100).collect()
                 } else {
-                    set.split(',').map(|s| s.parse().unwrap()).collect()
+                    set.split(',')
+                        .flat_map(|part| match part.split_once(':') {
+                            Some((a, b)) => (a.parse::<u32>().unwrap()..=b.parse::<u32>().unwrap().min(4100))
+                                .collect::<Vec<_>>(),
+                            None => vec![part.parse().unwrap()],
+                        })
+                        .collect()
                 };
                 let dated = fields.contains("INTERNALDATE");
                 if dated {
+                    // Exchange Online refuses a long command line outright
+                    // (`BAD Command Error. 10`); a batch is a range, not a list.
+                    assert!(request.len() < 64, "date request is a short range: {request}");
                     assert!(ids.len() <= 4096, "date response must be bounded");
                     batches.push(ids.len());
                 }

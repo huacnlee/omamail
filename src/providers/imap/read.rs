@@ -534,11 +534,19 @@ async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
             .collect();
         let mut dates = BTreeMap::new();
         for window in snapshot.chunks(4096) {
-            let set = window
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(",");
+            // The batch as its first and last UID, never as a list. A list of
+            // 4096 sparse UIDs is a 20 KB command, and Exchange Online answers
+            // one that long with `BAD Command Error. 10` and closes the
+            // connection - every listing of a large Microsoft 365 inbox failed
+            // that way. The range may span UIDs that no longer exist, but the
+            // server answers only for messages it has, so the reply is still
+            // at most this batch; anything else is dropped below.
+            let (first, last) = (window[0], window[window.len() - 1]);
+            let set = if first == last {
+                first.to_string()
+            } else {
+                format!("{first}:{last}")
+            };
             let fetched =
                 fetched_dates(&command(w, &format!("UID FETCH {set} (UID INTERNALDATE)")).await?)?;
             // Ignore unsolicited updates outside this batch (including arrivals
