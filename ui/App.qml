@@ -319,11 +319,8 @@ Item {
   readonly property string editingProvider: page === "setup" ? String(navPage.provider || "") : ""
   readonly property bool accountDraftOpen: page === "setup" && navPage.draft === true
 
-  // What the root is made of. Recomputed when a mailbox becomes usable or
-  // stops being — and, before any is, whenever the service learns more about
-  // the accounts it has, but only while the user has not moved off the root
-  // it was given: a form they backed out of must not come back because the
-  // address they typed was saved.
+  // Readiness rebuilds the root. Before sign-in, account changes rebuild only
+  // an untouched root, so saving an address cannot reopen a dismissed form.
   readonly property var rootState: ({
     anyReady: anyReady,
     hasSavedAccounts: !!service && service.hasSavedAccounts === true,
@@ -339,7 +336,11 @@ Item {
     if (flipped || (!rootState.anyReady && navUntouched)) resetNavigation()
   }
   function resetNavigation() {
-    nav = Nav.rootFor(rootState)
+    var next = Nav.rootFor(rootState)
+    // Open drafts emit no openedChanged here. Restore them with new return depths.
+    if (compose && compose.opened) next = Nav.push(next, Nav.entry("compose"))
+    if (eventComposer && eventComposer.opened) next = Nav.push(next, Nav.entry("eventComposer"))
+    nav = next
     navUntouched = true
     pendingComposeReturnTo = -1
   }
@@ -352,11 +353,8 @@ Item {
     nav = Nav.push(nav, Nav.entry(kind, fields))
   }
 
-  // Going somewhere takes the keyboard back from the search field. A click on
-  // a row or on the rail moves no focus — a MouseArea never does — so after
-  // one click in the field the context stayed "search" with a message open,
-  // and `e` typed itself into the query instead of archiving. The field is
-  // left the way it is submitted: by a navigation, not only by Escape.
+  // Mouse navigation does not move focus. Leave search context so mailbox keys
+  // act on the opened message rather than typing into the search field.
   onNavChanged: if (searchBar.fieldFocused) focusScope.parkKeyboard()
 
   // An overlay whose view has closed, wherever it sits. Usually the top; a

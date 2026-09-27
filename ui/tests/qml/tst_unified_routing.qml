@@ -433,6 +433,70 @@ Item {
       bob().memberSummaries = ({})
     }
 
+    // ------------------------------------------------- the projected rail
+
+    // The rail is drawn from `conversationProjection`, and while a new
+    // projection is in flight the one in hand stays up when it is about the
+    // same rail — `Model.projectionKey` decides what "the same" means. A
+    // thread's id is left as its provider gave it, so two accounts can each
+    // hold a `t1` in their Inbox; the reader moving from one to the other must
+    // not keep the first account's stops up while the second's are fetched.
+    //
+    // The reading host is moved directly. `select` clears the other host on
+    // its way, and that clear happens to empty the projection too; the key
+    // must not lean on that choreography, so the switch here has nothing else
+    // in it. Both mailboxes speak JMAP, whose rows are conversations.
+    function test_a_thread_with_the_same_id_in_another_account_is_another_rail() {
+      // A mailbox that is not Gmail carries its provider in its id.
+      var adaJmap = "jmap:" + adaId
+      var bobJmap = "jmap:" + bobId
+      service.applyAccounts(JSON.stringify({
+        version: 1, activeId: adaJmap,
+        accounts: [
+          { id: adaJmap, email: adaId, provider: "jmap" },
+          { id: bobJmap, email: bobId, provider: "jmap" }
+        ]
+      }))
+      wait(50)
+      compare(service.unified, true)
+      var ada = service.findAccount(adaJmap)
+      var bob = service.findAccount(bobJmap)
+      verify(!!ada && !!bob, "the service builds a host for each row")
+      compare(ada.showsConversations, true)
+      service.selectMailbox("inbox")
+
+      function holdThread(host, newest, oldest) {
+        host.messages = [row("1", newest, "Re: the engine"), row("2", oldest, "The engine")]
+        host.selectedId = "1"
+        host.memberSummaries = ({ "1": row("1", newest, "Re: the engine"), "2": row("2", oldest, "The engine") })
+        host.selectedThread = { id: "t1", count: 2, unread: true, flagged: false,
+          memberIds: ["1", "2"] }
+      }
+      holdThread(ada, 3000, 1000)
+      holdThread(bob, 2000, 500)
+
+      try {
+        service.selectionHost = ada
+        tryVerify(function() { return service.conversationProjection.showsRail === true })
+        compare(service.conversationProjection.stops.length, 2)
+        compare(Unified.accountOf(service.conversationProjection.stops[0].id), adaJmap,
+          "Ada's rail is drawn")
+
+        service.selectionHost = bob
+        compare(service.conversationProjection.showsRail, false,
+          "Bob's t1 is not Ada's: nothing of Ada's rail stays up while Bob's is fetched")
+        compare(service.conversationProjection.stops.length, 0)
+        compare(service.conversationProjection.caption, "")
+        tryVerify(function() { return service.conversationProjection.showsRail === true })
+        compare(service.conversationProjection.stops.length, 2)
+        compare(Unified.accountOf(service.conversationProjection.stops[0].id), bobJmap,
+          "and what lands is Bob's")
+      } finally {
+        // The next test seeds other hosts; nothing here may point at these.
+        service.clearSelection()
+      }
+    }
+
     function test_a_search_reaches_every_mailbox() {
       service.search("invoice")
       tryCompare(ada(), "searchQuery", "invoice")

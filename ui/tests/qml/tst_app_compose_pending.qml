@@ -211,7 +211,113 @@ Item {
       return item
     }
 
+    function typed(item, prefix) {
+      if (String(item).indexOf(prefix) === 0) return item
+      var children = item.children || []
+      for (var i = 0; i < children.length; i++) {
+        var found = typed(children[i], prefix)
+        if (found) return found
+      }
+      return null
+    }
+
+    SignalSpy { id: shortcutSpy; signalName: "triggered" }
+
+    function test_readiness_changes_keep_the_open_draft_and_keyboard_together() {
+      var compose = composeView()
+      app.open("{}")
+      shortcutSpy.target = named(app, "key-router")
+      shortcutSpy.clear()
+      wait(20)
+      compare(shortcutSpy.target.context, "list")
+      keyClick(Qt.Key_D)
+      keyClick(Qt.Key_E)
+      compare(shortcutSpy.count, 2, "positive control: real mailbox shortcuts dispatch")
+      compare(shortcutSpy.signalArguments[0][0], "trash")
+      compare(shortcutSpy.signalArguments[1][0], "archive")
+      app.startCompose("new")
+      named(compose, "compose-subject-field").text = "Readiness draft"
+      named(compose, "compose-body-editor").text = "Keep these words"
+      var sidebar = typed(app, "MailboxSidebar_")
+      var reader = typed(app, "MessageReader_")
+      var list = typed(app, "MessageList_")
+      verify(sidebar)
+      verify(reader)
+      verify(list)
+
+      mailService.anyAccountReady = false
+      wait(20)
+      compare(compose.opened, true)
+      compare(app.composing, true)
+      compare(sidebar.visible, false)
+      compare(reader.visible, false)
+      compare(list.visible, false)
+      compare(named(app, "key-router").context, "page")
+
+      mailService.anyAccountReady = true
+      wait(20)
+      compare(compose.opened, true)
+      compare(compose.visible, true)
+      compare(app.composing, true)
+      compare(app.navKinds.join(","), "list,compose")
+      compare(sidebar.visible, false)
+      compare(reader.visible, false)
+      compare(list.visible, false)
+      compare(named(app, "key-router").context, "compose")
+      compare(named(compose, "compose-subject-field").text, "Readiness draft")
+      compare(named(compose, "compose-body-editor").text, "Keep these words")
+
+      var subject = named(compose, "compose-subject-field")
+      subject.forceActiveFocus()
+      subject.cursorPosition = subject.text.length
+      shortcutSpy.clear()
+      keyClick(Qt.Key_D)
+      keyClick(Qt.Key_E)
+      compare(subject.text, "Readiness draftde")
+      compare(shortcutSpy.count, 0, "typing must never dispatch a mailbox action")
+
+      app.openSettings()
+      compare(compose.visible, false)
+      compare(named(app, "key-router").context, "page")
+      app.back()
+      compare(compose.visible, true)
+      compare(app.composing, true)
+      compare(named(app, "key-router").context, "compose")
+
+      // A normal queued send must remove the restored overlay as well.
+      named(compose, "compose-to-field").text = "synthetic@example.com"
+      compose.submit()
+      compare(compose.opened, false)
+      compare(app.navKinds.join(","), "list")
+      mailService.anyAccountReady = false
+      mailService.anyAccountReady = true
+      compare(app.composing, false)
+      compare(app.navKinds.join(","), "list")
+    }
+
+    function test_readiness_changes_keep_the_event_composer_in_navigation() {
+      app.open("{}")
+      var composer = typed(app, "CalendarEventComposer_")
+      verify(composer)
+      composer.begin()
+      mailService.anyAccountReady = false
+      wait(20)
+      compare(composer.opened, true)
+      compare(app.composing, true)
+      compare(named(app, "key-router").context, "page")
+      mailService.anyAccountReady = true
+      wait(20)
+      compare(composer.visible, true)
+      compare(app.navKinds.join(","), "list,eventComposer")
+      compare(named(app, "key-router").context, "compose")
+      app.back()
+      compare(composer.opened, false)
+      compare(app.composing, false)
+      compare(app.navKinds.join(","), "list")
+    }
+
     function init() {
+      mailService.anyAccountReady = true
       mailService.backendRuntime = null
       app.draftSavedToast = ""
       app.composeRecoveryNotice = ""

@@ -1789,24 +1789,58 @@ Item {
   readonly property string viewedMailboxKey: String(conversationProjection.viewedMailboxKey || "")
   property var conversationProjection: ({ showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] })
   property int conversationProjectionSerial: 0
+  // What the projection in hand was asked about: the source as text, and the
+  // account, thread and mailbox it names (`Model.projectionKey`). The source
+  // is an object literal, so it is a new object — and
+  // `conversationSourceChanged` fires — whenever any input is reassigned,
+  // whether or not anything in it is different. In All mailboxes that is
+  // constant: the composed thread and members are built afresh on every
+  // read, and the mailbox list is a new array on every snapshot. Compared as
+  // text, an unchanged source asks nothing.
+  property string projectedSource: ""
+  property string projectedRail: ""
   readonly property var conversationSource: ({
     operation: "project", thread: selectedThread, summaries: memberSummaries,
     selectedId: selectedId, mailboxKey: mailboxKey,
     searching: searchQuery !== "" || rawQuery !== "", mailboxes: mailboxes,
-    conversations: !!reading && reading.showsConversations
+    conversations: !!reading && reading.showsConversations,
+    // Whose thread it is. The projection does not need it — a thread's members
+    // are composed with their account on the way out — but the key that decides
+    // whether the rail in hand is this source's does: All mailboxes leaves
+    // `thread.id` as the provider gave it, so two accounts can each hold a `t1`.
+    accountId: reading ? String(reading.accountId || "") : ""
   })
-  function scheduleConversationProjection() {
+  // A new projection is asked for; until it lands, the one in hand stays up
+  // when it is about the same rail — the same thread, in the same mailbox, of
+  // the same account (`Model.pendingProjection`).
+  // Blanking it drew the rail to nothing and reflowed the reader on every
+  // member merge, mark-read and list refresh that opening a thread brings —
+  // several times per open. `sourceText` is the source already serialised by
+  // the caller, when it has it.
+  function scheduleConversationProjection(sourceText) {
     conversationProjectionSerial++
-    conversationProjection = ({ showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] })
+    var source = conversationSource
+    var rail = Model.projectionKey(source)
+    var sameRail = rail === projectedRail
+    projectedSource = sourceText || JSON.stringify(source)
+    projectedRail = rail
+    conversationProjection = Model.pendingProjection(conversationProjection, sameRail)
     conversationProjectionTimer.restart()
   }
   Timer { id: conversationProjectionTimer; interval: 0; onTriggered: root.refreshConversationProjection() }
-  onConversationSourceChanged: scheduleConversationProjection()
+  onConversationSourceChanged: {
+    var text = JSON.stringify(conversationSource)
+    if (text === projectedSource) return
+    scheduleConversationProjection(text)
+  }
   function refreshConversationProjection() {
     if (!backend || !backend.ready) return
     var serial = conversationProjectionSerial
     backend.call("account.conversation", conversationSource, function(result, error) {
-      if (!root || serial !== root.conversationProjectionSerial || error || !result) return
+      if (!root || serial !== root.conversationProjectionSerial) return
+      // A failed ask leaves the source unanswered: forget it was asked, so
+      // the next change of the same source asks again.
+      if (error || !result) { root.projectedSource = ""; return }
       root.conversationProjection = result
     })
   }
