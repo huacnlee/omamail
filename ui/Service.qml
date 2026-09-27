@@ -110,6 +110,8 @@ Item {
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
+  // Exchange Web Services calendars for a tenant that refuses Graph: API 6.
+  readonly property bool backendCanUseEwsCalendar: backend.ready && backend.apiVersion >= 6
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"

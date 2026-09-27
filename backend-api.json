@@ -1,5 +1,5 @@
 {
-  "apiVersion": 5,
+  "apiVersion": 6,
   "releasedApiVersion": 5,
   "protocolVersion": 1,
   "methods": [
@@ -759,10 +759,29 @@
       "types": {
         "ticket": "string"
       }
+    },
+    {
+      "name": "Exchange calendar request reads the mailbox's own Exchange token",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "ews",
+          "accountId": "outlook:missing@example.org"
+        },
+        "operation": "list",
+        "start": "2026-09-28T00:00:00Z",
+        "end": "2026-10-05T00:00:00Z"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
     }
   ],
   "unreleased": {
     "methods": [],
-    "cases": []
+    "cases": [
+      "Exchange calendar request reads the mailbox's own Exchange token"
+    ]
   }
 }

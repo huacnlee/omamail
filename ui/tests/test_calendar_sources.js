@@ -343,3 +343,28 @@ assert.strictEqual(namedMicrosoft.sources[0].name, "Work appointments",
   assert.strictEqual(sources.errorLabel({ id: "caldav:team", kind: "caldav" }, accounts), "caldav:team")
   assert.strictEqual(sources.errorLabel(null, accounts), "Calendar")
 }
+
+// An Outlook mailbox whose tenant refuses Graph reads its calendar through
+// Exchange instead: one read-only source, and no Graph one beside it.
+{
+  const accounts = [
+    { id: "outlook:me@contoso.com", email: "me@contoso.com", provider: "outlook",
+      signedIn: true, calendarProvider: "ews" },
+    { id: "outlook:you@example.org", email: "you@example.org", provider: "outlook",
+      signedIn: true, calendarProvider: "microsoft" }
+  ]
+  const joined = sources.withEwsAccounts(sources.withMicrosoftAccounts(sources.emptyList(), accounts), accounts)
+  const ids = joined.sources.map(function(source) { return source.id }).sort()
+  assert.strictEqual(JSON.stringify(ids), JSON.stringify(["ews:outlook:me@contoso.com", "microsoft:outlook:you@example.org"]),
+    "an Exchange mailbox gets an Exchange source and no Graph one")
+  const exchange = joined.sources.filter(function(source) { return source.kind === "ews" })[0]
+  assert.strictEqual(exchange.readOnly, true, "the Exchange route lists and does not write")
+  assert.strictEqual(sources.writable(exchange), false)
+  assert.strictEqual(sources.comesWithAccount(exchange), true)
+  assert.strictEqual(sources.providerLabel("ews"), "Exchange")
+  assert.strictEqual(sources.sourceId({ kind: "ews", accountId: "outlook:me@contoso.com" }),
+    "ews:outlook:me@contoso.com")
+  const signedOut = sources.withEwsAccounts(sources.emptyList(),
+    [Object.assign({}, accounts[0], { signedIn: false })])
+  assert.strictEqual(signedOut.sources.length, 0, "a signed-out mailbox brings no calendar")
+}

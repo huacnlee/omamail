@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::{sync::OnceLock, time::Duration};
 
 mod discovery;
+mod ews;
 pub use discovery::discover;
 
 const LIMIT: usize = 16 * 1024 * 1024;
@@ -185,6 +186,18 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
                 }
             }
         }
+        "ews" => {
+            // Read-only: see ews.rs. The destination is fixed and the body is
+            // built from the two view boundaries alone.
+            if op != "list" {
+                return Err("calendar_invalid_operation");
+            }
+            request.account_id = text(source, "accountId")?.into();
+            ews::anchor(&request.account_id)?;
+            request.url = Url::parse(ews::ENDPOINT).unwrap();
+            request.method = Method::POST;
+            request.body = ews::list_body(text(params, "start")?, text(params, "end")?)?;
+        }
         "caldav" | "icloud" => {
             let base = if kind == "icloud" {
                 request.account_id = text(source, "accountId")?.into();
@@ -258,8 +271,9 @@ where
     } else {
         None
     };
-    let paginated =
-        params["operation"] == "list" && !matches!(request.kind.as_str(), "caldav" | "icloud");
+    let paginated = params["operation"] == "list"
+        && !matches!(request.kind.as_str(), "caldav" | "icloud" | "ews");
+    let ews_list = request.kind == "ews";
     let origin = request.url.clone();
     let mut result = execute(
         client()?,
@@ -272,6 +286,13 @@ where
             .map_err(|_| "calendar_password_invalid")?,
     )
     .await?;
+    if ews_list {
+        // Handed on as Graph's shape, so the UI draws it with the Graph mapper.
+        let shaped = ews::graph_shape(result["body"].as_str().unwrap_or(""))?;
+        result["body"] =
+            Value::String(serde_json::to_string(&shaped).map_err(|_| "calendar_invalid_response")?);
+        return Ok(result);
+    }
     if !paginated {
         return Ok(result);
     }
@@ -388,9 +409,16 @@ async fn execute(
         let token = token
             .filter(|s| !s.is_empty() && !s.chars().any(char::is_control))
             .ok_or("calendar_auth_required")?;
-        builder = builder
-            .bearer_auth(token)
-            .header("Content-Type", "application/json");
+        if request.kind == "ews" {
+            builder = builder
+                .bearer_auth(token)
+                .header("Content-Type", "text/xml; charset=utf-8")
+                .header("X-AnchorMailbox", ews::anchor(&request.account_id)?);
+        } else {
+            builder = builder
+                .bearer_auth(token)
+                .header("Content-Type", "application/json");
+        }
         if request.kind == "microsoft" {
             builder = builder.header("Prefer", "outlook.timezone=\"UTC\"");
         }

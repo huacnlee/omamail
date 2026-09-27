@@ -329,6 +329,19 @@ impl Session {
                     )
                     .await?,
                 ),
+                // Exchange's own calendar interface, for a tenant that grants
+                // the mail client Exchange and refuses it Graph - see
+                // src/calendar/ews.rs. The same refresh token, another scope.
+                Some("ews") => Some(
+                    crate::auth::access_token(
+                        "outlook",
+                        params["source"]["accountId"]
+                            .as_str()
+                            .ok_or("invalid_params")?,
+                        "ews",
+                    )
+                    .await?,
+                ),
                 Some("caldav") => None,
                 _ => None,
             };
@@ -433,7 +446,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 5, "methods": methods::available(),
+            "protocol": 1, "apiVersion": 6, "methods": methods::available(),
             "capabilities": {"agent": cfg!(all(feature = "agent", target_os = "linux"))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),

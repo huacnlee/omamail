@@ -66,8 +66,7 @@ Item {
   // is touched and carried to the writer that runs after it.
   property string writeUrl: ""
   property bool eventWriting: false
-  readonly property var availableSources: Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-    sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+  readonly property var availableSources: withAccountSources(sourceList)
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView
@@ -179,9 +178,19 @@ Item {
     processNext()
   }
 
+  // Every calendar that comes with a signed-in mailbox, added to the saved
+  // list. Exchange only where the connected backend can read it: an older
+  // backend would refuse the kind, and a source that can only fail is worse
+  // than none.
+  function withAccountSources(list) {
+    var summaries = service ? service.accountSummaries : []
+    var joined = Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(list, summaries), summaries)
+    return service && service.backendCanUseEwsCalendar === true
+      ? Sources.withEwsAccounts(joined, summaries) : joined
+  }
+
   function sourcesForAccount(wantedAccountId) {
-    var available = Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+    var available = withAccountSources(sourceList)
     return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
@@ -694,6 +703,7 @@ Item {
     queue = pending
     if (activeSource.kind === "google") startGoogle()
     else if (activeSource.kind === "microsoft") startGraph()
+    else if (activeSource.kind === "ews") startNativeList()
     else if (activeSource.kind === "caldav" || activeSource.kind === "icloud") startPasswordLookup()
     else failSource("The HEY CLI does not expose calendar events")
   }
@@ -716,7 +726,9 @@ Item {
         if (!payload) { root.failSource("The calendar returned an unreadable response"); return }
         values = root.activeSource.kind === "google"
           ? Calendar.eventsFromGoogle(payload, root.activeSource.id)
-          : Calendar.eventsFromGraph(payload, root.activeSource.id)
+          : root.activeSource.kind === "ews"
+            ? Calendar.eventsFromEws(payload, root.activeSource.id)
+            : Calendar.eventsFromGraph(payload, root.activeSource.id)
       }
       root.replaceActiveSourceEvents(values)
       root.processNext()

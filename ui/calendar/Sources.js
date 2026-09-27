@@ -3,7 +3,7 @@
 .import "Palette.js" as Palette
 
 var VERSION = 1
-var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
+var KINDS = ["caldav", "google", "microsoft", "icloud", "hey", "ews"]
 var COLOR_KEYS = Palette.keys()
 
 function defaultColorKey(identity) { return Palette.defaultKey(identity) }
@@ -26,6 +26,7 @@ function sourceId(raw) {
   var kind = normalizeKind(value.kind)
   if (kind === "google") return "google:" + trimmed(value.accountId)
   if (kind === "microsoft") return "microsoft:" + trimmed(value.accountId)
+  if (kind === "ews") return "ews:" + trimmed(value.accountId)
   var address = trimmed(value.url).toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/[^a-z0-9]+/g, "-")
@@ -195,6 +196,8 @@ function withMicrosoftAccounts(list, accountSummaries) {
   for (var i = 0; i < accounts.length; i++) {
     var account = accounts[i] || {}
     if (account.provider !== "outlook" || account.signedIn !== true) continue
+    // Read through Exchange instead - see withEwsAccounts.
+    if (account.calendarProvider === "ews") continue
     var accountId = trimmed(account.id || account.email)
     if (accountId === "") continue
     var saved = null
@@ -226,9 +229,39 @@ function withMicrosoftAccounts(list, accountSummaries) {
   return next
 }
 
+// The same mailbox's calendar through Exchange Web Services, for a tenant
+// that refuses the mail client Graph: one read-only source for its default
+// calendar. Read-only because that is what the Rust route offers - listing is
+// what such a tenant takes away - and a calendar offered as somewhere to put
+// an event it cannot take is worse than one that is not offered.
+function withEwsAccounts(list, accountSummaries) {
+  var next = copyList(list)
+  var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
+  for (var i = 0; i < accounts.length; i++) {
+    var account = accounts[i] || {}
+    if (account.provider !== "outlook" || account.signedIn !== true
+        || account.calendarProvider !== "ews") continue
+    var accountId = trimmed(account.id || account.email)
+    if (accountId === "") continue
+    var id = "ews:" + accountId
+    var saved = null
+    for (var s = 0; s < next.sources.length; s++)
+      if ((next.sources[s] || {}).id === id) saved = next.sources[s]
+    next = add(next, {
+      id: id, kind: "ews",
+      name: trimmed(account.email || account.label || "Exchange Calendar"),
+      accountId: accountId,
+      enabled: saved ? saved.enabled !== false : true,
+      readOnly: true,
+      colorKey: saved ? saved.colorKey : Palette.defaultKey(id)
+    })
+  }
+  return next
+}
+
 function comesWithAccount(source) {
   return !!source && (source.kind === "google" || source.kind === "microsoft"
-    || source.kind === "icloud")
+    || source.kind === "icloud" || source.kind === "ews")
 }
 
 function accountSummary(accountId, accountSummaries) {
@@ -343,6 +376,7 @@ function providerLabel(kind) {
   var value = trimmed(kind).toLowerCase()
   if (value === "google" || value === "gmail") return "Google"
   if (value === "microsoft" || value === "outlook") return "Microsoft"
+  if (value === "ews") return "Exchange"
   if (value === "icloud") return "iCloud"
   if (value === "hey") return "HEY"
   return "CalDAV"

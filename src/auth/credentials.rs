@@ -363,6 +363,12 @@ pub(super) fn scope(resource: &str) -> Result<&'static str, &'static str> {
         "graph" => {
             "https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Calendars.ReadWrite"
         }
+        // Exchange Web Services, for a tenant that grants the mail client
+        // Exchange but not Graph. The same resource as IMAP and SMTP - the
+        // audience is outlook.office.com either way - so it is spelled the
+        // way the mail scopes are, which is also what the granted-scope
+        // check below compares against.
+        "ews" => "offline_access https://outlook.office.com/EWS.AccessAsUser.All",
         _ => return Err("invalid_params"),
     })
 }

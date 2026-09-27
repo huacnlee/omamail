@@ -63,6 +63,7 @@ Column {
     var send = workSwitch.checked && graphSwitch.checked ? "graph" : ""
     var imap = Outlook.settings(address, tenant, send)
     imap.tenant = tenant
+    imap.calendar = workSwitch.checked && ewsSwitch.checked ? "ews" : ""
     return ({
       provider: "outlook",
       email: address,
@@ -118,6 +119,7 @@ Column {
       clientIdField.text = String(auth.configuredClientId)
     workSwitch.checked = !!auth && Microsoft.isWorkTenant(auth.tenant)
     graphSwitch.checked = !!auth && String(auth.configuredSend || "") === "graph"
+    ewsSwitch.checked = !!auth && String(auth.configuredCalendar || "") === "ews"
   }
 
   // The auth object is rebuilt when the entry is saved, so the switches are
@@ -271,6 +273,44 @@ Column {
         anchors.verticalCenter: parent.verticalCenter
         text: graphSwitch.checked ? "On" : "Off"
         color: graphSwitch.checked ? root.accentColor : root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+
+    // The calendar without Graph. A tenant that lets users consent to the mail
+    // client's Exchange access but keeps Graph's calendar permission for an
+    // administrator leaves Graph refused for good; Exchange Web Services reads
+    // the same calendar with the sign-in the mail already has.
+    Row {
+      width: parent.width
+      spacing: Style.space(10)
+      visible: workSwitch.checked && root.service && root.service.backendCanUseEwsCalendar === true
+
+      ToggleSwitch {
+        id: ewsSwitch
+        objectName: "outlook-ews-switch"
+        anchors.verticalCenter: parent.verticalCenter
+        foreground: root.textColor
+        accent: root.accentColor
+        onToggled: checked = !checked
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Read the calendar through Exchange (the tenant refuses Microsoft Graph)"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+        width: parent.width - ewsSwitch.width - ewsState.width - Style.space(20)
+      }
+
+      Text {
+        id: ewsState
+        anchors.verticalCenter: parent.verticalCenter
+        text: ewsSwitch.checked ? "On" : "Off"
+        color: ewsSwitch.checked ? root.accentColor : root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
       }

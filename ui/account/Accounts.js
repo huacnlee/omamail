@@ -56,7 +56,8 @@ function isValidEmail(value) {
 function calendarProvider(raw) {
   var account = raw || {}
   var provider = trimmed(account.provider).toLowerCase()
-  if (provider === "outlook") return "microsoft"
+  if (provider === "outlook")
+    return trimmed(account.imap && account.imap.calendar).toLowerCase() === "ews" ? "ews" : "microsoft"
   if (provider !== "imap") return ""
   var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()
   var email = trimmed(account.email).toLowerCase()
@@ -129,7 +130,11 @@ function makeImapSettings(raw) {
     // An Outlook mailbox's tenant and how it sends; neither is a secret and
     // both are empty for every other kind of mailbox.
     tenant: trimmed(values.tenant),
-    send: trimmed(values.send)
+    send: trimmed(values.send),
+    // Where an Outlook mailbox's calendar is read: Graph, or Exchange Web
+    // Services for a tenant that grants the mail client Exchange and refuses
+    // it Graph. Empty is Graph, which is what every mailbox on disk means.
+    calendar: trimmed(values.calendar).toLowerCase() === "ews" ? "ews" : ""
   }
 }
 

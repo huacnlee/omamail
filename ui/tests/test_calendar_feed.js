@@ -589,3 +589,31 @@ console.log("test_calendar_feed.js ok")
   assert.strictEqual(made.graph.subject, "Plan")
   assert.strictEqual(made.recurring, false)
 }
+
+// Exchange hands over UTC instants with a Z. A timed one is that moment; an
+// all-day one is midnight in the mailbox's zone, which arrives as the evening
+// before in UTC and must still be drawn on its own day.
+{
+  const previous = process.env.TZ
+  process.env.TZ = "Europe/Berlin"
+  const events = feed.eventsFromEws({ value: [
+    { id: "AAMk1", iCalUId: "uid-1", subject: "Standup", isAllDay: false,
+      start: { dateTime: "2026-09-28T07:00:00Z" }, end: { dateTime: "2026-09-28T07:15:00Z" },
+      location: { displayName: "Room 2" }, organizer: { emailAddress: { name: "Dana", address: "dana@example.org" } } },
+    { id: "AAMk2", iCalUId: "uid-2", subject: "Holiday", isAllDay: true,
+      start: { dateTime: "2026-09-29T22:00:00Z" }, end: { dateTime: "2026-09-30T22:00:00Z" } },
+    { id: "AAMk3", subject: "Called off", isCancelled: true, isAllDay: false,
+      start: { dateTime: "2026-09-28T09:00:00Z" }, end: { dateTime: "2026-09-28T10:00:00Z" } }
+  ] }, "ews:outlook:me@contoso.com")
+  assert.strictEqual(events.length, 2, "a cancelled occurrence is not drawn")
+  const standup = events.filter(function(e) { return e.summary === "Standup" })[0]
+  assert.strictEqual(standup.start.ms, Date.UTC(2026, 8, 28, 7, 0))
+  assert.strictEqual(standup.location, "Room 2")
+  assert.strictEqual(standup.organizer.email, "dana@example.org")
+  assert.strictEqual(standup.graphId, "", "an Exchange item id is not a Graph write address")
+  const holiday = events.filter(function(e) { return e.summary === "Holiday" })[0]
+  assert.strictEqual(holiday.start.allDay, true)
+  assert.strictEqual(new Date(holiday.start.ms).getDate(), 30, "drawn on its own day, not the evening before")
+  if (previous === undefined) delete process.env.TZ
+  else process.env.TZ = previous
+}

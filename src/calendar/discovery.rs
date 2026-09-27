@@ -276,7 +276,7 @@ fn local_name(raw: &[u8]) -> &[u8] {
     raw.rsplit(|byte| *byte == b':').next().unwrap_or(raw)
 }
 
-fn append_reference(target: &mut String, reference: &BytesRef<'_>) -> Result<(), &'static str> {
+pub(super) fn append_reference(target: &mut String, reference: &BytesRef<'_>) -> Result<(), &'static str> {
     if let Some(value) = reference
         .resolve_char_ref()
         .map_err(|_| "calendar_invalid_response")?

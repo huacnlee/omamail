@@ -501,6 +501,41 @@ function eventsFromGraph(payload, sourceId) {
   return out
 }
 
+// An Exchange calendar view, which the backend hands over in Graph's shape
+// with Exchange's own instants: UTC, with a Z. A timed one loses the Z, which
+// is how graphMoment reads UTC. An all-day one is midnight *in the mailbox's
+// zone*, sent as that moment in UTC - so 00:00 in Berlin arrives as 22:00 the
+// day before, and taking its first ten characters would draw it a day early.
+// Its day is read in this machine's zone instead, which is the zone the
+// calendar is drawn in.
+function ewsDay(value) {
+  var ms = Date.parse(String(value || ""))
+  if (!isFinite(ms)) return ""
+  var day = new Date(ms)
+  return isoDate(day) + "T00:00:00"
+}
+
+function eventsFromEws(payload, sourceId) {
+  var items = payload && Array.isArray(payload.value) ? payload.value : []
+  var shaped = []
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i] || {}
+    var copy = {}
+    for (var key in item) copy[key] = item[key]
+    var allDay = item.isAllDay === true
+    var start = String(item.start && item.start.dateTime || "")
+    var end = String(item.end && item.end.dateTime || "")
+    copy.start = { dateTime: allDay ? ewsDay(start) : start.replace(/Z$/, ""), timeZone: "UTC" }
+    copy.end = { dateTime: allDay ? ewsDay(end) : end.replace(/Z$/, ""), timeZone: "UTC" }
+    shaped.push(copy)
+  }
+  var events = eventsFromGraph({ value: shaped }, sourceId)
+  // Graph's id is its write address; an Exchange item id is not one, and the
+  // source is read-only, so nothing may offer to write to it.
+  for (var e = 0; e < events.length; e++) events[e].graphId = ""
+  return events
+}
+
 // What Graph is sent for a new or edited event. A timed event is a UTC
 // moment written without its Z and named as UTC beside it, which is how
 // Graph spells one; an all-day event is midnight to the next midnight.
@@ -541,6 +576,8 @@ function nativeRequestError(kind) {
     return "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again"
   if (kind === "google")
     return "Google calendar request failed. Sign in again and check Calendar access"
+  if (kind === "ews")
+    return "Exchange calendar request failed. Sign in to the mailbox again; if it persists, the tenant does not allow Exchange access either"
   if (kind === "caldav")
     return "CalDAV calendar request failed. Check its server address and password in Settings"
   // An iCloud calendar signs in with the mailbox's app-specific password, so

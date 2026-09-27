@@ -17,6 +17,10 @@ function frozen(list) {
 
 deepEqual(accounts.emptyList(), { version: accounts.VERSION, accounts: [], activeId: "" })
 assert.strictEqual(accounts.calendarProvider({ provider: "outlook" }), "microsoft")
+assert.strictEqual(accounts.calendarProvider({ provider: "outlook", imap: { calendar: "ews" } }), "ews")
+assert.strictEqual(accounts.makeImapSettings({ calendar: "EWS" }).calendar, "ews")
+assert.strictEqual(accounts.makeImapSettings({ calendar: "caldav" }).calendar, "",
+  "only the two known calendar routes are kept")
 assert.strictEqual(accounts.calendarProvider({ provider: "imap", email: "person@icloud.com" }), "icloud")
 assert.strictEqual(accounts.calendarProvider({ provider: "imap", email: "person@example.com",
   imap: { imapHost: "imap.mail.me.com" } }), "icloud",
