@@ -143,50 +143,161 @@ fn metadata(uid: u32, day: u8, body: &str) -> Vec<u8> {
     format!("* 1 FETCH (UID {uid} INTERNALDATE \"{day:02}-Sep-2026 12:00:00 +0000\" BODY[] {{{}}}\r\n{body})\r\n", body.len()).into_bytes()
 }
 
-#[test]
-fn aggregate_only_mail_survives_and_reused_message_ids_do_not_hide_distinct_mail() {
-    let boxes = parse_folders(b"* LIST () \"/\" INBOX\r\n* LIST (\\Archive) \"/\" Archive\r\n* LIST (\\All) \"/\" Everything\r\n* LIST (\\Trash) \"/\" Bin\r\n* LIST (\\Junk) \"/\" Junkmail\r\n").unwrap();
-    let mut scan = plan(&boxes, &json!({}), "ALL".into()).unwrap();
-    let bodies = [
-        (
-            0,
-            7,
-            23,
-            "Message-ID: <same@example.org>\r\n\r\nInbox content",
-        ),
-        (
-            1,
-            7,
-            24,
-            "Message-ID: <same@example.org>\r\n\r\nDifferent archive content",
-        ),
-        (
-            2,
-            1,
-            25,
-            "Subject: aggregate only\r\n\r\nArchived without a label",
-        ),
-        (
-            2,
-            2,
-            23,
-            "Message-ID: <same@example.org>\r\n\r\nInbox content",
-        ),
-        (2, 3, 26, "Subject: trash\r\n\r\nDeleted content"),
-        (3, 7, 26, "Subject: trash\r\n\r\nDeleted content"),
-        (2, 4, 27, "Subject: spam\r\n\r\nJunk content"),
-        (4, 7, 27, "Subject: spam\r\n\r\nJunk content"),
-    ];
-    for (folder, uid, day, body) in bodies {
-        scan.folders[folder]
-            .messages
-            .extend(fetched(&metadata(uid, day, body), &[uid], Identity::Content).unwrap());
+// Generic \All server with no server-issued identity: (folder, uid, day, raw message).
+const GENERIC: [(&str, u32, u8, &str); 10] = [
+    (
+        "INBOX",
+        7,
+        23,
+        "Message-ID: <same@example.org>\r\n\r\nInbox content",
+    ),
+    (
+        "Archive",
+        7,
+        24,
+        "Message-ID: <same@example.org>\r\n\r\nDifferent archive content",
+    ),
+    (
+        "Everything",
+        1,
+        25,
+        "Subject: aggregate only\r\n\r\nArchived without a label",
+    ),
+    (
+        "Everything",
+        2,
+        23,
+        "Message-ID: <same@example.org>\r\n\r\nInbox content",
+    ),
+    (
+        "Everything",
+        5,
+        24,
+        "Message-ID: <same@example.org>\r\n\r\nDifferent archive content",
+    ),
+    (
+        "Everything",
+        3,
+        26,
+        "Message-ID: <t@example.org>\r\n\r\nDeleted content",
+    ),
+    (
+        "Bin",
+        7,
+        26,
+        "Message-ID: <t@example.org>\r\n\r\nDeleted content",
+    ),
+    (
+        "Everything",
+        6,
+        22,
+        "Message-ID: <t@example.org>\r\n\r\nKeepers content",
+    ),
+    ("Everything", 4, 27, "Subject: spam\r\n\r\nJunk content"),
+    ("Junkmail", 7, 27, "Subject: spam\r\n\r\nJunk content"),
+];
+
+async fn generic_peer(socket: TcpStream, selected: Arc<std::sync::Mutex<Vec<String>>>) {
+    let mut wire: Wire = BufReader::new(Box::new(socket));
+    write(&mut wire, b"* OK synthetic server\r\n")
+        .await
+        .unwrap();
+    let mut folder = String::new();
+    while let Ok(bytes) = line(&mut wire).await {
+        let cmd = String::from_utf8(bytes).unwrap();
+        let mut data = String::new();
+        if cmd.starts_with("O1 LOGIN ") {
+        } else if cmd == "O1 CAPABILITY\r\n" {
+            data.push_str("* CAPABILITY IMAP4rev1 SPECIAL-USE\r\n");
+        } else if cmd == "O1 LIST \"\" \"*\"\r\n" {
+            data.push_str("* LIST () \"/\" INBOX\r\n* LIST (\\Archive) \"/\" Archive\r\n* LIST (\\All) \"/\" Everything\r\n* LIST (\\Trash) \"/\" Bin\r\n* LIST (\\Junk) \"/\" Junkmail\r\n");
+        } else if let Some(name) = cmd.strip_prefix("O1 SELECT ") {
+            folder = name.trim().trim_matches('"').to_owned();
+            selected.lock().unwrap().push(folder.clone());
+            data.push_str("* OK [UIDVALIDITY 1] stable\r\n");
+        } else if cmd.starts_with("O1 UID SEARCH ") {
+            data.push_str("* SEARCH");
+            for (_, uid, _, _) in GENERIC.iter().filter(|m| m.0 == folder) {
+                data.push_str(&format!(" {uid}"));
+            }
+            data.push_str("\r\n");
+        } else if let Some(rest) = cmd.strip_prefix("O1 UID FETCH ") {
+            let (set, fields) = rest.split_once(' ').unwrap();
+            for uid in set.split(',') {
+                let uid = uid.parse::<u32>().unwrap();
+                let (_, _, day, raw) = GENERIC
+                    .iter()
+                    .find(|m| m.0 == folder && m.1 == uid)
+                    .unwrap();
+                let mut item = format!(
+                    "* 1 FETCH (UID {uid} INTERNALDATE \"{day:02}-Sep-2026 12:00:00 +0000\""
+                );
+                if fields.contains("HEADER.FIELDS (MESSAGE-ID)") {
+                    let header = raw
+                        .lines()
+                        .find(|l| l.starts_with("Message-ID:"))
+                        .map_or(String::from("\r\n"), |l| format!("{l}\r\n\r\n"));
+                    item.push_str(&format!(
+                        " RFC822.SIZE {} BODY[HEADER.FIELDS (MESSAGE-ID)] {{{}}}\r\n{header}",
+                        raw.len(),
+                        header.len()
+                    ));
+                } else {
+                    assert!(fields.contains("BODY.PEEK[]"), "{fields}");
+                    item.push_str(&format!(" BODY[] {{{}}}\r\n{raw}", raw.len()));
+                }
+                data.push_str(&item);
+                data.push_str(")\r\n");
+            }
+        } else {
+            panic!("unexpected command: {cmd}");
+        }
+        data.push_str("O1 OK done\r\n");
+        if write(&mut wire, data.as_bytes()).await.is_err() {
+            break;
+        }
     }
-    scan.finish();
-    let first = scan.page(0, 2).unwrap();
-    assert_eq!(first["page"]["ids"], json!(["1:Everything", "7:Archive"]));
-    assert_eq!(first["page"]["estimate"], 3);
-    assert_eq!(scan.page(2, 2).unwrap()["page"]["ids"], json!(["7:INBOX"]));
+}
+
+#[tokio::test]
+async fn generic_all_server_lists_each_message_once_and_verifies_exclusions() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let selected = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = selected.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(generic_peer(socket, seen.clone()));
+        }
+    });
+    let mut p = json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,
+        "username":"synthetic","insecure":true,"testPlaintext":true},
+        "credential":"synthetic:generic","query":"search:ALL","limit":10,"requestToken":"generic-all"});
+    let mut method = "imap.list";
+    let result = loop {
+        let result = super::super::super::call(method, &p).await.unwrap();
+        if result["continuation"].is_null() {
+            break result;
+        }
+        p["continuation"] = result["continuation"].clone();
+        method = "imap.listContinue";
+    };
+    // Inbox and Archive copies are not repeated from their folders; the
+    // aggregate-only message survives; a verified Trash/Junk copy does not;
+    // a message that only shares Message-ID and size with Trash survives.
+    assert_eq!(
+        result["page"]["ids"],
+        json!([
+            "1:Everything",
+            "5:Everything",
+            "2:Everything",
+            "6:Everything"
+        ])
+    );
+    let selected = selected.lock().unwrap();
+    assert!(!selected.iter().any(|f| f == "INBOX" || f == "Archive"));
+    server.abort();
 }
 
 #[test]
@@ -342,4 +453,29 @@ async fn cancelled_parallel_scan_closes_every_busy_socket() {
         .unwrap()
         .unwrap();
     assert_eq!(call(&p).await, Err("imap_search_expired"));
+}
+
+#[test]
+fn oversized_candidates_stay_visible_instead_of_reading_their_bodies() {
+    let boxes = parse_folders(b"* LIST (\\All) \"/\" Everything\r\n* LIST (\\Trash) \"/\" Bin\r\n")
+        .unwrap();
+    let mut scan = plan(&boxes, &json!({}), "ALL".into()).unwrap();
+    let header = "Message-ID: <large>\r\n\r\n";
+    for (folder, uid) in [(0, 1), (1, 7)] {
+        let data = format!(
+            "* 1 FETCH (UID {uid} INTERNALDATE \"23-Sep-2026 12:00:00 +0000\" RFC822.SIZE {} BODY[HEADER.FIELDS (MESSAGE-ID)] {{{}}}\r\n{header})\r\n",
+            CONTENT_LIMIT + 1,
+            header.len()
+        );
+        scan.folders[folder]
+            .messages
+            .extend(fetched(data.as_bytes(), &[uid], Identity::Candidate).unwrap());
+    }
+    scan.refine();
+    assert!(scan.folders.iter().all(|f| f.pending.is_empty()));
+    scan.finish();
+    assert_eq!(
+        scan.page(0, 10).unwrap()["page"]["ids"],
+        json!(["1:Everything"])
+    );
 }

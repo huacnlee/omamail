@@ -9,6 +9,10 @@ const WORKERS: usize = 4;
 const MAX_MESSAGES: usize = 250_000;
 const MAX_SNAPSHOTS: usize = 16;
 const TTL: Duration = Duration::from_secs(300);
+// A full body is read only to verify an All/Trash overlap. Larger candidates stay
+// visible rather than risk the 32 MiB response ceiling failing the whole search.
+const CONTENT_LIMIT: u64 = 8 * 1024 * 1024;
+const CONTENT_BATCH: usize = 64;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Identity {
@@ -22,6 +26,7 @@ enum Identity {
 struct Message {
     uid: u32,
     date: i64,
+    size: u64,
     identity: Option<[u8; 32]>,
     candidate: Option<[u8; 32]>,
 }
@@ -136,6 +141,11 @@ fn plan(boxes: &Mailboxes, p: &Value, criteria: String) -> Result<Snapshot> {
             continue;
         }
         let all = has_role(folder, boxes, "\\all");
+        // \All presents every message in the store (RFC 6154). Without a server
+        // identity, physical folders would only add unverifiable duplicates of it.
+        if identity == Identity::Candidate && !all && !excluded {
+            continue;
+        }
         folders.push(FolderScan {
             name: folder.name.clone(),
             excluded,
@@ -194,11 +204,6 @@ async fn step(
     criteria: &str,
     identity: Identity,
 ) -> Result<()> {
-    let identity = if identity == Identity::Candidate && !folder.aggregate && !folder.excluded {
-        Identity::FolderUid
-    } else {
-        identity
-    };
     let (mut wire, key) = acquire(p).await?;
     let selected = command(&mut wire, &format!("SELECT {}", quote(&folder.name)?)).await?;
     let current = validity(&selected)?;
@@ -214,12 +219,25 @@ async fn step(
         }
         folder.validity = Some(current);
     } else if folder.fetched < folder.pending.len() {
-        let batch = if identity == Identity::Content {
-            1
+        let end = if identity == Identity::Content {
+            // Candidates were chosen at or under CONTENT_LIMIT, so one always fits.
+            let mut end = folder.fetched;
+            let mut bytes = 0;
+            while end < folder.pending.len() && end - folder.fetched < CONTENT_BATCH {
+                let size = folder
+                    .messages
+                    .binary_search_by_key(&folder.pending[end], |m| m.uid)
+                    .map_or(CONTENT_LIMIT, |i| folder.messages[i].size);
+                if end > folder.fetched && bytes + size > CONTENT_LIMIT {
+                    break;
+                }
+                bytes += size;
+                end += 1;
+            }
+            end
         } else {
-            4096
+            (folder.fetched + 4096).min(folder.pending.len())
         };
-        let end = (folder.fetched + batch).min(folder.pending.len());
         let window = &folder.pending[folder.fetched..end];
         let set = window
             .iter()
@@ -231,7 +249,7 @@ async fn step(
             Identity::Content => " BODY.PEEK[]",
             Identity::EmailId => " EMAILID",
             Identity::GmailId => " X-GM-MSGID",
-            Identity::Candidate => " RFC822.SIZE BODY.PEEK[HEADER]",
+            Identity::Candidate => " RFC822.SIZE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]",
         };
         let data = command(
             &mut wire,
@@ -259,7 +277,7 @@ async fn step(
 
 impl Snapshot {
     fn refine(&mut self) {
-        // Headers and sizes nominate candidates; they NEVER suppress a result.
+        // Message-ID and size nominate candidates; they NEVER suppress a result.
         // Only compare bodies for candidates shared by All and Trash/Junk.
         let excluded: BTreeSet<_> = self
             .folders
@@ -280,6 +298,7 @@ impl Snapshot {
                 .iter()
                 .filter(|m| {
                     (folder.aggregate || folder.excluded)
+                        && m.size <= CONTENT_LIMIT
                         && m.candidate.is_some_and(|id| candidates.contains(&id))
                 })
                 .map(|m| m.uid)
@@ -476,13 +495,16 @@ fn fetched(data: &[u8], window: &[u32], identity: Identity) -> Result<Vec<Messag
                     .unwrap_or(0),
                 );
             }
-            if identity == Identity::Candidate {
-                if pair[0].is("BODY[HEADER]") {
-                    header = Some(pair[1].text());
-                }
-                if pair[0].is("RFC822.SIZE") {
-                    size = pair[1].string()?.parse::<u64>().ok();
-                }
+            if identity == Identity::Candidate
+                && pair[0]
+                    .text()
+                    .to_ascii_uppercase()
+                    .starts_with(b"BODY[HEADER")
+            {
+                header = Some(pair[1].text());
+            }
+            if pair[0].is("RFC822.SIZE") {
+                size = pair[1].string()?.parse::<u64>().ok();
             }
             let bytes = match identity {
                 Identity::Content if pair[0].is("BODY[]") => Some(pair[1].text()),
@@ -508,6 +530,8 @@ fn fetched(data: &[u8], window: &[u32], identity: Identity) -> Result<Vec<Messag
                 let candidate = if identity == Identity::Candidate {
                     let mut hash = Sha256::new();
                     hash.update(size.ok_or("imap_invalid_response")?.to_be_bytes());
+                    // An absent Message-ID is an empty field, never a wildcard:
+                    // the size still has to match before any body is read.
                     hash.update(header.ok_or("imap_invalid_response")?);
                     Some(hash.finalize().into())
                 } else {
@@ -518,6 +542,7 @@ fn fetched(data: &[u8], window: &[u32], identity: Identity) -> Result<Vec<Messag
                     Message {
                         uid,
                         date,
+                        size: size.unwrap_or(0),
                         identity: id,
                         candidate,
                     },
