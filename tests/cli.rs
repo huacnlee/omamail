@@ -12,6 +12,10 @@ use std::{
 static EMPTY_HOME: AtomicU64 = AtomicU64::new(0);
 static MAIL_LIST_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(feature = "integration-test-credentials")]
+#[path = "cli/search.rs"]
+mod search;
+
 fn omamail(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(args)

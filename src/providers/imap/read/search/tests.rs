@@ -1,10 +1,13 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+mod paging;
 
 #[derive(Default)]
 struct Counts {
     searches: AtomicUsize,
     fetches: AtomicUsize,
+    inventories: AtomicUsize,
+    verifications: AtomicUsize,
     selects: AtomicUsize,
     active: AtomicUsize,
     peak: AtomicUsize,
@@ -32,19 +35,44 @@ async fn peer(socket: TcpStream, counts: Arc<Counts>) {
             folder = name.trim().trim_matches('"').to_owned();
             assert!(!["Bin", "Spam", "Root"].contains(&folder.as_str()));
             counts.selects.fetch_add(1, Ordering::SeqCst);
-            data.push_str("* OK [UIDVALIDITY 1] stable\r\n");
+            let next = if folder == "f118" || folder == "f119" {
+                5001
+            } else {
+                1
+            };
+            data.push_str(&format!(
+                "* OK [UIDVALIDITY 1] stable\r\n* OK [UIDNEXT {next}] next\r\n"
+            ));
             delay = true;
-        } else if cmd == "O1 UID SEARCH UNDELETED ALL\r\n" {
+        } else if let Some(rest) = cmd.strip_prefix("O1 UID SEARCH UID ") {
             counts.searches.fetch_add(1, Ordering::SeqCst);
+            assert!(rest.ends_with(" UNDELETED ALL\r\n"));
+            let (first, last) = rest.split_once(' ').unwrap().0.split_once(':').unwrap();
+            let (first, last) = (first.parse::<u32>().unwrap(), last.parse::<u32>().unwrap());
+            assert!(last - first < BATCH as u32);
             data.push_str("* SEARCH");
             if folder == "f118" || folder == "f119" {
-                for uid in 1..=5000 {
+                for uid in first..=last {
                     data.push_str(&format!(" {uid}"));
                 }
             }
             data.push_str("\r\n");
             delay = true;
+        } else if cmd == "O1 UID FETCH 1:5000 (UID)\r\n" {
+            counts.inventories.fetch_add(1, Ordering::SeqCst);
+            for uid in 1..=5000 {
+                data.push_str(&format!("* {uid} FETCH (UID {uid})\r\n"));
+            }
         } else if let Some(rest) = cmd.strip_prefix("O1 UID FETCH ") {
+            if rest.ends_with(" (UID)\r\n") {
+                counts.verifications.fetch_add(1, Ordering::SeqCst);
+                for uid in rest.split_once(' ').unwrap().0.split(',') {
+                    data.push_str(&format!("* 1 FETCH (UID {uid})\r\n"));
+                }
+                data.push_str("O1 OK done\r\n");
+                write(&mut wire, data.as_bytes()).await.unwrap();
+                continue;
+            }
             counts.fetches.fetch_add(1, Ordering::SeqCst);
             assert!(rest.ends_with(" (UID INTERNALDATE)\r\n"));
             for uid in rest.split_once(' ').unwrap().0.split(',') {
@@ -120,7 +148,8 @@ async fn large_account_scan_is_parallel_bounded_and_pages_reuse_snapshot() {
     assert!(rounds > 1);
     assert_eq!(first["page"]["estimate"], 10000);
     assert_eq!(first["page"]["ids"], json!(["1:f118", "1:f119"]));
-    assert_eq!(counts.searches.load(Ordering::SeqCst), 120);
+    assert_eq!(counts.inventories.load(Ordering::SeqCst), 2);
+    assert_eq!(counts.searches.load(Ordering::SeqCst), 4);
     assert_eq!(counts.fetches.load(Ordering::SeqCst), 4);
     assert!(counts.peak.load(Ordering::SeqCst) > 1);
     assert!(counts.peak.load(Ordering::SeqCst) <= WORKERS);
@@ -129,13 +158,17 @@ async fn large_account_scan_is_parallel_bounded_and_pages_reuse_snapshot() {
     let before = counts.selects.load(Ordering::SeqCst);
     let second = call(&p).await.unwrap();
     assert_eq!(second["page"]["ids"], json!(["5000:f118", "4999:f118"]));
-    assert_eq!(counts.selects.load(Ordering::SeqCst), before);
+    assert_eq!(counts.selects.load(Ordering::SeqCst), before + 1);
+    assert_eq!(counts.inventories.load(Ordering::SeqCst), 2);
+    assert_eq!(counts.searches.load(Ordering::SeqCst), 4);
+    assert_eq!(counts.fetches.load(Ordering::SeqCst), 4);
+    assert_eq!(counts.verifications.load(Ordering::SeqCst), 3);
     p["query"] = json!("search:SUBJECT invoice");
     assert_eq!(call(&p).await, Err("imap_search_expired"));
     p["query"] = json!("search:ALL");
-    p["credential"] = json!("synthetic:other-account-secret");
+    p["settings"]["username"] = json!("other-account");
     assert_eq!(call(&p).await, Err("imap_search_expired"));
-    assert_eq!(counts.selects.load(Ordering::SeqCst), before);
+    assert_eq!(counts.selects.load(Ordering::SeqCst), before + 1);
     server.abort();
 }
 
@@ -214,7 +247,7 @@ async fn generic_peer(socket: TcpStream, selected: Arc<std::sync::Mutex<Vec<Stri
         } else if let Some(name) = cmd.strip_prefix("O1 SELECT ") {
             folder = name.trim().trim_matches('"').to_owned();
             selected.lock().unwrap().push(folder.clone());
-            data.push_str("* OK [UIDVALIDITY 1] stable\r\n");
+            data.push_str("* OK [UIDVALIDITY 1] stable\r\n* OK [UIDNEXT 8] next\r\n");
         } else if cmd.starts_with("O1 UID SEARCH ") {
             data.push_str("* SEARCH");
             for (_, uid, _, _) in GENERIC.iter().filter(|m| m.0 == folder) {
@@ -223,6 +256,26 @@ async fn generic_peer(socket: TcpStream, selected: Arc<std::sync::Mutex<Vec<Stri
             data.push_str("\r\n");
         } else if let Some(rest) = cmd.strip_prefix("O1 UID FETCH ") {
             let (set, fields) = rest.split_once(' ').unwrap();
+            if fields == "(UID)\r\n" {
+                let wanted: Vec<u32> = if set == "1:7" {
+                    GENERIC
+                        .iter()
+                        .filter(|m| m.0 == folder)
+                        .map(|m| m.1)
+                        .collect()
+                } else {
+                    set.split(',').map(|uid| uid.parse().unwrap()).collect()
+                };
+                for (_, uid, _, _) in GENERIC
+                    .iter()
+                    .filter(|m| m.0 == folder && wanted.contains(&m.1))
+                {
+                    data.push_str(&format!("* 1 FETCH (UID {uid})\r\n"));
+                }
+                data.push_str("O1 OK done\r\n");
+                write(&mut wire, data.as_bytes()).await.unwrap();
+                continue;
+            }
             for uid in set.split(',') {
                 let uid = uid.parse::<u32>().unwrap();
                 let (_, _, day, raw) = GENERIC
@@ -348,6 +401,29 @@ fn server_identity_uses_protocol_fields_not_sender_headers() {
 }
 
 #[test]
+fn server_identity_representative_is_stable_across_reordered_folder_discovery() {
+    for list in [
+        b"* LIST () \"/\" B\r\n* LIST () \"/\" A\r\n".as_slice(),
+        b"* LIST () \"/\" A\r\n* LIST () \"/\" B\r\n".as_slice(),
+    ] {
+        let boxes = parse_folders(list).unwrap();
+        let mut scan = plan(&boxes, &json!({}), "ALL".into()).unwrap();
+        for folder in &mut scan.folders {
+            folder.validity = Some(1);
+            folder.messages.push(Message {
+                size: 0,
+                uid: 7,
+                date: 123,
+                identity: Some([1; 32]),
+                candidate: None,
+            });
+        }
+        scan.finish();
+        assert_eq!(scan.page(None, 10).unwrap()["page"]["ids"], json!(["7:A"]));
+    }
+}
+
+#[test]
 fn matching_headers_only_nominate_candidates_and_different_bodies_survive() {
     let boxes = parse_folders(b"* LIST (\\All) \"/\" Everything\r\n* LIST (\\Trash) \"/\" Bin\r\n")
         .unwrap();
@@ -392,7 +468,7 @@ fn matching_headers_only_nominate_candidates_and_different_bodies_survive() {
     }
     scan.finish();
     assert_eq!(
-        scan.page(0, 10).unwrap()["page"]["ids"],
+        scan.page(None, 10).unwrap()["page"]["ids"],
         json!(["3:Everything", "1:Everything"])
     );
 }
@@ -475,7 +551,7 @@ fn oversized_candidates_stay_visible_instead_of_reading_their_bodies() {
     assert!(scan.folders.iter().all(|f| f.pending.is_empty()));
     scan.finish();
     assert_eq!(
-        scan.page(0, 10).unwrap()["page"]["ids"],
+        scan.page(None, 10).unwrap()["page"]["ids"],
         json!(["1:Everything"])
     );
 }

@@ -1,12 +1,17 @@
-//! Bounded account-wide scans. Continuations and pages refer to a short-lived,
-//! account/query-bound snapshot; no sender header is a message identity.
+//! Bounded account-wide scans with portable page cursors. In-progress work has
+//! a continuation; completed snapshots are only a disposable paging cache.
 use super::*;
+mod cursor;
+mod page;
+use cursor::{Cursor, Position};
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use sha2::{Digest, Sha256};
 use std::sync::Weak;
 
 const WORKERS: usize = 4;
 const MAX_MESSAGES: usize = 250_000;
+const MAX_UIDS: usize = 1_000_000;
+const BATCH: usize = 4096;
 const MAX_SNAPSHOTS: usize = 16;
 const TTL: Duration = Duration::from_secs(300);
 // A full body is read only to verify an All/Trash overlap. Larger candidates stay
@@ -44,7 +49,7 @@ struct FolderScan {
 
 impl FolderScan {
     fn size(&self) -> usize {
-        self.pending.len().max(self.messages.len())
+        self.pending.len() + self.messages.len()
     }
     fn done(&self) -> bool {
         self.validity.is_some() && self.fetched == self.pending.len()
@@ -54,12 +59,16 @@ impl FolderScan {
 struct Snapshot {
     token: String,
     owner: [u8; 32],
+    authorization: [u8; 32],
     request: String,
+    page_request: String,
     criteria: String,
     since: Instant,
     identity: Identity,
     folders: Vec<FolderScan>,
     ordered: Option<Vec<(usize, usize)>>,
+    paging: bool,
+    verified: BTreeSet<(usize, usize)>,
 }
 
 static SNAPSHOTS: OnceLock<tokio::sync::Mutex<Vec<Snapshot>>> = OnceLock::new();
@@ -77,9 +86,40 @@ async fn gate(owner: [u8; 32]) -> Arc<tokio::sync::Semaphore> {
     gate
 }
 
+async fn worker<T>(
+    gate: Arc<tokio::sync::Semaphore>,
+    work: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    tokio::time::timeout(Duration::from_secs(12), async {
+        let _permit = gate.acquire().await.map_err(|_| "worker_failed")?;
+        work.await
+    })
+    .await
+    .unwrap_or(Err("request_timed_out"))
+}
+
 fn owner(p: &Value) -> [u8; 32] {
-    Sha256::digest(json!([p["accountId"], p["settings"], p["credential"], p["oauth"]]).to_string())
-        .into()
+    let settings = &p["settings"];
+    Sha256::digest(
+        json!([
+            p["accountId"],
+            settings["imapHost"]
+                .as_str()
+                .unwrap_or("")
+                .to_ascii_lowercase(),
+            settings["imapPort"],
+            settings["username"],
+            p["oauth"] == true
+        ])
+        .to_string(),
+    )
+    .into()
+}
+
+fn authorization(p: &Value) -> [u8; 32] {
+    // A changed credential/transport must authenticate on the wire before it
+    // can reuse results. This digest stays private, never inside a cursor.
+    Sha256::digest(json!([p["settings"], p["credential"], p["oauth"]]).to_string()).into()
 }
 
 fn token() -> Result<String> {
@@ -171,21 +211,29 @@ fn plan(boxes: &Mailboxes, p: &Value, criteria: String) -> Result<Snapshot> {
     Ok(Snapshot {
         token: token()?,
         owner: owner(p),
+        authorization: authorization(p),
         request: p["requestToken"].as_str().unwrap_or("").into(),
+        page_request: p["pageToken"].as_str().unwrap_or("").into(),
         criteria,
         since: Instant::now(),
         identity,
         folders,
         ordered: None,
+        paging: false,
+        verified: BTreeSet::new(),
     })
 }
 
 fn validity(data: &[u8]) -> Result<u32> {
+    selected_number(data, "UIDVALIDITY")
+}
+
+fn selected_number(data: &[u8], wanted: &str) -> Result<u32> {
     for row in nodes(data)? {
         if row.len() >= 3 && row[0].is("*") && row[1].is("OK") {
             let code = row[2].string()?;
             if let Some((name, value)) = code.trim_matches(['[', ']']).split_once(' ') {
-                if name.eq_ignore_ascii_case("UIDVALIDITY") {
+                if name.eq_ignore_ascii_case(wanted) {
                     return value
                         .parse::<u32>()
                         .ok()
@@ -203,18 +251,26 @@ async fn step(
     p: &Value,
     criteria: &str,
     identity: Identity,
+    after: Option<&Position>,
 ) -> Result<()> {
     let (mut wire, key) = acquire(p).await?;
     let selected = command(&mut wire, &format!("SELECT {}", quote(&folder.name)?)).await?;
     let current = validity(&selected)?;
-    if folder.validity.is_some_and(|old| old != current) {
+    if folder.validity.is_some_and(|old| old != current)
+        || after.is_some_and(|a| a.folder == folder.name && a.validity != current)
+    {
         return Err("imap_search_expired");
     }
     if folder.validity.is_none() {
-        let live = if folder.excluded { "" } else { "UNDELETED " };
-        let data = command(&mut wire, &format!("UID SEARCH {live}{criteria}")).await?;
-        folder.pending = search_uids(&data)?;
-        if folder.pending.len() > MAX_MESSAGES {
+        // SEARCH returns all matches on one line, whose transport limit is
+        // 64 KiB. Inventory UIDs through separate FETCH responses instead,
+        // then SEARCH only bounded windows of these existing UIDs. Capturing
+        // UIDNEXT excludes later arrivals and avoids walking sparse UID gaps.
+        let ceiling = selected_number(&selected, "UIDNEXT")? - 1;
+        if ceiling > 0 {
+            folder.pending = inventory(&mut wire, ceiling).await?;
+        }
+        if folder.pending.len() > MAX_UIDS {
             return Err("mail_response_too_large");
         }
         folder.validity = Some(current);
@@ -236,9 +292,32 @@ async fn step(
             }
             end
         } else {
-            (folder.fetched + 4096).min(folder.pending.len())
+            (folder.fetched + BATCH).min(folder.pending.len())
         };
-        let window = &folder.pending[folder.fetched..end];
+        let inventory = &folder.pending[folder.fetched..end];
+        let matches;
+        let window = if identity == Identity::Content {
+            inventory
+        } else {
+            let first = inventory[0];
+            let last = inventory[inventory.len() - 1];
+            let live = if folder.excluded { "" } else { "UNDELETED " };
+            let data = command(
+                &mut wire,
+                &format!("UID SEARCH UID {first}:{last} {live}{criteria}"),
+            )
+            .await?;
+            matches = search_uids(&data)?
+                .into_iter()
+                .filter(|uid| inventory.binary_search(uid).is_ok())
+                .collect::<Vec<_>>();
+            &matches
+        };
+        if window.is_empty() {
+            folder.fetched = end;
+            release(wire, key).await;
+            return Ok(());
+        }
         let set = window
             .iter()
             .map(u32::to_string)
@@ -273,6 +352,28 @@ async fn step(
     }
     release(wire, key).await;
     Ok(())
+}
+
+async fn inventory(wire: &mut Wire, ceiling: u32) -> Result<Vec<u32>> {
+    write(
+        wire,
+        format!("O1 UID FETCH 1:{ceiling} (UID)\r\n").as_bytes(),
+    )
+    .await?;
+    let mut uids = BTreeSet::new();
+    response_each(wire, "O1", false, |record| {
+        uids.extend(
+            fetched_dates(record)?
+                .into_keys()
+                .filter(|uid| *uid <= ceiling),
+        );
+        if uids.len() > MAX_UIDS {
+            return Err("mail_response_too_large");
+        }
+        Ok(())
+    })
+    .await?;
+    Ok(uids.into_iter().collect())
 }
 
 impl Snapshot {
@@ -325,35 +426,40 @@ impl Snapshot {
                 }
             }
         }
-        ordered
-            .sort_by_key(|(f, m)| (self.folders[*f].rank, *f, self.folders[*f].messages[*m].uid));
+        // A rescan may receive LIST in a different order. Choose the same
+        // representative for a server-issued identity independently of that.
+        ordered.sort_by(|(af, am), (bf, bm)| {
+            let a = &self.folders[*af];
+            let b = &self.folders[*bf];
+            (a.rank, &a.name, a.messages[*am].uid).cmp(&(b.rank, &b.name, b.messages[*bm].uid))
+        });
         let mut seen = BTreeMap::new();
         ordered.retain(|(f, m)| {
             self.folders[*f].messages[*m]
                 .identity
                 .is_none_or(|id| *seen.entry(id).or_insert(*f) == *f)
         });
-        ordered.sort_by(|(af, am), (bf, bm)| {
-            let a = &self.folders[*af].messages[*am];
-            let b = &self.folders[*bf].messages[*bm];
-            b.date
-                .cmp(&a.date)
-                .then_with(|| self.folders[*af].name.cmp(&self.folders[*bf].name))
-                .then_with(|| b.uid.cmp(&a.uid))
-        });
+        ordered.sort_by(|a, b| self.order(*a).cmp(&self.order(*b)));
         self.ordered = Some(ordered);
+        self.paging = true;
+        for folder in &mut self.folders {
+            folder.pending = Vec::new();
+            folder.fetched = 0;
+        }
     }
 
-    fn page(&self, offset: usize, limit: usize) -> Result<Value> {
-        let Some(ordered) = &self.ordered else {
-            return Ok(
-                json!({"page":{"ids":[],"threadIds":[],"estimate":0,"nextPageToken":""},
-                "continuation":self.token}),
-            );
-        };
-        if offset > ordered.len() {
-            return Err("invalid_params");
-        }
+    fn order(
+        &self,
+        (f, m): (usize, usize),
+    ) -> (std::cmp::Reverse<i64>, &str, std::cmp::Reverse<u32>) {
+        let folder = &self.folders[f];
+        let message = &folder.messages[m];
+        cursor::order(message.date, &folder.name, message.uid)
+    }
+
+    fn page(&self, cursor: Option<&Cursor>, limit: usize) -> Result<Value> {
+        let ordered = self.ordered.as_ref().ok_or("imap_invalid_response")?;
+        let offset = self.offset(cursor);
         let ids: Vec<_> = ordered
             .iter()
             .skip(offset)
@@ -366,10 +472,37 @@ impl Snapshot {
             })
             .collect();
         let next = offset + ids.len();
+        let next_cursor = if next < ordered.len() {
+            let (f, m) = ordered[next - 1];
+            let folder = &self.folders[f];
+            let message = &folder.messages[m];
+            Cursor::new(
+                self.owner,
+                &self.criteria,
+                Position {
+                    date: message.date,
+                    folder: folder.name.clone(),
+                    uid: message.uid,
+                    validity: folder.validity.ok_or("imap_invalid_response")?,
+                },
+                self.token.clone(),
+            )
+            .encode()?
+        } else {
+            String::new()
+        };
         Ok(
             json!({"page":{"ids":ids,"threadIds":[],"estimate":ordered.len(),
-            "nextPageToken":if next < ordered.len() { format!("{}:{next}", self.token) } else { String::new() }}}),
+            "nextPageToken":next_cursor}}),
         )
+    }
+
+    fn offset(&self, cursor: Option<&Cursor>) -> usize {
+        cursor.map_or(0, |c| {
+            self.ordered.as_ref().map_or(0, |ordered| {
+                ordered.partition_point(|i| self.order(*i) <= c.after.order())
+            })
+        })
     }
 }
 
@@ -382,45 +515,69 @@ pub(super) async fn call(p: &Value) -> Result<Value> {
     let limit = p["limit"].as_u64().unwrap_or(25).clamp(1, 100) as usize;
     let page = p["pageToken"].as_str().unwrap_or("");
     let continuation = p["continuation"].as_str().unwrap_or("");
-    let (id, offset) = if !continuation.is_empty() {
-        if !page.is_empty() {
+    let owner = owner(p);
+    let authorization = authorization(p);
+    let cursor = if page.is_empty() {
+        None
+    } else {
+        Some(Cursor::decode(page, owner, &criteria)?)
+    };
+    let id = if !continuation.is_empty() {
+        if continuation.len() > 128 || !safe(continuation) {
             return Err("invalid_params");
         }
-        (continuation, 0)
-    } else if !page.is_empty() {
-        let (id, offset) = page.split_once(':').ok_or("invalid_params")?;
-        (id, offset.parse::<usize>().map_err(|_| "invalid_params")?)
+        continuation
     } else {
-        ("", 0)
+        cursor.as_ref().map_or("", |c| c.snapshot.as_str())
     };
-    let owner = owner(p);
-    let mut snapshot = if !id.is_empty() {
+    let cached = if !id.is_empty() {
         let mut snapshots = SNAPSHOTS.get_or_init(Default::default).lock().await;
         snapshots.retain(|s| s.since.elapsed() < TTL);
-        let index = snapshots
-            .iter()
-            .position(|s| {
-                s.token == id
-                    && s.owner == owner
-                    && s.criteria == criteria
-                    && (continuation.is_empty()
-                        || s.request == p["requestToken"].as_str().unwrap_or(""))
-            })
-            .ok_or("imap_search_expired")?;
-        if !page.is_empty() && snapshots[index].ordered.is_none() {
-            return Err("invalid_params");
-        }
-        snapshots.remove(index)
+        let index = snapshots.iter().position(|s| {
+            s.token == id
+                && s.owner == owner
+                && s.criteria == criteria
+                && if continuation.is_empty() {
+                    s.ordered.is_some() && !s.paging && s.authorization == authorization
+                } else {
+                    (s.ordered.is_none() || s.paging)
+                        && s.request == p["requestToken"].as_str().unwrap_or("")
+                        && s.page_request == page
+                }
+        });
+        index.map(|index| snapshots.remove(index))
     } else {
-        let (mut wire, key) = acquire(p).await?;
-        let boxes = mailboxes(&mut wire, p).await?;
-        release(wire, key).await;
+        None
+    };
+    let mut snapshot = if let Some(mut snapshot) = cached {
+        if continuation.is_empty() {
+            snapshot.request = p["requestToken"].as_str().unwrap_or("").into();
+            snapshot.page_request = page.into();
+            snapshot.paging = true;
+            snapshot.verified.clear();
+        }
+        snapshot
+    } else {
+        if !continuation.is_empty() {
+            return Err("imap_search_expired");
+        }
+        let boxes = worker(gate(owner).await, async {
+            let (mut wire, key) = acquire(p).await?;
+            let boxes = mailboxes(&mut wire, p).await?;
+            release(wire, key).await;
+            Ok(boxes)
+        })
+        .await?;
         plan(&boxes, p, criteria)?
     };
+    if snapshot.authorization != authorization {
+        snapshot.verified.clear();
+    }
     if snapshot.ordered.is_none() {
         let gate = gate(owner).await;
         let identity = snapshot.identity;
         let criteria = &snapshot.criteria;
+        let after = cursor.as_ref().map(|c| &c.after);
         let mut work = FuturesUnordered::new();
         for folder in snapshot
             .folders
@@ -429,20 +586,25 @@ pub(super) async fn call(p: &Value) -> Result<Value> {
             .take(WORKERS)
         {
             let gate = gate.clone();
-            work.push(async move {
-                tokio::time::timeout(Duration::from_secs(12), async {
-                    let _permit = gate.acquire().await.map_err(|_| "worker_failed")?;
-                    step(folder, p, criteria, identity).await
-                })
-                .await
-                .unwrap_or(Err("request_timed_out"))
-            });
+            work.push(worker(gate, step(folder, p, criteria, identity, after)));
         }
         while let Some(result) = work.next().await {
             result?;
         }
         drop(work);
-        if snapshot.folders.iter().map(FolderScan::size).sum::<usize>() > MAX_MESSAGES {
+        if snapshot
+            .folders
+            .iter()
+            .map(|f| f.pending.len())
+            .sum::<usize>()
+            > MAX_UIDS
+            || snapshot
+                .folders
+                .iter()
+                .map(|f| f.messages.len())
+                .sum::<usize>()
+                > MAX_MESSAGES
+        {
             return Err("mail_response_too_large");
         }
         if snapshot.folders.iter().all(FolderScan::done) && snapshot.identity == Identity::Candidate
@@ -452,9 +614,19 @@ pub(super) async fn call(p: &Value) -> Result<Value> {
         if snapshot.folders.iter().all(FolderScan::done) {
             snapshot.finish();
         }
+        snapshot.authorization = authorization;
+        snapshot.since = Instant::now();
+    } else {
+        snapshot.paging = !snapshot.verify_page(p, cursor.as_ref(), limit).await?;
+        snapshot.authorization = authorization;
     }
-    let result = snapshot.page(offset, limit)?;
-    snapshot.since = Instant::now();
+    let result = if snapshot.ordered.is_none() || snapshot.paging {
+        json!({"page":{"ids":[],"threadIds":[],"estimate":0,"nextPageToken":""},"continuation":snapshot.token})
+    } else {
+        snapshot.verified.clear();
+        snapshot.page(cursor.as_ref(), limit)?
+    };
+    let size = snapshot.folders.iter().map(FolderScan::size).sum::<usize>();
     let mut snapshots = SNAPSHOTS.get_or_init(Default::default).lock().await;
     snapshots.retain(|s| s.since.elapsed() < TTL);
     while snapshots.len() >= MAX_SNAPSHOTS
@@ -462,7 +634,8 @@ pub(super) async fn call(p: &Value) -> Result<Value> {
             .iter()
             .map(|s| s.folders.iter().map(FolderScan::size).sum::<usize>())
             .sum::<usize>()
-            > MAX_MESSAGES * 3
+            + size
+            > MAX_UIDS * 2
     {
         snapshots.remove(0);
     }
