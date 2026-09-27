@@ -510,7 +510,7 @@ impl Session {
         {
             return Err("imap_list_incomplete");
         }
-        if let Some(continuation) = page["continuation"]
+        while let Some(continuation) = page["continuation"]
             .as_str()
             .filter(|token| !token.is_empty())
         {
@@ -519,12 +519,6 @@ impl Session {
             if page["warning"]
                 .as_str()
                 .is_some_and(|warning| !warning.is_empty())
-            {
-                return Err("imap_list_incomplete");
-            }
-            if page["continuation"]
-                .as_str()
-                .is_some_and(|token| !token.is_empty())
             {
                 return Err("imap_list_incomplete");
             }

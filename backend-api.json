@@ -184,6 +184,36 @@
   ],
   "contractCases": [
     {
+      "name": "IMAP account search refuses an expired page snapshot",
+      "method": "imap.list",
+      "params": {
+        "query": "search:ALL",
+        "pageToken": "expired-snapshot:2",
+        "settings": {"username": "synthetic", "imapHost": "imap.example.invalid", "imapPort": 993},
+        "credential": "synthetic:secret"
+      },
+      "errorCode": -32000,
+      "equals": {"message": "imap_search_expired"}
+    },
+    {
+      "name": "IMAP text search includes archived mail",
+      "method": "providers.resolve",
+      "params": {"provider": "imap", "operation": "query", "search": "subject:invoice"},
+      "equals": {"value": "search:SUBJECT \"invoice\""}
+    },
+    {
+      "name": "Outlook text search includes archived mail",
+      "method": "providers.resolve",
+      "params": {"provider": "outlook", "operation": "query", "search": "invoice"},
+      "equals": {"value": "search:TEXT \"invoice\""}
+    },
+    {
+      "name": "IMAP address search includes archived mail",
+      "method": "providers.resolve",
+      "params": {"provider": "imap", "operation": "addressQuery", "field": "from", "value": "ada@example.org"},
+      "equals": {"value": "search:FROM \"ada@example.org\""}
+    },
+    {
       "name": "IMAP All mail resolves to account-wide listing",
       "method": "providers.resolve",
       "params": {"provider": "imap", "operation": "query", "mailbox": "all"},
@@ -769,6 +799,6 @@
   ],
   "unreleased": {
     "methods": [],
-    "cases": ["IMAP All mail resolves to account-wide listing"]
+    "cases": ["IMAP All mail resolves to account-wide listing", "IMAP text search includes archived mail", "Outlook text search includes archived mail", "IMAP address search includes archived mail", "IMAP account search refuses an expired page snapshot"]
   }
 }

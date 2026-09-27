@@ -88,6 +88,16 @@ meaning require contract review, updated fixtures and a higher API revision.
 predates this field; only that exact version is recognized as legacy API 1. Missing
 revision information from any other version is refused.
 
+## API 6 account-wide IMAP search
+
+IMAP and Outlook text searches, and IMAP address searches, resolve to `search:<criteria>`. IMAP All mail resolves to `search:ALL`; folder queries remain folder-scoped. The IMAP UI keeps Archive on API 5 and exposes All mail starting at API 6.
+
+`imap.list` and `imap.listContinue` return an empty `page` plus an opaque `continuation` until the account-wide scan has finished. Clients must continue with the same account, query and request token; partial scans are not a globally newest-first page. A completed page's opaque `nextPageToken` refers to the same sorted snapshot, so fetching another page does not rescan the account. Snapshots expire after five minutes without use and may be evicted under memory pressure. An expired, mismatched or UIDVALIDITY-invalidated snapshot returns `imap_search_expired`; refresh starts a new search.
+
+Each call advances at most four folders, with at most four concurrent search workers per account and a 12-second worker deadline inside the existing 22-second request deadline. Metadata batches contain at most 4096 UIDs. Scans are limited to 2048 folders and 250,000 matching folder/UID identities; oversized responses fail explicitly instead of presenting incomplete results as complete. The backend retains at most 16 snapshots with a combined budget of one million matching identities.
+
+Search includes aggregate All Mail destinations and excludes Trash/Junk membership from aggregate results. Cross-folder copies are collapsed using server-provided `EMAILID`/`X-GM-MSGID`. On generic servers, complete headers and RFC822.SIZE nominate possible overlaps between All and Trash/Junk, then SHA-256 of complete message bytes verifies those candidates before excluding any aggregate result. This fallback reads one candidate per folder step with `BODY.PEEK[]` and retains only its digest; messages without possible excluded-folder overlaps need no body read. Generic folder/UID copies are otherwise preserved, so overlapping folders may produce duplicate rows. A sender-written Message-ID, headers or size alone never suppress a result. Copies within one physical folder remain distinct.
+
 ## Released and unreleased: one step ahead of the pin
 
 Backends ship in batches, not per merge, so `main` may implement an API the pinned

@@ -38,6 +38,13 @@ var MAILBOXES = [
     "icon": "sent"
   },
   {
+    "key": "archive",
+    "label": "Archive",
+    "icon": "archive",
+    "maximumApiVersion": 5,
+    "optional": true
+  },
+  {
     "key": "all",
     "label": "All mail",
     "icon": "archive",

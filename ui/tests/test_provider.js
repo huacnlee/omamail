@@ -2,6 +2,13 @@ const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
 const provider = load("providers/Registry.js")
+for (const api of [1, 5, 6, 7]) {
+  const boxes = provider.mailboxes("imap", [], api)
+  assert.strictEqual(boxes.some(box => box.key === "archive"), api < 6)
+  assert.strictEqual(boxes.some(box => box.key === "all"), api >= 6)
+  assert.strictEqual(boxes.find(box => box.key === (api < 6 ? "archive" : "all")).query,
+    api < 6 ? "folder:\\Archive" : "search:ALL")
+}
 // Historical query assertions stay as oracles; Rust independently matches the
 // captured parameter/result fixtures. Production Registry has no query engine.
 const legacy = load("tests/oracles/providers/Registry.js")
@@ -253,7 +260,7 @@ assert.strictEqual(provider.mailboxes("imap", ["archive"]).length, dropped.lengt
 
 assert.strictEqual(provider.hasMailbox("gmail", "all"), true)
 assert.strictEqual(provider.hasMailbox("imap", "all"), true)
-assert.strictEqual(provider.hasMailbox("imap", "archive"), false, "All mail replaces the separate Archive destination")
+assert.strictEqual(provider.hasMailbox("imap", "archive"), true, "Archive remains available to API 5")
 assert.strictEqual(provider.hasMailbox("gmail", "drafts"), true)
 assert.strictEqual(provider.hasMailbox("hey", "drafts"), true)
 assert.strictEqual(provider.hasMailbox("imap", "drafts"), true)

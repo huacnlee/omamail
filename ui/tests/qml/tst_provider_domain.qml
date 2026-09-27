@@ -42,6 +42,8 @@ Item {
       verify(!gmail.some(function(box) { return box.key === "archive" }))
       compare(Provider.mailboxFor("imap", "all").query, "search:ALL")
       verify(!Provider.mailboxes("imap", [], 5).some(function(box) { return box.key === "all" }))
+      verify(Provider.mailboxes("imap", [], 5).some(function(box) { return box.key === "archive" }))
+      verify(!Provider.mailboxes("imap", [], 6).some(function(box) { return box.key === "archive" }))
       verify(Provider.mailboxes("imap", [], 6).some(function(box) { return box.key === "all" }))
       compare(Provider.mailboxFor("gmail", "all").query,
         "in:anywhere -in:spam -in:trash")

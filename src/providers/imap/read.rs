@@ -2,6 +2,7 @@
 use super::*;
 use base64::engine::general_purpose::{STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 use std::collections::{BTreeMap, BTreeSet};
+mod search;
 #[derive(Clone, Debug, PartialEq)]
 enum Node {
     Text(Vec<u8>),
@@ -478,9 +479,6 @@ fn page(
     json!({"ids":ids,"threadIds":[],"nextPageToken":if can_continue{next.to_string()}else{String::new()},"estimate":if more{ordered.len().max(offset+limit+1)}else{ordered.len()}})
 }
 async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
-    if let Some(criteria) = p["query"].as_str().unwrap_or("").strip_prefix("search:") {
-        return search_mailboxes(w, p, boxes, criteria).await;
-    }
     let limit = p["limit"].as_u64().unwrap_or(25).clamp(1, 100) as usize;
     let offset = p["pageToken"]
         .as_str()
@@ -576,132 +574,6 @@ async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
     found.retain(|uid| dates.contains_key(uid));
     Ok(json!({"page":page(&found,&dates,&folder,offset,limit,false)}))
 }
-// Aggregate mailboxes (All Mail / Flagged) can contain excluded mail and
-// duplicate physical folders. Search selectable destinations instead.
-fn searchable_folder(folder: &Folder, boxes: &Mailboxes) -> bool {
-    ![
-        "trash",
-        "deleted items",
-        "deleted messages",
-        "junk",
-        "junk email",
-        "spam",
-    ]
-    .iter()
-    .any(|name| folder.name.eq_ignore_ascii_case(name))
-        && !folder.flags.iter().any(|flag| {
-            ["\\noselect", "\\all", "\\flagged", "\\trash", "\\junk"]
-                .iter()
-                .any(|excluded| flag.eq_ignore_ascii_case(excluded))
-        })
-        && !["\\trash", "\\junk", "\\all"].iter().any(|role| {
-            boxes
-                .special
-                .get(*role)
-                .is_some_and(|name| name == &folder.name)
-        })
-}
-
-async fn search_mailboxes(
-    w: &mut Wire,
-    p: &Value,
-    boxes: &Mailboxes,
-    criteria: &str,
-) -> Result<Value> {
-    // Apply the same validation as folder-scoped queries before writing any command.
-    let (_, criteria) = query(&format!("folder:INBOX {criteria}"))?;
-    if p.get("continuation").is_some() {
-        return Err("invalid_params");
-    }
-    let limit = p["limit"].as_u64().unwrap_or(25).clamp(1, 100) as usize;
-    let offset = p["pageToken"]
-        .as_str()
-        .unwrap_or("")
-        .parse::<usize>()
-        .unwrap_or(0)
-        .min(10_000_000);
-    let mut found = BTreeMap::new();
-    for folder in boxes.folders.iter().filter(|f| searchable_folder(f, boxes)) {
-        command(w, &format!("SELECT {}", quote(&folder.name)?)).await?;
-        let uids = search_uids(&command(w, &format!("UID SEARCH UNDELETED {criteria}")).await?)?;
-        for window in uids.chunks(4096) {
-            let set = window
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(",");
-            let data = command(
-                w,
-                &format!(
-                    "UID FETCH {set} (UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])"
-                ),
-            )
-            .await?;
-            for message in parse_messages(&data, &folder.name, false, boxes)? {
-                let (uid, _) = message_id(message["id"].as_str().ok_or("imap_invalid_response")?)?;
-                if window.binary_search(&uid).is_ok() {
-                    let identity = message["payload"]["headers"]
-                        .as_array()
-                        .and_then(|headers| {
-                            headers.iter().find(|h| {
-                                h["name"]
-                                    .as_str()
-                                    .is_some_and(|name| name.eq_ignore_ascii_case("message-id"))
-                            })
-                        })
-                        .and_then(|h| h["value"].as_str())
-                        .unwrap_or("")
-                        .trim()
-                        .to_owned();
-                    found.insert(
-                        (folder.name.clone(), uid),
-                        (message["internalDate"].as_i64().unwrap_or(0), identity),
-                    );
-                }
-            }
-        }
-    }
-    let mut ordered: Vec<_> = found.into_iter().collect();
-    // One message can appear in several IMAP folders (notably Proton labels).
-    // Prefer its Inbox/system-folder identity so actions address that location.
-    // Missing Message-IDs and distinct UIDs within one folder remain distinct.
-    let rank = |folder: &str| {
-        if folder.eq_ignore_ascii_case("INBOX") {
-            0
-        } else if boxes.special.values().any(|name| name == folder) {
-            1
-        } else {
-            2
-        }
-    };
-    ordered.sort_by(|a, b| rank(&a.0.0).cmp(&rank(&b.0.0)).then_with(|| a.0.cmp(&b.0)));
-    let mut seen = BTreeMap::new();
-    ordered.retain(|((folder, _), (_, identity))| {
-        identity.is_empty()
-            || seen
-                .entry(identity.clone())
-                .or_insert_with(|| folder.clone())
-                == folder
-    });
-    ordered.sort_by(|a, b| {
-        b.1.0
-            .cmp(&a.1.0)
-            .then_with(|| a.0.0.cmp(&b.0.0))
-            .then_with(|| b.0.1.cmp(&a.0.1))
-    });
-    let ids: Vec<_> = ordered
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .map(|((folder, uid), _)| format!("{uid}:{folder}"))
-        .collect();
-    let next = offset + ids.len();
-    Ok(
-        json!({"page":{"ids":ids,"threadIds":[],"estimate":ordered.len(),
-        "nextPageToken":if next < ordered.len() { next.to_string() } else { String::new() }}}),
-    )
-}
-
 pub(crate) fn message_id(id: &str) -> Result<(u32, String)> {
     let (uid, folder) = id.split_once(':').ok_or("invalid_params")?;
     if !uid.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -962,6 +834,11 @@ pub(super) fn validate(method: &str, p: &Value) -> Result<()> {
     Ok(())
 }
 pub(super) async fn call(method: &str, p: &Value) -> Result<Value> {
+    if matches!(method, "imap.list" | "imap.listContinue")
+        && p["query"].as_str().unwrap_or("").starts_with("search:")
+    {
+        return search::call(p).await;
+    }
     if method == "imap.attachment" {
         let mut request = p.clone();
         request["ids"] = json!([string(p, "messageId")?]);

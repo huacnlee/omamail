@@ -40,6 +40,8 @@ function mailbox(raw) {
   }
   if (Number(entry.minimumApiVersion || 0) > 0)
     result.minimumApiVersion = Number(entry.minimumApiVersion)
+  if (Number(entry.maximumApiVersion || 0) > 0)
+    result.maximumApiVersion = Number(entry.maximumApiVersion)
   return result
 }
 
@@ -131,7 +133,8 @@ function mailboxes(id, absent, apiVersion) {
   var out = []
   for (var j = 0; j < list.length; j++) {
     if (drop.indexOf(list[j].key) < 0
-        && (apiVersion === undefined || Number(apiVersion) >= Number(list[j].minimumApiVersion || 0)))
+        && (apiVersion === undefined || Number(apiVersion) >= Number(list[j].minimumApiVersion || 0))
+        && (!list[j].maximumApiVersion || (apiVersion !== undefined && Number(apiVersion) <= list[j].maximumApiVersion)))
       out.push(list[j])
   }
   return out
