@@ -584,7 +584,7 @@ if grep -q 'Shortcut { sequence: "Escape"' components/CalendarEventComposer.qml;
 fi
 grep -q 'objectName: "event-repeat-selector"' components/CalendarEventComposer.qml \
   || fail "event creation needs an optional recurrence section"
-grep -q 'text: "Add a calendar"' components/CalendarSettings.qml \
+grep -q 'text: "Connect a CalDAV calendar\.\.\."' components/CalendarSettings.qml \
   || fail "settings must let a user add a calendar"
 grep -q 'placeholderText: "Calendar name"' components/CalendarSettings.qml \
   || fail "calendar setup needs a name field"

@@ -17,6 +17,10 @@ Item {
     property int settingChanges: 0
     property var accountSummaries: []
     property bool backendCanDiscoverCalendars: true
+    property bool backendCanGoogleCalendars: true
+    property bool calendarRemindersEnabled: true
+    property int calendarSnoozeMinutes: 5
+    property string calendarReminderError: ""
     property var auth: null
 
     function setUnifiedCalendarView(value) {
@@ -41,6 +45,10 @@ Item {
     property int colorCalls: 0
     property string coloredId: ""
     property string selectedColor: ""
+    property var discoveryChoices: null
+    property string discoveryChoiceAccount: ""
+    property string defaultId: ""
+    property var reminderPolicy: null
     signal calendarSaved(bool ok, string error)
     signal discoveryFinished(bool ok, string error, int count)
 
@@ -50,6 +58,10 @@ Item {
     function discoveredCount(_accountId) { return 0 }
     function discoverAccountCalendars(_accountId) { discoverCalls++; return true }
     function setSourceEnabled(sourceId, _enabled) { toggleCalls++; toggledId = sourceId }
+    function setDefaultCalendar(sourceId) { defaultId = sourceId }
+    function setReminderPolicy(sourceId, enabled, minutes) {
+      reminderPolicy = { id: sourceId, enabled: enabled, minutes: minutes }
+    }
     function setSourceColor(sourceId, colorKey) {
       colorCalls++
       coloredId = sourceId
@@ -69,6 +81,8 @@ Item {
     panelFontFamily: "monospace"
   }
 
+  SignalSpy { id: signInSpy; target: settings; signalName: "calendarSignInRequested" }
+
   TestCase {
     name: "CalendarSettings"
     when: windowShown
@@ -85,6 +99,10 @@ Item {
       calendarController.colorCalls = 0
       calendarController.coloredId = ""
       calendarController.selectedColor = ""
+      calendarController.defaultId = ""
+      calendarController.reminderPolicy = null
+      calendarController.discoveryChoices = null
+      signInSpy.clear()
       wait(1)
     }
 
@@ -193,6 +211,64 @@ Item {
       wait(1)
       compare(findChild(settings, "calendar-discover-icloud"), null)
       compare(calendarController.discoverCalls, 0)
+    }
+
+    function test_google_setup_failure_keeps_calendars_and_offers_retry() {
+      mailService.accountSummaries = [{ id: "person@example.org", email: "person@example.org",
+        provider: "gmail", calendarProvider: "google", signedIn: true }]
+      calendarController.sourceList = ({ version: 1, sources: [{ id: "personal", kind: "google",
+        accountId: "person@example.org", name: "Personal", enabled: true, readOnly: false,
+        remindersEnabled: true, reminderMinutes: -1, preferred: true }] })
+      wait(1)
+      var discover = findChild(settings, "calendar-discover-google")
+      compare(discover.text, "Enable Google Calendar...")
+      discover.clicked()
+      compare(calendarController.discoverCalls, 1)
+      calendarController.discoveryFinished(false, "Sign in to this mailbox again", 0)
+      var recovery = findChild(settings, "calendar-setup-recovery")
+      compare(recovery.visible, true)
+      compare(calendarController.sourceList.sources.length, 1)
+      calendarController.discoveryFinished(true, "", 1)
+      compare(recovery.visible, false)
+      compare(findChild(settings, "calendar-open-after-setup").visible, true)
+    }
+
+    function test_signed_out_google_account_starts_its_own_sign_in() {
+      mailService.accountSummaries = [{ id: "person@example.org", email: "person@example.org",
+        provider: "gmail", calendarProvider: "google", signedIn: false }]
+      wait(1)
+      var discover = findChild(settings, "calendar-discover-google")
+      compare(discover.text, "Sign in...")
+      discover.clicked()
+      compare(calendarController.discoverCalls, 0)
+      compare(signInSpy.count, 1)
+      compare(signInSpy.signalArguments[0][0], 0)
+    }
+
+    function test_reminders_are_independent_of_visibility_and_default_excludes_readonly() {
+      mailService.accountSummaries = [{ id: "person@example.org", email: "person@example.org",
+        provider: "gmail", calendarProvider: "google", signedIn: true }]
+      calendarController.sourceList = ({ version: 1, sources: [
+        { id: "personal", kind: "google", accountId: "person@example.org", name: "Personal",
+          enabled: false, readOnly: false, remindersEnabled: true, reminderMinutes: -1, preferred: true },
+        { id: "holidays", kind: "google", accountId: "person@example.org", name: "Holidays",
+          enabled: true, readOnly: true, remindersEnabled: false, reminderMinutes: -1 }
+      ] })
+      wait(1)
+      var picker = findChild(settings, "calendar-default-picker")
+      compare(picker.options.length, 1)
+      compare(picker.value, "personal")
+      picker.changed("personal")
+      compare(calendarController.defaultId, "personal")
+      findChild(settings, "calendar-reminder-options").clicked()
+      var mode = findChild(settings, "calendar-reminder-mode")
+      mode.changed("custom")
+      compare(calendarController.reminderPolicy.minutes, 10)
+      compare(calendarController.reminderPolicy.enabled, true)
+      compare(calendarController.toggleCalls, 0)
+      mode.changed("off")
+      compare(calendarController.reminderPolicy.enabled, false)
+      compare(calendarController.toggleCalls, 0)
     }
   }
 }

@@ -49,8 +49,14 @@ Item {
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
   readonly property var hourRange: Calendar.weekHourRange(
     controller ? controller.events : [], days, 7, 19)
-  readonly property int firstHour: hourRange.first
-  readonly property int lastHour: hourRange.last
+  readonly property int firstHour: 0
+  readonly property int lastHour: 24
+  function resetTimeScroll() {
+    timeline.contentY = Math.max(0, Math.min(hourRange.first * timeline.hourHeight,
+      timeline.contentHeight - timeline.height))
+  }
+  Component.onCompleted: Qt.callLater(root.resetTimeScroll)
+  onDaysChanged: Qt.callLater(root.resetTimeScroll)
   readonly property int hourCount: Math.max(1, lastHour - firstHour)
   readonly property var allDayLayout: Calendar.spanLayout(
     (controller ? controller.events : []).filter(Calendar.displayInAllDayLane), days)
@@ -260,6 +266,7 @@ Item {
 
   Flickable {
     id: timeline
+    objectName: "calendar-time-scroll"
 
     WheelScroller { view: timeline }
     anchors.left: parent.left

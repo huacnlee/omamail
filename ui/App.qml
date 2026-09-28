@@ -2387,6 +2387,14 @@ Item {
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
               onClientSetupRequested: root.openClientSetup()
+              onCalendarSignInRequested: function(index) {
+                root.editAccount(index)
+                Qt.callLater(function() { if (root.service) root.service.signIn() })
+              }
+              onOpenCalendarRequested: {
+                root.showCalendar()
+                calendarView.refresh()
+              }
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
               onEditRequested: function(index) { root.editAccount(index) }

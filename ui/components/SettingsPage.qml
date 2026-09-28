@@ -28,6 +28,8 @@ Column {
   signal clientSetupRequested()
   signal addRequested()
   signal editRequested(int index)
+  signal openCalendarRequested()
+  signal calendarSignInRequested(int index)
 
   readonly property var accounts: service ? service.accountSummaries : []
   // A separate list on purpose: accountSummaries carries live mailbox state and
@@ -1227,6 +1229,14 @@ Column {
     accentColor: root.accentColor
     urgentColor: root.urgentColor
     panelFontFamily: root.panelFontFamily
+    onAccountSetupRequested: function(index) {
+      if (index < 0) return
+      if (root.accounts[index].calendarProvider === "google") root.calendarSignInRequested(index)
+      else root.editRequested(index)
+    }
+    onClientSetupRequested: root.clientSetupRequested()
+    onAddAccountRequested: root.addRequested()
+    onOpenCalendarRequested: root.openCalendarRequested()
   }
 
   PanelSeparator {
@@ -1260,7 +1270,7 @@ Column {
       Text {
         width: parent.width
         text: root.auth && root.auth.credentialsPresent
-          ? String(root.auth.clientDescription || "Google OAuth client") : "No client yet"
+          ? "Google client configured" : "Google client setup required"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
@@ -1271,7 +1281,7 @@ Column {
         width: parent.width
         // Every mailbox signs in through this one client, which is why adding
         // an account never asks for another.
-        text: "Shared by every mailbox above"
+        text: "Advanced setup · shared by Gmail and Google Calendar accounts"
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
