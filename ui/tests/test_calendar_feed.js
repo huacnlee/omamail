@@ -383,6 +383,20 @@ assert.strictEqual(feed.timedLayout([holiday,dailyTwo],travelDay).length,1)
 assert.strictEqual(holiday.start.allDay,false,"display promotion must not mutate timed events")
 const originalTZ = process.env.TZ
 process.env.TZ = "Europe/Berlin"
+for (const [startDate, endDate, offset, expectedStart, expectedEnd] of [
+  [[2026,9,24], [2026,9,25], 1, "2026-10-25", "2026-10-26"],
+  [[2026,2,29], [2026,2,30], 1, "2026-03-30", "2026-03-31"],
+  [[2026,9,23], [2026,9,25], 1, "2026-10-24", "2026-10-26"],
+  [[2026,2,30], [2026,3,1], -1, "2026-03-29", "2026-03-31"]
+]) {
+  const event = spanFixture("all-day-move", new Date(...startDate), new Date(...endDate), true)
+  const moved = feed.gestureRange(event, offset, 0, "")
+  const patch = feed.updateEvent(feed.rescheduleFields(event, moved.start, moved.end), event, 1)
+  assert.strictEqual(patch.google.start.date, expectedStart)
+  assert.strictEqual(patch.google.end.date, expectedEnd)
+  assert.strictEqual(new Date(moved.start).getHours(), 0)
+  assert.strictEqual(new Date(moved.end).getHours(), 0)
+}
 for (const date of [[2026,2,29],[2026,9,25]]) {
   const start = new Date(...date)
   const end = new Date(start.getTime()); end.setDate(end.getDate()+1)

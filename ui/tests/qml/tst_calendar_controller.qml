@@ -71,6 +71,26 @@ Item {
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
+    function test_settings_can_target_another_accounts_calendar() {
+      controller.accountId = "one@gmail.com"
+      verify(controller.findSource("google:two@gmail.com") === null,
+        "event writes remain scoped to the current mailbox")
+      controller.setReminderPolicy("google:two@gmail.com", false, -1)
+      compare(mailService.configWrites.length, 1)
+      var saved = JSON.parse(mailService.configWrites[0].payload).sources.filter(function(s) {
+        return s.id === "google:two@gmail.com"
+      })[0]
+      compare(saved.remindersEnabled, false)
+      mailService.configCallback(true, "")
+      controller.setDefaultCalendar("google:two@gmail.com")
+      compare(mailService.configWrites.length, 2)
+      saved = JSON.parse(mailService.configWrites[1].payload).sources.filter(function(s) {
+        return s.id === "google:two@gmail.com"
+      })[0]
+      compare(saved.preferred, true)
+      mailService.configCallback(true, "")
+    }
+
     function test_legacy_sources_cannot_enter_reminder_polling_or_settings() {
       var kinds = ["microsoft", "icloud", "caldav", "hey"]
       for (var i = 0; i < kinds.length; i++) {

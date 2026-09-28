@@ -25,6 +25,14 @@ TestCase {
     property string accountId: "me@example.org"
     property string selectedId: "mail-1"
     property string receivedAsAddress: "me@example.org"
+    property string receivedAsName: "Synthetic owner"
+    property string ownAddress: "me@example.org"
+    property var selectedMessage: ({messageId:"synthetic-message",threadId:"synthetic-thread"})
+    property var sent: []
+    property var api: ({sendMessage:function(payload, callback) {
+      owner.sent = owner.sent.concat([payload])
+      callback({}, null)
+    }})
     property var selectedInvite: ({ uid: "meeting", recurrenceIdMs: 0 })
     property string notice: ""
     property string failure: ""
@@ -51,6 +59,8 @@ TestCase {
     owner.notice = ""
     owner.failure = ""
     owner.cachedInvite = null
+    owner.sent = []
+    action.fallbackMessageId = ""
   }
 
   function test_refusal_does_not_fall_back_to_a_reply_email() {
@@ -70,6 +80,22 @@ TestCase {
     action.run("TENTATIVE")
     compare(backend.calls.length, 0)
     verify(owner.failure !== "")
+    compare(owner.sent.length, 0, "a native response must not silently become an email")
+  }
+
+  function test_old_backend_offers_an_explicit_email_only_reply() {
+    backend.apiVersion = 5
+    owner.selectedInvite = {uid:"meeting",summary:"Synthetic meeting",
+      organizer:{email:"organizer@example.test"},attendees:[]}
+    verify(action.fallbackAvailable)
+    action.run("accepted", true)
+    compare(backend.calls.length, 0)
+    compare(owner.sent.length, 1)
+    compare(owner.notice, "Reply email sent; Calendar attendance is not confirmed")
+    compare(owner.cachedInvite, null)
+    compare(owner.selectedInvite.attendees.length, 0)
+    backend.apiVersion = 6
+    verify(!action.fallbackAvailable)
   }
 
   function test_success_is_cached_only_after_readback_confirmation() {

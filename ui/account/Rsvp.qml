@@ -16,7 +16,11 @@ QtObject {
   property bool reconciling: false
   property int attendanceRevision: 0
   property string fallbackMessageId: ""
-  readonly property bool fallbackAvailable: fallbackMessageId !== "" && fallbackMessageId === account.selectedId
+  readonly property bool fallbackAvailable: (fallbackMessageId !== "" && fallbackMessageId === account.selectedId)
+    || (!!account.selectedInvite && account.selectedId !== ""
+      && Provider.calendarAttendanceMethod(account.providerId) !== ""
+      && !!account.backend && account.backend.ready
+      && account.backend.apiVersion > 0 && account.backend.apiVersion < 6)
   property Connections selection: Connections {
     target: rsvpAction.account
     function onSelectedIdChanged() { rsvpAction.reconciledKey = ""; rsvpAction.attendanceRevision++; rsvpAction.fallbackMessageId = "" }

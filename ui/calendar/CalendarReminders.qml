@@ -46,15 +46,13 @@ Item {
   }
 
   function deliver(record) {
-    if (waiters >= 16) { action(record.key, "failed"); return }
-    var body = Qt.formatDateTime(new Date(record.start), "ddd, MMM d · hh:mm")
-    var count = 1 + (Array.isArray(record.relatedKeys) ? record.relatedKeys.length : 0)
-    var title = count > 1 ? String(count) + " calendar reminders" : record.title
-    if (count > 1) body = record.title + " · " + body
     var notice = reminderInbox.receive(record)
+    // The process budget limits desktop waiters, never the actionable inbox.
+    if (waiters >= 16) return
+    var body = Qt.formatDateTime(new Date(record.start), "ddd, MMM d · hh:mm")
     var process = notification.createObject(root, { record: notice,
       command: ["python3", pluginDir + "/scripts/notify-mail.py", "--calendar",
-        notificationForeground, notificationAccent, "--", title, body] })
+        notificationForeground, notificationAccent, "--", record.title, body] })
     if (!process) { action(record.key, "failed"); return }
     waiters++
     process.running = true

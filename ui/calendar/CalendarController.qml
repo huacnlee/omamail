@@ -317,7 +317,11 @@ Item {
   }
 
   function findSource(sourceId) {
-    var values = contextSources.sources
+    return sourceById(contextSources, sourceId)
+  }
+
+  function sourceById(list, sourceId) {
+    var values = list.sources
     for (var i = 0; i < values.length; i++) {
       if (values[i] && values[i].id === String(sourceId)) return values[i]
     }
@@ -680,7 +684,7 @@ Item {
 
   function setDefaultCalendar(sourceId) {
     if (savingSource || discoveringCalendars) return
-    var chosen = findSource(sourceId)
+    var chosen = sourceById(availableSources, sourceId)
     if (!chosen || chosen.readOnly) return
     var next = Sources.add(sourceList, chosen)
     next.sources = next.sources.map(function(source) {
@@ -698,7 +702,7 @@ Item {
 
   function setReminderPolicy(sourceId, enabled, minutes) {
     if (savingSource || discoveringCalendars) return
-    var source = findSource(sourceId)
+    var source = sourceById(availableSources, sourceId)
     if (!Sources.nativeCalendarFeatures(source)) return
     var value = Sources.makeSource(source)
     value.remindersEnabled = enabled === true

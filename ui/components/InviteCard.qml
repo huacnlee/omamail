@@ -290,7 +290,7 @@ Rectangle {
       visible: root.fallbackAvailable && root.canRespond
       Text {
         width: parent.width
-        text: "This invitation was not found in Calendar. You can open Calendar or send a reply email only; email does not confirm your Calendar attendance."
+        text: "Calendar attendance cannot be confirmed here. You can open Calendar or send a reply email only; email does not confirm your Calendar attendance."
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
         color: root.dimColor

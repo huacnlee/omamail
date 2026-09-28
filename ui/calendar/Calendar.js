@@ -789,10 +789,15 @@ function gestureRange(event, dayOffset, minuteOffset, edge) {
   else {
     var date = new Date(start)
     date.setDate(date.getDate() + Number(dayOffset))
-    date.setMinutes(date.getMinutes() + minutes)
+    if (!event.start.allDay) date.setMinutes(date.getMinutes() + minutes)
     var duration = end - start
     start = date.getTime()
-    end = start + duration
+    if (event.start.allDay) {
+      // All-day duration counts local dates, including 23/25-hour DST days.
+      var endDate = new Date(end)
+      endDate.setDate(endDate.getDate() + Number(dayOffset))
+      end = endDate.getTime()
+    } else end = start + duration
   }
   return isFinite(start) && isFinite(end) && end > start ? { start: start, end: end } : null
 }

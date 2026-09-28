@@ -9,6 +9,7 @@ Item {
   SystemPalette { id: palette }
   QtObject {
     id: backend
+    property bool ready: false
     property var calls: []
     property var callbacks: []
     function call(method, args, callback) {
@@ -22,17 +23,28 @@ Item {
     function summon(id, payload) { opened = JSON.parse(payload) }
   }
   QtObject {
-    id: service
+    id: mailService
     property var backend: backend
     property var shell: shell
     property int calendarSnoozeMinutes: 5
     property var calendarReminderInbox: inbox
+    property var calendarController: null
+    property var accountSummaries: []
   }
-  Calendar.CalendarReminderInbox { id: inbox; service: service }
+  Calendar.CalendarReminderInbox { id: inbox; service: mailService }
+  Component {
+    id: reminderComponent
+    Calendar.CalendarReminders {
+      service: mailService
+      pluginDir: ""
+      notificationForeground: palette.text.toString()
+      notificationAccent: palette.highlight.toString()
+    }
+  }
   Views.CalendarReminderPanel {
     id: panel
     width: parent.width
-    service: service
+    service: mailService
     textColor: palette.text
     dimColor: palette.mid
     accentColor: palette.highlight
@@ -53,6 +65,38 @@ Item {
       compare(shell.opened.eventId,"personal\nevent")
       compare(backend.calls.length,0)
       compare(inbox.records.length,1)
+    }
+    function test_simultaneous_events_have_independent_details_and_actions() {
+      var first = inbox.receive(record())
+      var second = record()
+      second.key = "second-ledger-key"
+      second.eventId = "second-event"
+      second.title = "Second meeting"
+      second = inbox.receive(second)
+      compare(inbox.records.length, 2)
+      panel.eventKey = "personal\nsecond-event"
+      compare(panel.records.length, 1)
+      compare(panel.records[0].title, "Second meeting")
+      inbox.open(second)
+      compare(shell.opened.eventId, "personal\nsecond-event")
+      verify(inbox.action(first.key, "dismiss", first.noticeId))
+      backend.callbacks[0]({}, "")
+      compare(inbox.records.length, 1)
+      verify(inbox.current(second.key, second.noticeId))
+      verify(inbox.action(second.key, "snooze", second.noticeId))
+      compare(backend.calls[1].args.key, second.key)
+    }
+    function test_desktop_process_limit_keeps_every_event_in_the_inbox() {
+      var reminders = createTemporaryObject(reminderComponent, panel, {waiters:16})
+      verify(reminders !== null)
+      var first = record(), second = record()
+      second.key = "second-ledger-key"
+      second.eventId = "second-event"
+      reminders.deliver(first)
+      reminders.deliver(second)
+      compare(reminders.inbox.records.length, 2)
+      compare(reminders.inbox.records[1].eventId, "second-event")
+      compare(backend.calls.length, 0, "process saturation must not discard or requeue inbox entries")
     }
     function test_action_failure_retains_notice_and_success_removes_it() {
       var notice=inbox.receive(record())

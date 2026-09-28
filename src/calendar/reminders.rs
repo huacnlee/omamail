@@ -164,43 +164,21 @@ fn call_at(root: &Path, params: &Value) -> Result<Value> {
             record["occurrence"] = json!(occurrence);
             record["pending"] = json!(false);
             entries.insert(id, record.clone());
-            if notifications.is_empty() {
-                record["relatedKeys"] = json!([]);
-                notifications.push(record);
-            } else {
-                notifications[0]["relatedKeys"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(record["key"].clone());
-            }
-        }
-        if let Some(notification) = notifications.first() {
-            let id = notification["key"].as_str().unwrap().to_owned();
-            entries.insert(id, notification.clone());
+            notifications.push(record);
         }
     } else {
         let id = params["key"].as_str().unwrap();
-        let record = entries.get(id).ok_or("calendar_reminder_not_found")?;
-        let mut ids = vec![id.to_owned()];
-        ids.extend(
-            record["relatedKeys"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|key| key.as_str().map(str::to_owned)),
-        );
-        for id in ids {
-            if let Some(record) = entries.get_mut(&id) {
-                record["pending"] = json!(params["operation"] != "dismiss");
-                if params["operation"] != "dismiss" {
-                    let minutes = if params["operation"] == "failed" {
-                        1
-                    } else {
-                        params["minutes"].as_i64().unwrap()
-                    };
-                    record["due"] = json!(now.saturating_add(minutes * 60000));
-                }
-            }
+        // One action owns one reminder, including entries from an older ledger
+        // that grouped unrelated events under relatedKeys.
+        let record = entries.get_mut(id).ok_or("calendar_reminder_not_found")?;
+        record["pending"] = json!(params["operation"] != "dismiss");
+        if params["operation"] != "dismiss" {
+            let minutes = if params["operation"] == "failed" {
+                1
+            } else {
+                params["minutes"].as_i64().unwrap()
+            };
+            record["due"] = json!(now.saturating_add(minutes * 60000));
         }
     }
     let bytes = serde_json::to_vec(&ledger).map_err(|_| "calendar_reminders_invalid")?;
@@ -214,15 +192,15 @@ fn call_at(root: &Path, params: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn claims_are_durable_and_snooze_never_replays_an_ended_event() {
+
+    fn fixture_root(name: &str) -> std::path::PathBuf {
         // macOS exposes its temporary directory through /var, a symlink to
         // /private/var. Resolve the trusted fixture parent before exercising
         // the production no-symlink storage boundary.
         let root = std::env::temp_dir()
             .canonicalize()
             .unwrap()
-            .join(format!("omamail-reminders-{}", std::process::id()));
+            .join(format!("omamail-reminders-{name}-{}", std::process::id()));
         std::fs::create_dir(&root).unwrap();
         #[cfg(unix)]
         {
@@ -231,6 +209,66 @@ mod tests {
             // the same private-directory policy as the real config root.
             std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
+        root
+    }
+
+    #[test]
+    fn simultaneous_reminders_keep_each_event_and_action_independent() {
+        let root = fixture_root("simultaneous");
+        let candidates: Vec<Value> = (1..=2)
+            .map(|i| {
+                json!({
+                    "key":format!("event-{i}"), "occurrence":format!("event-{i}"),
+                    "start":2000000, "end":5600000, "due":1400000,
+                    "eventId":format!("event-{i}"), "sourceId":"calendar",
+                    "accountId":"synthetic", "title":format!("Meeting {i}")
+                })
+            })
+            .collect();
+        let mut poll =
+            json!({"operation":"poll","now":1400000,"lastCheck":1300000,"candidates":candidates});
+        let result = call_at(&root, &poll).unwrap();
+        let notices = result["notifications"].as_array().unwrap();
+        assert_eq!(notices.len(), 2);
+        assert_eq!(notices[0]["eventId"], "event-1");
+        assert_eq!(notices[1]["eventId"], "event-2");
+        assert_eq!(notices[1]["title"], "Meeting 2");
+        assert!(
+            call_at(&root, &poll).unwrap()["notifications"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+
+        // An older ledger may still carry a bundled action target. It must not
+        // let dismissing one event overwrite the other event's later snooze.
+        let path = root.join("omamail/calendar-reminders.json");
+        let mut ledger: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let first = notices[0]["key"].as_str().unwrap();
+        let second = notices[1]["key"].as_str().unwrap();
+        ledger[first]["relatedKeys"] = json!([second]);
+        std::fs::write(&path, serde_json::to_vec(&ledger).unwrap()).unwrap();
+        call_at(
+            &root,
+            &json!({"operation":"snooze","now":1400000,"key":second,"minutes":5}),
+        )
+        .unwrap();
+        call_at(
+            &root,
+            &json!({"operation":"dismiss","now":1400000,"key":first}),
+        )
+        .unwrap();
+        poll["now"] = json!(1700000);
+        let result = call_at(&root, &poll).unwrap();
+        let notices = result["notifications"].as_array().unwrap();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(notices[0]["eventId"], "event-2");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn claims_are_durable_and_snooze_never_replays_an_ended_event() {
+        let root = fixture_root("durable");
         let candidate = json!({"key":"occurrence\n10", "occurrence":"occurrence", "start":2000000,
             "end":5600000,"due":1400000,"eventId":"event","sourceId":"calendar","accountId":"synthetic","title":"Planning"});
         let mut poll =

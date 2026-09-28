@@ -60,8 +60,6 @@ Column {
               width: parent.width
               text: String(entry.modelData.title || "Event") + " · "
                 + Qt.formatDateTime(new Date(entry.modelData.start), "ddd HH:mm")
-                + (entry.modelData.relatedKeys && entry.modelData.relatedKeys.length
-                  ? " · and " + entry.modelData.relatedKeys.length + " more reminders" : "")
               textFormat: Text.PlainText
               wrapMode: Text.Wrap
               color: root.textColor
