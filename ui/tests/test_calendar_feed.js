@@ -526,6 +526,12 @@ const preservedXml = [
   '</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>'
 ].join("")
 const preservedEvent = feed.eventsFromCaldav(preservedXml, "work")[0]
+for (const kind of ["microsoft", "caldav", "icloud"]) {
+  assert.strictEqual(feed.writeRefusal({kind}, preservedEvent), "", "legacy editing remains available")
+  assert.strictEqual(feed.writeRefusal({kind}, preservedEvent, "reschedule"),
+    "Open the event editor to change its time", "new gestures are Google-only")
+}
+assert.strictEqual(feed.writeRefusal({kind:"google"}, {googleId:"event"}, "reschedule"), "")
 const preservedUpdate = feed.updateEvent({
   title: "After", startMs: Date.UTC(2026, 7, 24, 8, 0),
   endMs: Date.UTC(2026, 7, 24, 9, 0), location: "", description: ""

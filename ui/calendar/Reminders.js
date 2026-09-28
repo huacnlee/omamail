@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Sources.js" as Sources
+
 // Reminder eligibility is independent of whether a calendar is drawn. Inputs
 // are normalized calendar resources, not mail's potentially stale invitation.
 function candidates(events, sources) {
@@ -10,7 +12,7 @@ function candidates(events, sources) {
   var items = Array.isArray(events) ? events : []
   for (var e = 0; e < items.length; e++) {
     var event = items[e], source = event && byId[event.sourceId]
-    if (!source || source.remindersEnabled !== true || !event.start || !event.end
+    if (!Sources.nativeCalendarFeatures(source) || source.remindersEnabled !== true || !event.start || !event.end
         || event.status === "CANCELLED") continue
     var accountAddress = String(source.accountId || source.username || "").replace(/^[^:@]+:/, "").toLowerCase()
     if ((event.attendees || []).some(function(attendee) {

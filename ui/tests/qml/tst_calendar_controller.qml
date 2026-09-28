@@ -71,6 +71,23 @@ Item {
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
+    function test_legacy_sources_cannot_enter_reminder_polling_or_settings() {
+      var kinds = ["microsoft", "icloud", "caldav", "hey"]
+      for (var i = 0; i < kinds.length; i++) {
+        var source = {id:"legacy",kind:kinds[i],enabled:true,remindersEnabled:true,reminderMinutes:10}
+        controller.reminderMode = false
+        compare(controller.sourceIncluded(source), true)
+        controller.reminderMode = true
+        compare(controller.sourceIncluded(source), false)
+        controller.sourceList = {version:1,sources:[source]}
+        var writes = mailService.configWrites.length
+        controller.setReminderPolicy("legacy", true, 5)
+        compare(mailService.configWrites.length, writes)
+      }
+      compare(controller.sourceIncluded({kind:"google",enabled:false,remindersEnabled:true}), true)
+      controller.reminderMode = false
+    }
+
     function test_immediate_transfer_sends_only_move_and_uses_new_event_identity() {
       mailService.backendCanGoogleCalendars = true
       controller.accountId = "one@gmail.com"

@@ -500,7 +500,7 @@ Column {
         anchors.top: sourceRow.bottom
         width: parent.width
         spacing: Style.space(6)
-        visible: !!root.service && root.service.backendCanGoogleCalendars === true
+        visible: Sources.nativeCalendarFeatures(modelData) && !!root.service && root.service.backendCanGoogleCalendars === true
         height: visible ? implicitHeight : 0
         Button {
           objectName: "calendar-reminder-options"
@@ -806,8 +806,10 @@ Column {
     width: parent.width
     spacing: Style.space(8)
     visible: !!root.service && root.service.backendCanGoogleCalendars === true
+      && !!root.controller && !!root.controller.availableSources
+      && root.controller.availableSources.sources.some(Sources.nativeCalendarFeatures)
     Text {
-      text: "Desktop reminders"
+      text: "Google desktop reminders"
       color: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.body

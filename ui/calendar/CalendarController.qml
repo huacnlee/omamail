@@ -12,7 +12,7 @@ Item {
   required property string pluginDir
   property string cacheName: "calendar"
   property bool reminderMode: false
-  function sourceIncluded(source) { return !!source && (reminderMode ? source.remindersEnabled === true : source.enabled !== false) }
+  function sourceIncluded(source) { return !!source && (reminderMode ? Sources.nativeCalendarFeatures(source) && source.remindersEnabled === true : source.enabled !== false) }
   property string accountId: ""
   property var sourceList: Sources.emptyList()
   property bool sourcesLoaded: false
@@ -699,7 +699,7 @@ Item {
   function setReminderPolicy(sourceId, enabled, minutes) {
     if (savingSource || discoveringCalendars) return
     var source = findSource(sourceId)
-    if (!source) return
+    if (!Sources.nativeCalendarFeatures(source)) return
     var value = Sources.makeSource(source)
     value.remindersEnabled = enabled === true
     value.reminderMinutes = Math.max(-1, Math.min(40320, Math.floor(Number(minutes))))

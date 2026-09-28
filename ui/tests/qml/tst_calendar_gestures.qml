@@ -12,6 +12,8 @@ Item {
     property var service: null
     property bool eventWriting: false
     property bool loading: false
+    property string sourceKind: "google"
+    function findSource(id) { return {id:id,kind:sourceKind} }
     signal eventUpdated(bool ok, string error)
     property var events: [{sourceId:"personal",googleId:"meeting",uid:"uid",summary:"Planning",
       start:{ms:new Date(2026,9,1,10).getTime()},end:{ms:new Date(2026,9,1,11).getTime()}}]
@@ -41,7 +43,24 @@ Item {
   TestCase {
     name: "CalendarGestures"
     when: windowShown
-    function init() { moved.clear(); created.clear(); fixture.eventWriting = false; fixture.loading = false; view.pendingGesture = null }
+    function init() {
+      moved.clear(); created.clear(); fixture.eventWriting = false; fixture.loading = false; view.pendingGesture = null
+      fixture.sourceKind = "google"
+      view.resetTimeScroll()
+      waitForRendering(view)
+      wait(50)
+    }
+    function test_legacy_provider_cannot_dispatch_resize() {
+      for (var i = 0; i < 3; i++) {
+        fixture.sourceKind = ["microsoft", "icloud", "caldav"][i]
+        var drag = findChild(view, "calendar-event-drag-meeting")
+        mousePress(drag, drag.width / 2, drag.height - 2)
+        mouseMove(drag, drag.width / 2, drag.height + 35, 20)
+        mouseRelease(drag, drag.width / 2, drag.height + 35)
+        compare(moved.count, 0)
+        compare(view.pendingGesture, null)
+      }
+    }
     function test_pending_resize_is_immediate_and_failure_restores_it() {
       var originalEnd = fixture.events[0].end.ms
       var accept = function() { fixture.eventWriting = true }

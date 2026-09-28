@@ -480,7 +480,7 @@ Rectangle {
       reminderMinutes: reminderField.text,
       changeRecurrence: changeRecurrence,
       recurrence: {
-        enabled: recurring,
+        enabled: recurring && !!chosenSource && chosenSource.kind !== "microsoft",
         frequency: recurrenceFrequency,
         interval: intervalField.text,
         count: countField.text
@@ -969,7 +969,8 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
-        visible: !root.editing || (!root.editingEvent.recurringEventId && !!root.chosenSource && root.chosenSource.kind === "google")
+        visible: (!root.editing && !!root.chosenSource && root.chosenSource.kind !== "microsoft")
+          || (root.editing && !root.editingEvent.recurringEventId && !!root.chosenSource && root.chosenSource.kind === "google")
         FieldLabel { text: "Repeat" }
         EventOption {
           objectName: "event-repeat-selector"
@@ -989,7 +990,7 @@ Rectangle {
 
       Column {
         width: parent.width
-        visible: root.recurring && (!root.editing || root.changeRecurrence)
+        visible: root.recurring && !!root.chosenSource && root.chosenSource.kind !== "microsoft" && (!root.editing || root.changeRecurrence)
         spacing: Style.space(8)
 
         Row {

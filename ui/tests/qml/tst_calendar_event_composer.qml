@@ -19,6 +19,7 @@ Item {
     property bool eventWriting: false
     property int createCalls: 0
     property int updateCalls: 0
+    property var createdFields: null
     property var transferCallback: null
     function findSource(id) {
       for (var i=0;i<writableSourceGroups.length;i++)
@@ -49,6 +50,7 @@ Item {
     function createEvent(_sourceId, _fields) {
       if (creatingEvent || eventWriting) return false
       createCalls++
+      createdFields = _fields
       creatingEvent = true
       return true
     }
@@ -99,6 +101,20 @@ Item {
       composer.writePending = false
       contacts.recipientContacts = []
       contacts.refreshCalls = 0
+    }
+
+    function test_microsoft_creation_keeps_basic_fields_without_repetition() {
+      var groups = JSON.parse(JSON.stringify(initialGroups))
+      groups[0].calendars[0].kind = "microsoft"
+      eventController.writableSourceGroups = groups
+      composer.begin()
+      findChild(composer, "event-title-field").text = "Basic Outlook event"
+      compare(findChild(composer, "event-repeat-selector").visible, false)
+      // A previous calendar selection must not leak a hidden repeat setting.
+      composer.recurring = true
+      composer.submit("all")
+      compare(eventController.createCalls, 1)
+      compare(eventController.createdFields.recurrence.enabled, false)
     }
 
     function test_guest_suggestions_reuse_mail_contacts_without_submitting() {

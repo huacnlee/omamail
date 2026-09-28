@@ -901,6 +901,8 @@ function createEvent(fields, nowMs) {
 function writeRefusal(source, event, operation) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
+  if (operation === "reschedule" && source.kind !== "google")
+    return "Open the event editor to change its time"
   if (source.kind === "google" && event && event.eventType === "fromGmail" && operation !== "delete")
     return "Google does not allow changing the time or details of events created from Gmail"
   if (source.kind === "google" && event && event.organizer && event.organizer.self === false

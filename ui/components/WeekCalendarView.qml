@@ -413,7 +413,7 @@ Item {
                 readonly property var eventData: modelData.event
                 readonly property bool canReschedule: Calendar.writeRefusal(
                   root.controller && typeof root.controller.findSource === "function"
-                    ? root.controller.findSource(eventData.sourceId) : {kind: eventData.googleId ? "google" : ""}, eventData) === ""
+                    ? root.controller.findSource(eventData.sourceId) : {kind: eventData.googleId ? "google" : ""}, eventData, "reschedule") === ""
                 x: Style.space(3) + modelData.column * (dayColumn.width - Style.space(6)) / modelData.columns
                 width: (dayColumn.width - Style.space(6)) / modelData.columns - Style.space(2)
                 y: Calendar.eventTop(eventData, dayColumn.modelData,

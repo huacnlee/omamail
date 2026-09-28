@@ -1,7 +1,7 @@
 const assert = require("assert")
 const { load } = require("./load")
 const reminders = load("calendar/Reminders.js")
-const source = {id:"hidden",accountId:"me",enabled:false,remindersEnabled:true,reminderMinutes:-1,
+const source = {id:"hidden",kind:"google",accountId:"me",enabled:false,remindersEnabled:true,reminderMinutes:-1,
   defaultReminders:[{method:"popup",minutes:10},{method:"email",minutes:20}]}
 const event = {uid:"meeting",googleId:"instance",sourceId:"hidden",summary:"Planning",
   organizer:{email:"organizer@example.org"},start:{ms:2000000},end:{ms:5600000},reminders:{useDefault:true}}
@@ -15,3 +15,7 @@ assert.strictEqual(reminders.candidates([event,{...event,sourceId:"shared"}],
   {sources:[source,{...source,id:"shared",accountId:"another"}]}).length,1)
 assert.strictEqual(reminders.candidates([{...event,status:"CANCELLED"}],{sources:[source]}).length,0)
 console.log("calendar reminder eligibility tests passed")
+for (const kind of ["microsoft", "icloud", "caldav", "hey"]) {
+  assert.strictEqual(reminders.candidates([event], {sources:[{...source,kind,reminderMinutes:10}]}).length,0,
+    "saved reminder settings must not enable deep integration for " + kind)
+}

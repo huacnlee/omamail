@@ -434,6 +434,12 @@ function writable(source) {
   return !!source && source.readOnly !== true
 }
 
+// The redesigned views are shared; deep integration is currently Google-only.
+// Other providers retain their existing basic create/edit/delete paths.
+function nativeCalendarFeatures(source) {
+  return !!source && source.kind === "google"
+}
+
 // The picker groups with the read-only calendars left out, and a group left
 // empty by that left out too.
 function writableGroups(groups) {
