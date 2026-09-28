@@ -4,7 +4,7 @@ import "../../components" as Omamail
 
 Item {
   width: 900
-  height: 1100
+  height: 600
 
   QtObject {
     id: contacts
@@ -130,6 +130,9 @@ Item {
       compare(composer.opened, true)
       guests.text += " "
       compare(composer.guestSuggestionsOpen, true)
+      var scroll = findChild(composer, "event-composer-scroll")
+      scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height,
+        list.mapToItem(scroll.contentItem, 0, 0).y - 100))
       wait(0)
       mouseClick(list, list.width / 2, 15)
       compare(guests.text, "brown@example.test, sam@example.test, ")

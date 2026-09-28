@@ -472,6 +472,7 @@ Rectangle {
 
   Flickable {
     id: composerFlick
+    objectName: "event-composer-scroll"
 
     WheelScroller { view: composerFlick }
 
