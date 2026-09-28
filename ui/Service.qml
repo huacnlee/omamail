@@ -2853,6 +2853,7 @@ Item {
     Qt.callLater(root.restoreAccountRegistry)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
+    Qt.callLater(root.refreshDefaultMailClient)
   }
 
   property var barBridge: null

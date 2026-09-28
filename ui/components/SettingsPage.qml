@@ -242,9 +242,17 @@ Column {
     ensureSignatureAccount()
     ensureNameAccount()
   }
-  Component.onCompleted: {
-    if (service && typeof service.refreshDefaultMailClient === "function")
+  // The page is built with the window, before `service` is bound, and either
+  // half of the answer can change from a terminal while the window is open —
+  // so ask whenever the page comes into view, not once.
+  function refreshDefaultMailClient() {
+    if (visible && service && typeof service.refreshDefaultMailClient === "function")
       service.refreshDefaultMailClient()
+  }
+  onServiceChanged: refreshDefaultMailClient()
+  onVisibleChanged: refreshDefaultMailClient()
+  Component.onCompleted: {
+    refreshDefaultMailClient()
     renderSignaturePreview()
     ensureSignatureAccount()
     ensureNameAccount()
