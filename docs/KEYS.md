@@ -154,6 +154,9 @@ used to exist, and they had.
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose | Save and close the event |
+| `guestNext` | `Down` | eventGuests | Next guest suggestion |
+| `guestPrevious` | `Up` | eventGuests | Previous guest suggestion |
+| `guestChoose` | `Return`, `Enter` | eventGuests | Choose guest suggestion |
 | `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9` | mail | Go to that mailbox |

@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../calendar/Calendar.js" as Calendar
+import "../compose/Recipients.js" as Recipients
 
 Rectangle {
   id: root
@@ -23,6 +24,22 @@ Rectangle {
   property bool createMeet: false
   property string conferenceRequestId: ""
   property string originalGuestText: ""
+  readonly property var contactService: controller && controller.service ? controller.service : null
+  readonly property var contactBook: contactService && Array.isArray(contactService.recipientContacts)
+    ? contactService.recipientContacts : []
+  property bool guestSuggestionsDismissed: false
+  readonly property var guestSuggestions: opened && guestsField.visible && guestsField.activeFocus && !guestSuggestionsDismissed
+    ? Recipients.suggest(contactBook, guestsField.text, 5) : []
+  readonly property bool guestSuggestionsOpen: guestSuggestions.length > 0
+
+  function moveGuestSuggestion(delta) { guestSuggestionsList.moveSelection(delta) }
+  function chooseGuestSuggestion() { guestSuggestionsList.acceptSelection() }
+  function dismissGuestSuggestions() { guestSuggestionsDismissed = true }
+  function acceptGuest(contact) {
+    // Calendar's guest payload accepts addresses, not mail's display-name syntax.
+    guestsField.text = Recipients.accept(guestsField.text, { email: contact.email }) + ", "
+    guestsField.forceActiveFocus()
+  }
   property string reminderMode: "default"
   property string availability: "opaque"
   property string eventVisibility: "default"
@@ -48,8 +65,13 @@ Rectangle {
   // without losing anyone anything.
   readonly property bool pristine: !editing && !writePending
     && String(titleField.text || "") === "" && String(locationField.text || "") === ""
-    && String(notesField.text || "") === ""
-  onOpenedChanged: if (!opened && controller) controller.composeEnded()
+    && String(notesField.text || "") === "" && String(guestsField.text || "").trim() === ""
+  onOpenedChanged: {
+    guestSuggestionsDismissed = false
+    if (!opened && controller) controller.composeEnded()
+    if (opened && contactService && typeof contactService.refreshRecipientContacts === "function")
+      contactService.refreshRecipientContacts()
+  }
   Binding {
     target: root.controller
     property: "composerHeld"
@@ -644,6 +666,27 @@ Rectangle {
         placeholderText: "Event title"
       }
 
+      Column {
+        width: parent.width
+        spacing: Style.space(6)
+        Text {
+          text: "Description"
+          textFormat: Text.PlainText
+          color: root.dimColor
+          font.family: root.panelFontFamily
+        }
+        TextField {
+          id: notesField
+          objectName: "event-description-field"
+          width: parent.width
+          foreground: root.textColor
+          accent: root.accentColor
+          font.family: root.panelFontFamily
+          placeholderText: "Add event details"
+          Accessible.name: "Description"
+        }
+      }
+
       IconTextButton {
         visible: root.editing && !!root.editingEvent.recurringEventId
           && !!root.chosenSource && root.chosenSource.kind === "google"
@@ -781,6 +824,7 @@ Rectangle {
         }
         TextField {
           id: guestsField
+          objectName: "event-guests-field"
           width: parent.width
           visible: !root.editing || (!!root.editingEvent.organizer && root.editingEvent.organizer.self === true)
           placeholderText: "Guest email addresses, separated by commas"
@@ -788,6 +832,21 @@ Rectangle {
           accent: root.accentColor
           font.family: root.panelFontFamily
           Accessible.name: "Guest email addresses"
+          onTextChanged: root.guestSuggestionsDismissed = false
+          onActiveFocusChanged: root.guestSuggestionsDismissed = false
+        }
+        RecipientSuggestions {
+          id: guestSuggestionsList
+          objectName: "event-guest-suggestions"
+          width: parent.width
+          contacts: root.guestSuggestions
+          textColor: root.textColor
+          dimColor: root.dimColor
+          accentColor: root.accentColor
+          popupBackgroundColor: root.backgroundColor
+          popupBorderColor: Style.normalBorderFor(root.textColor, root.accentColor)
+          panelFontFamily: root.panelFontFamily
+          onChosen: function(contact) { root.acceptGuest(contact) }
         }
         Column {
           width: parent.width
@@ -850,14 +909,6 @@ Rectangle {
           font.family: root.panelFontFamily
           Accessible.name: "Popup reminder minutes before the event"
         }
-      }
-
-      TextField {
-        id: notesField
-        width: parent.width
-        foreground: root.textColor
-        font.family: root.panelFontFamily
-        placeholderText: "Description"
       }
 
       Column {

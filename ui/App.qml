@@ -1069,6 +1069,9 @@ Item {
     if (id === "calendarMonth") return calendarView.setView("month")
     if (id === "send") return compose.submit()
     if (id === "saveEvent") return eventComposer.submit("all")
+    if (id === "guestNext") return eventComposer.moveGuestSuggestion(1)
+    if (id === "guestPrevious") return eventComposer.moveGuestSuggestion(-1)
+    if (id === "guestChoose") return eventComposer.chooseGuestSuggestion()
     if (id === "undoSend") { undoPendingSend(); return }
     if (id === "search") return searchBar.focusField()
     if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
@@ -1111,6 +1114,7 @@ Item {
   // purpose: a QQC.Popup with CloseOnEscape consumes the key itself, so a
   // branch for them here would never run. Everything else is the history.
   function goBack() {
+    if (eventComposer.guestSuggestionsOpen) { eventComposer.dismissGuestSuggestions(); return }
     if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
     if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
     if (activeAssistant && activeAssistant.interrupt()) return
@@ -1532,20 +1536,14 @@ Item {
         showPage: root.showPage,
         composing: root.composing,
         eventComposing: eventComposer.opened,
+        guestSuggestions: eventComposer.guestSuggestionsOpen,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
 
-      // The context owns the keyboard. Changing it moves the focus to whatever
-      // that context types into, or parks it when the context types into
-      // nothing — so a field that has been dismissed cannot go on eating keys.
-      //
-      // Keeping these as two things is the bug this replaces: the context came
-      // from the screen while the focus stayed wherever the last click left it,
-      // and a closed compose field kept swallowing j and k. One mechanism now,
-      // and there is nothing to keep in step.
+      // Context changes move or park focus so dismissed fields cannot eat keys.
       onKeyContextChanged: Qt.callLater(applyContextFocus)
       function focusWithin(container) {
         var item = focusScope.Window.activeFocusItem
@@ -1558,7 +1556,7 @@ Item {
           if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
           else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
         }
-        else if (keyContext === "eventCompose") {
+        else if (keyContext === "eventCompose" || keyContext === "eventGuests") {
           if (!focusWithin(eventComposer)) eventComposer.takeFocus()
         }
         else if (keyContext === "compose") {

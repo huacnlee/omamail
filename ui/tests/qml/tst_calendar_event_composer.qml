@@ -4,10 +4,17 @@ import "../../components" as Omamail
 
 Item {
   width: 900
-  height: 600
+  height: 1100
 
   QtObject {
+    id: contacts
+    property var recipientContacts: []
+    property int refreshCalls: 0
+    function refreshRecipientContacts() { refreshCalls++ }
+  }
+  QtObject {
     id: eventController
+    property var service: contacts
     property bool creatingEvent: false
     property bool eventWriting: false
     property int createCalls: 0
@@ -68,8 +75,14 @@ Item {
 
   TestCase {
     Omamail.KeyRouter {
-      context: composer.opened ? "eventCompose" : ""
-      onTriggered: function(id) { if (id === "saveEvent") composer.submit("all") }
+      context: composer.opened ? (composer.guestSuggestionsOpen ? "eventGuests" : "eventCompose") : ""
+      onTriggered: function(id) {
+        if (id === "saveEvent") composer.submit("all")
+        if (id === "guestNext") composer.moveGuestSuggestion(1)
+        if (id === "guestPrevious") composer.moveGuestSuggestion(-1)
+        if (id === "guestChoose") composer.chooseGuestSuggestion()
+        if (id === "back") composer.dismissGuestSuggestions()
+      }
     }
     name: "CalendarEventComposer"
     when: windowShown
@@ -84,6 +97,45 @@ Item {
       eventController.transferCallback = null
       composer.close()
       composer.writePending = false
+      contacts.recipientContacts = []
+      contacts.refreshCalls = 0
+    }
+
+    function test_guest_suggestions_reuse_mail_contacts_without_submitting() {
+      var groups = JSON.parse(JSON.stringify(initialGroups))
+      groups[0].calendars[0].kind = "google"
+      eventController.writableSourceGroups = groups
+      composer.begin()
+      compare(contacts.refreshCalls, 1)
+      wait(0)
+      var guests = findChild(composer, "event-guests-field")
+      var list = findChild(composer, "event-guest-suggestions")
+      findChild(composer, "event-title-field").text = "Guests"
+      guests.forceActiveFocus()
+      guests.text = "sam"
+      compare(composer.guestSuggestions.length, 0)
+      contacts.recipientContacts = [{name:"Sam Adams",email:"sam@example.test"},
+        {name:"Sam Brown",email:"brown@example.test"}]
+      compare(composer.guestSuggestions.length, 2)
+      keyClick(Qt.Key_Down)
+      keyClick(Qt.Key_Down)
+      compare(list.currentIndex, 1)
+      keyClick(Qt.Key_Return)
+      compare(guests.text, "brown@example.test, ")
+      compare(eventController.createCalls, 0)
+      guests.text += "sam"
+      compare(composer.guestSuggestions.length, 1)
+      keyClick(Qt.Key_Escape)
+      compare(composer.guestSuggestionsOpen, false)
+      compare(composer.opened, true)
+      guests.text += " "
+      compare(composer.guestSuggestionsOpen, true)
+      wait(0)
+      mouseClick(list, list.width / 2, 15)
+      compare(guests.text, "brown@example.test, sam@example.test, ")
+      compare(composer.guestSuggestionsOpen, false)
+      keyClick(Qt.Key_Return)
+      compare(eventController.createCalls, 1)
     }
 
     function test_enter_creates_and_closes_only_after_success() {
