@@ -897,11 +897,15 @@ function eventTop(event, day, firstHour, hourHeight) {
   return Math.max(0, minutes / 60 * Number(hourHeight))
 }
 
+// The shortest block the grid draws, in hours, so a five-minute event still
+// has room for its title. dayLanes measures overlap by it too.
+var MIN_BLOCK_HOURS = 0.42
+
 function eventHeight(event, day, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))
   var end = event.end ? Math.min(Number(event.end.ms), Number(day.endMs)) : start + 1800000
-  return Math.max(Number(hourHeight) * 0.42,
+  return Math.max(Number(hourHeight) * MIN_BLOCK_HOURS,
     (dayMinutes(end, day) - dayMinutes(start, day)) / 60 * Number(hourHeight))
 }
 
@@ -938,6 +942,75 @@ function weekNowOffset(days, firstHour, lastHour, hourHeight, nowMs) {
     if (offset >= 0) return offset
   }
   return -1
+}
+
+// Side-by-side lanes for one day's timed events. Events that overlap, even
+// through a third one, form a cluster; each event takes the leftmost lane
+// free at its start, and every event in a cluster is drawn at the width of
+// the cluster's lane count - so three meetings at nine sit in three thirds
+// instead of on top of each other, and a lone meeting keeps the whole
+// column. An event then stretches over the lanes to its right that stay free
+// for its whole length, which is what keeps a short clash from narrowing a
+// long meeting beside it for the rest of the day.
+//
+// Answers [{event, lane, lanes, span}] in the order the events came; a caller
+// places an event at lane / lanes of the column, span / lanes wide.
+function dayLanes(events, day) {
+  var values = Array.isArray(events) ? events : []
+  var items = []
+  for (var i = 0; i < values.length; i++) {
+    var event = values[i]
+    if (!event || !event.start || event.start.allDay) continue
+    var start = Math.max(Number(event.start.ms), Number(day.startMs))
+    var end = event.end ? Math.min(Number(event.end.ms), Number(day.endMs)) : start + 1800000
+    // Measured as drawn rather than by the clock: eventHeight never draws a
+    // block shorter than MIN_BLOCK_HOURS, so two five-minute events ten
+    // minutes apart overlap on screen though not in time, and have to share
+    // lanes for that reason. (The point #123 made.)
+    end = Math.max(end, start + MIN_BLOCK_HOURS * 3600000)
+    items.push({ event: event, index: i, start: start, end: end, lane: 0, lanes: 1, span: 1 })
+  }
+  items.sort(function(a, b) { return a.start - b.start || b.end - a.end || a.index - b.index })
+  var out = []
+  var cluster = []
+  var laneEnds = []
+  var clusterEnd = -Infinity
+  function close() {
+    for (var c = 0; c < cluster.length; c++) {
+      var item = cluster[c]
+      item.lanes = laneEnds.length
+      var span = 1
+      for (var next = item.lane + 1; next < laneEnds.length; next++) {
+        var free = true
+        for (var o = 0; o < cluster.length; o++) {
+          var other = cluster[o]
+          if (other.lane === next && other.start < item.end && other.end > item.start) { free = false; break }
+        }
+        if (!free) break
+        span++
+      }
+      item.span = span
+      out.push(item)
+    }
+    cluster = []
+    laneEnds = []
+    clusterEnd = -Infinity
+  }
+  for (var k = 0; k < items.length; k++) {
+    var current = items[k]
+    if (current.start >= clusterEnd) close()
+    var lane = 0
+    while (lane < laneEnds.length && laneEnds[lane] > current.start) lane++
+    current.lane = lane
+    laneEnds[lane] = current.end
+    cluster.push(current)
+    clusterEnd = Math.max(clusterEnd, current.end)
+  }
+  close()
+  out.sort(function(a, b) { return a.index - b.index })
+  return out.map(function(item) {
+    return { event: item.event, lane: item.lane, lanes: item.lanes, span: item.span }
+  })
 }
 
 function eventsOnDay(events, day) {

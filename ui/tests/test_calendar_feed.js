@@ -589,3 +589,25 @@ console.log("test_calendar_feed.js ok")
   assert.strictEqual(made.graph.subject, "Plan")
   assert.strictEqual(made.recurring, false)
 }
+
+// Overlapping timed events share a day column in lanes.
+{
+  const day = { startMs: Date.UTC(2026, 8, 28, 0), endMs: Date.UTC(2026, 8, 29, 0) }
+  const at = (h, m) => Date.UTC(2026, 8, 28, h, m || 0)
+  const ev = (id, from, to) => ({ uid: id, start: { ms: from, allDay: false }, end: { ms: to, allDay: false } })
+  const lanes = (events) => JSON.parse(JSON.stringify(feed.dayLanes(events, day)))
+    .map(l => [l.event.uid, l.lane, l.lanes, l.span])
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10))]), [["a", 0, 1, 1]], "a lone event keeps the column")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(9), at(10)), ev("c", at(9, 30), at(11))]),
+    [["a", 0, 3, 1], ["b", 1, 3, 1], ["c", 2, 3, 1]], "three at once are three lanes")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(12)), ev("b", at(9), at(10)), ev("c", at(10), at(11))]),
+    [["a", 0, 2, 1], ["b", 1, 2, 1], ["c", 1, 2, 1]], "a lane is reused once its event has ended")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(13), at(14))]),
+    [["a", 0, 1, 1], ["b", 0, 1, 1]], "events apart are separate clusters, each whole width")
+  assert.deepStrictEqual(lanes([ev("long", at(9), at(17)), ev("x", at(9), at(10)), ev("y", at(9), at(10)), ev("z", at(12), at(13))]),
+    [["long", 0, 3, 1], ["x", 1, 3, 1], ["y", 2, 3, 1], ["z", 1, 3, 2]],
+    "a later event stretches over the lanes left free beside it")
+  assert.deepStrictEqual(lanes([ev("zero", at(9), at(9))]), [["zero", 0, 1, 1]], "a zero-length event still takes a slot")
+  assert.deepStrictEqual(lanes([ev("p", at(9), at(9, 5)), ev("q", at(9, 15), at(9, 20))]),
+    [["p", 0, 2, 1], ["q", 1, 2, 1]], "events that overlap as drawn share lanes, not only by the clock")
+}
