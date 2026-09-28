@@ -190,6 +190,7 @@ test-shell-portable:
 	bash tests/test_agent_job.sh
 	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
+	bash tests/test_default_mail.sh
 	bash tests/test_transport.sh
 	bash tests/test_jmap_transport.sh
 	python3 tests/test_jmap_stream.py

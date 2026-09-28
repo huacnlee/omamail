@@ -3,6 +3,7 @@ use std::io::{self, Read};
 mod call;
 mod mail;
 mod output;
+mod setup;
 
 #[derive(Parser)]
 #[command(
@@ -35,6 +36,8 @@ enum Command {
     Spam(mail::Action),
     /// Preview a message with UTF-8 body on stdin (maximum 16 MiB); --execute sends
     Send(mail::Send),
+    /// Make Omamail the default mail client (mailto: links and SUPER+SHIFT+E)
+    Setup(setup::Setup),
     /// Serve JSON-RPC 2.0 on persistent stdin/stdout pipes
     Serve,
     #[cfg(all(feature = "agent", target_os = "linux"))]
@@ -94,6 +97,9 @@ pub fn run() {
         println!();
         return;
     };
+    if let Command::Setup(ref args) = command {
+        std::process::exit(setup::run(args));
+    }
     if matches!(command, Command::Serve) {
         if cli.json {
             Cli::command()
@@ -163,7 +169,7 @@ pub fn run() {
         }
         Command::Call { method } => call::read_params(io::stdin())
             .and_then(|params| runtime.block_on(call::dispatch(&session, &method, &params))),
-        Command::Serve => unreachable!(),
+        Command::Serve | Command::Setup(_) => unreachable!(),
         #[cfg(all(feature = "agent", target_os = "linux"))]
         Command::AgentWorker { .. } => unreachable!(),
     };

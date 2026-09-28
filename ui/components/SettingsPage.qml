@@ -44,6 +44,8 @@ Column {
     var values = [{ key: "backend", title: "Mail backend", y: backendSetup.y }]
     if (!root.service || root.service.hasTray !== false)
       values.push({ key: "bar", title: "Bar", y: barHeading.y })
+    if (root.service && root.service.hasMailto === true)
+      values.push({ key: "mailClient", title: "Default mail client", y: mailClientHeading.y })
     values.push({ key: "reading", title: "Reading", y: readingHeading.y })
     if (!root.service || root.service.hasNotifications !== false
         || String(root.service.notificationError || "") !== "")
@@ -241,6 +243,8 @@ Column {
     ensureNameAccount()
   }
   Component.onCompleted: {
+    if (service && typeof service.refreshDefaultMailClient === "function")
+      service.refreshDefaultMailClient()
     renderSignaturePreview()
     ensureSignatureAccount()
     ensureNameAccount()
@@ -423,6 +427,97 @@ Column {
       foreground: root.textColor
       accent: root.accentColor
       onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
+    }
+  }
+
+  // --------------------------------------------------- default mail client
+  //
+  // Omarchy opens HEY's web app on SUPER+SHIFT+E, and mailto: links go to
+  // whatever claimed them. scripts/default-mail.sh moves both, the same script
+  // `omamail setup` runs, and undoing it gives the key back to Omarchy.
+
+  Text {
+    id: mailClientHeading
+    visible: !!root.service && root.service.hasMailto === true
+    text: "DEFAULT MAIL CLIENT"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    id: mailClientRow
+    objectName: "default-mail-client-settings"
+    visible: !!root.service && root.service.hasMailto === true
+    width: parent.width
+    implicitHeight: Math.max(mailClientText.implicitHeight, mailClientButton.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    readonly property bool isDefault: !!root.service
+      && root.service.defaultMailClient === "default"
+
+    Column {
+      id: mailClientText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: mailClientButton.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: mailClientRow.isDefault
+          ? "Omamail is the default mail client"
+          : "Set up Omamail as the default mail client"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Opens mailto: links, SUPER+SHIFT+E and SUPER+SHIFT+ALT+E for a new "
+          + "message. The same as running omamail setup in a terminal."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        visible: text !== ""
+        text: root.service ? String(root.service.defaultMailClientError || "") : ""
+        color: root.urgentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    IconTextButton {
+      id: mailClientButton
+      objectName: "defaultMailClientButton"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      enabled: !!root.service && !root.service.defaultMailClientBusy
+        && root.service.defaultMailClient !== ""
+      text: mailClientRow.isDefault ? "Undo" : "Set as default"
+      tooltipText: mailClientRow.isDefault
+        ? "Give SUPER+SHIFT+E back to Omarchy's own email binding"
+        : "Make Omamail open mailto: links and SUPER+SHIFT+E"
+      foreground: root.textColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.service.setDefaultMailClient(!mailClientRow.isDefault)
     }
   }
 
