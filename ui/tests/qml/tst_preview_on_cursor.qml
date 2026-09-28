@@ -312,6 +312,10 @@ Item {
       compare(app.composing, true)
       app.moveCursor(1)
       compare(mailService.openSelects, 0)
+      // Navigation resets preserve an open composer across readiness changes.
+      // Close this empty draft so the next test starts in the mail list.
+      app.back()
+      compare(app.composing, false)
     }
 
     function test_immediate_open_clears_the_previous_heavy_document_override() {
