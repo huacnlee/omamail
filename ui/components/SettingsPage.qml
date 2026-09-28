@@ -441,8 +441,8 @@ Column {
   // --------------------------------------------------- default mail client
   //
   // Omarchy opens HEY's web app on SUPER+SHIFT+E, and mailto: links go to
-  // whatever claimed them. scripts/default-mail.sh moves both, the same script
-  // `omamail setup` runs, and undoing it gives the key back to Omarchy.
+  // whatever claimed them. scripts/default-mail.sh moves both, and undoing it
+  // gives the key back to Omarchy.
 
   Text {
     id: mailClientHeading
@@ -490,8 +490,7 @@ Column {
 
       Text {
         width: parent.width
-        text: "Opens mailto: links, SUPER+SHIFT+E and SUPER+SHIFT+ALT+E for a new "
-          + "message. The same as running omamail setup in a terminal."
+        text: "Opens mailto: links, SUPER+SHIFT+E, and SUPER+SHIFT+ALT+E for a new message."
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

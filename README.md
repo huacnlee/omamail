@@ -69,15 +69,9 @@ See [mailbox setup](docs/MAILBOXES.md) for provider instructions and limitations
 
 ## Make Omamail the default mail client
 
-Omarchy opens HEY's web app on `SUPER+SHIFT+E`. To make Omamail the default mail client instead, choose **Settings → Default mail client → Set as default**, or run:
+Omarchy opens HEY's web app on `SUPER+SHIFT+E`. Choose **Settings → Default mail client → Set as default** to make Omamail open `mailto:` links, `SUPER+SHIFT+E`, and `SUPER+SHIFT+ALT+E` for a new message.
 
-```bash
-omamail setup          # mailto: links, SUPER+SHIFT+E, and SUPER+SHIFT+ALT+E for a new message
-omamail setup --status # default or not-default
-omamail setup --undo   # give SUPER+SHIFT+E back to Omarchy
-```
-
-The key bindings go in a clearly marked block in `~/.config/hypr/bindings.lua`; Omarchy's own files are never changed, and `--undo` removes the block and leaves the file as it was. `omamail setup` finds the plugin in `~/.config/omarchy/plugins/omamail`; set `OMAMAIL_PLUGIN_DIR` if it lives elsewhere.
+The key bindings go in a clearly marked block in `~/.config/hypr/bindings.lua`; Omarchy's own files are never changed. **Undo** removes the block and leaves the file as it was.
 
 ## Open the Omarchy plugin from the keyboard
 
