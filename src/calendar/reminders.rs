@@ -216,7 +216,13 @@ mod tests {
     use super::*;
     #[test]
     fn claims_are_durable_and_snooze_never_replays_an_ended_event() {
-        let root = std::env::temp_dir().join(format!("omamail-reminders-{}", std::process::id()));
+        // macOS exposes its temporary directory through /var, a symlink to
+        // /private/var. Resolve the trusted fixture parent before exercising
+        // the production no-symlink storage boundary.
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("omamail-reminders-{}", std::process::id()));
         std::fs::create_dir(&root).unwrap();
         let candidate = json!({"key":"occurrence\n10", "occurrence":"occurrence", "start":2000000,
             "end":5600000,"due":1400000,"eventId":"event","sourceId":"calendar","accountId":"synthetic","title":"Planning"});
