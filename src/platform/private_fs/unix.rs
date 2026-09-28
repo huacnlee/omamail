@@ -412,14 +412,22 @@ impl Drop for ExclusiveLock {
 pub(crate) fn lock_exclusive(dir: &File, name: &str) -> Result<ExclusiveLock> {
     validate_owned_root(dir)?;
     let name = cstr(name.as_ref())?;
-    let fd = unsafe {
+    let flags = libc::O_RDWR | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    // Darwin can return a spurious ENOENT when concurrent openat(O_CREAT)
+    // callers race the first creation. Use exclusive creation followed by a
+    // non-creating open of the winner; both remain relative to the pinned dir.
+    // https://github.com/golang/go/issues/81246
+    let mut fd = unsafe {
         libc::openat(
             dir.as_raw_fd(),
             name.as_ptr(),
-            libc::O_RDWR | libc::O_CREAT | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            flags | libc::O_CREAT | libc::O_EXCL,
             0o600,
         )
     };
+    if fd < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EEXIST) {
+        fd = unsafe { libc::openat(dir.as_raw_fd(), name.as_ptr(), flags) };
+    }
     if fd < 0 {
         return Err("cache_unsafe_path");
     }
