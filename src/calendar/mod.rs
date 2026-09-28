@@ -3,8 +3,11 @@ use reqwest::{Client, Method, Url};
 use serde_json::{Value, json};
 use std::{sync::OnceLock, time::Duration};
 
+pub mod attendance;
 mod discovery;
+pub mod reminders;
 pub use discovery::discover;
+pub use discovery::google as discover_google;
 
 const LIMIT: usize = 16 * 1024 * 1024;
 static CLIENT: OnceLock<Result<Client, &'static str>> = OnceLock::new();
@@ -85,6 +88,7 @@ struct Request {
     source_id: String,
     username: String,
     account_id: String,
+    if_match: Option<String>,
 }
 
 fn prepare(params: &Value) -> Result<Request, &'static str> {
@@ -92,8 +96,8 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
     let kind = text(source, "kind")?;
     let op = text(params, "operation")?;
     let method = match op {
-        "list" => Method::GET,
-        "create" => Method::POST,
+        "list" | "get" | "lookup" | "instances" => Method::GET,
+        "create" | "move" => Method::POST,
         "update" => Method::PATCH,
         "delete" => Method::DELETE,
         _ => return Err("calendar_invalid_operation"),
@@ -110,9 +114,36 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         source_id: String::new(),
         username: String::new(),
         account_id: String::new(),
+        if_match: params
+            .get("ifMatch")
+            .map(|_| text(params, "ifMatch").map(str::to_owned))
+            .transpose()?,
     };
     match kind {
         "google" | "microsoft" => {
+            if kind == "google" {
+                let calendar_id = source["calendarId"]
+                    .as_str()
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or("primary");
+                if calendar_id == "."
+                    || calendar_id == ".."
+                    || calendar_id.len() > 8192
+                    || calendar_id.chars().any(char::is_control)
+                {
+                    return Err("calendar_invalid_input");
+                }
+                request.url =
+                    Url::parse("https://www.googleapis.com/calendar/v3/calendars").unwrap();
+                request
+                    .url
+                    .path_segments_mut()
+                    .unwrap()
+                    .push(calendar_id)
+                    .push("events");
+            } else if !matches!(op, "list" | "create" | "update" | "delete") {
+                return Err("calendar_invalid_operation");
+            }
             if kind == "microsoft" {
                 // Legacy/default sources serialize an empty identity. They
                 // still address /me/calendarView until discovery names one.
@@ -149,12 +180,57 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
                     .unwrap();
                 }
             }
-            if op == "update" || op == "delete" {
+            if matches!(op, "get" | "update" | "delete" | "instances" | "move") {
                 let id = text(params, "eventId")?;
                 if id == "." || id == ".." {
                     return Err("calendar_invalid_input");
                 }
                 request.url.path_segments_mut().unwrap().push(id);
+            }
+            if op == "instances" {
+                request.url.path_segments_mut().unwrap().push("instances");
+                request
+                    .url
+                    .query_pairs_mut()
+                    .append_pair("showDeleted", "true");
+                if params.get("originalStart").is_some() {
+                    request
+                        .url
+                        .query_pairs_mut()
+                        .append_pair("originalStart", text(params, "originalStart")?);
+                }
+            }
+            if op == "lookup" {
+                request.url.query_pairs_mut().extend_pairs([
+                    ("iCalUID", text(params, "uid")?),
+                    ("showHiddenInvitations", "true"),
+                    ("showDeleted", "true"),
+                    ("maxResults", "2500"),
+                ]);
+            }
+            if op == "move" {
+                request.url.path_segments_mut().unwrap().push("move");
+                request
+                    .url
+                    .query_pairs_mut()
+                    .append_pair("destination", text(params, "destination")?);
+            }
+            if kind == "google" && matches!(op, "create" | "update" | "move" | "delete") {
+                if let Some(updates) = params["sendUpdates"].as_str() {
+                    if !["all", "externalOnly", "none"].contains(&updates) {
+                        return Err("calendar_invalid_input");
+                    }
+                    request
+                        .url
+                        .query_pairs_mut()
+                        .append_pair("sendUpdates", updates);
+                }
+                if matches!(op, "create" | "update") {
+                    request
+                        .url
+                        .query_pairs_mut()
+                        .append_pair("conferenceDataVersion", "1");
+                }
             }
             if op == "list" {
                 let start = text(params, "start")?;
@@ -186,6 +262,9 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
             }
         }
         "caldav" | "icloud" => {
+            if !matches!(op, "list" | "create" | "update" | "delete") {
+                return Err("calendar_invalid_operation");
+            }
             let base = if kind == "icloud" {
                 request.account_id = text(source, "accountId")?.into();
                 discovery::icloud_url(text(source, "url")?)?
@@ -208,6 +287,10 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         _ => return Err("calendar_provider_unsupported"),
     }
     Ok(request)
+}
+
+pub fn validate(params: &Value) -> Result<(), &'static str> {
+    prepare(params).map(|_| ())
 }
 
 /// OAuth tokens remain inside Rust; CalDAV credentials are loaded only after
@@ -258,8 +341,10 @@ where
     } else {
         None
     };
-    let paginated =
-        params["operation"] == "list" && !matches!(request.kind.as_str(), "caldav" | "icloud");
+    let paginated = matches!(
+        params["operation"].as_str(),
+        Some("list" | "lookup" | "instances")
+    ) && !matches!(request.kind.as_str(), "caldav" | "icloud");
     let origin = request.url.clone();
     let mut result = execute(
         client()?,
@@ -375,6 +460,14 @@ async fn execute(
     password: Option<&str>,
 ) -> Result<Value, &'static str> {
     let mut builder = client.request(request.method.clone(), request.url);
+    // Google's empty-body POST endpoints (events.move) require an explicit
+    // length. reqwest/hyper may otherwise omit framing for a zero-byte body.
+    if request.method == Method::POST && request.body.is_empty() {
+        builder = builder.header(reqwest::header::CONTENT_LENGTH, "0");
+    }
+    if let Some(etag) = request.if_match {
+        builder = builder.header("If-Match", etag);
+    }
     if matches!(request.kind.as_str(), "caldav" | "icloud") {
         builder = builder.basic_auth(request.username, password);
         if request.method.as_str() == "REPORT" {
@@ -401,6 +494,12 @@ async fn execute(
         .await
         .map_err(|_| "calendar_network_failed")?;
     let status = response.status();
+    if status.as_u16() == 412 {
+        return Err("calendar_conflict");
+    }
+    if status.as_u16() == 404 {
+        return Err("calendar_not_found");
+    }
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err("calendar_auth_refused");
     }

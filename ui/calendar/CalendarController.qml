@@ -11,6 +11,8 @@ Item {
   required property var service
   required property string pluginDir
   property string cacheName: "calendar"
+  property bool reminderMode: false
+  function sourceIncluded(source) { return !!source && (reminderMode ? source.remindersEnabled === true : source.enabled !== false) }
   property string accountId: ""
   property var sourceList: Sources.emptyList()
   property bool sourcesLoaded: false
@@ -18,6 +20,7 @@ Item {
   property bool loading: false
   property string lastError: ""
   property string lastErrorKind: ""
+  property var undoChange: null
   property double rangeStart: 0
   property double rangeEnd: 0
   property double pendingRangeStart: 0
@@ -49,6 +52,8 @@ Item {
   property int discoverySerial: 0
   property bool discoverySaving: false
   property int discoveryPendingCount: 0
+  property var discoveryChoices: null
+  property string discoveryChoiceAccount: ""
   property bool clockRunning: false
   property double nowMs: Date.now()
   property bool refreshAfterSourceWrite: false
@@ -107,7 +112,7 @@ Item {
   // summaries twice a cycle with no calendar having come or gone, which a
   // string compares away where the array would not.
   readonly property string enabledSourceKey: contextSources.sources.filter(function(source) {
-    return source && source.enabled
+    return root.sourceIncluded(source)
   }).map(function(source) { return String(source.id || "") }).join("\n")
   onEnabledSourceKeyChanged: reloadVisibleRange()
 
@@ -171,11 +176,11 @@ Item {
     refreshScope = calendarScope
     var effectiveSources = sourcesForAccount(refreshAccountId)
     queue = effectiveSources.sources.filter(function(source) {
-      return source && source.enabled
+      return root.sourceIncluded(source)
     })
     var sourceIds = queue.map(function(source) { return String(source.id || "") })
-    events = eventCache.get(refreshScope, rangeStart, rangeEnd, sourceIds)
     loading = true
+    events = eventCache.get(refreshScope, rangeStart, rangeEnd, sourceIds)
     processNext()
   }
 
@@ -192,7 +197,8 @@ Item {
       var account = accounts[i] || {}
       if (String(account.id || "") !== String(accountId || "")) continue
       return account.signedIn === true
-        && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud")
+        && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud"
+          || (account.calendarProvider === "google" && service.backendCanGoogleCalendars === true))
     }
     return false
   }
@@ -216,7 +222,7 @@ Item {
     if (code === "auth_signed_out" || code === "calendar_auth_refused")
       return "Sign in to this mailbox again"
     if (code === "calendar_provider_unsupported")
-      return "This mailbox does not provide iCloud or Microsoft calendars"
+      return "This mailbox does not support calendar discovery"
     if (code === "calendar_timeout") return "Calendar discovery timed out"
     return "Calendars could not be discovered"
   }
@@ -249,6 +255,12 @@ Item {
         return
       }
       var next = Sources.applyDiscovery(root.sourceList, result)
+      if (result.provider === "google") {
+        root.discoveryChoiceAccount = wanted
+        root.discoveryChoices = next
+        root.discoveryPendingCount = result.calendars.length
+        return
+      }
       root.discoveryPendingCount = result.calendars.length
       root.discoverySaving = true
       root.sourceBeingSaved = null
@@ -261,11 +273,44 @@ Item {
     return true
   }
 
+  function chooseDiscovered(id, enabled) {
+    if (!discoveryChoices) return
+    var next = Sources.setEnabled(discoveryChoices, id, enabled)
+    var existing = sourceList.sources.some(function(source) { return source.id === id && source.discovered })
+    if (!existing) next.sources = next.sources.map(function(source) {
+      if (source.id !== id) return source
+      var value = Sources.makeSource(source)
+      value.remindersEnabled = enabled === true
+      return value
+    })
+    discoveryChoices = next
+  }
+
+  function confirmDiscovery() {
+    if (!discoveryChoices || savingSource) return
+    if (!discoverableAccount(discoveryChoiceAccount)) { discoveryChoices = null; return }
+    var chosen = Sources.copyList(sourceList)
+    chosen.sources = chosen.sources.filter(function(source) {
+      return source.kind !== "google" || source.accountId !== root.discoveryChoiceAccount
+    })
+    discoveryChoices.sources.forEach(function(source) {
+      if (source.kind === "google" && source.accountId === root.discoveryChoiceAccount) chosen = Sources.add(chosen, source)
+    })
+    sourceWritePayload = Sources.serialize(chosen)
+    discoveryChoices = null
+    discoverySaving = true
+    sourceBeingSaved = null
+    sourceSecret = ""
+    refreshAfterSourceWrite = true
+    savingSource = true
+    writeSources()
+  }
+
   // `scope` rather than an account id: in the unified view every mailbox reads
   // the same entry, and asking for it by account would find nothing.
   function cachedEventsFor(scope, startMs, endMs) {
     var values = sourcesForAccount(accountId).sources.filter(function(source) {
-      return source && source.enabled
+      return root.sourceIncluded(source)
     })
     return eventCache.get(scope, startMs, endMs,
       values.map(function(source) { return String(source.id || "") }))
@@ -289,6 +334,12 @@ Item {
     if (refusal !== "") { eventCreated(false, refusal); return false }
     var built = Calendar.createEvent(fields, Date.now())
     if (!built.ok) { eventCreated(false, built.error); return false }
+    if (source.kind === "google") {
+      var options = Calendar.googleOptions(built.google, fields, source, null)
+      if (!options.ok) { eventCreated(false, options.error); return false }
+      built.google = options.body
+      built.sendUpdates = fields.sendUpdates === "none" ? "none" : "all"
+    }
     eventSource = source
     eventDraft = built
     creatingEvent = true
@@ -319,10 +370,30 @@ Item {
       return false
     }
     var source = findSource(sourceId)
+    if (source && source.kind === "google" && service.backendCanGoogleCalendars === true && !event.etag) {
+      eventUpdated(false, "Refresh this event before editing it")
+      return false
+    }
     var refusal = Calendar.writeRefusal(source, event)
     if (refusal !== "") { eventUpdated(false, refusal); return false }
     var built = Calendar.updateEvent(fields, event, Date.now())
     if (!built.ok) { eventUpdated(false, built.error); return false }
+    var destination = fields.destinationSourceId && fields.destinationSourceId !== sourceId
+      ? findSource(fields.destinationSourceId) : null
+    if (fields.destinationSourceId && fields.destinationSourceId !== sourceId) {
+      var transferError = Calendar.transferRefusal(source, destination, event)
+      if (transferError !== "") { eventUpdated(false, transferError); return false }
+      if (service.backendCanGoogleCalendars !== true) {
+        eventUpdated(false, "Update the backend to transfer events"); return false
+      }
+      built.destination = destination
+    }
+    if (source.kind === "google") {
+      var options = Calendar.googleOptions(built.google, fields, source, event)
+      if (!options.ok) { eventUpdated(false, options.error); return false }
+      built.google = options.body
+      built.sendUpdates = fields.sendUpdates === "none" ? "none" : "all"
+    }
     writeOp = "update"
     writeSource = source
     writeEvent = event
@@ -340,7 +411,7 @@ Item {
       return false
     }
     var source = findSource(sourceId)
-    var refusal = Calendar.writeRefusal(source, event)
+    var refusal = Calendar.writeRefusal(source, event, "delete")
     if (refusal !== "") { eventDeleted(false, refusal); return false }
     writeOp = "delete"
     writeSource = source
@@ -350,6 +421,29 @@ Item {
     if (source.kind === "google") startGoogleWrite()
     else if (source.kind === "microsoft") startGraphWrite()
     else startCaldavWrite()
+    return true
+  }
+
+  function transferEvent(sourceId, destinationId, event, callback) {
+    var source = findSource(sourceId), destination = findSource(destinationId)
+    var refusal = Calendar.transferRefusal(source, destination, event)
+    if (creatingEvent || eventWriting) refusal = "Another event change is still in progress"
+    else if (service.backendCanGoogleCalendars !== true) refusal = "Update the backend to transfer events"
+    else if (!event || !event.etag) refusal = "Refresh this event before moving it"
+    if (refusal) { callback(null, refusal); return false }
+    eventWriting = true
+    nativeRequest(source, "move", {eventId:event.googleId, destination:destination.calendarId || "primary",
+      ifMatch:event.etag, sendUpdates:"none"}, function(result, error) {
+      root.eventWriting = false
+      if (error) { callback(null, error); return }
+      root.undoChange = null
+      var resource = null
+      try { resource = JSON.parse(result.body) } catch (e) {}
+      var moved = resource ? Calendar.eventsFromGoogle({items:[resource]}, destination.id) : []
+      callback(moved.length === 1 ? moved[0] : null,
+        moved.length === 1 ? "" : "The calendar changed, but its updated details could not be read. Reopen the event before editing further.", true)
+      if (root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
+    })
     return true
   }
 
@@ -394,6 +488,13 @@ Item {
 
   function nativeRequest(source, operation, fields, callback) {
     if (!service || !service.backend) { callback(null, "Calendar backend is unavailable"); return }
+    if (source && source.kind === "google"
+        && (source.calendarId || ["get", "lookup", "instances", "move"].indexOf(operation) >= 0
+          || fields && (fields.ifMatch || fields.sendUpdates !== undefined))
+        && service.backendCanGoogleCalendars !== true) {
+      callback(null, "Update the backend to access Google calendars")
+      return
+    }
     if (source && service.backendCanDiscoverCalendars !== true) {
       if (source.kind === "microsoft" && String(source.calendarId || "") !== ""
           && isDefaultMicrosoftCalendar(source)) {
@@ -412,7 +513,8 @@ Item {
     service.backend.call("calendar.request", params, function(result, error) {
       var reason = ""
       if (error) {
-        reason = Calendar.nativeRequestError(String(source && source.kind || ""))
+        reason = error.message === "calendar_conflict" ? "This event changed elsewhere. Refresh and try again."
+          : Calendar.nativeRequestError(String(source && source.kind || ""))
       }
       callback(result, reason)
     })
@@ -420,6 +522,8 @@ Item {
 
   function createNativeEvent() {
     var fields = {}
+    if (eventSource.kind === "google" && service.backendCanGoogleCalendars === true)
+      fields.sendUpdates = eventDraft.sendUpdates
     if (eventSource.kind === "caldav" || eventSource.kind === "icloud") {
       var base = String(eventSource.url || "")
       if (base.charAt(base.length - 1) !== "/") base += "/"
@@ -437,9 +541,67 @@ Item {
       if (writeDraft) fields.body = writeDraft.ics
     } else {
       fields.eventId = String(writeSource.kind === "google" ? writeEvent.googleId : writeEvent.graphId)
+      if (writeSource.kind === "google" && writeEvent.etag && service.backendCanGoogleCalendars === true)
+        fields.ifMatch = writeEvent.etag
+      if (writeSource.kind === "google" && writeDraft && service.backendCanGoogleCalendars === true)
+        fields.sendUpdates = writeDraft.sendUpdates
+      if (writeSource.kind === "google" && writeOp === "delete" && service.backendCanGoogleCalendars === true)
+        fields.sendUpdates = writeEvent.deleteSendUpdates === "none" ? "none" : "all"
       if (writeDraft) fields.body = JSON.stringify(writeSource.kind === "google" ? writeDraft.google : writeDraft.graph)
     }
-    nativeRequest(writeSource, writeOp, fields, function(result, error) { root.finishWrite(!error, error) })
+    nativeRequest(writeSource, writeOp, fields, function(result, error) {
+      if (!error) root.undoChange = null
+      if (!error && root.writeOp === "update" && root.writeSource.kind === "google"
+          && root.service.backendCanGoogleCalendars === true
+          && root.writeEvent.start && root.writeEvent.end
+          && !root.writeDraft.destination && !(root.writeEvent.attendees || []).some(function(a) { return a.self !== true })
+          && !(root.writeDraft.google.attendees || []).some(function(a) { return a.self !== true })) {
+        var saved = null
+        try { saved = JSON.parse(result.body) } catch (e) {}
+        if (saved && saved.etag) {
+          var previous = root.writeEvent
+          var inverse = Calendar.googleEventPatch({ title: previous.summary, description: previous.description,
+            location: previous.location, start: previous.start.ms, end: previous.end.ms }, previous.start.allDay)
+          if (root.writeDraft.google.conferenceData) inverse.conferenceData = previous.conferenceData || null
+          if (root.writeDraft.google.recurrence !== undefined) inverse.recurrence = previous.recurrenceLines || []
+          var preserved = ["reminders", "transparency", "visibility", "attendees"]
+          var completeUndo = true
+          for (var p = 0; p < preserved.length; p++) {
+            var field = preserved[p]
+            if (root.writeDraft.google[field] !== undefined && previous[field] !== undefined)
+              inverse[field] = previous[field]
+            else if (root.writeDraft.google[field] !== undefined) completeUndo = false
+          }
+          if (!previous.start.allDay && previous.timeZone) {
+            inverse.start.timeZone = previous.timeZone
+            inverse.end.timeZone = previous.timeZone
+          }
+          if (completeUndo) root.undoChange = { source: root.writeSource, eventId: fields.eventId, ifMatch: saved.etag,
+            body: JSON.stringify(inverse), sendUpdates: "none" }
+        }
+      }
+      if (error || !root.writeDraft || !root.writeDraft.destination) { root.finishWrite(!error, error); return }
+      var move = { eventId: fields.eventId, destination: root.writeDraft.destination.calendarId || "primary",
+        sendUpdates: root.writeDraft.sendUpdates }
+      root.nativeRequest(root.writeSource, "move", move, function(moved, moveError) {
+        root.finishWrite(!moveError, moveError ? "Changes were saved, but the calendar transfer failed. Refresh before trying again." : "")
+        if (moveError && root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
+      })
+    })
+  }
+
+  function undoLastChange() {
+    if (!undoChange || creatingEvent || eventWriting) return
+    if (service.backendCanGoogleCalendars !== true) { lastError = "Update the backend to undo calendar changes"; return }
+    var change = undoChange
+    undoChange = null
+    eventWriting = true
+    nativeRequest(change.source, "update", { eventId: change.eventId, ifMatch: change.ifMatch,
+      body: change.body, sendUpdates: change.sendUpdates }, function(result, error) {
+      root.eventWriting = false
+      if (root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
+      if (error) root.lastError = error
+    })
   }
 
   function saveCalDavPassword(secret) {
@@ -514,6 +676,40 @@ Item {
       if (values[i] && values[i].id === String(sourceId)) return values[i].colorKey
     }
     return Sources.defaultColorKey(sourceId)
+  }
+
+  function setDefaultCalendar(sourceId) {
+    if (savingSource || discoveringCalendars) return
+    var chosen = findSource(sourceId)
+    if (!chosen || chosen.readOnly) return
+    var next = Sources.add(sourceList, chosen)
+    next.sources = next.sources.map(function(source) {
+      var value = Sources.makeSource(source)
+      if (value.accountId === chosen.accountId) value.preferred = value.id === chosen.id
+      return value
+    })
+    sourceBeingSaved = null
+    sourceSecret = ""
+    sourceWritePayload = Sources.serialize(next)
+    refreshAfterSourceWrite = false
+    savingSource = true
+    writeSources()
+  }
+
+  function setReminderPolicy(sourceId, enabled, minutes) {
+    if (savingSource || discoveringCalendars) return
+    var source = findSource(sourceId)
+    if (!source) return
+    var value = Sources.makeSource(source)
+    value.remindersEnabled = enabled === true
+    value.reminderMinutes = Math.max(-1, Math.min(40320, Math.floor(Number(minutes))))
+    if (!isFinite(value.reminderMinutes)) return
+    sourceWritePayload = Sources.serialize(Sources.add(sourceList, value))
+    sourceBeingSaved = null
+    sourceSecret = ""
+    refreshAfterSourceWrite = false
+    savingSource = true
+    writeSources()
   }
 
   function setSourceColor(sourceId, colorKey) {
@@ -672,7 +868,7 @@ Item {
       activeSource = null
       loading = false
       var enabled = sourcesForAccount(refreshAccountId).sources.filter(function(source) {
-        return source && source.enabled
+        return root.sourceIncluded(source)
       }).map(function(source) { return String(source.id || "") })
       var allowed = {}
       for (var i = 0; i < enabled.length; i++) allowed[enabled[i]] = true
@@ -680,7 +876,8 @@ Item {
         return allowed[String(event && event.sourceId || "")] === true
       })
       if (rangeStart && rangeEnd && refreshScope === calendarScope)
-        eventCache.put(refreshScope, rangeStart, rangeEnd, events)
+        eventCache.put(refreshScope, rangeStart, rangeEnd, events,
+          contextSources.sources.filter(function(source) { return root.sourceIncluded(source) }).map(function(source) { return String(source.id) }))
       var nextStart = pendingRangeStart
       var nextEnd = pendingRangeEnd
       pendingRangeStart = 0

@@ -23,12 +23,14 @@ Column {
       ? root.service.accountSummaries : []
     return accounts.filter(function(account) {
       return account && account.signedIn === true
-        && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud")
+        && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud"
+          || (account.calendarProvider === "google" && root.service.backendCanGoogleCalendars === true))
     })
   }
 
   function providerName(account) {
-    return account && account.calendarProvider === "icloud" ? "iCloud" : "Microsoft"
+    return account && account.calendarProvider === "icloud" ? "iCloud"
+      : account && account.calendarProvider === "google" ? "Google" : "Microsoft"
   }
 
   function accountLabel(source) {
@@ -88,7 +90,7 @@ Column {
 
   Text {
     width: parent.width
-    text: "Google and Microsoft calendars follow their signed-in mailboxes. Find every Microsoft or iCloud calendar below, or connect another CalDAV calendar manually."
+    text: "Find Google, Microsoft and iCloud calendars from your connected mailboxes, or connect another CalDAV calendar manually. Choose visibility and desktop reminders independently."
     color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
@@ -142,6 +144,101 @@ Column {
       accent: root.accentColor
       onToggled: if (root.service)
         root.service.setUnifiedCalendarView(!root.service.unifiedCalendarView)
+    }
+  }
+
+  Column {
+    width: parent.width
+    spacing: Style.space(6)
+    visible: !!root.service && root.service.backendCanGoogleCalendars === true
+    Button {
+      text: root.service && root.service.calendarRemindersEnabled ? "✓ Desktop reminders" : "Desktop reminders off"
+      selected: !!root.service && root.service.calendarRemindersEnabled === true
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.service.persistSetting("calendarRemindersEnabled", !root.service.calendarRemindersEnabled)
+    }
+    Text {
+      width: parent.width
+      visible: text !== ""
+      text: String(root.service && root.service.calendarReminderError || "")
+      textFormat: Text.PlainText
+      wrapMode: Text.Wrap
+      color: root.urgentColor
+      font.family: root.panelFontFamily
+    }
+    Text {
+      width: parent.width
+      text: "Reminders run while Omamail is running, even with its window closed. Per-calendar minutes are before the event starts. Leave them blank to follow Google popup reminders; explicit event settings with no reminders stay silent."
+      textFormat: Text.PlainText
+      wrapMode: Text.Wrap
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+    }
+    Row {
+      spacing: Style.space(8)
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Snooze (minutes)"
+        textFormat: Text.PlainText
+        color: root.textColor
+        font.family: root.panelFontFamily
+      }
+      TextField {
+        width: Style.space(80)
+        text: String(root.service ? root.service.calendarSnoozeMinutes : 5)
+        placeholderText: "5"
+        foreground: root.textColor
+        accent: root.accentColor
+        font.family: root.panelFontFamily
+        Accessible.name: "Snooze minutes"
+        onEditingFinished: if (/^[0-9]+$/.test(text) && Number(text) >= 1 && Number(text) <= 1440)
+          root.service.persistSetting("calendarSnoozeMinutes", Number(text))
+      }
+    }
+    Repeater {
+      model: root.controller && root.controller.availableSources ? root.controller.availableSources.sources : []
+      delegate: Row {
+        id: reminderRow
+        required property var modelData
+        width: parent.width
+        spacing: Style.space(6)
+        Text {
+          width: Math.max(0, parent.width - reminderToggle.implicitWidth - reminderMinutes.width - parent.spacing * 2)
+          anchors.verticalCenter: parent.verticalCenter
+          text: String(reminderRow.modelData.name || reminderRow.modelData.id)
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: root.textColor
+          font.family: root.panelFontFamily
+        }
+        Button {
+          id: reminderToggle
+          text: reminderRow.modelData.remindersEnabled ? "✓ Remind" : "Off"
+          selected: reminderRow.modelData.remindersEnabled === true
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          enabled: !root.controller.savingSource
+          onClicked: root.controller.setReminderPolicy(reminderRow.modelData.id,
+            !reminderRow.modelData.remindersEnabled, reminderRow.modelData.reminderMinutes)
+        }
+        TextField {
+          id: reminderMinutes
+          width: Style.space(150)
+          text: Number(reminderRow.modelData.reminderMinutes) >= 0 ? String(reminderRow.modelData.reminderMinutes) : ""
+          placeholderText: reminderRow.modelData.kind === "google" ? "Google default" : "No reminders"
+          foreground: root.textColor
+          accent: root.accentColor
+          font.family: root.panelFontFamily
+          Accessible.name: "Minutes before " + String(reminderRow.modelData.name || "event")
+          enabled: !root.controller.savingSource
+          onEditingFinished: if (text === "" || (/^[0-9]+$/.test(text) && Number(text) <= 40320))
+            root.controller.setReminderPolicy(reminderRow.modelData.id, reminderRow.modelData.remindersEnabled, text === "" ? -1 : Number(text))
+        }
+      }
     }
   }
 
@@ -202,7 +299,8 @@ Column {
           && root.controller.discoveringAccountId === String(discoveryRow.modelData.id || "")
           ? "Finding..."
           : (root.controller && root.controller.discoveredCount(discoveryRow.modelData.id) > 0
-            ? "Refresh calendars" : "Find calendars")
+             ? "Refresh calendars" : "Find calendars")
+          + (discoveryRow.modelData.calendarProvider === "google" ? "..." : "")
         onClicked: {
           resultText.text = ""
           root.colorEditingId = ""
@@ -210,6 +308,47 @@ Column {
           if (root.controller)
             root.controller.discoverAccountCalendars(discoveryRow.modelData.id)
         }
+      }
+    }
+  }
+
+  Column {
+    width: root.width
+    visible: !!root.controller && root.controller.discoveryChoices !== null
+    spacing: Style.space(8)
+    Text {
+      text: "Choose calendars to show"
+      color: root.textColor
+      font.family: root.panelFontFamily
+      textFormat: Text.PlainText
+    }
+    Repeater {
+      model: root.controller && root.controller.discoveryChoices ? root.controller.discoveryChoices.sources.filter(function(source) {
+        return source.accountId === root.controller.discoveryChoiceAccount && source.kind === "google"
+      }) : []
+      delegate: Button {
+        required property var modelData
+        text: (modelData.enabled ? "✓ " : "○ ") + String(modelData.name || modelData.id)
+        foreground: root.textColor
+        accent: root.accentColor
+        selected: modelData.enabled
+        fontFamily: root.panelFontFamily
+        Accessible.role: Accessible.CheckBox
+        Accessible.checked: modelData.enabled
+        onClicked: root.controller.chooseDiscovered(modelData.id, !modelData.enabled)
+      }
+    }
+    Row {
+      spacing: Style.space(8)
+      Button {
+        text: "Apply selection"
+        foreground: root.textColor
+        onClicked: root.controller.confirmDiscovery()
+      }
+      Button {
+        text: "Cancel"
+        foreground: root.textColor
+        onClicked: root.controller.discoveryChoices = null
       }
     }
   }
@@ -318,6 +457,16 @@ Column {
           enabled: !!root.controller && !root.controller.savingSource
             && !root.controller.discoveringCalendars
           onClicked: root.controller.removeCalendar(modelData.id)
+        }
+        IconTextButton {
+          visible: modelData.readOnly !== true
+          text: modelData.preferred === true ? "✓ Default" : "Set default"
+          selected: modelData.preferred === true
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          enabled: !!root.controller && !root.controller.savingSource
+          onClicked: root.controller.setDefaultCalendar(modelData.id)
         }
         Button {
           id: sourceToggle

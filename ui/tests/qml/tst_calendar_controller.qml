@@ -13,6 +13,7 @@ Item {
     property var nextResult: ({ body: "{}", status: 200 })
     property var nextError: null
     property bool backendCanDiscoverCalendars: true
+    property bool backendCanGoogleCalendars: false
     property var discoveryCallback: null
     property var credentialWrites: []
     property var configWrites: []
@@ -70,6 +71,31 @@ Item {
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
+    function test_immediate_transfer_sends_only_move_and_uses_new_event_identity() {
+      mailService.backendCanGoogleCalendars = true
+      controller.accountId = "one@gmail.com"
+      controller.sourceList = {version:1,sources:[
+        {id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary",enabled:true},
+        {id:"google:family",kind:"google",accountId:"one@gmail.com",calendarId:"family",enabled:true}]}
+      controller.rangeStart = 0
+      controller.rangeEnd = 0
+      var event = {googleId:"meeting",eventType:"default",etag:"before",organizer:{self:true}}
+      mailService.nextResult = {body:JSON.stringify({id:"meeting",etag:"after",summary:"Saved title",
+        start:{dateTime:"2026-10-01T10:00:00Z"},end:{dateTime:"2026-10-01T11:00:00Z"},organizer:{self:true}})}
+      var moved = null
+      verify(controller.transferEvent("google:one@gmail.com","google:family",event,function(value,error) {
+        compare(error,""); moved=value
+      }))
+      compare(mailService.requests.length,1)
+      compare(mailService.requests[0].params.operation,"move")
+      compare(mailService.requests[0].params.destination,"family")
+      compare(mailService.requests[0].params.ifMatch,"before")
+      compare(mailService.requests[0].params.body,undefined)
+      compare(moved.sourceId,"google:family")
+      compare(moved.etag,"after")
+      compare(controller.eventWriting,false)
+    }
+
     function init() {
       // Reset here rather than at the end of each case: a failed compare aborts
       // the function, so a restore on its last line does not run and one real
@@ -79,6 +105,7 @@ Item {
       mailService.nextResult = ({ body: "{}", status: 200 })
       mailService.nextError = null
       mailService.backendCanDiscoverCalendars = true
+      mailService.backendCanGoogleCalendars = false
       mailService.discoveryCallback = null
       mailService.backend.ready = false
       mailService.accountSummaries = [
@@ -207,7 +234,7 @@ Item {
       var cases = [
         {message: "auth_signed_out", expected: "Sign in to this mailbox again"},
         {message: "calendar_auth_refused", expected: "Sign in to this mailbox again"},
-        {message: "calendar_provider_unsupported", expected: "This mailbox does not provide iCloud or Microsoft calendars"},
+        {message: "calendar_provider_unsupported", expected: "This mailbox does not support calendar discovery"},
         {message: "calendar_timeout", expected: "Calendar discovery timed out"},
         {message: "private diagnostic <img src='https://example.org/tracker'>", expected: "Calendars could not be discovered"}
       ]

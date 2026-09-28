@@ -29,6 +29,11 @@ Item {
   }
 
   function close() { dialog.close() }
+  function confirm() {
+    var value = dialog.opened ? request : null
+    dialog.close()
+    if (value) confirmed(value)
+  }
 
   QQC.Popup {
     id: dialog
@@ -38,6 +43,7 @@ Item {
     modal: true
     focus: true
     closePolicy: QQC.Popup.CloseOnEscape
+    onOpened: deleteButton.forceActiveFocus()
     onClosed: root.request = null
     background: Rectangle {
       radius: Style.cornerRadius
@@ -47,6 +53,13 @@ Item {
     }
     contentItem: Column {
       spacing: Style.space(14)
+      // Popups consume keys before the window shortcut map.
+      Keys.onPressed: function(event) {
+        if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter) return
+        event.accepted = true
+        if (cancelButton.activeFocus) root.close()
+        else if (deleteButton.activeFocus) root.confirm()
+      }
 
       Text {
         width: parent.width
@@ -71,20 +84,28 @@ Item {
         anchors.right: parent.right
         spacing: Style.space(8)
         Button {
+          id: cancelButton
+          objectName: "delete-cancel"
           text: "Cancel"
           foreground: root.textColor
-          bordered: false
+          fontFamily: root.panelFontFamily
+          focusable: true
+          activeFocusOnTab: true
+          KeyNavigation.tab: deleteButton
+          KeyNavigation.backtab: deleteButton
           onClicked: dialog.close()
         }
         Button {
+          id: deleteButton
+          objectName: "delete-confirm"
           text: "Delete"
           foreground: root.dangerColor
-          bordered: false
-          onClicked: {
-            var value = root.request
-            dialog.close()
-            if (value) root.confirmed(value)
-          }
+          fontFamily: root.panelFontFamily
+          focusable: true
+          activeFocusOnTab: true
+          KeyNavigation.tab: cancelButton
+          KeyNavigation.backtab: cancelButton
+          onClicked: root.confirm()
         }
       }
     }

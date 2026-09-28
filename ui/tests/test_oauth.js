@@ -127,11 +127,11 @@ assert.strictEqual(oauth.refreshRetryDelay(100), 300000)
 // --------------------------------------------------------------- scopes
 
 deepEqual(
-  oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events"),
+  oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly"),
   [])
 deepEqual(
   oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify"),
-  ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar.events"])
+  ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"])
 assert.strictEqual(
   oauth.missingScopeMessage(["https://www.googleapis.com/auth/gmail.send"]),
   "Google sign-in finished without the gmail.send permission. Sign in again and leave every checkbox ticked")

@@ -21,6 +21,39 @@ Rectangle {
   signal closed()
   signal editRequested(string sourceId, var event)
   signal deleteRequested(string sourceId, var event)
+  property bool readingSeries: false
+  property bool refreshing: false
+  property string refreshError: ""
+  property bool meetingLinkCopied: false
+  onMeetingLinkChanged: { meetingLinkCopied = false; copiedFeedback.stop() }
+  Timer {
+    id: copiedFeedback
+    interval: 2000
+    onTriggered: root.meetingLinkCopied = false
+  }
+  readonly property bool notifiesGuests: !!event && !!event.organizer && event.organizer.self === true
+    && (event.attendees || []).some(function(attendee) { return attendee.self !== true })
+
+  function requestDelete(updates) {
+    var copy = {}
+    for (var key in event) copy[key] = event[key]
+    copy.deleteSendUpdates = updates
+    deleteRequested(String(event.sourceId || ""), copy)
+  }
+
+  function deleteSeries() {
+    if (readingSeries || !event || !event.recurringEventId || !controller || !source) return
+    readingSeries = true
+    var owner = source
+    controller.nativeRequest(owner, "get", { eventId: event.recurringEventId }, function(result, error) {
+      root.readingSeries = false
+      if (error) { root.controller.lastError = error; return }
+      var payload
+      try { payload = JSON.parse(result.body) } catch (e) { return }
+      var events = Calendar.eventsFromGoogle({ items: [payload] }, owner.id)
+      if (events.length === 1) root.deleteRequested(owner.id, events[0])
+    })
+  }
 
   readonly property var source: {
     var sources = controller && controller.availableSources
@@ -38,7 +71,7 @@ Rectangle {
   // carries only a RECURRENCE-ID, but its href is the series' shared file —
   // and an href that resolves outside the source's own origin is refused by
   // the same rule the controller applies before any credential is read.
-  readonly property bool canWrite: !!root.source && !!event
+  readonly property bool canDelete: !!root.source && !!event
     && root.source.readOnly !== true
     && (root.source.kind === "google" ? String(event.googleId || "") !== ""
       : root.source.kind === "microsoft" ? String(event.graphId || "") !== ""
@@ -46,9 +79,13 @@ Rectangle {
         && Number(event.recurrenceIdMs || 0) <= 0
         && String(event.source && event.source.recurrenceId || "") === ""
         && Calendar.caldavEventUrl(root.source.url, event) !== "")
+  readonly property bool canWrite: canDelete && Calendar.writeRefusal(source, event) === ""
   readonly property color eventColor: calendarPalette.colorFor(
     source ? source.colorKey : "accent")
   readonly property string meetingLink: httpLink(event ? event.meetLink : "")
+  readonly property string conferenceStatus: String(event && event.conferenceData
+    && event.conferenceData.createRequest && event.conferenceData.createRequest.status
+    ? event.conferenceData.createRequest.status.statusCode || "" : "")
   readonly property string locationLink: httpLink(event ? event.location : "")
   // The location as written. One that is not a link is a place, and a place
   // is something to copy into a message or to look up on a map.
@@ -194,9 +231,168 @@ Rectangle {
         }
       }
 
+      Text {
+        width: parent.width
+        visible: root.refreshing || root.refreshError !== ""
+        text: root.refreshing ? "Refreshing event details..." : root.refreshError
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.refreshError !== "" ? root.urgentColor : root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(6)
+        visible: root.meetingLink !== ""
+        Text {
+          text: "Meeting link"
+          textFormat: Text.PlainText
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Row {
+          width: parent.width
+          spacing: Style.space(10)
+          AbstractButton {
+            objectName: "event-meeting-link"
+            width: Math.max(0, Math.min(contentItem.implicitWidth,
+              parent.width - copyMeetingLink.width - copiedLabel.width - parent.spacing * 2))
+            implicitHeight: Math.max(contentItem.implicitHeight, copyMeetingLink.height)
+            text: root.meetingLink
+            Accessible.role: Accessible.Link
+            Accessible.name: root.meetingLink
+            contentItem: Text {
+              text: root.meetingLink
+              textFormat: Text.PlainText
+              wrapMode: Text.WrapAnywhere
+              verticalAlignment: Text.AlignVCenter
+              color: root.accentColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.body
+              font.underline: true
+            }
+            onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+          }
+          IconButton {
+            id: copyMeetingLink
+            objectName: "event-copy-meeting-link"
+            iconName: root.meetingLinkCopied ? "check" : "copy"
+            tooltipText: root.meetingLinkCopied ? "Copied" : "Copy meeting link"
+            foreground: root.meetingLinkCopied ? root.accentColor : root.dimColor
+            hoverColor: root.textColor
+            fontFamily: root.panelFontFamily
+            onClicked: {
+              if (root.controller && root.controller.copyText(root.meetingLink)) {
+                root.meetingLinkCopied = true
+                copiedFeedback.restart()
+              }
+            }
+          }
+          Text {
+            id: copiedLabel
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Copied"
+            opacity: root.meetingLinkCopied ? 1 : 0
+            textFormat: Text.PlainText
+            color: root.accentColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+      }
+
+      Text {
+        width: parent.width
+        visible: !!root.event && root.event.eventType === "fromGmail"
+        text: "Created automatically from Gmail. Google does not allow apps to change its time or event details."
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(8)
+        visible: attendeeList.count > 0
+        Text {
+          text: "Guests · " + attendeeList.count
+          textFormat: Text.PlainText
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.bold: true
+          font.pixelSize: Style.font.body
+        }
+        Repeater {
+          id: attendeeList
+          model: Calendar.attendeeRows(root.event)
+          delegate: Rectangle {
+            required property var modelData
+            width: parent.width
+            height: guestInfo.implicitHeight + Style.space(16)
+            radius: Style.cornerRadius
+            color: Qt.alpha(root.textColor, 0.04)
+            Row {
+              id: guestInfo
+              x: Style.space(10)
+              y: Style.space(8)
+              width: parent.width - Style.space(20)
+              spacing: Style.space(10)
+              Text {
+                width: Style.space(20)
+                text: modelData.symbol
+                textFormat: Text.PlainText
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.body
+              }
+              Column {
+                width: parent.width - Style.space(30)
+                spacing: Style.space(3)
+                Text {
+                  width: parent.width
+                  text: modelData.name + (modelData.self ? " (you)" : "")
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.textColor
+                  font.family: root.panelFontFamily
+                  font.bold: true
+                }
+                Text {
+                  width: parent.width
+                  text: modelData.label + (modelData.optional ? " · Optional" : "")
+                    + (modelData.email && modelData.email !== modelData.name ? " · " + modelData.email : "")
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.dimColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+          }
+        }
+      }
+
+      Text {
+        width: parent.width
+        visible: root.conferenceStatus === "pending" || root.conferenceStatus === "failure"
+        text: root.conferenceStatus === "pending" ? "Google Meet is being created. Refresh to check its status."
+          : "The event was saved, but Google Meet could not be created."
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+      }
+
       Flow {
         visible: root.meetingLink !== "" || root.locationLink !== ""
-          || root.providerLink !== "" || root.canWrite || root.locationText !== ""
+           || root.providerLink !== "" || root.canDelete || root.locationText !== ""
         width: parent.width
         spacing: Style.space(7)
 
@@ -211,23 +407,34 @@ Rectangle {
         }
 
         IconTextButton {
-          visible: root.canWrite
-          text: "Delete..."
+          visible: root.canDelete
+          text: root.notifiesGuests ? "Delete and notify guests..."
+            : root.event && root.event.recurringEventId ? "Delete this occurrence..." : "Delete..."
           iconName: "trash"
           foreground: root.urgentColor
           accent: root.urgentColor
           fontFamily: root.panelFontFamily
-          onClicked: root.deleteRequested(String(root.event.sourceId || ""), root.event)
+          onClicked: root.requestDelete("all")
         }
 
         IconTextButton {
-          visible: root.meetingLink !== ""
-          text: "Join call"
-          iconName: "video"
-          foreground: root.textColor
-          accent: root.eventColor
+          visible: root.canDelete && root.notifiesGuests && root.source.kind === "google"
+          text: "Delete without email..."
+          foreground: root.urgentColor
+          accent: root.urgentColor
           fontFamily: root.panelFontFamily
-          onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
+          onClicked: root.requestDelete("none")
+        }
+
+        IconTextButton {
+          visible: root.canDelete && !!root.event && !!root.event.recurringEventId
+            && !!root.controller && !!root.controller.service && root.controller.service.backendCanGoogleCalendars === true
+          text: "Delete entire series..."
+          foreground: root.urgentColor
+          accent: root.urgentColor
+          fontFamily: root.panelFontFamily
+          enabled: !root.readingSeries
+          onClicked: root.deleteSeries()
         }
 
         IconTextButton {

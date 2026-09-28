@@ -602,6 +602,8 @@ Item {
       response: root.service ? root.service.selectedResponse : ""
       canRespond: !!root.service && root.service.canRespondToInvite
       sending: !!root.service && root.service.rsvpSending
+      fallbackAvailable: !!root.service && root.service.rsvpFallbackAvailable === true
+      calendarUrl: String(root.service && root.service.rsvpCalendarUrl || "")
       textColor: root.textColor
       accentColor: root.accentColor
       dimColor: root.dimColor
@@ -610,6 +612,7 @@ Item {
       onRespondRequested: function(answer) {
         if (root.service) root.service.rsvp(answer)
       }
+      onMailOnlyRequested: function(answer) { if (root.service) root.service.rsvpMailOnly(answer) }
       // The same rule the body's own links obey: this leaves the app, and it
       // leaves it through the desktop's browser rather than anything here.
       onOpenRequested: function(url) { root.openLink(url) }

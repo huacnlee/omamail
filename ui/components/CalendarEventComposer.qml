@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
@@ -18,11 +19,29 @@ Rectangle {
   property bool opened: false
   property string selectedSourceId: ""
   property bool recurring: false
+  property bool changeRecurrence: false
+  property bool createMeet: false
+  property string conferenceRequestId: ""
+  property string originalGuestText: ""
+  property string reminderMode: "default"
+  property string availability: "opaque"
+  property string eventVisibility: "default"
+  property bool visibilityChanged: false
+  property bool availabilityChanged: false
+  readonly property var chosenSource: controller && typeof controller.findSource === "function"
+    ? controller.findSource(selectedSourceId) : null
   property string recurrenceFrequency: "WEEKLY"
   // Set while an existing event is being changed rather than a new one made.
-  // The calendar picker and the recurrence section stand down then: the event
-  // stays on the calendar that owns it, and the rule is the server's to keep.
+  // Calendar changes select a transfer destination; they are committed on Save.
   property var editingEvent: null
+  property bool loadingSeries: false
+  property bool transferring: false
+  property bool transferNeedsRefresh: false
+  property int editGeneration: 0
+  readonly property bool guestUpdate: editing && !!chosenSource && chosenSource.kind === "google"
+    && !!editingEvent.organizer && editingEvent.organizer.self === true
+    && ((Array.isArray(editingEvent.attendees) && editingEvent.attendees.some(function(attendee) { return attendee.self !== true }))
+      || guestsField.text.trim() !== "")
   property string editingSourceId: ""
   readonly property bool editing: editingEvent !== null
   // Nothing typed and nothing being edited: a form that can be replaced
@@ -43,9 +62,100 @@ Rectangle {
   property bool writePending: false
   // An all-day event is edited as the dates it spans; the time fields stand
   // down, because writing them back would turn the event into a timed one.
-  readonly property bool editingAllDay: editing
-    && !!(editingEvent.start && editingEvent.start.allDay)
+  property bool allDay: false
+  readonly property bool editingAllDay: allDay
+  readonly property var dateRange: Calendar.editorDateRange(dateField.text, startField.text,
+    endDateField.text, endField.text, allDay)
   color: root.backgroundColor
+
+  component EventOption: QQC.ComboBox {
+    id: option
+    property string value: ""
+    signal chosen(string value)
+    width: parent.width
+    implicitHeight: Style.spacing.controlHeight
+    textRole: "label"
+    valueRole: "value"
+    currentIndex: {
+      for (var i = 0; i < model.length; i++) if (model[i].value === value) return i
+      return -1
+    }
+    onActivated: function(index) { chosen(String(model[index].value)) }
+    leftPadding: Style.space(10)
+    rightPadding: Style.space(30)
+    contentItem: Text {
+      text: option.displayText
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+      verticalAlignment: Text.AlignVCenter
+      color: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.body
+    }
+    indicator: ActionIcon {
+      name: "chevronDown"
+      x: option.width - width - Style.space(10)
+      y: (option.height - height) / 2
+      color: root.dimColor
+      iconSize: Style.font.iconSmall
+    }
+    background: Rectangle {
+      color: option.popup.opened ? Style.selectedFillFor(root.textColor, root.accentColor)
+        : Style.normalFillFor(root.textColor, root.accentColor)
+      border.width: Style.normalBorderWidth
+      border.color: option.popup.opened ? root.accentColor : Style.normalBorderFor(root.textColor, root.accentColor)
+      radius: Style.cornerRadius
+    }
+    delegate: QQC.ItemDelegate {
+      id: optionRow
+      required property var modelData
+      required property int index
+      width: option.width
+      implicitHeight: Style.spacing.controlHeight
+      highlighted: option.highlightedIndex === index
+      contentItem: Text {
+        text: optionRow.modelData.label
+        textFormat: Text.PlainText
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
+        verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
+      }
+      background: Rectangle {
+        color: optionRow.highlighted ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+      }
+    }
+    popup: QQC.Popup {
+      width: option.width
+      padding: Style.space(4)
+      implicitHeight: Math.min(optionList.contentHeight + padding * 2, Style.space(280))
+      function place() {
+        var window = option.Window.window
+        if (!window) return
+        var point = option.mapToItem(window.contentItem, 0, 0)
+        var top = point.y + option.height
+        if (top + height > window.height) top = point.y - height
+        y = Math.max(0, Math.min(top, window.height - height)) - point.y
+        x = Math.max(0, Math.min(point.x, window.width - width)) - point.x
+      }
+      onOpened: place()
+      onHeightChanged: if (opened) place()
+      contentItem: ListView {
+        id: optionList
+        clip: true
+        model: option.popup.visible ? option.delegateModel : null
+        currentIndex: option.highlightedIndex
+        QQC.ScrollBar.vertical: QQC.ScrollBar {}
+      }
+      background: Rectangle {
+        color: root.backgroundColor
+        border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+        border.width: Style.normalBorderWidth
+        radius: Style.cornerRadius
+      }
+    }
+  }
 
   function localDate(date) {
     function two(value) { return value < 10 ? "0" + value : String(value) }
@@ -58,6 +168,13 @@ Rectangle {
   }
 
   function beginAt(startMs) {
+    changeRecurrence = false
+    visibilityChanged = false
+    availabilityChanged = false
+    editGeneration++
+    loadingSeries = false
+    transferring = false
+    transferNeedsRefresh = false
     var requested = Number(startMs)
     var start = isFinite(requested) && requested > 0
       ? new Date(requested) : new Date(Date.now() + 3600000)
@@ -65,12 +182,22 @@ Rectangle {
       start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30, 0, 0)
     var end = new Date(start.getTime() + 3600000)
     editingEvent = null
+    allDay = false
+    createMeet = false
+    originalGuestText = ""
+    guestsField.text = ""
+    reminderMode = "default"
+    reminderField.text = "10"
+    availability = "opaque"
+    eventVisibility = "default"
+    conferenceRequestId = "omamail-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2)
     editingSourceId = ""
     writePending = false
     titleField.text = ""
     dateField.text = localDate(start)
     startField.text = localTime(start)
     endField.text = localTime(end)
+    endDateField.text = localDate(end)
     locationField.text = ""
     notesField.text = ""
     intervalField.text = "1"
@@ -84,6 +211,7 @@ Rectangle {
     // B would otherwise open with A's calendar chosen and write there unless
     // the user noticed the picker.
     selectedSourceId = preferredCalendarId()
+    timeZoneField.text = chosenSource ? String(chosenSource.timeZone || "") : ""
     opened = true
     Qt.callLater(titleField.forceActiveFocus)
   }
@@ -97,6 +225,9 @@ Rectangle {
     if (wanted !== "") {
       for (var i = 0; i < groups.length; i++) {
         if (String(groups[i].id || "") !== "account:" + wanted) continue
+        for (var c = 0; c < groups[i].calendars.length; c++) {
+          if (groups[i].calendars[c].preferred) return String(groups[i].calendars[c].id)
+        }
         if (groups[i].calendars && groups[i].calendars.length)
           return String(groups[i].calendars[0].id)
       }
@@ -105,10 +236,27 @@ Rectangle {
   }
 
   function beginEdit(sourceId, event) {
+    changeRecurrence = false
+    visibilityChanged = false
+    availabilityChanged = false
+    editGeneration++
+    loadingSeries = false
+    transferring = false
+    transferNeedsRefresh = false
     if (!event || !event.start) return
     var start = new Date(Number(event.start.ms))
     var end = event.end ? new Date(Number(event.end.ms)) : new Date(start.getTime() + 3600000)
     editingEvent = event
+    allDay = !!(event.start && event.start.allDay)
+    createMeet = false
+    originalGuestText = (event.attendees || []).map(function(attendee) { return String(attendee.email || "") }).filter(function(email) { return email !== "" }).join(", ")
+    guestsField.text = originalGuestText
+    reminderMode = "preserve"
+    reminderField.text = "10"
+    availability = event.transparency || "opaque"
+    eventVisibility = event.visibility || "default"
+    timeZoneField.text = String(event.timeZone || "")
+    conferenceRequestId = "omamail-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2)
     editingSourceId = String(sourceId || "")
     writePending = false
     titleField.text = String(event.summary || "")
@@ -132,6 +280,16 @@ Rectangle {
 
   function begin() { beginAt(0) }
 
+  function beginReschedule(event, startMs, endMs) {
+    beginEdit(event.sourceId, event)
+    var start = new Date(startMs), end = new Date(endMs)
+    dateField.text = localDate(start)
+    startField.text = localTime(start)
+    endDateField.text = localDate(new Date(allDay ? endMs - 1 : endMs))
+    endField.text = localTime(end)
+  }
+
+
   // What the form holds, for a test to read without reaching into fields.
   function titleText() { return String(titleField.text || "") }
   function whenText() { return dateField.text + " " + startField.text + " " + endField.text }
@@ -145,10 +303,18 @@ Rectangle {
     var fields = prefill || {}
     // A form the owner is in the middle of is not replaced.
     if (opened && !pristine) return false
+    if (fields.editingEvent) {
+      beginReschedule(fields.editingEvent, Number(fields.startMs), Number(fields.endMs))
+      return true
+    }
     beginAt(Number(fields.startMs) || 0)
+    allDay = fields.allDay === true
     var start = Number(fields.startMs) || 0
     var end = Number(fields.endMs) || 0
-    if (start > 0 && end > start) endField.text = localTime(new Date(end))
+    if (start > 0 && end > start) {
+      endField.text = localTime(new Date(end))
+      endDateField.text = localDate(new Date(allDay ? end - 1 : end))
+    }
     titleField.text = String(fields.title || "")
     locationField.text = String(fields.location || "")
     notesField.text = String(fields.description || "")
@@ -164,6 +330,9 @@ Rectangle {
     if (!accountId || !groups) return ""
     for (var i = 0; i < groups.length; i++) {
       if (String(groups[i].id || "") !== "account:" + accountId) continue
+      for (var c = 0; c < groups[i].calendars.length; c++) {
+        if (groups[i].calendars[c].preferred) return String(groups[i].calendars[c].id)
+      }
       if (groups[i].calendars && groups[i].calendars.length) return String(groups[i].calendars[0].id)
     }
     return ""
@@ -176,27 +345,87 @@ Rectangle {
   }
   function takeFocus() { titleField.forceActiveFocus() }
 
-  function submit() {
+  function editSeries() {
+    if (!editingEvent || !editingEvent.recurringEventId || loadingSeries || transferring || transferNeedsRefresh || !chosenSource) return
+    var serial = ++editGeneration
+    var source = chosenSource
+    loadingSeries = true
+    controller.nativeRequest(source, "get", { eventId: editingEvent.recurringEventId }, function(result, error) {
+      if (serial !== root.editGeneration || !root.opened) return
+      root.loadingSeries = false
+      if (error) { resultText.text = error; return }
+      var payload
+      try { payload = JSON.parse(result.body) } catch (e) { resultText.text = "Could not read the series"; return }
+      var events = Calendar.eventsFromGoogle({ items: [payload] }, source.id)
+      if (events.length !== 1) { resultText.text = "The series is no longer available"; return }
+      root.beginEdit(source.id, events[0])
+    })
+  }
+
+  function changeRepeat() {
+    var lines = editingEvent.recurrenceLines || []
+    var rules = lines.filter(function(line) { return String(line).indexOf("RRULE:") === 0 })
+    if (rules.length > 1 || (rules.length && !/^RRULE:FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;(INTERVAL|COUNT)=\d+)*$/.test(rules[0]))) {
+      resultText.text = "This series has an advanced repeat rule. Change its repetition in Google Calendar. Other edits preserve it."
+      return
+    }
+    var rule = rules.length ? rules[0] : ""
+    var frequency = /FREQ=([A-Z]+)/.exec(rule), interval = /INTERVAL=(\d+)/.exec(rule), count = /COUNT=(\d+)/.exec(rule)
+    recurring = rule !== ""
+    recurrenceFrequency = frequency ? frequency[1] : "WEEKLY"
+    intervalField.text = interval ? interval[1] : "1"
+    countField.text = count ? count[1] : ""
+    changeRecurrence = true
+  }
+
+  function chooseCalendar(sourceId) {
+    if (transferring || transferNeedsRefresh || writePending || sourceId === selectedSourceId) return
+    if (!editing) { selectedSourceId = sourceId; return }
+    var original = editingSourceId
+    var generation = editGeneration
+    selectedSourceId = sourceId
+    transferring = true
+    resultText.text = "Moving event"
+    controller.transferEvent(original, sourceId, editingEvent, function(event, error, moved) {
+      if (generation !== root.editGeneration || !root.opened) return
+      root.transferring = false
+      if (error) {
+        root.transferNeedsRefresh = moved === true
+        root.selectedSourceId = moved === true ? sourceId : original
+        resultText.text = error
+        return
+      }
+      root.editingEvent = event
+      root.editingSourceId = sourceId
+      resultText.text = "Calendar changed"
+    })
+  }
+
+  function submit(sendUpdates) {
     if (!controller) return
     // Create, update and delete share one controller write slot. Do not mark
     // this form pending unless that slot is free: otherwise an older write's
     // completion could be mistaken for this form's and close it.
-    if (controller.creatingEvent || controller.eventWriting) return
-    var start = new Date(dateField.text + "T" + startField.text + ":00")
-    var end = new Date(dateField.text + "T" + endField.text + ":00")
-    if (editingAllDay) {
-      start = new Date(dateField.text + "T00:00:00")
-      var lastDay = new Date(endDateField.text + "T00:00:00")
-      // The written end is exclusive: the midnight after the last shown day,
-      // reached by date fields so a daylight-saving boundary cannot shift it.
-      end = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1)
-    }
+    if (controller.creatingEvent || controller.eventWriting || loadingSeries || transferring || transferNeedsRefresh) return
+    if (!dateRange.ok) return
     var fields = {
       title: titleField.text,
-      startMs: start.getTime(),
-      endMs: end.getTime(),
+      allDay: allDay,
+      startMs: dateRange.startMs,
+      endMs: dateRange.endMs,
       location: locationField.text,
       description: notesField.text,
+      createMeet: createMeet,
+      conferenceRequestId: conferenceRequestId,
+      destinationSourceId: selectedSourceId,
+      sendUpdates: sendUpdates === "none" ? "none" : "all",
+      timeZone: timeZoneField.text.trim(),
+      guestEmails: !editing || guestsField.text !== originalGuestText ? guestsField.text : undefined,
+      transparency: !editing || availabilityChanged ? availability : undefined,
+      visibility: !editing || visibilityChanged ? eventVisibility : undefined,
+      reminderMode: reminderMode,
+      reminderMinutes: reminderField.text,
+      changeRecurrence: changeRecurrence,
       recurrence: {
         enabled: recurring,
         frequency: recurrenceFrequency,
@@ -247,7 +476,8 @@ Rectangle {
       }
 
       Text {
-        text: root.editingAllDay ? "Edit event · All day"
+        text: root.editing && root.editingEvent.recurringEventId ? "Edit this occurrence"
+          : root.editing && root.editingEvent.recurrence ? "Edit entire series"
           : root.editing ? "Edit event" : "Create event"
         color: root.textColor
         font.family: root.panelFontFamily
@@ -257,7 +487,7 @@ Rectangle {
       }
 
       Text {
-        visible: !root.editing
+        visible: true
         text: "CALENDAR"
         color: root.dimColor
         font.family: root.panelFontFamily
@@ -266,50 +496,147 @@ Rectangle {
         textFormat: Text.PlainText
       }
 
-      Repeater {
-        model: root.editing ? [] : (root.controller ? root.controller.writableSourceGroups : [])
-
-        delegate: Column {
-          id: sourceGroup
+      QQC.ComboBox {
+        id: calendarSelector
+        objectName: "event-calendar-selector"
+        width: parent.width
+        implicitHeight: Style.spacing.controlHeight
+        enabled: count > 0 && !root.writePending && !root.transferring && !root.transferNeedsRefresh
+        model: Calendar.calendarChoiceRows(root.controller ? root.controller.writableSourceGroups : [],
+          root.editing && root.controller && typeof root.controller.findSource === "function"
+            ? root.controller.findSource(root.editingSourceId) : null, root.editingEvent)
+        currentIndex: {
+          for (var i = 0; i < model.length; i++)
+            if (String(model[i].source.id) === root.selectedSourceId) return i
+          return -1
+        }
+        onActivated: function(index) { root.chooseCalendar(String(model[index].source.id)) }
+        readonly property var choice: currentIndex >= 0 && currentIndex < model.length ? model[currentIndex] : null
+        Accessible.name: "Calendar"
+        leftPadding: Style.space(30)
+        rightPadding: Style.space(32)
+        contentItem: Text {
+          text: calendarSelector.choice ? String(calendarSelector.choice.source.name || calendarSelector.choice.source.id) : "Choose a calendar"
+          textFormat: Text.PlainText
+          elide: Text.ElideMiddle
+          verticalAlignment: Text.AlignVCenter
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.body
+        }
+        Rectangle {
+          x: Style.space(12)
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(8)
+          height: width
+          radius: width / 2
+          color: calendarPalette.colorFor(calendarSelector.choice ? calendarSelector.choice.source.colorKey : "accent")
+        }
+        indicator: ActionIcon {
+          name: "chevronDown"
+          x: calendarSelector.width - width - Style.space(10)
+          y: (calendarSelector.height - height) / 2
+          color: root.dimColor
+          iconSize: Style.font.iconSmall
+        }
+        background: Rectangle {
+          color: calendarSelector.popup.opened ? Style.selectedFillFor(root.textColor, root.accentColor)
+            : calendarSelector.hovered ? Style.hoverFillFor(root.textColor, root.accentColor)
+            : Style.normalFillFor(root.textColor, root.accentColor)
+          border.width: Style.normalBorderWidth
+          border.color: calendarSelector.popup.opened ? root.accentColor : Style.normalBorderFor(root.textColor, root.accentColor)
+          radius: Style.cornerRadius
+        }
+        delegate: QQC.ItemDelegate {
+          id: calendarOption
+          objectName: "event-calendar-option-" + index
           required property var modelData
-          width: form.width
-          spacing: Style.space(4)
-
-          Text {
-            width: parent.width
-            text: sourceGroup.modelData.providerLabel + " · "
-              + sourceGroup.modelData.accountLabel
-            color: root.dimColor
-            font.family: root.panelFontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideMiddle
-            textFormat: Text.PlainText
-          }
-
-          Flow {
-            width: parent.width
-            height: childrenRect.height
-            spacing: Style.space(5)
-
-            Repeater {
-              model: sourceGroup.modelData.calendars
-
-              IconTextButton {
-                required property var modelData
-                text: String(modelData.name || modelData.id || "Calendar")
-                selected: root.selectedSourceId === String(modelData.id)
-                foreground: root.textColor
-                accent: calendarPalette.colorFor(modelData.colorKey)
-                fontFamily: root.panelFontFamily
-                onClicked: root.selectedSourceId = String(modelData.id)
+          required property int index
+          width: calendarSelector.popup.availableWidth
+          implicitHeight: optionContent.implicitHeight + Style.space(12)
+          highlighted: calendarSelector.highlightedIndex === index
+          padding: Style.space(6)
+          contentItem: Column {
+            id: optionContent
+            spacing: Style.space(8)
+            Text {
+              width: parent.width
+              visible: calendarOption.modelData.firstInGroup
+              text: calendarOption.modelData.groupLabel
+              textFormat: Text.PlainText
+              color: root.dimColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.Wrap
+              MouseArea { anchors.fill: parent }
+            }
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+              Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: Style.space(8)
+                height: width
+                radius: width / 2
+                color: calendarPalette.colorFor(calendarOption.modelData.source.colorKey)
+              }
+              Text {
+                width: parent.width - Style.space(40)
+                text: String(calendarOption.modelData.source.name || calendarOption.modelData.source.id)
+                textFormat: Text.PlainText
+                elide: Text.ElideMiddle
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.body
+              }
+              Text {
+                text: root.selectedSourceId === String(calendarOption.modelData.source.id) ? "✓" : ""
+                textFormat: Text.PlainText
+                color: root.textColor
+                font.family: root.panelFontFamily
               }
             }
+          }
+          background: Rectangle {
+            color: calendarOption.highlighted ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+            radius: Style.cornerRadius
+          }
+        }
+        popup: QQC.Popup {
+          width: calendarSelector.width
+          padding: Style.space(6)
+          implicitHeight: Math.min(calendarOptions.contentHeight + padding * 2, Style.space(320))
+          function place() {
+            var window = calendarSelector.Window.window
+            if (!window) return
+            var point = calendarSelector.mapToItem(window.contentItem, 0, 0)
+            var top = point.y + calendarSelector.height
+            if (top + height > window.height) top = point.y - height
+            y = Math.max(0, Math.min(top, window.height - height)) - point.y
+            x = Math.max(0, Math.min(point.x, window.width - width)) - point.x
+          }
+          onOpened: place()
+          onHeightChanged: if (opened) place()
+          contentItem: ListView {
+            id: calendarOptions
+            clip: true
+            model: calendarSelector.popup.visible ? calendarSelector.delegateModel : null
+            currentIndex: calendarSelector.highlightedIndex
+            boundsBehavior: Flickable.StopAtBounds
+            QQC.ScrollBar.vertical: QQC.ScrollBar {}
+          }
+          background: Rectangle {
+            color: root.backgroundColor
+            border.width: Style.normalBorderWidth
+            border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+            radius: Style.cornerRadius
           }
         }
       }
 
       TextField {
         id: titleField
+        objectName: "event-title-field"
         width: parent.width
         foreground: root.textColor
         accent: root.accentColor
@@ -317,53 +644,212 @@ Rectangle {
         placeholderText: "Event title"
       }
 
+      IconTextButton {
+        visible: root.editing && !!root.editingEvent.recurringEventId
+          && !!root.chosenSource && root.chosenSource.kind === "google"
+        text: root.loadingSeries ? "Loading series" : "Edit entire series..."
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        enabled: !root.loadingSeries && !root.writePending
+        onClicked: root.editSeries()
+      }
+
+      IconTextButton {
+        text: root.allDay ? "✓ All day" : "All day"
+        selected: root.allDay
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.allDay = !root.allDay
+      }
+
       Row {
         width: parent.width
         spacing: Style.space(8)
-
+        Text {
+          width: Style.space(80)
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Starts"
+          textFormat: Text.PlainText
+          color: root.dimColor
+          font.family: root.panelFontFamily
+        }
         TextField {
           id: dateField
-          width: root.editingAllDay ? (parent.width - parent.spacing) * 0.5
-            : (parent.width - parent.spacing * 2) * 0.5
+          objectName: "event-start-date-field"
+          width: parent.width - Style.space(80) - parent.spacing - (startField.visible ? startField.width + parent.spacing : 0)
           foreground: root.textColor
           font.family: root.panelFontFamily
           placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
         }
 
         TextField {
-          id: endDateField
-          visible: root.editingAllDay
-          width: (parent.width - parent.spacing) * 0.5
-          foreground: root.textColor
-          font.family: root.panelFontFamily
-          placeholderText: "Last day (YYYY-MM-DD)"
-        }
-
-        TextField {
           id: startField
+          objectName: "event-start-time-field"
           visible: !root.editingAllDay
-          width: (parent.width - parent.spacing * 2) * 0.25
+          width: Style.space(120)
           foreground: root.textColor
           font.family: root.panelFontFamily
           placeholderText: "Start"
         }
-
+      }
+      Row {
+        width: parent.width
+        spacing: Style.space(8)
+        Text {
+          width: Style.space(80)
+          anchors.verticalCenter: parent.verticalCenter
+          text: root.allDay ? "Last day" : "Ends"
+          textFormat: Text.PlainText
+          color: root.dimColor
+          font.family: root.panelFontFamily
+        }
+        TextField {
+          id: endDateField
+          objectName: "event-end-date-field"
+          width: parent.width - Style.space(80) - parent.spacing - (endField.visible ? endField.width + parent.spacing : 0)
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          placeholderText: "YYYY-MM-DD"
+        }
         TextField {
           id: endField
+          objectName: "event-end-time-field"
           visible: !root.editingAllDay
-          width: (parent.width - parent.spacing * 2) * 0.25
+          width: Style.space(120)
           foreground: root.textColor
           font.family: root.panelFontFamily
           placeholderText: "End"
         }
       }
 
+      Text {
+        objectName: "event-date-range-error"
+        width: parent.width
+        visible: !root.dateRange.ok
+        text: root.dateRange.error
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.urgentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
       TextField {
         id: locationField
+        objectName: "event-location-field"
         width: parent.width
         foreground: root.textColor
         font.family: root.panelFontFamily
         placeholderText: "Location or meeting link"
+      }
+
+      IconTextButton {
+        objectName: "event-add-meet"
+        visible: !!root.chosenSource && root.chosenSource.canCreateMeet === true
+          && !(root.editingEvent && root.editingEvent.conferenceData)
+        text: root.createMeet ? "✓ Add Google Meet" : "Add Google Meet"
+        selected: root.createMeet
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.createMeet = !root.createMeet
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(6)
+        visible: !!root.chosenSource && root.chosenSource.kind === "google"
+        Text {
+          width: parent.width
+          text: "Dates and times above use your computer's local time. The event's time zone controls repeating schedules."
+          textFormat: Text.PlainText
+          wrapMode: Text.Wrap
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
+        TextField {
+          id: timeZoneField
+          width: parent.width
+          placeholderText: "Event time zone, e.g. Europe/Paris"
+          foreground: root.textColor
+          accent: root.accentColor
+          font.family: root.panelFontFamily
+          Accessible.name: "Event time zone"
+        }
+        TextField {
+          id: guestsField
+          width: parent.width
+          visible: !root.editing || (!!root.editingEvent.organizer && root.editingEvent.organizer.self === true)
+          placeholderText: "Guest email addresses, separated by commas"
+          foreground: root.textColor
+          accent: root.accentColor
+          font.family: root.panelFontFamily
+          Accessible.name: "Guest email addresses"
+        }
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+          Text {
+            text: "Availability"
+            textFormat: Text.PlainText
+            color: root.dimColor
+            font.family: root.panelFontFamily
+          }
+          EventOption {
+            objectName: "event-availability-selector"
+            value: root.availability
+            model: [{value:"opaque",label:"Busy — blocks this time"},{value:"transparent",label:"Free — keeps this time available"}]
+            onChosen: function(value) { root.availability = value; root.availabilityChanged = true }
+          }
+          Text {
+            text: "Visibility"
+            textFormat: Text.PlainText
+            color: root.dimColor
+            font.family: root.panelFontFamily
+          }
+          EventOption {
+            objectName: "event-visibility-selector"
+            value: root.eventVisibility
+            model: [{value:"default",label:"Calendar default"},{value:"public",label:"Public"},{value:"private",label:"Private"}]
+            onChosen: function(value) { root.eventVisibility = value; root.visibilityChanged = true }
+          }
+        }
+        Text {
+          text: "Event reminders"
+          textFormat: Text.PlainText
+          color: root.dimColor
+          font.family: root.panelFontFamily
+        }
+        Flow {
+          width: parent.width
+          spacing: Style.space(6)
+          Repeater {
+            model: root.editing ? ["preserve", "default", "none", "custom"] : ["default", "none", "custom"]
+            IconTextButton {
+              required property string modelData
+              text: modelData === "preserve" ? "Keep existing" : modelData === "default" ? "Calendar default"
+                : modelData === "none" ? "None" : "Custom popup"
+              selected: root.reminderMode === modelData
+              foreground: root.textColor
+              accent: root.accentColor
+              fontFamily: root.panelFontFamily
+              onClicked: root.reminderMode = modelData
+            }
+          }
+        }
+        TextField {
+          id: reminderField
+          visible: root.reminderMode === "custom"
+          width: parent.width
+          placeholderText: "Minutes before the event (replaces existing reminders)"
+          foreground: root.textColor
+          accent: root.accentColor
+          font.family: root.panelFontFamily
+          Accessible.name: "Popup reminder minutes before the event"
+        }
       }
 
       TextField {
@@ -371,58 +857,39 @@ Rectangle {
         width: parent.width
         foreground: root.textColor
         font.family: root.panelFontFamily
-        placeholderText: "Notes"
-      }
-
-      IconTextButton {
-        visible: !root.editing
-        text: "Make recurring"
-        iconName: root.recurring ? "check" : ""
-        selected: root.recurring
-        foreground: root.recurring ? root.textColor : root.dimColor
-        accent: root.accentColor
-        fontFamily: root.panelFontFamily
-        onClicked: root.recurring = !root.recurring
+        placeholderText: "Description"
       }
 
       Column {
         width: parent.width
-        visible: root.recurring && !root.editing
-        spacing: Style.space(8)
-
+        spacing: Style.space(6)
+        visible: !root.editing || (!root.editingEvent.recurringEventId && !!root.chosenSource && root.chosenSource.kind === "google")
         Text {
-          text: "REPEATS"
+          text: "Repeat"
+          textFormat: Text.PlainText
           color: root.dimColor
           font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          font.letterSpacing: 1
-          textFormat: Text.PlainText
         }
-
-        Flow {
-          width: parent.width
-          height: childrenRect.height
-          spacing: Style.space(5)
-
-          Repeater {
-            model: [
-              { label: "Daily", value: "DAILY" },
-              { label: "Weekly", value: "WEEKLY" },
-              { label: "Monthly", value: "MONTHLY" },
-              { label: "Yearly", value: "YEARLY" }
-            ]
-
-            IconTextButton {
-              required property var modelData
-              text: modelData.label
-              selected: root.recurrenceFrequency === modelData.value
-              foreground: selected ? root.textColor : root.dimColor
-              accent: root.accentColor
-              fontFamily: root.panelFontFamily
-              onClicked: root.recurrenceFrequency = modelData.value
-            }
+        EventOption {
+          objectName: "event-repeat-selector"
+          value: root.editing && !root.changeRecurrence ? Calendar.repeatChoice(root.editingEvent)
+            : root.recurring ? root.recurrenceFrequency : "none"
+          model: [{value:"none",label:"Does not repeat"},{value:"DAILY",label:"Daily"},
+            {value:"WEEKLY",label:"Weekly"},{value:"MONTHLY",label:"Monthly"},{value:"YEARLY",label:"Yearly"}]
+            .concat(root.editing && Calendar.repeatChoice(root.editingEvent) === "custom" ? [{value:"custom",label:"Custom schedule (edit in Google Calendar)"}] : [])
+          onChosen: function(value) {
+            if (root.editing && !root.changeRecurrence) root.changeRepeat()
+            if (value === "custom" || (root.editing && !root.changeRecurrence)) return
+            root.recurring = value !== "none"
+            if (root.recurring) root.recurrenceFrequency = value
           }
         }
+      }
+
+      Column {
+        width: parent.width
+        visible: root.recurring && (!root.editing || root.changeRecurrence)
+        spacing: Style.space(8)
 
         Row {
           width: parent.width
@@ -492,10 +959,11 @@ Rectangle {
         spacing: Style.space(6)
 
         IconTextButton {
+          objectName: "event-save-button"
           text: {
             var busy = root.controller
               && (root.controller.creatingEvent || root.controller.eventWriting)
-            if (root.editing) return busy ? "Saving" : "Save changes"
+            if (root.editing) return busy ? "Saving" : root.guestUpdate ? "Send update" : "Save changes"
             return busy ? "Creating" : "Create event"
           }
           iconName: root.editing ? "check" : "plus"
@@ -503,8 +971,18 @@ Rectangle {
           accent: root.accentColor
           fontFamily: root.panelFontFamily
           enabled: root.controller && !root.controller.creatingEvent
-            && !root.controller.eventWriting
-          onClicked: root.submit()
+              && !root.controller.eventWriting && !root.loadingSeries && root.dateRange.ok
+           onClicked: root.submit("all")
+        }
+
+        IconTextButton {
+          visible: root.guestUpdate
+          text: "Don't send"
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          enabled: !root.writePending && !root.loadingSeries && root.dateRange.ok
+          onClicked: root.submit("none")
         }
 
         IconTextButton {
@@ -518,9 +996,13 @@ Rectangle {
 
       Text {
         id: resultText
+        objectName: "event-save-error"
         width: parent.width
         visible: text !== ""
-        color: root.accentColor
+        color: root.urgentColor
+        onTextChanged: if (resultText.text !== "") Qt.callLater(function() {
+          composerFlick.contentY = Math.max(0, composerFlick.contentHeight - composerFlick.height)
+        })
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
