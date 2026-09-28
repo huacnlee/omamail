@@ -202,6 +202,37 @@ mod unix {
             0o600
         );
     }
+
+    #[test]
+    fn concurrent_private_directory_and_lock_creation() {
+        let temp = Temp::new();
+        for round in 0..32 {
+            let root = temp.0.join(format!("claim-{round}"));
+            let start = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                let claim = || {
+                    start.wait();
+                    let dir = directories(&root, &["omamail"], true)
+                        .expect("concurrent reminder directory creation")
+                        .expect("created reminder directory");
+                    let _lock = match lock_exclusive(&dir, "lease") {
+                        Ok(lock) => lock,
+                        Err("private_fs_busy") => return,
+                        Err(error) => panic!(
+                            "concurrent reminder lock creation: {error}; OS error: {}",
+                            std::io::Error::last_os_error()
+                        ),
+                    };
+                    regular(&dir, "ledger", false).expect("read ledger while holding its lock");
+                    atomic_replace(&dir, "ledger", b"{}")
+                        .expect("replace ledger while holding its lock");
+                };
+                let peer = scope.spawn(claim);
+                claim();
+                peer.join().unwrap();
+            });
+        }
+    }
     #[tokio::test]
     async fn ipc_is_anchored_handles_long_unicode_roots_and_reclaims_stale_sockets() {
         use crate::platform::ipc::{LocalEndpoint, check_peer};
