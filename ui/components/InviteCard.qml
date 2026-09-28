@@ -249,7 +249,7 @@ Rectangle {
     Row {
       id: rsvpRow
       spacing: Style.space(6)
-      visible: root.canRespond
+      visible: root.canRespond && !root.fallbackAvailable
 
       Text {
         anchors.verticalCenter: parent.verticalCenter

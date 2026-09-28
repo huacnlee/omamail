@@ -24,6 +24,7 @@ Rectangle {
   property bool createMeet: false
   property string conferenceRequestId: ""
   property string originalGuestText: ""
+  property bool advancedOptionsOpen: false
   readonly property var contactService: controller && controller.service ? controller.service : null
   readonly property var contactBook: contactService && Array.isArray(contactService.recipientContacts)
     ? contactService.recipientContacts : []
@@ -31,6 +32,7 @@ Rectangle {
   readonly property var guestSuggestions: opened && guestsField.visible && guestsField.activeFocus && !guestSuggestionsDismissed
     ? Recipients.suggest(contactBook, guestsField.text, 5) : []
   readonly property bool guestSuggestionsOpen: guestSuggestions.length > 0
+  onGuestSuggestionsChanged: if (guestSuggestionsOpen) Qt.callLater(root.revealField, guestsField)
 
   function moveGuestSuggestion(delta) { guestSuggestionsList.moveSelection(delta) }
   function chooseGuestSuggestion() { guestSuggestionsList.acceptSelection() }
@@ -89,6 +91,32 @@ Rectangle {
   readonly property var dateRange: Calendar.editorDateRange(dateField.text, startField.text,
     endDateField.text, endField.text, allDay)
   color: root.backgroundColor
+
+  component FieldLabel: Text {
+    width: parent.width
+    color: root.textColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.bodySmall
+    textFormat: Text.PlainText
+    wrapMode: Text.Wrap
+  }
+
+  function revealField(field) {
+    if (!field.activeFocus) return
+    var top = field.mapToItem(composerFlick.contentItem, 0, 0).y
+    var bottom = field === guestsField && guestSuggestionsOpen
+      ? guestSuggestionsList.mapToItem(composerFlick.contentItem, 0, guestSuggestionsList.height).y
+      : top + field.height
+    if (top < composerFlick.contentY) composerFlick.contentY = top
+    else if (bottom > composerFlick.contentY + composerFlick.height)
+      composerFlick.contentY = Math.max(0, Math.min(top, bottom - composerFlick.height))
+  }
+
+  component EditorField: TextField {
+    id: input
+    font.pixelSize: Style.font.bodySmall
+    onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealField, input)
+  }
 
   component EventOption: QQC.ComboBox {
     id: option
@@ -190,6 +218,7 @@ Rectangle {
   }
 
   function beginAt(startMs) {
+    advancedOptionsOpen = false
     changeRecurrence = false
     visibilityChanged = false
     availabilityChanged = false
@@ -258,6 +287,8 @@ Rectangle {
   }
 
   function beginEdit(sourceId, event) {
+    advancedOptionsOpen = !!event && (event.transparency === "transparent"
+      || event.visibility === "private" || event.visibility === "public")
     changeRecurrence = false
     visibilityChanged = false
     availabilityChanged = false
@@ -476,7 +507,10 @@ Rectangle {
 
     WheelScroller { view: composerFlick }
 
-    anchors.fill: parent
+    anchors.top: parent.top
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: editorFooter.top
     anchors.margins: Style.space(18)
     contentWidth: width
     contentHeight: form.implicitHeight
@@ -657,7 +691,8 @@ Rectangle {
         }
       }
 
-      TextField {
+      FieldLabel { text: "Title" }
+      EditorField {
         id: titleField
         objectName: "event-title-field"
         width: parent.width
@@ -665,18 +700,14 @@ Rectangle {
         accent: root.accentColor
         font.family: root.panelFontFamily
         placeholderText: "Event title"
+        Accessible.name: "Event title"
       }
 
       Column {
         width: parent.width
         spacing: Style.space(6)
-        Text {
-          text: "Description"
-          textFormat: Text.PlainText
-          color: root.dimColor
-          font.family: root.panelFontFamily
-        }
-        TextField {
+        FieldLabel { text: "Description" }
+        EditorField {
           id: notesField
           objectName: "event-description-field"
           width: parent.width
@@ -719,7 +750,7 @@ Rectangle {
           color: root.dimColor
           font.family: root.panelFontFamily
         }
-        TextField {
+        EditorField {
           id: dateField
           objectName: "event-start-date-field"
           width: parent.width - Style.space(80) - parent.spacing - (startField.visible ? startField.width + parent.spacing : 0)
@@ -728,7 +759,7 @@ Rectangle {
           placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
         }
 
-        TextField {
+        EditorField {
           id: startField
           objectName: "event-start-time-field"
           visible: !root.editingAllDay
@@ -749,7 +780,7 @@ Rectangle {
           color: root.dimColor
           font.family: root.panelFontFamily
         }
-        TextField {
+        EditorField {
           id: endDateField
           objectName: "event-end-date-field"
           width: parent.width - Style.space(80) - parent.spacing - (endField.visible ? endField.width + parent.spacing : 0)
@@ -757,7 +788,7 @@ Rectangle {
           font.family: root.panelFontFamily
           placeholderText: "YYYY-MM-DD"
         }
-        TextField {
+        EditorField {
           id: endField
           objectName: "event-end-time-field"
           visible: !root.editingAllDay
@@ -780,13 +811,24 @@ Rectangle {
         font.pixelSize: Style.font.caption
       }
 
-      TextField {
+      Text {
+        visible: !root.allDay && root.dateRange.ok
+        text: "Times shown in " + Qt.formatDateTime(new Date(root.dateRange.startMs || Date.now()), "t") + " (local time)"
+        textFormat: Text.PlainText
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      FieldLabel { text: "Location or meeting link" }
+      EditorField {
         id: locationField
         objectName: "event-location-field"
         width: parent.width
         foreground: root.textColor
         font.family: root.panelFontFamily
         placeholderText: "Location or meeting link"
+        Accessible.name: "Location or meeting link"
       }
 
       IconTextButton {
@@ -805,25 +847,8 @@ Rectangle {
         width: parent.width
         spacing: Style.space(6)
         visible: !!root.chosenSource && root.chosenSource.kind === "google"
-        Text {
-          width: parent.width
-          text: "Dates and times above use your computer's local time. The event's time zone controls repeating schedules."
-          textFormat: Text.PlainText
-          wrapMode: Text.Wrap
-          color: root.dimColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-        }
-        TextField {
-          id: timeZoneField
-          width: parent.width
-          placeholderText: "Event time zone, e.g. Europe/Paris"
-          foreground: root.textColor
-          accent: root.accentColor
-          font.family: root.panelFontFamily
-          Accessible.name: "Event time zone"
-        }
-        TextField {
+        FieldLabel { text: "Guests"; visible: guestsField.visible }
+        EditorField {
           id: guestsField
           objectName: "event-guests-field"
           width: parent.width
@@ -834,10 +859,15 @@ Rectangle {
           font.family: root.panelFontFamily
           Accessible.name: "Guest email addresses"
           onTextChanged: root.guestSuggestionsDismissed = false
-          onActiveFocusChanged: root.guestSuggestionsDismissed = false
+          onActiveFocusChanged: {
+            root.guestSuggestionsDismissed = false
+            if (activeFocus) Qt.callLater(root.revealField, guestsField)
+          }
         }
         RecipientSuggestions {
           id: guestSuggestionsList
+          onHeightChanged: if (root.guestSuggestionsOpen) Qt.callLater(root.revealField, guestsField)
+          onYChanged: if (root.guestSuggestionsOpen) Qt.callLater(root.revealField, guestsField)
           objectName: "event-guest-suggestions"
           width: parent.width
           contacts: root.guestSuggestions
@@ -849,27 +879,46 @@ Rectangle {
           panelFontFamily: root.panelFontFamily
           onChosen: function(contact) { root.acceptGuest(contact) }
         }
+        IconTextButton {
+          objectName: "event-more-options"
+          text: "More options..."
+          selected: root.advancedOptionsOpen
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.advancedOptionsOpen = !root.advancedOptionsOpen
+        }
         Column {
           width: parent.width
           spacing: Style.space(6)
+          visible: root.advancedOptionsOpen
+          FieldLabel { text: "Time zone for repeating events" }
+          EditorField {
+            id: timeZoneField
+            width: parent.width
+            placeholderText: "e.g. Europe/Paris"
+            foreground: root.textColor
+            accent: root.accentColor
+            font.family: root.panelFontFamily
+            Accessible.name: "Time zone for repeating events"
+          }
           Text {
-            text: "Availability"
+            width: parent.width
+            text: "Repeating events follow this time zone. Dates and times above use your computer's local time."
             textFormat: Text.PlainText
+            wrapMode: Text.Wrap
             color: root.dimColor
             font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
           }
+          FieldLabel { text: "Availability" }
           EventOption {
             objectName: "event-availability-selector"
             value: root.availability
             model: [{value:"opaque",label:"Busy — blocks this time"},{value:"transparent",label:"Free — keeps this time available"}]
             onChosen: function(value) { root.availability = value; root.availabilityChanged = true }
           }
-          Text {
-            text: "Visibility"
-            textFormat: Text.PlainText
-            color: root.dimColor
-            font.family: root.panelFontFamily
-          }
+          FieldLabel { text: "Visibility" }
           EventOption {
             objectName: "event-visibility-selector"
             value: root.eventVisibility
@@ -877,12 +926,7 @@ Rectangle {
             onChosen: function(value) { root.eventVisibility = value; root.visibilityChanged = true }
           }
         }
-        Text {
-          text: "Event reminders"
-          textFormat: Text.PlainText
-          color: root.dimColor
-          font.family: root.panelFontFamily
-        }
+        FieldLabel { text: "Event reminders" }
         Flow {
           width: parent.width
           spacing: Style.space(6)
@@ -891,7 +935,7 @@ Rectangle {
             IconTextButton {
               required property string modelData
               text: modelData === "preserve" ? "Keep existing" : modelData === "default" ? "Calendar default"
-                : modelData === "none" ? "None" : "Custom popup"
+                : modelData === "none" ? "None" : "Custom reminder"
               selected: root.reminderMode === modelData
               foreground: root.textColor
               accent: root.accentColor
@@ -900,15 +944,25 @@ Rectangle {
             }
           }
         }
-        TextField {
-          id: reminderField
+        Row {
           visible: root.reminderMode === "custom"
           width: parent.width
-          placeholderText: "Minutes before the event (replaces existing reminders)"
-          foreground: root.textColor
-          accent: root.accentColor
-          font.family: root.panelFontFamily
-          Accessible.name: "Popup reminder minutes before the event"
+          spacing: Style.space(8)
+          EditorField {
+            id: reminderField
+            width: Style.space(80)
+            placeholderText: "Minutes"
+            foreground: root.textColor
+            accent: root.accentColor
+            font.family: root.panelFontFamily
+            inputMethodHints: Qt.ImhDigitsOnly
+            Accessible.name: "Reminder minutes before the event"
+          }
+          FieldLabel {
+            width: parent.width - reminderField.width - parent.spacing
+            anchors.verticalCenter: parent.verticalCenter
+            text: "minutes before the event"
+          }
         }
       }
 
@@ -916,12 +970,7 @@ Rectangle {
         width: parent.width
         spacing: Style.space(6)
         visible: !root.editing || (!root.editingEvent.recurringEventId && !!root.chosenSource && root.chosenSource.kind === "google")
-        Text {
-          text: "Repeat"
-          textFormat: Text.PlainText
-          color: root.dimColor
-          font.family: root.panelFontFamily
-        }
+        FieldLabel { text: "Repeat" }
         EventOption {
           objectName: "event-repeat-selector"
           value: root.editing && !root.changeRecurrence ? Calendar.repeatChoice(root.editingEvent)
@@ -963,7 +1012,7 @@ Rectangle {
               width: parent.width
               spacing: Style.space(8)
 
-              TextField {
+              EditorField {
                 id: intervalField
                 width: Math.min(Style.space(96), parent.width * 0.5)
                 foreground: root.textColor
@@ -995,7 +1044,7 @@ Rectangle {
               textFormat: Text.PlainText
             }
 
-            TextField {
+            EditorField {
               id: countField
               width: parent.width
               foreground: root.textColor
@@ -1007,58 +1056,69 @@ Rectangle {
         }
       }
 
-      Row {
-        spacing: Style.space(6)
+    }
+  }
 
-        IconTextButton {
-          objectName: "event-save-button"
-          text: {
-            var busy = root.controller
-              && (root.controller.creatingEvent || root.controller.eventWriting)
-            if (root.editing) return busy ? "Saving" : root.guestUpdate ? "Send update" : "Save changes"
-            return busy ? "Creating" : "Create event"
-          }
-          iconName: root.editing ? "check" : "plus"
-          foreground: root.textColor
-          accent: root.accentColor
-          fontFamily: root.panelFontFamily
-          enabled: root.controller && !root.controller.creatingEvent
-              && !root.controller.eventWriting && !root.loadingSeries && root.dateRange.ok
-           onClicked: root.submit("all")
-        }
+  Column {
+    id: editorFooter
+    objectName: "event-editor-footer"
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: Style.space(18)
+    width: Math.min(parent.width - Style.space(36), Style.space(620))
+    spacing: Style.space(10)
 
-        IconTextButton {
-          visible: root.guestUpdate
-          text: "Don't send"
-          foreground: root.textColor
-          accent: root.accentColor
-          fontFamily: root.panelFontFamily
-          enabled: !root.writePending && !root.loadingSeries && root.dateRange.ok
-          onClicked: root.submit("none")
-        }
+    PanelSeparator { width: parent.width; foreground: root.textColor }
 
-        IconTextButton {
-          text: "Cancel"
-          bordered: false
-          foreground: root.dimColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.close()
+    Text {
+      id: resultText
+      objectName: "event-save-error"
+      width: parent.width
+      visible: text !== ""
+      color: root.urgentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.Wrap
+      textFormat: Text.PlainText
+    }
+
+    Flow {
+      width: parent.width
+      spacing: Style.space(6)
+
+      IconTextButton {
+        objectName: "event-save-button"
+        text: {
+          var busy = root.controller
+            && (root.controller.creatingEvent || root.controller.eventWriting)
+          if (root.editing) return busy ? "Saving" : root.guestUpdate ? "Send update" : "Save changes"
+          return busy ? "Creating" : "Create event"
         }
+        iconName: root.editing ? "check" : "plus"
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        enabled: root.controller && !root.controller.creatingEvent
+          && !root.controller.eventWriting && !root.loadingSeries && root.dateRange.ok
+        onClicked: root.submit("all")
       }
 
-      Text {
-        id: resultText
-        objectName: "event-save-error"
-        width: parent.width
-        visible: text !== ""
-        color: root.urgentColor
-        onTextChanged: if (resultText.text !== "") Qt.callLater(function() {
-          composerFlick.contentY = Math.max(0, composerFlick.contentHeight - composerFlick.height)
-        })
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
+      IconTextButton {
+        visible: root.guestUpdate
+        text: "Save without email"
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        enabled: !root.writePending && !root.loadingSeries && root.dateRange.ok
+        onClicked: root.submit("none")
+      }
+
+      IconTextButton {
+        text: "Cancel"
+        bordered: false
+        foreground: root.dimColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.close()
       }
     }
   }

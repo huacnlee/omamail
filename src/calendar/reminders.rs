@@ -224,6 +224,13 @@ mod tests {
             .unwrap()
             .join(format!("omamail-reminders-{}", std::process::id()));
         std::fs::create_dir(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // CI may use a group-writable umask; the fixture itself must obey
+            // the same private-directory policy as the real config root.
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let candidate = json!({"key":"occurrence\n10", "occurrence":"occurrence", "start":2000000,
             "end":5600000,"due":1400000,"eventId":"event","sourceId":"calendar","accountId":"synthetic","title":"Planning"});
         let mut poll =

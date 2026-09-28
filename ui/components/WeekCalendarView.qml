@@ -226,6 +226,7 @@ Item {
             anchors.rightMargin: Style.space(3)
             verticalAlignment: Text.AlignVCenter
             text: (allDayEvent.modelData.continuesBefore ? "‹ " : "")
+              + (allDayEvent.eventData.start.allDay ? "" : "Timed · ")
               + String(allDayEvent.eventData.summary || "Untitled event")
               + (allDayEvent.modelData.continuesAfter ? " ›" : "")
             color: root.textColor
@@ -419,8 +420,9 @@ Item {
                   root.firstHour, timeline.hourHeight)
                 height: Calendar.eventHeight(eventData, dayColumn.modelData, timeline.hourHeight)
                 radius: Style.cornerRadius
-                color: Qt.rgba(eventColor.r, eventColor.g, eventColor.b,
-                  Calendar.eventKey(eventData) === root.selectedEventId ? 0.3 : 0.17)
+                z: 1
+                color: Qt.tint(root.backgroundColor, Qt.alpha(eventColor,
+                  Calendar.eventKey(eventData) === root.selectedEventId ? 0.3 : 0.17))
                 border.width: Calendar.eventKey(eventData) === root.selectedEventId ? 1 : 0
                 border.color: eventColor
                 clip: true
@@ -567,10 +569,8 @@ Item {
               }
             }
 
-            // After the events, so a meeting in progress is crossed by the line
-            // rather than covering it. The dot is what survives a theme whose
-            // urgent colour sits close to an event's border: a bare rule reads
-            // as one more hour separator, a rule with a bead on it does not.
+            // Keep the line behind event text; the gutter time and dot remain
+            // visible without striking through a meeting's title.
             Item {
               readonly property real offset: Calendar.nowOffset(
                 dayColumn.modelData, root.firstHour, root.lastHour,
@@ -579,7 +579,7 @@ Item {
               y: offset
               width: parent.width
               height: 0
-              z: 1
+              z: 0
               Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right

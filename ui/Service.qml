@@ -115,7 +115,8 @@ Item {
   readonly property int calendarSnoozeMinutes: Math.max(1, Math.min(1440,
     Math.floor(Number(settings && settings.calendarSnoozeMinutes) || 5)))
   readonly property string calendarReminderError: calendarReminderLoader.item
-    ? calendarReminderLoader.item.lastError : ""
+    ? calendarReminderLoader.item.lastError || calendarReminderLoader.item.inbox.lastError : ""
+  readonly property var calendarReminderInbox: calendarReminderLoader.item ? calendarReminderLoader.item.inbox : null
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"

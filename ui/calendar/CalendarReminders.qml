@@ -12,7 +12,10 @@ Item {
   property bool polling: false
   property int waiters: 0
   property string lastError: ""
+  property alias inbox: reminderInbox
   visible: false
+
+  CalendarReminderInbox { id: reminderInbox; service: root.service }
 
   function refresh() {
     if (!calendars.sourcesLoaded || calendars.loading) return
@@ -22,15 +25,13 @@ Item {
   }
 
   function action(key, operation) {
-    service.backend.call("calendar.reminders", { operation: operation, key: key,
-      now: Date.now(), minutes: service.calendarSnoozeMinutes }, function(result, error) {
-      if (error) root.lastError = "The reminder action could not be saved"
-    })
+    reminderInbox.action(key, operation)
   }
 
   function poll() {
     if (polling || !calendars.sourcesLoaded || calendars.loading) return
     var now = Date.now()
+    reminderInbox.prune(now)
     polling = true
     service.backend.call("calendar.reminders", { operation: "poll", now: now, lastCheck: lastCheck,
       candidates: Reminders.candidates(calendars.events, calendars.availableSources) }, function(result, error) {
@@ -50,7 +51,8 @@ Item {
     var count = 1 + (Array.isArray(record.relatedKeys) ? record.relatedKeys.length : 0)
     var title = count > 1 ? String(count) + " calendar reminders" : record.title
     if (count > 1) body = record.title + " · " + body
-    var process = notification.createObject(root, { record: record,
+    var notice = reminderInbox.receive(record)
+    var process = notification.createObject(root, { record: notice,
       command: ["python3", pluginDir + "/scripts/notify-mail.py", "--calendar",
         notificationForeground, notificationAccent, "--", title, body] })
     if (!process) { action(record.key, "failed"); return }
@@ -90,22 +92,16 @@ Item {
       stdout: StdioCollector {
         onStreamFinished: {
           var choice = text.trim()
-          if (choice === "snooze") root.action(delivery.record.key, "snooze")
-          else if (choice === "default") {
-            root.action(delivery.record.key, "dismiss")
-            if (root.service.shell && typeof root.service.shell.summon === "function")
-              root.service.shell.summon("omamail", JSON.stringify({ view: "calendar",
-                accountId: delivery.record.accountId,
-                eventId: delivery.record.sourceId + "\n" + delivery.record.eventId,
-                eventStart: delivery.record.start }))
-          } else if (choice === "dismiss") root.action(delivery.record.key, "dismiss")
+          if (choice === "default") reminderInbox.open(delivery.record)
+          else if (choice === "snooze" || choice === "dismiss")
+            reminderInbox.action(delivery.record.key, choice, delivery.record.noticeId)
         }
       }
       onExited: function(code, status) {
         root.waiters--
         if (code !== 0) {
           root.lastError = "Desktop reminder delivery failed"
-          root.action(record.key, "failed")
+          reminderInbox.action(record.key, "failed", record.noticeId)
         }
         destroy()
       }

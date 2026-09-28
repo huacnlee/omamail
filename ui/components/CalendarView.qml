@@ -600,6 +600,16 @@ Item {
       wrapMode: Text.Wrap
     }
 
+    CalendarReminderPanel {
+      width: parent.width
+      service: root.controller ? root.controller.service : null
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      urgentColor: root.urgentColor
+      panelFontFamily: root.panelFontFamily
+    }
+
     Row {
       id: calendarBody
       width: parent.width
@@ -798,7 +808,8 @@ Item {
                     var time = event.start && !event.start.allDay
                       ? Calendar.two(new Date(event.start.ms).getHours()) + ":"
                         + Calendar.two(new Date(event.start.ms).getMinutes()) + " " : ""
-                    return time + (event.summary || "Untitled event")
+                    var title = String(event.summary || "Untitled event")
+                    return monthEvent.width < Style.space(140) ? title + (time ? " · " + time.trim() : "") : time + title
                   }
                   color: root.textColor
                   font.family: root.panelFontFamily
@@ -1035,7 +1046,7 @@ Item {
     property Item dayCell: null
     readonly property var events: dayCell ? Calendar.eventsOnDay(root.controller ? root.controller.events : [], dayCell.modelData) : []
     width: Math.min(Style.space(400), parent.width - Style.space(16))
-    height: Math.min(parent.height - Style.space(24), overflowHeading.implicitHeight
+    height: Math.min(Style.space(460), parent.height - Style.space(24), overflowHeading.implicitHeight
       + overflowEvents.height + padding * 2 + Style.space(10))
     padding: Style.space(10)
     focus: false
@@ -1067,7 +1078,9 @@ Item {
       Text {
         id: overflowHeading
         width: parent.width
-        text: monthOverflow.dayCell ? Qt.formatDate(new Date(monthOverflow.dayCell.modelData.startMs), "dddd, d MMMM") : ""
+        text: monthOverflow.dayCell ? Qt.formatDate(new Date(monthOverflow.dayCell.modelData.startMs), "dddd, d MMMM")
+          + " · " + monthOverflow.events.length + " events" : ""
+        wrapMode: Text.Wrap
         textFormat: Text.PlainText
         color: root.textColor
         font.family: root.panelFontFamily
@@ -1085,7 +1098,7 @@ Item {
         contentHeight: overflowEvents.height
         contentWidth: width
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {}
+        ScrollBar.vertical: ScrollBar { policy: overflowScroll.contentHeight > overflowScroll.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
         WheelScroller { view: overflowScroll }
         Column {
           id: overflowEvents

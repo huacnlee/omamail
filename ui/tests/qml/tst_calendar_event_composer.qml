@@ -131,9 +131,13 @@ Item {
       guests.text += " "
       compare(composer.guestSuggestionsOpen, true)
       var scroll = findChild(composer, "event-composer-scroll")
-      scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height,
-        list.mapToItem(scroll.contentItem, 0, 0).y - 100))
-      wait(0)
+      tryVerify(function() { return list.height > 40 })
+      tryVerify(function() {
+        var top = list.mapToItem(scroll, 0, 0).y
+        return top >= 0 && top + list.height <= scroll.height
+      })
+      waitForRendering(list)
+      wait(50)
       mouseClick(list, list.width / 2, 15)
       compare(guests.text, "brown@example.test, sam@example.test, ")
       compare(composer.guestSuggestionsOpen, false)
@@ -159,6 +163,27 @@ Item {
       eventController.creatingEvent = false
       eventController.eventCreated(true,"")
       compare(composer.opened,false)
+    }
+
+    function test_save_failure_stays_visible_without_scrolling() {
+      composer.begin()
+      findChild(composer, "event-title-field").text = "Error visibility"
+      composer.recurring = true
+      composer.reminderMode = "custom"
+      composer.submit("all")
+      eventController.creatingEvent = false
+      eventController.eventCreated(false, "Could not save this event. Your changes are still here. Please try again.")
+      wait(0)
+      var error = findChild(composer, "event-save-error")
+      var footer = findChild(composer, "event-editor-footer")
+      var scroll = findChild(composer, "event-composer-scroll")
+      verify(error.visible)
+      verify(error.mapToItem(composer, 0, 0).y >= 0)
+      verify(error.mapToItem(composer, 0, error.height).y <= composer.height)
+      verify(scroll.y + scroll.height <= footer.y)
+      scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
+      verify(error.mapToItem(composer, 0, error.height).y <= composer.height)
+      verify(composer.opened)
     }
 
     function test_enter_saves_an_edited_event() {

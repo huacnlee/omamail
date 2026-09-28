@@ -25,6 +25,8 @@ Rectangle {
   property bool refreshing: false
   property string refreshError: ""
   property bool meetingLinkCopied: false
+  property bool deleteOptionsOpen: false
+  onEventChanged: deleteOptionsOpen = false
   onMeetingLinkChanged: { meetingLinkCopied = false; copiedFeedback.stop() }
   Timer {
     id: copiedFeedback
@@ -157,6 +159,17 @@ Rectangle {
         onActivated: root.closed()
       }
 
+      CalendarReminderPanel {
+        width: parent.width
+        service: root.controller ? root.controller.service : null
+        eventKey: root.event ? String(root.event.sourceId || "") + "\n" + String(root.event.googleId || root.event.uid || "") : ""
+        textColor: root.textColor
+        dimColor: root.dimColor
+        accentColor: root.accentColor
+        urgentColor: root.urgentColor
+        panelFontFamily: root.panelFontFamily
+      }
+
       Rectangle {
         width: parent.width
         height: Style.space(4)
@@ -205,6 +218,29 @@ Rectangle {
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
           textFormat: Text.PlainText
+        }
+      }
+
+      Flow {
+        width: parent.width
+        spacing: Style.space(8)
+        IconTextButton {
+          visible: root.meetingLink !== ""
+          text: "Join meeting..."
+          iconName: "video"
+          foreground: root.textColor
+          accent: root.eventColor
+          fontFamily: root.panelFontFamily
+          onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
+        }
+        IconTextButton {
+          visible: root.canWrite
+          text: "Edit..."
+          iconName: "edit"
+          foreground: root.textColor
+          accent: root.eventColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
         }
       }
 
@@ -316,6 +352,18 @@ Rectangle {
         font.pixelSize: Style.font.body
       }
 
+      Text {
+        visible: String(root.event && root.event.description || "") !== ""
+        width: parent.width
+        text: String(root.event && root.event.description || "")
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
+        lineHeight: 1.35
+        wrapMode: Text.Wrap
+        textFormat: Text.PlainText
+      }
+
       Column {
         width: parent.width
         spacing: Style.space(8)
@@ -397,44 +445,15 @@ Rectangle {
         spacing: Style.space(7)
 
         IconTextButton {
-          visible: root.canWrite
-          text: "Edit..."
-          iconName: "edit"
-          foreground: root.textColor
-          accent: root.eventColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
-        }
-
-        IconTextButton {
           visible: root.canDelete
-          text: root.notifiesGuests ? "Delete and notify guests..."
-            : root.event && root.event.recurringEventId ? "Delete this occurrence..." : "Delete..."
+          objectName: "event-delete-options"
+          text: "Delete..."
           iconName: "trash"
-          foreground: root.urgentColor
+          selected: root.deleteOptionsOpen
+          foreground: root.dimColor
           accent: root.urgentColor
           fontFamily: root.panelFontFamily
-          onClicked: root.requestDelete("all")
-        }
-
-        IconTextButton {
-          visible: root.canDelete && root.notifiesGuests && root.source.kind === "google"
-          text: "Delete without email..."
-          foreground: root.urgentColor
-          accent: root.urgentColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.requestDelete("none")
-        }
-
-        IconTextButton {
-          visible: root.canDelete && !!root.event && !!root.event.recurringEventId
-            && !!root.controller && !!root.controller.service && root.controller.service.backendCanGoogleCalendars === true
-          text: "Delete entire series..."
-          foreground: root.urgentColor
-          accent: root.urgentColor
-          fontFamily: root.panelFontFamily
-          enabled: !root.readingSeries
-          onClicked: root.deleteSeries()
+          onClicked: root.deleteOptionsOpen = !root.deleteOptionsOpen
         }
 
         IconTextButton {
@@ -481,22 +500,36 @@ Rectangle {
         }
       }
 
-      PanelSeparator {
-        visible: String(root.event && root.event.description || "") !== ""
+      Flow {
+        visible: root.canDelete && root.deleteOptionsOpen
         width: parent.width
-        foreground: root.textColor
-      }
-
-      Text {
-        visible: String(root.event && root.event.description || "") !== ""
-        width: parent.width
-        text: String(root.event && root.event.description || "")
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.body
-        lineHeight: 1.35
-        wrapMode: Text.Wrap
-        textFormat: Text.PlainText
+        spacing: Style.space(7)
+        IconTextButton {
+          text: root.notifiesGuests ? "Delete and notify guests..."
+            : root.event && root.event.recurringEventId ? "Delete this occurrence..." : "Delete event..."
+          foreground: root.urgentColor
+          accent: root.urgentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.requestDelete("all")
+        }
+        IconTextButton {
+          visible: root.notifiesGuests && root.source.kind === "google"
+          text: "Delete without email..."
+          foreground: root.urgentColor
+          accent: root.urgentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.requestDelete("none")
+        }
+        IconTextButton {
+          visible: !!root.event && !!root.event.recurringEventId
+            && !!root.controller && !!root.controller.service && root.controller.service.backendCanGoogleCalendars === true
+          text: "Delete entire series..."
+          foreground: root.urgentColor
+          accent: root.urgentColor
+          fontFamily: root.panelFontFamily
+          enabled: !root.readingSeries
+          onClicked: root.deleteSeries()
+        }
       }
     }
   }
