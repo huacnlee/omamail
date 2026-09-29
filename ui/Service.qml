@@ -398,6 +398,29 @@ Item {
     mailtoInstaller.running = true
   }
 
+  // Whether mailto: links and Omarchy's SUPER+SHIFT+E open Omamail. Empty
+  // until default-mail.sh has been asked; the settings page asks on open,
+  // because either half can change behind this window's back.
+  property string defaultMailClient: ""
+  property bool defaultMailClientBusy: false
+  property string defaultMailClientError: ""
+
+  function refreshDefaultMailClient() {
+    if (!hasMailto || pluginDir === "" || defaultMailClientProcess.running) return
+    defaultMailClientProcess.command = [pluginDir + "/scripts/default-mail.sh", "status"]
+    defaultMailClientProcess.running = true
+  }
+
+  function setDefaultMailClient(enabled) {
+    if (!hasMailto || pluginDir === "" || defaultMailClientProcess.running) return
+    defaultMailClientBusy = true
+    defaultMailClientError = ""
+    defaultMailClientProcess.command = enabled
+      ? [pluginDir + "/scripts/default-mail.sh", "on", pluginDir]
+      : [pluginDir + "/scripts/default-mail.sh", "off"]
+    defaultMailClientProcess.running = true
+  }
+
   function applySettings(values) {
     var next = normalizedSettings(values)
     if (JSON.stringify(next) !== JSON.stringify(settings)) settings = next
@@ -2824,6 +2847,23 @@ Item {
     stderr: StdioCollector { waitForEnd: true }
   }
 
+  Process {
+    id: defaultMailClientProcess
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (root.defaultMailClientBusy) {
+        root.defaultMailClientBusy = false
+        if (exitCode !== 0) root.defaultMailClientError =
+          String(stderr.text || "").trim() || "Could not change the default mail client"
+        // The status read cannot start from inside this process's own exit.
+        Qt.callLater(root.refreshDefaultMailClient)
+        return
+      }
+      if (exitCode === 0) root.defaultMailClient = String(stdout.text || "").trim()
+    }
+  }
+
   Component.onCompleted: {
     barBridge = BarBridge.publish(function() {
       return {
@@ -2838,6 +2878,7 @@ Item {
     Qt.callLater(root.restoreAccountRegistry)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
+    Qt.callLater(root.refreshDefaultMailClient)
   }
 
   property var barBridge: null
