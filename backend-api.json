@@ -262,7 +262,13 @@
     {
       "name": "Google attendance rejects unsupported answers before authentication",
       "method": "calendar.attendance",
-      "params": {"accountId":"missing@example.org","uid":"invite","response":"yes"},
+      "params": {"accountId":"missing@example.org","uid":"invite","organizer":"organizer@example.org","response":"yes"},
+      "errorCode": -32602
+    },
+    {
+      "name": "Google attendance requires the invitation organizer before authentication",
+      "method": "calendar.attendance",
+      "params": {"accountId":"missing@example.org","uid":"invite","response":"accepted"},
       "errorCode": -32602
     },
     {
@@ -851,6 +857,6 @@
   ],
   "unreleased": {
     "methods": ["calendar.attendance", "calendar.reminders"],
-    "cases": ["IMAP All mail resolves to account-wide listing", "IMAP text search includes archived mail", "Outlook text search includes archived mail", "IMAP address search includes archived mail", "IMAP account search refuses an expired work continuation", "IMAP account search refuses a malformed page cursor", "Google calendar identity is validated before authentication", "Google attendance rejects unsupported answers before authentication", "Reminder actions validate before opening the ledger", "Reminder view cache has an independent namespace", "Simultaneous reminders retain each event identity"]
+    "cases": ["IMAP All mail resolves to account-wide listing", "IMAP text search includes archived mail", "Outlook text search includes archived mail", "IMAP address search includes archived mail", "IMAP account search refuses an expired work continuation", "IMAP account search refuses a malformed page cursor", "Google calendar identity is validated before authentication", "Google attendance rejects unsupported answers before authentication", "Google attendance requires the invitation organizer before authentication", "Reminder actions validate before opening the ledger", "Reminder view cache has an independent namespace", "Simultaneous reminders retain each event identity"]
   }
 }

@@ -33,8 +33,13 @@ QtObject {
     onTriggered: { rsvpAction.reconciledKey = ""; rsvpAction.reconcile() }
   }
 
+  // The organizer travels with the UID because a UID alone is not proof: any
+  // sender can reuse one, and the backend refuses a calendar copy whose
+  // organizer is not the one this invitation names.
   function invitationParams(invited) {
-    var params = { accountId: account.accountId, uid: invited.uid }
+    var organizer = Calendar.replyRecipient(invited)
+    if (!organizer) return null
+    var params = { accountId: account.accountId, uid: invited.uid, organizer: organizer }
     if (invited.recurrenceIdMs) {
       params.originalStart = new Date(invited.recurrenceIdMs).toISOString()
       var raw = String(invited.source && invited.source.recurrenceId || "")
@@ -55,8 +60,10 @@ QtObject {
     var key = identity + "\n" + id + "\n" + invited.uid
     if (key === reconciledKey) return
     reconciledKey = key
+    var params = invitationParams(invited)
+    if (!params) return
     reconciling = true
-    account.backend.call(method, invitationParams(invited), function(result, error) {
+    account.backend.call(method, params, function(result, error) {
       rsvpAction.reconciling = false
       if (identity !== account.accountId || id !== account.selectedId || account.rsvpSending
           || revision !== rsvpAction.attendanceRevision) return
@@ -163,6 +170,10 @@ QtObject {
     var identity = account.accountId
     var answeringAs = account.receivedAsAddress
     var params = invitationParams(invited)
+    if (!params) {
+      account.fail("This invitation names no organiser to answer")
+      return
+    }
     params.response = response
     account.rsvpSending = true
     account.clearNotice()
@@ -170,7 +181,8 @@ QtObject {
       account.rsvpSending = false
       if (identity !== account.accountId) return
       if (error || !result || result.response !== response) {
-        if (error && error.message === "calendar_invitation_not_found" && account.selectedId === messageId)
+        if (error && (error.message === "calendar_invitation_not_found"
+            || error.message === "calendar_organizer_mismatch") && account.selectedId === messageId)
           rsvpAction.fallbackMessageId = messageId
         account.fail("Calendar has not confirmed your answer. Refresh the invitation or open it in Calendar.")
         return

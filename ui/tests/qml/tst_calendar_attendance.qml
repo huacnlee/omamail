@@ -33,7 +33,7 @@ TestCase {
       owner.sent = owner.sent.concat([payload])
       callback({}, null)
     }})
-    property var selectedInvite: ({ uid: "meeting", recurrenceIdMs: 0 })
+    property var selectedInvite: ({ uid: "meeting", recurrenceIdMs: 0, organizer: { email: "organizer@example.test" } })
     property string notice: ""
     property string failure: ""
     property var selectedBody: ({text:"Invitation",source:"plain"})
@@ -55,7 +55,7 @@ TestCase {
     backend.apiVersion = 6
     owner.rsvpSending = false
     owner.selectedId = "mail-1"
-    owner.selectedInvite = { uid: "meeting", recurrenceIdMs: 0 }
+    owner.selectedInvite = { uid: "meeting", recurrenceIdMs: 0, organizer: { email: "organizer@example.test" } }
     owner.notice = ""
     owner.failure = ""
     owner.cachedInvite = null
@@ -72,6 +72,27 @@ TestCase {
     backend.callback(null, { message: "calendar_invitation_not_found" })
     verify(!owner.rsvpSending)
     verify(owner.failure !== "")
+    compare(owner.notice, "")
+  }
+
+  function test_request_names_the_invitation_organizer() {
+    action.run("accepted")
+    compare(backend.calls[0].params.organizer, "organizer@example.test")
+  }
+
+  function test_invitation_without_organizer_makes_no_request() {
+    owner.selectedInvite = { uid: "meeting", recurrenceIdMs: 0 }
+    action.run("accepted")
+    action.reconcile()
+    compare(backend.calls.length, 0)
+    verify(owner.failure !== "")
+  }
+
+  function test_organizer_mismatch_exposes_only_explicit_mail_fallback() {
+    action.run("declined")
+    backend.callback(null, { message: "calendar_organizer_mismatch" })
+    verify(action.fallbackAvailable)
+    compare(owner.cachedInvite, null)
     compare(owner.notice, "")
   }
 
@@ -117,6 +138,7 @@ TestCase {
 
   function test_occurrence_uses_original_date_and_late_result_does_not_replace_new_mail() {
     owner.selectedInvite = { uid: "meeting", recurrenceIdMs: Date.UTC(2026, 9, 1),
+      organizer: { email: "organizer@example.test" },
       source: { recurrenceId: "RECURRENCE-ID;VALUE=DATE:20261001" } }
     action.run("DECLINED")
     compare(backend.calls[0].params.originalStart, "2026-10-01")

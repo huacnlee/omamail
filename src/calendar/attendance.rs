@@ -1,7 +1,19 @@
 //! Match a mail invitation to its authoritative Google calendar copy before
 //! changing attendance. An occurrence is identified by its original start,
 //! never its (possibly moved) current start.
+//!
+//! A UID is not a secret: anyone who saw one invitation can write another
+//! naming the same UID. The calendar copy is therefore only this invitation's
+//! when its organizer is the one the invitation names, and nothing is read
+//! back or written until that holds.
 use serde_json::{Value, json};
+
+fn same_organizer(event: &Value, organizer: &str) -> Result<(), &'static str> {
+    match event["organizer"]["email"].as_str() {
+        Some(email) if email.eq_ignore_ascii_case(organizer) => Ok(()),
+        _ => Err("calendar_organizer_mismatch"),
+    }
+}
 
 fn own_attendee<'a>(event: &'a Value, addresses: &[String]) -> Result<&'a Value, &'static str> {
     let mut matches = event["attendees"]
@@ -69,7 +81,9 @@ pub fn validate(params: &Value) -> Result<(), &'static str> {
     let fields = params.as_object().ok_or("invalid_params")?;
     if fields
         .keys()
-        .any(|key| !["accountId", "uid", "originalStart", "response"].contains(&key.as_str()))
+        .any(|key| {
+            !["accountId", "uid", "organizer", "originalStart", "response"].contains(&key.as_str())
+        })
     {
         return Err("invalid_params");
     }
@@ -78,6 +92,10 @@ pub fn validate(params: &Value) -> Result<(), &'static str> {
         return Err("invalid_params");
     }
     super::text(params, "uid")?;
+    let organizer = super::text(params, "organizer").map_err(|_| "invalid_params")?;
+    if !organizer.contains('@') || organizer.chars().any(char::is_whitespace) {
+        return Err("invalid_params");
+    }
     if params.get("originalStart").is_some() {
         let original = super::text(params, "originalStart")?;
         if chrono::DateTime::parse_from_rfc3339(original).is_err()
@@ -122,6 +140,7 @@ async fn google_inner(
     validate(params)?;
     let account = super::text(params, "accountId")?;
     let uid = super::text(params, "uid")?;
+    let organizer = super::text(params, "organizer")?;
     let source = json!({"kind":"google", "accountId":account, "calendarId":"primary"});
     let listing = request(&source, "lookup", json!({"uid":uid}), token).await?;
     let mut items = listing["items"]
@@ -153,6 +172,7 @@ async fn google_inner(
         }
     }
     let event = choose(&items, uid, original)?;
+    same_organizer(event, organizer)?;
     if event["status"] == "cancelled" {
         if params.get("response").is_some() {
             return Err("calendar_invitation_cancelled");
@@ -175,6 +195,7 @@ async fn google_inner(
     } else {
         event.clone()
     };
+    same_organizer(&result, organizer)?;
     let attendee = own_attendee(&result, addresses)?;
     if let Some(expected) = params["response"].as_str() {
         if attendee["responseStatus"] != expected {
@@ -213,5 +234,33 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn an_invitation_reusing_a_uid_is_not_another_organizers_event() {
+        let event = json!({"iCalUID":"meeting","organizer":{"email":"Boss@Example.org"}});
+        assert!(same_organizer(&event, "boss@example.org").is_ok());
+        assert_eq!(
+            same_organizer(&event, "attacker@example.net"),
+            Err("calendar_organizer_mismatch")
+        );
+        assert_eq!(
+            same_organizer(&json!({"iCalUID":"meeting"}), "boss@example.org"),
+            Err("calendar_organizer_mismatch")
+        );
+    }
+
+    #[test]
+    fn attendance_requires_the_invitation_organizer() {
+        let base = json!({"accountId":"me@example.org","uid":"meeting","response":"accepted"});
+        assert_eq!(validate(&base), Err("invalid_params"));
+        for organizer in ["", "boss", "boss @example.org", "boss@example.org\n"] {
+            let mut params = base.clone();
+            params["organizer"] = json!(organizer);
+            assert!(validate(&params).is_err(), "{organizer:?}");
+        }
+        let mut params = base;
+        params["organizer"] = json!("boss@example.org");
+        assert!(validate(&params).is_ok());
     }
 }
