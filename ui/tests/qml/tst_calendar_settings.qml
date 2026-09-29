@@ -134,7 +134,8 @@ Item {
       wait(1)
       var discover = findChild(settings, "calendar-discover-icloud")
       verify(discover !== null)
-      compare(discover.text, "Find calendars")
+      // The account already lists a calendar, so the action refreshes it.
+      compare(discover.text, "Refresh calendars")
       verify(discover.activeFocusOnTab, "discovery must be reachable with Tab")
       discover.forceActiveFocus()
       keyClick(Qt.Key_Return)
@@ -223,7 +224,7 @@ Item {
         remindersEnabled: true, reminderMinutes: -1, preferred: true }] })
       wait(1)
       var discover = findChild(settings, "calendar-discover-google")
-      compare(discover.text, "Enable Google Calendar...")
+      compare(discover.text, "Refresh calendars...")
       discover.clicked()
       compare(calendarController.discoverCalls, 1)
       calendarController.discoveryFinished(false, "Sign in to this mailbox again", 0)
@@ -257,11 +258,17 @@ Item {
           enabled: true, readOnly: true, remindersEnabled: false, reminderMinutes: -1 }
       ] })
       wait(1)
+      // One writable calendar is no choice: no default row is drawn for it.
+      compare(findChild(settings, "calendar-default-picker"), null)
+      calendarController.sourceList = ({ version: 1, sources: calendarController.sourceList.sources.concat([
+        { id: "work", kind: "google", accountId: "person@example.org", name: "Work",
+          enabled: true, readOnly: false, remindersEnabled: false, reminderMinutes: -1 }]) })
+      wait(1)
       var picker = findChild(settings, "calendar-default-picker")
-      compare(picker.options.length, 1)
+      compare(picker.options.length, 2, "the read-only calendar is not offered")
       compare(picker.value, "personal")
-      picker.changed("personal")
-      compare(calendarController.defaultId, "personal")
+      picker.changed("work")
+      compare(calendarController.defaultId, "work")
       var mode = findChild(settings, "calendar-reminder-mode")
       verify(mode !== null, "reminder timing is a visible setting, not a disclosure")
       mode.changed("custom")

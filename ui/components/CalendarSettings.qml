@@ -90,6 +90,15 @@ Column {
     return parts.join(" · ")
   }
 
+  // Google names a mailbox's own calendar after its address, which the row
+  // above already shows; beside it the calendar is simply the primary one.
+  function displayName(source) {
+    var value = source || {}
+    var name = String(value.name || value.id || "Calendar")
+    var account = root.accountLabel(value)
+    return account !== "" && name.toLowerCase() === account.toLowerCase() ? "Primary" : name
+  }
+
   function accountCalendars(accountId) {
     return root.settingsSources.filter(function(source) {
       return String(source.accountId || "") === String(accountId || "") && !root.orphaned(source)
@@ -103,6 +112,12 @@ Column {
     return account === "" || root.orphaned(source)
       || !root.discoverableAccounts().some(function(value) { return String(value.id) === account })
   })
+
+  // One default per account, asked only where the account has more than one
+  // calendar to put a new event in.
+  readonly property var defaultChoices: Sources.writableGroups(Sources.groupByAccount(
+    { sources: writableSources }, service ? service.accountSummaries : []))
+    .filter(function(group) { return group.calendars.length > 1 })
 
   readonly property var reminderSources: settingsSources.filter(function(source) {
     return Sources.nativeCalendarFeatures(source) && !root.orphaned(source)
@@ -142,7 +157,6 @@ Column {
     id: settingRow
     property string title: ""
     property string detail: ""
-    property real indent: 0
     default property alias controls: rowControls.data
     width: parent ? parent.width : 0
     implicitHeight: Math.max(settingText.implicitHeight, rowControls.implicitHeight) + Style.space(16)
@@ -151,7 +165,7 @@ Column {
     Column {
       id: settingText
       anchors.left: parent.left
-      anchors.leftMargin: Style.space(12) + settingRow.indent
+      anchors.leftMargin: Style.space(12)
       anchors.right: rowControls.left
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
@@ -198,13 +212,12 @@ Column {
     id: calendarRow
     property var source: ({})
     property string detail: ""
-    property real indent: 0
     width: parent ? parent.width : 0
     spacing: Style.space(2)
 
     Rectangle {
       width: parent.width
-      implicitHeight: Math.max(calendarText.implicitHeight, calendarActions.implicitHeight) + Style.space(12)
+      implicitHeight: Math.max(calendarText.implicitHeight, calendarActions.implicitHeight) + Style.space(16)
       radius: Style.cornerRadius
       color: Style.normalFillFor(root.textColor, root.accentColor)
 
@@ -212,13 +225,15 @@ Column {
         id: colorButton
         objectName: "calendar-source-color"
         focusable: true
+        // The dot's left edge sits on the same line as the titles above it.
         anchors.left: parent.left
-        anchors.leftMargin: Style.space(6) + calendarRow.indent
+        anchors.leftMargin: Style.space(12) - (width - Style.space(10)) / 2
         anchors.verticalCenter: parent.verticalCenter
         width: Style.space(24)
         height: width
         horizontalPadding: 0
         verticalPadding: 0
+        background: "transparent"
         selected: root.colorEditingId === String(calendarRow.source.id)
         foreground: root.textColor
         accent: root.accentColor
@@ -243,15 +258,15 @@ Column {
 
       Column {
         id: calendarText
-        anchors.left: colorButton.right
-        anchors.leftMargin: Style.space(6)
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(30)
         anchors.right: calendarActions.left
         anchors.rightMargin: Style.space(10)
         anchors.verticalCenter: parent.verticalCenter
         spacing: Style.space(2)
         Text {
           width: parent.width
-          text: String(calendarRow.source.name || calendarRow.source.id || "Calendar")
+          text: root.displayName(calendarRow.source)
           textFormat: Text.PlainText
           elide: Text.ElideRight
           color: root.textColor
@@ -320,7 +335,7 @@ Column {
     Row {
       id: colorRow
       objectName: "calendar-color-picker"
-      x: Style.space(12) + calendarRow.indent
+      x: Style.space(12)
       visible: root.colorEditingId === String(calendarRow.source.id)
       height: visible ? implicitHeight : 0
       spacing: Style.space(6)
@@ -378,7 +393,7 @@ Column {
 
     Row {
       id: passwordRow
-      x: Style.space(12) + calendarRow.indent
+      x: Style.space(12)
       width: parent.width - x
       visible: calendarRow.source.kind === "caldav" && calendarRow.source.discovered !== true
         && root.passwordEditingId === String(calendarRow.source.id)
@@ -484,7 +499,7 @@ Column {
             : root.controller && root.controller.discoveringCalendars
             && root.controller.discoveringAccountId === String(accountBlock.modelData.id || "")
             ? "Finding..."
-            : (root.controller && root.controller.discoveredCount(accountBlock.modelData.id) > 0
+            : (accountBlock.calendars.length > 0
                ? "Refresh calendars" : accountBlock.modelData.calendarProvider === "google" ? "Enable Google Calendar" : "Find calendars")
             + (accountBlock.modelData.calendarProvider === "google" ? "..." : "")
           onClicked: {
@@ -510,7 +525,6 @@ Column {
           required property var modelData
           source: modelData
           detail: root.nestedDetail(modelData)
-          indent: Style.space(12)
         }
       }
     }
@@ -762,13 +776,12 @@ Column {
 
   Column {
     width: parent.width
-    visible: defaultGroups.count > 0
+    visible: root.defaultChoices.length > 0
     spacing: Style.space(2)
     SectionHeading { text: "NEW EVENTS"; bottomPadding: Style.space(2) }
     Repeater {
       id: defaultGroups
-      model: Sources.writableGroups(Sources.groupByAccount({ sources: root.writableSources },
-        root.service ? root.service.accountSummaries : []))
+      model: root.defaultChoices
       SettingRow {
         id: defaultGroup
         required property var modelData
@@ -779,7 +792,7 @@ Column {
           width: Style.space(200)
           showLabel: false
           options: defaultGroup.modelData.calendars.map(function(source) {
-            return { value: source.id, label: String(source.name || source.id) }
+            return { value: source.id, label: root.displayName(source) }
           })
           value: {
             var values = defaultGroup.modelData.calendars
@@ -838,7 +851,7 @@ Column {
       SettingRow {
         id: reminderRow
         required property var modelData
-        title: String(modelData.name || modelData.id)
+        title: root.displayName(modelData)
         detail: root.accountLabel(modelData) + (modelData.enabled === false ? " · Hidden, still reminds" : "")
         NumberField {
           objectName: "calendar-reminder-minutes"
