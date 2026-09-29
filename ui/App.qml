@@ -1115,6 +1115,7 @@ Item {
   // branch for them here would never run. Everything else is the history.
   function goBack() {
     if (eventComposer.guestSuggestionsOpen) { eventComposer.dismissGuestSuggestions(); return }
+    if (calendarView.dismissPreview()) return
     if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
     if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
     if (activeAssistant && activeAssistant.interrupt()) return

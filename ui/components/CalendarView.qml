@@ -229,6 +229,15 @@ Item {
     })
   }
 
+  // Escape's first answer while the busy-day preview is up.
+  function dismissPreview() {
+    if (!monthOverflow.opened) return false
+    monthOverflow.close()
+    monthHoverDelay.stop()
+    hoveredMonthDay = null
+    return true
+  }
+
   function closeDetail() { detailReadSerial++; detailLoading = false; detailError = ""; waitingForEvent = false; detailEvent = null }
 
   function reschedule(event, startMs, endMs) {
@@ -1053,19 +1062,33 @@ Item {
     }
   }
 
-  Popup {
+  // A hover preview, not a QQC.Popup: an open Popup takes every key before the
+  // window's shortcuts see it, focused or not (tst_popup_keys), so resting the
+  // pointer on a busy day would silence j, k and every view key until it left.
+  // An item drawn above the window keeps the keyboard with KeyRouter; Escape
+  // reaches it through goBack().
+  Rectangle {
     id: monthOverflow
     objectName: "calendar-month-overflow"
     parent: root.Window.window ? root.Window.window.contentItem : root
     property Item dayCell: null
+    property bool opened: false
+    readonly property real padding: Style.space(10)
     readonly property var events: dayCell ? Calendar.eventsOnDay(root.controller ? root.controller.events : [], dayCell.modelData) : []
+    function open() { opened = true }
+    function close() {
+      if (!opened) return
+      opened = false
+      monthHoverClose.stop()
+    }
+    visible: opened
+    z: 1000
     width: Math.min(Style.space(400), parent.width - Style.space(16))
     height: Math.min(Style.space(460), parent.height - Style.space(24), overflowHeading.implicitHeight
       + overflowEvents.height + padding * 2 + Style.space(10))
-    padding: Style.space(10)
-    focus: false
-    modal: false
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    color: root.backgroundColor
+    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+    radius: Style.cornerRadius
     function place() {
       if (!dayCell) return
       var below = dayCell.mapToItem(parent, 0, dayCell.height)
@@ -1073,15 +1096,14 @@ Item {
       x = Math.max(0, Math.min(above.x, parent.width - width))
       y = Math.max(0, Math.min(below.y + height > parent.height ? above.y - height : below.y, parent.height - height))
     }
-    onOpened: place()
+    onOpenedChanged: if (opened) place()
     onHeightChanged: if (opened) place()
-    onClosed: monthHoverClose.stop()
-    background: Rectangle {
-      color: root.backgroundColor
-      border.color: Style.normalBorderFor(root.textColor, root.accentColor)
-      radius: Style.cornerRadius
-    }
-    contentItem: Item {
+    // Swallows clicks that miss an event, as the popup's background did, so
+    // one never lands on the month cell drawn underneath.
+    MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: function(wheel) { wheel.accepted = true } }
+    Item {
+      anchors.fill: parent
+      anchors.margins: monthOverflow.padding
       HoverHandler {
         id: overflowHover
         onHoveredChanged: {

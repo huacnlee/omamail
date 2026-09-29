@@ -7,6 +7,8 @@ Item {
   width: 1000
   height: 700
   SystemPalette { id: palette }
+  property string shortcutFired: ""
+  Shortcut { sequence: "j"; onActivated: shortcutFired = "j" }
   QtObject {
     id: serviceFixture
     property bool backendCanGoogleCalendars: true
@@ -103,6 +105,25 @@ Item {
       compare(view.agendaEvents.length,0)
       fixture.nowMs = Date.now()
       view.setView("month")
+    }
+    function test_busy_day_preview_leaves_window_shortcuts_live() {
+      view.visibleMonth = new Date(2026,9,1)
+      view.setView("month")
+      var values = []
+      for (var i = 0; i < 20; i++) values.push(event("keys-" + i))
+      fixture.events = values
+      wait(0)
+      var day = findChild(view,"calendar-month-day-2026-10-25")
+      mouseMove(day,day.width/2,day.height-5)
+      var preview = findChild(view,"calendar-month-overflow")
+      tryCompare(preview,"opened",true)
+      shortcutFired = ""
+      keyClick(Qt.Key_J)
+      compare(shortcutFired,"j")
+      verify(view.dismissPreview())
+      compare(preview.opened,false)
+      verify(!view.dismissPreview())
+      mouseMove(view,5,5)
     }
     function test_overflow_hover_shows_all_events_and_opens_hidden_event() {
       view.visibleMonth = new Date(2026,9,1)
