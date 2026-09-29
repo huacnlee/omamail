@@ -57,7 +57,11 @@ Rectangle {
   property bool transferring: false
   property bool transferNeedsRefresh: false
   property int editGeneration: 0
-  readonly property bool guestUpdate: editing && !!chosenSource && chosenSource.kind === "google"
+  // Google's options travel only through the API 6 backend; an older one
+  // would save the event without them, so the controls are not offered.
+  readonly property bool googleWrites: !!chosenSource && chosenSource.kind === "google"
+    && !!controller && !!controller.service && controller.service.backendCanGoogleCalendars === true
+  readonly property bool guestUpdate: editing && googleWrites
     && !!editingEvent.organizer && editingEvent.organizer.self === true
     && ((Array.isArray(editingEvent.attendees) && editingEvent.attendees.some(function(attendee) { return attendee.self !== true }))
       || guestsField.text.trim() !== "")
@@ -721,7 +725,7 @@ Rectangle {
 
       IconTextButton {
         visible: root.editing && !!root.editingEvent.recurringEventId
-          && !!root.chosenSource && root.chosenSource.kind === "google"
+          && root.googleWrites
         text: root.loadingSeries ? "Loading series" : "Edit entire series..."
         foreground: root.textColor
         accent: root.accentColor
@@ -833,7 +837,7 @@ Rectangle {
 
       IconTextButton {
         objectName: "event-add-meet"
-        visible: !!root.chosenSource && root.chosenSource.canCreateMeet === true
+        visible: root.googleWrites && root.chosenSource.canCreateMeet === true
           && !(root.editingEvent && root.editingEvent.conferenceData)
         text: root.createMeet ? "✓ Add Google Meet" : "Add Google Meet"
         selected: root.createMeet
@@ -846,7 +850,7 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
-        visible: !!root.chosenSource && root.chosenSource.kind === "google"
+        visible: root.googleWrites
         FieldLabel { text: "Guests"; visible: guestsField.visible }
         EditorField {
           id: guestsField
@@ -970,7 +974,7 @@ Rectangle {
         width: parent.width
         spacing: Style.space(6)
         visible: (!root.editing && !!root.chosenSource && root.chosenSource.kind !== "microsoft")
-          || (root.editing && !root.editingEvent.recurringEventId && !!root.chosenSource && root.chosenSource.kind === "google")
+          || (root.editing && !root.editingEvent.recurringEventId && root.googleWrites)
         FieldLabel { text: "Repeat" }
         EventOption {
           objectName: "event-repeat-selector"

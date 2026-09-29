@@ -220,8 +220,7 @@ Item {
 
   function reschedule(event, startMs, endMs) {
     if (!controller || !event || !event.start || !event.end) return
-    var source = controller.findSource(event.sourceId)
-    var refusal = Calendar.writeRefusal(source, event, "reschedule")
+    var refusal = controller.rescheduleRefusal(event)
     if (refusal !== "") { controller.lastError = refusal; return }
     if ((event.attendees || []).some(function(attendee) { return attendee.self !== true })) {
       controller.composeRequested({ editingEvent: event, startMs: startMs, endMs: endMs })
@@ -832,7 +831,7 @@ Item {
                       root.activateEvent(monthEvent.eventData)
                       return
                     }
-                    if (!root.controller || Calendar.writeRefusal(root.controller.findSource(monthEvent.eventData.sourceId), monthEvent.eventData, "reschedule") !== "") return
+                    if (!root.controller || root.controller.rescheduleRefusal(monthEvent.eventData) !== "") return
                     if (point.x < 0 || point.y < 0 || point.x >= monthGrid.width || point.y >= monthGrid.height) return
                     var rows = root.days.length / 7
                     var from = Math.floor(initial.y / (monthGrid.height / rows)) * 7 + Math.floor(initial.x / (monthGrid.width / 7))
@@ -934,7 +933,7 @@ Item {
                 root.activateEvent(spanBar.eventData)
                 return
               }
-              if (!root.controller || Calendar.writeRefusal(root.controller.findSource(spanBar.eventData.sourceId), spanBar.eventData, "reschedule") !== "") return
+              if (!root.controller || root.controller.rescheduleRefusal(spanBar.eventData) !== "") return
               if (point.x < 0 || point.y < 0 || point.x >= monthGrid.width || point.y >= monthGrid.height) return
               var from = Math.floor(initial.y / monthGrid.weekHeight) * 7 + Math.floor(initial.x / (monthGrid.width / 7))
               var to = Math.floor(point.y / monthGrid.weekHeight) * 7 + Math.floor(point.x / (monthGrid.width / 7))

@@ -9,6 +9,7 @@ Item {
   QtObject {
     id: contacts
     property var recipientContacts: []
+    property bool backendCanGoogleCalendars: true
     property int refreshCalls: 0
     function refreshRecipientContacts() { refreshCalls++ }
   }

@@ -411,9 +411,9 @@ Item {
                 readonly property color eventColor: calendarPalette.colorFor(
                   root.controller ? root.controller.colorKeyFor(eventData.sourceId) : "")
                 readonly property var eventData: modelData.event
-                readonly property bool canReschedule: Calendar.writeRefusal(
-                  root.controller && typeof root.controller.findSource === "function"
-                    ? root.controller.findSource(eventData.sourceId) : {kind: eventData.googleId ? "google" : ""}, eventData, "reschedule") === ""
+                readonly property bool canReschedule: !!root.controller
+                  && typeof root.controller.rescheduleRefusal === "function"
+                  && root.controller.rescheduleRefusal(eventData) === ""
                 x: Style.space(3) + modelData.column * (dayColumn.width - Style.space(6)) / modelData.columns
                 width: (dayColumn.width - Style.space(6)) / modelData.columns - Style.space(2)
                 y: Calendar.eventTop(eventData, dayColumn.modelData,

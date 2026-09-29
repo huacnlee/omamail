@@ -339,6 +339,10 @@ Item {
     var built = Calendar.createEvent(fields, Date.now())
     if (!built.ok) { eventCreated(false, built.error); return false }
     if (source.kind === "google") {
+      var refusedOptions = googleOptionsRefusal(fields)
+      if (refusedOptions !== "") { eventCreated(false, refusedOptions); return false }
+    }
+    if (source.kind === "google" && service.backendCanGoogleCalendars === true) {
       var options = Calendar.googleOptions(built.google, fields, source, null)
       if (!options.ok) { eventCreated(false, options.error); return false }
       built.google = options.body
@@ -368,6 +372,27 @@ Item {
     if (ok && rangeStart && rangeEnd) refresh(rangeStart, rangeEnd)
   }
 
+  // Guests, Meet and a changed repeat rule reach Google only through the API 6
+  // backend, which also carries sendUpdates and If-Match. An older backend
+  // would save the event without them and report success, so they are
+  // refused rather than dropped.
+  function googleOptionsRefusal(fields) {
+    if (service.backendCanGoogleCalendars === true) return ""
+    if (fields.createMeet === true || fields.changeRecurrence === true
+        || String(fields.guestEmails || "").trim() !== "")
+      return "Update the backend to add guests, Meet or repetition changes"
+    return ""
+  }
+
+  // Dragging writes without opening the editor, so it needs the revision
+  // check only the API 6 backend sends.
+  function rescheduleRefusal(event) {
+    var refusal = Calendar.writeRefusal(findSource(event && event.sourceId), event, "reschedule")
+    if (refusal === "" && service.backendCanGoogleCalendars !== true)
+      refusal = "Update the backend to move events by dragging"
+    return refusal
+  }
+
   function updateEvent(sourceId, event, fields) {
     if (creatingEvent || eventWriting) {
       eventUpdated(false, "Another event change is still in progress")
@@ -393,6 +418,10 @@ Item {
       built.destination = destination
     }
     if (source.kind === "google") {
+      var refusedChange = googleOptionsRefusal(fields)
+      if (refusedChange !== "") { eventUpdated(false, refusedChange); return false }
+    }
+    if (source.kind === "google" && service.backendCanGoogleCalendars === true) {
       var options = Calendar.googleOptions(built.google, fields, source, event)
       if (!options.ok) { eventUpdated(false, options.error); return false }
       built.google = options.body

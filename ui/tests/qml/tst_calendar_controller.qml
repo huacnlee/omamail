@@ -108,6 +108,27 @@ Item {
       controller.reminderMode = false
     }
 
+    function test_old_backend_refuses_google_options_instead_of_dropping_them() {
+      controller.accountId = "one@gmail.com"
+      controller.sourceList = {version:1,sources:[
+        {id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary",enabled:true,canCreateMeet:true}]}
+      var start = new Date(2026, 9, 1, 10).getTime()
+      var base = {title:"Planning",allDay:false,startMs:start,endMs:start + 3600000,location:"",description:"",
+        recurrence:{enabled:false}}
+      var asks = [{guestEmails:"guest@example.org"}, {createMeet:true}]
+      for (var i = 0; i < asks.length; i++) {
+        var fields = JSON.parse(JSON.stringify(base))
+        for (var key in asks[i]) fields[key] = asks[i][key]
+        compare(controller.createEvent("google:one@gmail.com", fields), false)
+      }
+      compare(mailService.requests.length, 0)
+      var event = {sourceId:"google:one@gmail.com",googleId:"meeting",eventType:"default",organizer:{self:true},
+        start:{ms:start},end:{ms:start + 3600000}}
+      verify(controller.rescheduleRefusal(event) !== "")
+      mailService.backendCanGoogleCalendars = true
+      compare(controller.rescheduleRefusal(event), "")
+    }
+
     function test_immediate_transfer_sends_only_move_and_uses_new_event_identity() {
       mailService.backendCanGoogleCalendars = true
       controller.accountId = "one@gmail.com"
