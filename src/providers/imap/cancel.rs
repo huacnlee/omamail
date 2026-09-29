@@ -140,7 +140,7 @@ mod tests {
                 0
             );
         });
-        let p = json!({"requestToken":"socket-close-test","settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true},"credential":"synthetic:secret"});
+        let p = json!({"requestToken":"socket-close-test","settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true,"testPlaintext":true},"credential":"synthetic:secret"});
         let q = p.clone();
         let request = tokio::spawn(async move { super::super::call("imap.folders", &q).await });
         reached.notified().await;

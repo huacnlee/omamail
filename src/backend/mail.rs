@@ -308,6 +308,8 @@ fn summaries(messages: &[Value]) -> Result<Vec<Value>, &'static str> {
         .collect()
 }
 
+const SEARCH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
+
 async fn imap_call(method: &str, params: &Value) -> Result<Value, &'static str> {
     let method = method.to_owned();
     let params = params.clone();
@@ -510,21 +512,31 @@ impl Session {
         {
             return Err("imap_list_incomplete");
         }
-        if let Some(continuation) = page["continuation"]
+        // Only an account-wide search continues more than once. Each step has its
+        // own deadline; this one bounds the whole scan so a list always answers.
+        let search = params["query"]
+            .as_str()
+            .is_some_and(|query| query.starts_with("search:"));
+        let deadline = tokio::time::Instant::now() + SEARCH_DEADLINE;
+        let mut steps = 0;
+        while let Some(continuation) = page["continuation"]
             .as_str()
             .filter(|token| !token.is_empty())
         {
+            steps += 1;
+            if steps > 1 && !search {
+                return Err("imap_list_incomplete");
+            }
             request["continuation"] = json!(continuation);
-            page = Box::pin(imap_call("imap.listContinue", &request)).await?;
+            page = tokio::time::timeout_at(
+                deadline,
+                Box::pin(imap_call("imap.listContinue", &request)),
+            )
+            .await
+            .map_err(|_| "request_timed_out")??;
             if page["warning"]
                 .as_str()
                 .is_some_and(|warning| !warning.is_empty())
-            {
-                return Err("imap_list_incomplete");
-            }
-            if page["continuation"]
-                .as_str()
-                .is_some_and(|token| !token.is_empty())
             {
                 return Err("imap_list_incomplete");
             }

@@ -164,7 +164,7 @@ void ResourcesTest::smokeTestLoadsQmlHandshakesAndWritesReadyFile()
     QVERIFY(ready.open(QIODevice::ReadOnly));
     const QJsonObject value = QJsonDocument::fromJson(ready.readAll()).object();
     QCOMPARE(value.value(QStringLiteral("version")).toString(), QStringLiteral(OMAMAIL_APP_VERSION));
-    QCOMPARE(value.value(QStringLiteral("apiVersion")).toInt(), 5);
+    QCOMPARE(value.value(QStringLiteral("apiVersion")).toInt(), 6);
 }
 
 void ResourcesTest::smokeRejectsMismatchedBackendApi()
@@ -344,7 +344,7 @@ int main(int argc, char *argv[])
                 result = {{QStringLiteral("name"), QStringLiteral("omamail")},
                           {QStringLiteral("version"), QStringLiteral(OMAMAIL_APP_VERSION)},
                           {QStringLiteral("protocol"), 1},
-                          {QStringLiteral("apiVersion"), fixture == QByteArrayLiteral("stale-api") ? 4 : 5}};
+                          {QStringLiteral("apiVersion"), fixture == QByteArrayLiteral("stale-api") ? 5 : 6}};
             } else {
                 result = {{QStringLiteral("quitReady"), true}};
             }

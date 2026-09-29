@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Exercise diagnostics with private synthetic state and a fake agent launcher."""
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import tempfile
@@ -52,6 +54,28 @@ class Diagnostics(unittest.TestCase):
             self.call('record', [self.event('process_unavailable'), self.event()] * 16)
         self.assertLessEqual(len(json.loads(log.read_text())), 100)
         self.assertLess(log.stat().st_size, 65536)
+
+    def test_backend_provider_identifiers_survive_redaction(self):
+        codes = ['gmail_http_failed', 'calendar_auth_refused', 'upload_capacity_exceeded',
+                 'invalid_upload_encoding']
+        self.call('record', [self.event(code) for code in codes])
+        data = (self.folder / 'errors.json').read_text()
+        for code in codes:
+            self.assertIn(code, data)
+        self.assertNotIn('unknown_error', data)
+
+    def test_every_provider_identifier_the_backend_returns_is_allowlisted(self):
+        spec = importlib.util.spec_from_file_location('diagnostics', SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        produced = re.compile(r'(?:Err\(|=> *|or\(|map_err\(\|_\| *)"((?:gmail|calendar|upload|auth)_[a-z_]+|invalid_upload_encoding)"')
+        codes = set()
+        for path in (ROOT / 'src').rglob('*.rs'):
+            if path.name == 'tests.rs' or path.stem.endswith(('_tests', '_test')):
+                continue
+            codes |= set(produced.findall(path.read_text()))
+        self.assertGreater(len(codes), 50)
+        self.assertEqual(sorted(codes - module.MESSAGES), [])
 
     def test_only_explicit_open_launches_agent_with_report_path(self):
         self.call('record', [self.event()])

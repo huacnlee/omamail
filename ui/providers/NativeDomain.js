@@ -84,6 +84,7 @@ var FACTS = {
     "inheritedDefault": "in:inbox",
     "nativeSync": true,
     "queries": {
+      "all": "search:ALL",
       "archive": "folder:\\Archive",
       "drafts": "folder:\\Drafts",
       "inbox": "folder:INBOX",

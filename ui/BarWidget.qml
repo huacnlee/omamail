@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui
 import "components"
 import "bar"
+import "bar/Bridge.js" as BarBridge
 
 // The bar's job is one number and one click. Everything the widget knows comes
 // from the shared service, which keeps running whether or not the window is
@@ -13,8 +14,58 @@ BarWidget {
 
   moduleName: "omamail"
 
-  readonly property var gmail: bar && bar.shell
+  readonly property var directService: bar && bar.shell
     ? bar.shell.serviceFor("omamail") : null
+  readonly property var gmail: directService
+    || (bridgeApi && bridgeState ? bridgedStatus : null)
+  property var bridgeApi: null
+  property var bridgeState: null
+  property string bridgeStateText: ""
+
+  function syncBridge() {
+    var api = BarBridge.current()
+    var state = api ? api.snapshot() : null
+    var serialized = JSON.stringify(state)
+    // Leave preview delegates in place when their contents have not changed.
+    if (serialized !== bridgeStateText) {
+      bridgeStateText = serialized
+      bridgeState = state
+    }
+    bridgeApi = api
+  }
+
+  // A replacement bar gets the same preview and actions without a reference
+  // to the service, its authentication managers, or its account models.
+  QtObject {
+    id: bridgedStatus
+    readonly property bool ready: !!root.bridgeState && root.bridgeState.ready
+    readonly property bool windowOpen: !!root.bridgeState && root.bridgeState.windowOpen
+    readonly property bool showBarIcon: !root.bridgeState || root.bridgeState.showBarIcon
+    readonly property int unreadTotal: root.bridgeState ? root.bridgeState.unreadTotal : 0
+    readonly property string barTooltip: root.bridgeState ? root.bridgeState.barTooltip : "Omamail"
+    readonly property string contentDirection: root.bridgeState ? root.bridgeState.contentDirection : ""
+    readonly property var barMessages: root.bridgeState ? root.bridgeState.barMessages : []
+    readonly property var barEvents: root.bridgeState ? root.bridgeState.barEvents : []
+    function applySettings(values) {
+      if (root.bridgeApi) root.bridgeApi.applySettings(values)
+    }
+    function refresh() {
+      if (root.bridgeApi) root.bridgeApi.refresh()
+    }
+    function refreshCalendarPreview() {
+      if (root.bridgeApi) root.bridgeApi.refreshCalendarPreview()
+    }
+  }
+
+  // JS library registration is not a QML property. A small poll discovers
+  // service startup/replacement and reads only three mail rows and two events.
+  Timer {
+    interval: 1000
+    running: !root.directService
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.syncBridge()
+  }
 
   // `barForeground` belongs to qs.Ui.Panel, not to BarWidget: reading it here
   // yields undefined, and assigning undefined to a colour leaves the icon
@@ -39,11 +90,15 @@ BarWidget {
 
   onSettingsChanged: pushSettings()
   onGmailChanged: pushSettings()
+  onBridgeApiChanged: if (!directService) pushSettings()
   onPreviewOpenChanged: {
     if (previewOpen && gmail && typeof gmail.refreshCalendarPreview === "function")
       root.gmail.refreshCalendarPreview()
   }
-  Component.onCompleted: pushSettings()
+  Component.onCompleted: {
+    syncBridge()
+    pushSettings()
+  }
 
   function openWindow() {
     close()

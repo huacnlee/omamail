@@ -1,12 +1,142 @@
 use super::*;
 use tokio::net::TcpListener;
+#[tokio::test]
+async fn proton_custom_port_requires_starttls_before_credentials() {
+    use std::io::{BufRead, BufReader as BlockingReader};
+    let mut peer = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/providers/imap/starttls_test.py"
+        ))
+        .args(["imap", "local", "starttls"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut output = BlockingReader::new(peer.stdout.take().unwrap());
+    let mut port = String::new();
+    output.read_line(&mut port).unwrap();
+    let settings = json!({"imapHost":"127.0.0.1", "imapPort":port.trim().parse::<u16>().unwrap(), "insecure":true});
+    let mut wire = connect(&settings, false).await.unwrap();
+    write(&mut wire, b"synthetic-credential\r\n").await.unwrap();
+    let mut report = String::new();
+    output.read_line(&mut report).unwrap();
+    let success = peer.wait().unwrap().success();
+    assert_eq!(report.trim(), "encrypted-credentials");
+    assert!(success);
+}
+#[tokio::test]
+async fn bridge_starttls_encrypts_credentials_and_never_downgrades() {
+    use std::io::{BufRead, BufReader as BlockingReader};
+    for smtp in [false, true] {
+        let bridge_port = if smtp { 1025 } else { 1143 };
+        let standard_port = if smtp { 587 } else { 143 };
+        let implicit_port = if smtp { 465 } else { 993 };
+        for (host, logical_port, insecure, implicit, mode) in [
+            ("127.0.0.1", bridge_port, true, false, "local"),
+            ("localhost", bridge_port, true, false, "local"),
+            ("::1", bridge_port, true, false, "local"),
+            ("127.0.0.1", 23456, true, false, "local"),
+            ("127.0.0.1", standard_port, true, false, "local"),
+            ("127.0.0.1", implicit_port, true, true, "local"),
+            ("127.0.0.1", bridge_port, false, false, "strict"),
+            ("localhost", 23456, false, false, "strict"),
+            ("127.0.0.1", implicit_port, false, true, "strict"),
+            ("remote.example", bridge_port, true, true, "strict"),
+            ("remote.example", 23456, true, true, "strict"),
+            ("remote.example", standard_port, true, false, "strict"),
+            ("127.0.0.1", bridge_port, true, false, "refuse"),
+            ("127.0.0.1", bridge_port, true, false, "malformed"),
+            ("127.0.0.1", bridge_port, true, false, "buffered"),
+        ] {
+            let mut peer = std::process::Command::new("python3")
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/providers/imap/starttls_test.py"
+                ))
+                .arg(if smtp { "smtp" } else { "imap" })
+                .arg(mode)
+                .arg(if implicit { "implicit" } else { "starttls" })
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut output = BlockingReader::new(peer.stdout.take().unwrap());
+            let mut port = String::new();
+            output.read_line(&mut port).unwrap();
+            let port = port.trim().parse::<u16>().unwrap();
+            let settings = json!({"imapHost":"127.0.0.1", "imapPort":1143,
+                "smtpHost":host, "smtpPort":logical_port, "insecure":insecure});
+            let mut settings = settings;
+            if !smtp {
+                settings["imapHost"] = json!(host);
+                settings["imapPort"] = json!(logical_port);
+            }
+            // Only the socket destination is substituted. All host/port/trust
+            // decisions go through the production connection selection path.
+            let result = connect_with_dial(&settings, smtp, |dial_host, dial_port| async move {
+                assert_eq!(
+                    dial_host,
+                    if host == "localhost" {
+                        "127.0.0.1"
+                    } else {
+                        host
+                    }
+                );
+                assert_eq!(dial_port, logical_port);
+                TcpStream::connect(("127.0.0.1", port))
+                    .await
+                    .map_err(|_| "mail_network_failed")
+            })
+            .await;
+            // Keep the TLS socket alive until the peer has read and reported
+            // the credentials. Closing it here can abort the peer's handshake
+            // on Windows while TLS 1.3 session tickets are still in flight.
+            let mut secure = None;
+            if mode == "local" {
+                let mut wire = result.unwrap();
+                write(&mut wire, b"synthetic-credential\r\n").await.unwrap();
+                secure = Some(wire);
+            } else {
+                assert!(result.is_err());
+            }
+            let mut report = String::new();
+            output.read_line(&mut report).unwrap();
+            assert_eq!(
+                report.trim(),
+                if mode == "local" {
+                    "encrypted-credentials"
+                } else {
+                    "no-credentials"
+                },
+                "smtp={smtp} host={host} port={logical_port} mode={mode}"
+            );
+            assert!(peer.wait().unwrap().success());
+            drop(secure);
+        }
+    }
+}
 pub(super) async fn server() -> (TcpListener, u16) {
     let s = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let p = s.local_addr().unwrap().port();
     (s, p)
 }
+#[tokio::test]
+async fn bridge_tls_refuses_buffered_plaintext_before_writing() {
+    let (client, mut peer) = tokio::io::duplex(256);
+    peer.write_all(b"plaintext after STARTTLS\r\n")
+        .await
+        .unwrap();
+    let mut w: Wire = BufReader::new(Box::new(client));
+    assert!(!w.fill_buf().await.unwrap().is_empty());
+    assert!(matches!(
+        bridge_tls::upgrade(w, "127.0.0.1").await,
+        Err("mail_tls_failed")
+    ));
+    let mut received = Vec::new();
+    peer.read_to_end(&mut received).await.unwrap();
+    assert!(received.is_empty());
+}
 pub(super) fn params(port: u16) -> Value {
-    json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true},"credential":"synthetic:password","folder":"INBOX","commands":["UID FETCH 1 (UID BODY.PEEK[])"]})
+    json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true,"testPlaintext":true},"credential":"synthetic:password","folder":"INBOX","commands":["UID FETCH 1 (UID BODY.PEEK[])"]})
 }
 #[tokio::test]
 async fn literal_bytes_cannot_forge_tagged_completion() {
@@ -192,8 +322,16 @@ async fn non_bridge_connection_sends_no_plaintext_credentials() {
         socket.write_all(b"* OK not TLS\r\n").await.unwrap();
     });
     let mut p = params(port);
-    p["settings"]["insecure"] = json!(false);
-    assert_eq!(call("imap.request", &p).await, Err("mail_tls_failed"));
+    p["settings"]["imapHost"] = json!("remote.example");
+    let result = connect_with_dial(&p["settings"], false, |host, selected_port| async move {
+        assert_eq!(host, "remote.example");
+        assert_eq!(selected_port, port);
+        TcpStream::connect(("127.0.0.1", port))
+            .await
+            .map_err(|_| "mail_network_failed")
+    })
+    .await;
+    assert!(matches!(result, Err("mail_tls_failed")));
     server.await.unwrap();
 }
 #[tokio::test]

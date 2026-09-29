@@ -6,7 +6,7 @@ fn row(id: &str, subject: &str, at: i64, labels: Value) -> Value {
 fn conservative_search_terms_and_provider_scope() {
     let mut store = store::empty();
     store["queries"] = json!({"folder:INBOX|25":{"at":2,"summaries":[row("in","needle",10,json!([]))]},"folder:Sent|25":{"at":1,"summaries":[row("sent","needle",20,json!([]))]}});
-    assert_eq!(search(&store, "needle", "imap").len(), 1);
+    assert_eq!(search(&store, "needle", "imap").len(), 2);
     assert_eq!(search(&store, "needle", "hey").len(), 2);
     assert!(search(&store, "from:sender", "gmail").is_empty());
     store["queries"]["folder:INBOX|25"]["summaries"][0]["labelIds"] = json!(["TRASH"]);
@@ -80,7 +80,14 @@ fn ttl_clock_reversal_and_quoted_imap_scope() {
     assert!(!stale(100.0, 90.0, 10.0));
     assert!(!stale(100.0, 110.0, 10.0));
     assert!(stale(100.0, 111.0, 10.0));
-    assert!(!eligible("imap", "folder:\"INBOX Sent\"", &json!({})));
+    assert!(eligible("imap", "folder:\"INBOX Sent\"", &json!({})));
+    assert!(!eligible("imap", "folder:\"Junk Email\"", &json!({})));
+    assert!(!eligible(
+        "imap",
+        "search:TEXT needle",
+        &json!({"labelIds":["TRASH"]})
+    ));
+    assert!(!eligible("imap", "folder:Custom", &json!({"inSpam":true})));
     assert!(eligible("outlook", "folder:\"INBOX\" UNSEEN", &json!({})));
     assert!(!eligible("jmap", "role:junk", &json!({})));
     assert!(eligible("hey", "role:junk", &json!({})));

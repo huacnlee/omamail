@@ -288,6 +288,8 @@ def main():
                    CONTRACT_STANDALONE='1' if args.standalone else '')
         runtime_root.mkdir(parents=True, mode=0o700)
         registry.parent.mkdir(parents=True)
+        if os.name != 'nt':
+            registry.parent.chmod(0o700)
         # Every provider the contract cases name is registered in both views:
         # a released case is the same fixture it was while unreleased.
         accounts = [
@@ -302,6 +304,8 @@ def main():
         for root in (cache_root, state_root, data_root):
             sentinel = root / 'omamail/sentinel'
             sentinel.parent.mkdir(parents=True, exist_ok=True)
+            if os.name != 'nt':
+                sentinel.parent.chmod(0o700)
             sentinel.write_bytes(b'preserve existing user state\n')
         helpers = home / 'bin'
         helpers.mkdir()

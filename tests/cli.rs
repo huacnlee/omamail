@@ -12,6 +12,10 @@ use std::{
 static EMPTY_HOME: AtomicU64 = AtomicU64::new(0);
 static MAIL_LIST_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(feature = "integration-test-credentials")]
+#[path = "cli/search.rs"]
+mod search;
+
 fn omamail(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(args)
@@ -146,7 +150,7 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
             "activeId":"gmail@example.org",
             "accounts":[
                 {"provider":"gmail","email":"gmail@example.org"},
-                {"provider":"imap","email":"imap@example.org","imap":{"username":"imap@example.org","imapHost":"127.0.0.1","imapPort":imap_port,"insecure":true}},
+                {"provider":"imap","email":"imap@example.org","imap":{"username":"imap@example.org","imapHost":"127.0.0.1","imapPort":imap_port,"insecure":true,"testPlaintext":true}},
                 {"provider":"jmap","email":"jmap@example.org","jmap":{"sessionUrl":"https://localhost:9/session","username":"jmap@example.org"}},
                 {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}}
             ]
@@ -597,6 +601,8 @@ async fn imap_adapter_lists_first_page_without_request_token() {
                 b"O1 OK selected\r\n".as_slice()
             } else if line == b"O1 UID FETCH 1:* (UID)\r\n" {
                 b"* 1 FETCH (UID 7)\r\nO1 OK snapshot\r\n".as_slice()
+            } else if line == b"O1 UID FETCH 7 (UID INTERNALDATE)\r\n" {
+                b"* 1 FETCH (UID 7 INTERNALDATE \"11-Sep-2026 12:00:00 +0000\")\r\nO1 OK snapshot\r\n".as_slice()
             } else if line.starts_with(b"O1 UID FETCH 7 (UID FLAGS ") {
                 b"* 7 FETCH (UID 7 FLAGS () INTERNALDATE \"11-Sep-2026 12:00:00 +0000\" RFC822.SIZE 54 BODY[HEADER.FIELDS (FROM SUBJECT)] {54}\r\nFrom: Test <test@example.org>\r\nSubject: First page\r\n\r\n)\r\nO1 OK fetched\r\n".as_slice()
             } else {
@@ -1667,6 +1673,8 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
                     "O1 OK selected\r\n".into()
                 } else if line == "O1 UID FETCH 1:* (UID)\r\n" {
                     "* 1 FETCH (UID 7)\r\nO1 OK snapshot\r\n".into()
+                } else if line == "O1 UID FETCH 7 (UID INTERNALDATE)\r\n" {
+                    "* 1 FETCH (UID 7 INTERNALDATE \"11-Sep-2026 12:00:00 +0000\")\r\nO1 OK snapshot\r\n".into()
                 } else if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
                     assert!(line.contains("BODY.PEEK["));
                     assert_eq!(line.contains("BODY.PEEK[]"), read);

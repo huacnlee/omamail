@@ -30,14 +30,14 @@ var MAILBOXES = [
     "icon": "star"
   },
   {
-    "key": "sent",
-    "label": "Sent",
-    "icon": "sent"
-  },
-  {
     "key": "drafts",
     "label": "Drafts",
     "icon": "compose"
+  },
+  {
+    "key": "sent",
+    "label": "Sent",
+    "icon": "sent"
   },
   {
     "key": "archive",

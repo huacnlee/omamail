@@ -35,6 +35,7 @@ Item {
       account.accountId = "account-one"
       backend.requests = []
       account.bodyMode = "original"
+      account.alwaysShowImages = false
       account.remoteImagesAllowed = false
       account.remoteImageData = ({})
     }
@@ -195,6 +196,48 @@ Item {
       backend.complete(1, "current image policy", null)
       backend.complete(0, "obsolete image policy", null)
       compare(account.selectedDocument.children[0].text, "current image policy")
+    }
+
+    function test_always_show_images_transition_rerenders_active_message() {
+      account.selectedId = "message-one"
+      account.renderSource("native-key")
+      compare(account.remoteImagesAllowed, false)
+      compare(backend.requests.length, 1)
+      compare(backend.requests[0].params.options.allowRemoteImages, false)
+      account.alwaysShowImages = true
+      compare(account.remoteImagesAllowed, true)
+      compare(backend.requests.length, 2)
+      compare(backend.requests[1].params.options.allowRemoteImages, true)
+      compare(backend.requests[1].params.readerKey, "native-key")
+    }
+
+    function test_disabling_images_reblocks_current_document() {
+      account.selectedId = "message-one"
+      account.renderSource("native-key")
+      account.alwaysShowImages = true
+      backend.complete(1, "image permitted", null)
+      account.alwaysShowImages = false
+      compare(account.remoteImagesAllowed, false)
+      compare(account.selectedDocument, null, "approved images must disappear before the replacement render returns")
+      compare(backend.requests.length, 3, "turning the preference off must rerender the visible message")
+      compare(backend.requests[2].params.options.allowRemoteImages, false)
+      backend.complete(2, "image blocked", null)
+      compare(account.selectedDocument.children[0].text, "image blocked")
+    }
+
+    function test_disabling_images_stops_queued_requests() {
+      account.selectedId = "message-one"
+      account.alwaysShowImages = true
+      account.readerSourceKey = "native-key"
+      account.selectedRemoteImageSources = ["https://example.org/one", "https://example.org/two"]
+      account.prepareRemoteImages()
+      compare(backend.requests.length, 1)
+      account.alwaysShowImages = false
+      compare(backend.requests.length, 2)
+      compare(backend.requests[1].method, "reader.render")
+      backend.requests[0].callback({data: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="}, null)
+      compare(backend.requests.length, 2, "disabling must not dispatch the next sender URL")
+      compare(Object.keys(account.remoteImageData).length, 0, "late image bytes must be discarded")
     }
 
   }

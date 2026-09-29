@@ -1,5 +1,5 @@
 {
-  "apiVersion": 5,
+  "apiVersion": 6,
   "releasedApiVersion": 5,
   "protocolVersion": 1,
   "methods": [
@@ -183,6 +183,54 @@
     "jmap.stream.close"
   ],
   "contractCases": [
+    {
+      "name": "IMAP account search refuses an expired work continuation",
+      "method": "imap.list",
+      "params": {
+        "query": "search:ALL",
+        "continuation": "expired-snapshot",
+        "settings": {"username": "synthetic", "imapHost": "imap.example.invalid", "imapPort": 993},
+        "credential": "synthetic:secret"
+      },
+      "errorCode": -32000,
+      "equals": {"message": "imap_search_expired"}
+    },
+    {
+      "name": "IMAP account search refuses a malformed page cursor",
+      "method": "imap.list",
+      "params": {
+        "query": "search:ALL",
+        "pageToken": "not-a-page-cursor",
+        "settings": {"username": "synthetic", "imapHost": "imap.example.invalid", "imapPort": 993},
+        "credential": "synthetic:secret"
+      },
+      "errorCode": -32602,
+      "equals": {"message": "Invalid params"}
+    },
+    {
+      "name": "IMAP text search includes archived mail",
+      "method": "providers.resolve",
+      "params": {"provider": "imap", "operation": "query", "search": "subject:invoice"},
+      "equals": {"value": "search:SUBJECT \"invoice\""}
+    },
+    {
+      "name": "Outlook text search includes archived mail",
+      "method": "providers.resolve",
+      "params": {"provider": "outlook", "operation": "query", "search": "invoice"},
+      "equals": {"value": "search:TEXT \"invoice\""}
+    },
+    {
+      "name": "IMAP address search includes archived mail",
+      "method": "providers.resolve",
+      "params": {"provider": "imap", "operation": "addressQuery", "field": "from", "value": "ada@example.org"},
+      "equals": {"value": "search:FROM \"ada@example.org\""}
+    },
+    {
+      "name": "IMAP All mail resolves to account-wide listing",
+      "method": "providers.resolve",
+      "params": {"provider": "imap", "operation": "query", "mailbox": "all"},
+      "equals": {"value": "search:ALL"}
+    },
     {
       "name": "iCloud request refuses an external credential origin",
       "method": "calendar.request",
@@ -763,6 +811,6 @@
   ],
   "unreleased": {
     "methods": [],
-    "cases": []
+    "cases": ["IMAP All mail resolves to account-wide listing", "IMAP text search includes archived mail", "Outlook text search includes archived mail", "IMAP address search includes archived mail", "IMAP account search refuses an expired work continuation", "IMAP account search refuses a malformed page cursor"]
   }
 }

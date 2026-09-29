@@ -139,7 +139,7 @@ var PRESETS = [
     name: "Proton Mail",
     domains: ["proton.me", "protonmail.com", "pm.me"],
     // Proton speaks IMAP only through the Bridge, which listens on loopback
-    // in clear text because it is a process on this machine.
+    // with STARTTLS and a self-signed certificate on this machine.
     imapHost: "127.0.0.1", imapPort: 1143,
     smtpHost: "127.0.0.1", smtpPort: 1025,
     insecure: true,
