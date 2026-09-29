@@ -8,7 +8,9 @@ job directory, whose production allowlist permits only its three JSON records.
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
+import threading
 import time
 import unittest
 
@@ -54,11 +56,27 @@ class NativeBridge(legacy.Bridge):
         return answer['result'] if answer.get('ok') else answer.get('error', {}).get('code', '')
 
     def cleanup(self):
+        active = []
         for ident in self.ids:
-            subprocess.run([str(BINARY),'--json','call','agent.jobCancel'],
-                           input=json.dumps({'id':ident}), text=True, env=self.env,
-                           capture_output=True, timeout=8)
-        time.sleep(.3)
+            result = subprocess.run([str(BINARY),'--json','call','agent.jobCancel'],
+                                    input=json.dumps({'id':ident}), text=True, env=self.env,
+                                    capture_output=True, timeout=8)
+            # Some tests intentionally remove jobs or invalidate their storage.
+            if result.returncode == 0:
+                job = json.loads(result.stdout)['result']
+                if job['state'] in ('queued', 'running'):
+                    active.append(ident)
+        # Cancellation only signals the detached worker. It must finish its
+        # final display/job writes before TemporaryDirectory removes storage.
+        deadline = time.monotonic() + 8
+        while active:
+            active = [ident for ident in active
+                      if self.call('show', ident)['job']['state'] in ('queued', 'running')]
+            if not active:
+                break
+            if time.monotonic() >= deadline:
+                self.fail('Cancelled workers did not settle before cleanup: ' + ', '.join(active))
+            time.sleep(.04)
         self.assertFalse((self.root/'TERMINAL').exists())
 
     def test_background_stdin_result_and_resume(self):
@@ -113,6 +131,26 @@ class NativeBridge(legacy.Bridge):
         self.call('cancel',ident)
         self.assertEqual(self.wait(ident)['job']['state'],'cancelled')
         self.assertFalse(Path('/proc/%d'%pid).exists())
+
+    def test_cleanup_waits_for_delayed_worker_shutdown(self):
+        self.agent('time.sleep(30)')
+        ident = self.new()
+        job = self.wait(ident, ('running',))['job']
+        pid = job['pid']
+        # Freeze the worker so cancellation cannot finish within the former
+        # 300ms cleanup sleep. Resume it independently of the cleanup call.
+        os.kill(pid, signal.SIGSTOP)
+        resume = threading.Timer(1, lambda: os.kill(pid, signal.SIGCONT))
+        resume.start()
+        try:
+            self.cleanup()
+            saved = json.loads((self.store/ident/'job.json').read_text())
+            self.assertEqual(saved['state'], 'cancelled')
+            self.assertNotIn('pid', saved)
+        finally:
+            resume.join()
+            self.call('cancel', ident)
+            self.wait(ident)
 
     def test_deadline_and_stale_worker(self):
         # Actual short-deadline/native pipe cleanup is exercised by worker.rs's
