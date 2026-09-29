@@ -108,6 +108,19 @@ Item {
       controller.reminderMode = false
     }
 
+    function test_undo_does_not_follow_the_view_to_another_account() {
+      mailService.backendCanGoogleCalendars = true
+      controller.accountId = "one@gmail.com"
+      var change = {source:{id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary"},
+        eventId:"meeting",ifMatch:"etag",body:"{}",sendUpdates:"none",scope:controller.calendarScope}
+      controller.undoChange = change
+      controller.accountId = "two@gmail.com"
+      mailService.requests = []
+      controller.undoLastChange()
+      compare(mailService.requests.length, 0)
+      compare(controller.undoChange, null)
+    }
+
     function test_old_backend_refuses_google_options_instead_of_dropping_them() {
       controller.accountId = "one@gmail.com"
       controller.sourceList = {version:1,sources:[

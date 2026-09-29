@@ -568,6 +568,9 @@ Item {
 
   function startNativeWrite() {
     var fields = {}
+    // Undo belongs to the calendar the change was made in: a write that lands
+    // after the view moved to another account offers nothing to undo there.
+    var scope = calendarScope
     if (writeSource.kind === "caldav" || writeSource.kind === "icloud") {
       fields.href = String(writeEvent.href || Calendar.caldavEventUrl(writeSource.url, writeEvent))
       if (!fields.href) { finishWrite(false, "The event's address is outside this calendar's server"); return }
@@ -609,8 +612,9 @@ Item {
             inverse.start.timeZone = previous.timeZone
             inverse.end.timeZone = previous.timeZone
           }
-          if (completeUndo) root.undoChange = { source: root.writeSource, eventId: fields.eventId, ifMatch: saved.etag,
-            body: JSON.stringify(inverse), sendUpdates: "none" }
+          if (completeUndo && scope === root.calendarScope)
+            root.undoChange = { source: root.writeSource, eventId: fields.eventId, ifMatch: saved.etag,
+              body: JSON.stringify(inverse), sendUpdates: "none", scope: scope }
         }
       }
       if (error || !root.writeDraft || !root.writeDraft.destination) { root.finishWrite(!error, error); return }
@@ -625,6 +629,7 @@ Item {
 
   function undoLastChange() {
     if (!undoChange || creatingEvent || eventWriting) return
+    if (undoChange.scope !== calendarScope) { undoChange = null; return }
     if (service.backendCanGoogleCalendars !== true) { lastError = "Update the backend to undo calendar changes"; return }
     var change = undoChange
     undoChange = null
