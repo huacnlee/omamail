@@ -16,7 +16,6 @@ Column {
   property bool adding: false
   property string passwordEditingId: ""
   property string colorEditingId: ""
-  property string reminderEditingId: ""
   property string setupAccountId: ""
   property string setupError: ""
   property bool setupComplete: false
@@ -81,6 +80,39 @@ Column {
     return (value.kind === "caldav" && value.discovered !== true) || root.orphaned(value)
   }
 
+  // Calendars listed under their mailbox's row: the provider and the address
+  // are on that row already, so only what sets this calendar apart is left.
+  function nestedDetail(source) {
+    var value = source || {}
+    var parts = []
+    if (value.preferred === true) parts.push("Default for new events")
+    if (value.readOnly === true) parts.push("Read-only")
+    return parts.join(" · ")
+  }
+
+  function accountCalendars(accountId) {
+    return root.settingsSources.filter(function(source) {
+      return String(source.accountId || "") === String(accountId || "") && !root.orphaned(source)
+    })
+  }
+
+  // Hand-added CalDAV calendars and ones whose mailbox is gone or cannot be
+  // discovered here: nothing above lists them, so they are listed on their own.
+  readonly property var otherSources: settingsSources.filter(function(source) {
+    var account = String(source.accountId || "")
+    return account === "" || root.orphaned(source)
+      || !root.discoverableAccounts().some(function(value) { return String(value.id) === account })
+  })
+
+  readonly property var reminderSources: settingsSources.filter(function(source) {
+    return Sources.nativeCalendarFeatures(source) && !root.orphaned(source)
+  })
+
+  function reminderMode(source) {
+    return source.remindersEnabled !== true ? "off"
+      : Number(source.reminderMinutes) >= 0 ? "custom" : "google"
+  }
+
   function sourceDetail(source) {
     var value = source || {}
     if (value.kind === "caldav") return String(value.url || "CalDAV")
@@ -102,32 +134,302 @@ Column {
   }
 
   width: parent ? parent.width : implicitWidth
-  spacing: Style.space(8)
+  spacing: Style.space(16)
 
-  Text {
-    text: "CALENDARS"
+  // One settings row, the shape every other row on this page has: a title and
+  // a caption on the left, the control that changes it on the right.
+  component SettingRow: Rectangle {
+    id: settingRow
+    property string title: ""
+    property string detail: ""
+    property real indent: 0
+    default property alias controls: rowControls.data
+    width: parent ? parent.width : 0
+    implicitHeight: Math.max(settingText.implicitHeight, rowControls.implicitHeight) + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+    Column {
+      id: settingText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12) + settingRow.indent
+      anchors.right: rowControls.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+      Text {
+        width: parent.width
+        text: settingRow.title
+        textFormat: Text.PlainText
+        elide: Text.ElideMiddle
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+      Text {
+        width: parent.width
+        visible: text !== ""
+        text: settingRow.detail
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+    }
+    Row {
+      id: rowControls
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(6)
+    }
+  }
+
+  component SectionHeading: Text {
     color: root.dimColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.caption
     font.letterSpacing: 1
   }
 
-  Text {
-    width: parent.width
-    text: "Connect an account, choose your calendars, then set where new events and reminders belong."
-    color: root.dimColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.caption
-    wrapMode: Text.WordWrap
-    textFormat: Text.PlainText
+  // A calendar: its colour, its name and whether it is shown. The colour and
+  // password editors open beneath the row they belong to.
+  component CalendarRow: Column {
+    id: calendarRow
+    property var source: ({})
+    property string detail: ""
+    property real indent: 0
+    width: parent ? parent.width : 0
+    spacing: Style.space(2)
+
+    Rectangle {
+      width: parent.width
+      implicitHeight: Math.max(calendarText.implicitHeight, calendarActions.implicitHeight) + Style.space(12)
+      radius: Style.cornerRadius
+      color: Style.normalFillFor(root.textColor, root.accentColor)
+
+      Button {
+        id: colorButton
+        objectName: "calendar-source-color"
+        focusable: true
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(6) + calendarRow.indent
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(24)
+        height: width
+        horizontalPadding: 0
+        verticalPadding: 0
+        selected: root.colorEditingId === String(calendarRow.source.id)
+        foreground: root.textColor
+        accent: root.accentColor
+        tooltipText: "Change calendar color"
+        Accessible.name: "Change color for " + String(calendarRow.source.name || calendarRow.source.id)
+        enabled: !!root.controller && !root.controller.savingSource
+          && !root.controller.discoveringCalendars
+        onClicked: {
+          root.passwordEditingId = ""
+          root.colorEditingId = root.colorEditingId === String(calendarRow.source.id)
+            ? "" : String(calendarRow.source.id)
+        }
+        Rectangle {
+          objectName: "calendar-source-color-swatch"
+          anchors.centerIn: parent
+          width: Style.space(10)
+          height: width
+          radius: width / 2
+          color: calendarPalette.colorFor(calendarRow.source.colorKey)
+        }
+      }
+
+      Column {
+        id: calendarText
+        anchors.left: colorButton.right
+        anchors.leftMargin: Style.space(6)
+        anchors.right: calendarActions.left
+        anchors.rightMargin: Style.space(10)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(2)
+        Text {
+          width: parent.width
+          text: String(calendarRow.source.name || calendarRow.source.id || "Calendar")
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        Text {
+          objectName: "calendar-source-detail"
+          width: parent.width
+          visible: text !== ""
+          text: calendarRow.detail
+          textFormat: Text.PlainText
+          elide: Text.ElideMiddle
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
+
+      Row {
+        id: calendarActions
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(10)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(6)
+        IconTextButton {
+          anchors.verticalCenter: parent.verticalCenter
+          visible: calendarRow.source.kind === "caldav" && calendarRow.source.discovered !== true
+          text: "Set password"
+          bordered: false
+          foreground: root.textColor
+          fontFamily: root.panelFontFamily
+          enabled: !!root.controller && !root.controller.savingSource
+            && !root.controller.discoveringCalendars
+          onClicked: {
+            root.colorEditingId = ""
+            root.passwordEditingId = String(calendarRow.source.id)
+          }
+        }
+        IconTextButton {
+          objectName: "calendar-source-remove"
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.removable(calendarRow.source)
+          text: "Remove"
+          bordered: false
+          foreground: root.urgentColor
+          fontFamily: root.panelFontFamily
+          enabled: !!root.controller && !root.controller.savingSource
+            && !root.controller.discoveringCalendars
+          onClicked: root.controller.removeCalendar(calendarRow.source.id)
+        }
+        ToggleSwitch {
+          objectName: "calendar-source-toggle"
+          anchors.verticalCenter: parent.verticalCenter
+          checked: calendarRow.source.enabled !== false
+          interactive: !!root.controller && !root.controller.savingSource
+            && !root.controller.discoveringCalendars
+          foreground: root.textColor
+          accent: root.accentColor
+          onToggled: if (root.controller)
+            root.controller.setSourceEnabled(calendarRow.source.id, calendarRow.source.enabled === false)
+        }
+      }
+    }
+
+    Row {
+      id: colorRow
+      objectName: "calendar-color-picker"
+      x: Style.space(12) + calendarRow.indent
+      visible: root.colorEditingId === String(calendarRow.source.id)
+      height: visible ? implicitHeight : 0
+      spacing: Style.space(6)
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Color"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        textFormat: Text.PlainText
+      }
+      Repeater {
+        model: calendarPalette.slots
+        Button {
+          id: paletteOption
+          required property string modelData
+          objectName: "calendar-color-" + modelData
+          focusable: true
+          width: Style.space(24)
+          height: width
+          horizontalPadding: 0
+          verticalPadding: 0
+          selected: String(modelData) === String(calendarRow.source.colorKey || "")
+          foreground: root.textColor
+          accent: root.accentColor
+          tooltipText: "Use " + modelData
+          Accessible.name: "Use " + modelData + " for "
+            + String(calendarRow.source.name || calendarRow.source.id)
+          enabled: !!root.controller && !root.controller.savingSource
+            && !root.controller.discoveringCalendars
+          onClicked: {
+            root.controller.setSourceColor(calendarRow.source.id, modelData)
+            root.colorEditingId = ""
+          }
+          Rectangle {
+            anchors.centerIn: parent
+            width: Style.space(14)
+            height: width
+            radius: width / 2
+            color: "transparent"
+            border.width: parent.selected ? Math.max(1, Style.normalBorderWidth) : 0
+            border.color: root.textColor
+            Rectangle {
+              objectName: "calendar-color-swatch-" + paletteOption.modelData
+              anchors.centerIn: parent
+              width: Style.space(8)
+              height: width
+              radius: width / 2
+              color: calendarPalette.colorFor(paletteOption.modelData)
+            }
+          }
+        }
+      }
+    }
+
+    Row {
+      id: passwordRow
+      x: Style.space(12) + calendarRow.indent
+      width: parent.width - x
+      visible: calendarRow.source.kind === "caldav" && calendarRow.source.discovered !== true
+        && root.passwordEditingId === String(calendarRow.source.id)
+      height: visible ? implicitHeight : 0
+      spacing: Style.space(6)
+      TextField {
+        id: existingPassword
+        width: Math.max(80, parent.width - saveExisting.implicitWidth
+          - cancelExisting.implicitWidth - parent.spacing * 2)
+        password: true
+        foreground: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        placeholderText: "Password or app password"
+        onAccepted: saveExisting.clicked()
+      }
+      IconTextButton {
+        id: saveExisting
+        text: "Save"
+        foreground: root.textColor
+        fontFamily: root.panelFontFamily
+        enabled: !!root.controller && existingPassword.text !== ""
+          && !root.controller.savingSource && !root.controller.discoveringCalendars
+        onClicked: root.controller.updateCalendarPassword(calendarRow.source, existingPassword.text)
+      }
+      IconTextButton {
+        id: cancelExisting
+        text: "Cancel"
+        bordered: false
+        foreground: root.dimColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.passwordEditingId = ""
+      }
+    }
   }
 
-  Text {
-    text: "Accounts"
-    color: root.textColor
-    font.family: root.panelFontFamily
-    font.pixelSize: Style.font.body
-    topPadding: Style.space(12)
+  // --------------------------------------------------------------- calendars
+
+  Column {
+    width: parent.width
+    spacing: Style.space(4)
+    SectionHeading { text: "CALENDARS" }
+    Text {
+      width: parent.width
+      text: "Choose which calendars appear and their colors. New events and reminders are set below."
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+    }
   }
 
   Text {
@@ -154,88 +456,61 @@ Column {
   Repeater {
     model: root.discoverableAccounts()
 
-    Rectangle {
-      id: discoveryRow
+    Column {
+      id: accountBlock
       required property var modelData
-
+      readonly property var calendars: root.accountCalendars(modelData.id)
       width: root.width
-      implicitHeight: Math.max(discoveryText.implicitHeight, discoveryButton.implicitHeight)
-        + Style.space(16)
-      radius: Style.cornerRadius
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      spacing: Style.space(2)
 
-      Column {
-        id: discoveryText
-        anchors.left: parent.left
-        anchors.leftMargin: Style.space(12)
-        anchors.right: discoveryButton.left
-        anchors.rightMargin: Style.space(10)
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: Style.space(2)
-
-        Text {
-          width: parent.width
-          text: root.providerName(discoveryRow.modelData) + " calendars"
-          color: root.textColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-        Text {
-          width: parent.width
-          text: String(discoveryRow.modelData.email || discoveryRow.modelData.label || "")
-          color: root.dimColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideMiddle
-          textFormat: Text.PlainText
-        }
-        Text {
-          width: parent.width
-          text: discoveryRow.modelData.signedIn !== true ? "Sign in to connect calendars"
-            : root.controller && root.controller.discoveredCount(discoveryRow.modelData.id) > 0
-              ? "Calendars connected · refresh to change your selection"
-              : "Use this mailbox's existing sign-in to connect calendars"
-          color: root.dimColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          wrapMode: Text.WordWrap
-          textFormat: Text.PlainText
+      SettingRow {
+        title: String(accountBlock.modelData.email || accountBlock.modelData.label || "")
+        detail: root.providerName(accountBlock.modelData) + " · "
+          + (accountBlock.modelData.signedIn !== true ? "Sign in to connect calendars"
+            : accountBlock.calendars.length > 0
+              ? accountBlock.calendars.length + (accountBlock.calendars.length === 1 ? " calendar" : " calendars")
+              : "Uses this mailbox's sign-in")
+        Button {
+          id: discoveryButton
+          objectName: "calendar-discover-" + String(accountBlock.modelData.calendarProvider || "account")
+          focusable: true
+          bordered: true
+          foreground: root.textColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.caption
+          enabled: !!root.controller && !root.controller.discoveringCalendars
+            && !root.controller.savingSource
+          text: accountBlock.modelData.signedIn !== true ? "Sign in..."
+            : root.controller && root.controller.discoveringCalendars
+            && root.controller.discoveringAccountId === String(accountBlock.modelData.id || "")
+            ? "Finding..."
+            : (root.controller && root.controller.discoveredCount(accountBlock.modelData.id) > 0
+               ? "Refresh calendars" : accountBlock.modelData.calendarProvider === "google" ? "Enable Google Calendar" : "Find calendars")
+            + (accountBlock.modelData.calendarProvider === "google" ? "..." : "")
+          onClicked: {
+            resultText.text = ""
+            root.colorEditingId = ""
+            root.passwordEditingId = ""
+            root.setupAccountId = String(accountBlock.modelData.id || "")
+            root.setupError = ""
+            root.setupComplete = false
+            if (accountBlock.modelData.signedIn !== true) {
+              root.accountSetupRequested(root.accountIndex(root.setupAccountId))
+              return
+            }
+            if (root.controller)
+              root.controller.discoverAccountCalendars(accountBlock.modelData.id)
+          }
         }
       }
 
-      Button {
-        id: discoveryButton
-        objectName: "calendar-discover-" + String(discoveryRow.modelData.calendarProvider || "account")
-        focusable: true
-        anchors.right: parent.right
-        anchors.rightMargin: Style.space(10)
-        anchors.verticalCenter: parent.verticalCenter
-        bordered: true
-        foreground: root.textColor
-        fontFamily: root.panelFontFamily
-        fontSize: Style.font.caption
-        enabled: !!root.controller && !root.controller.discoveringCalendars
-          && !root.controller.savingSource
-        text: discoveryRow.modelData.signedIn !== true ? "Sign in..."
-          : root.controller && root.controller.discoveringCalendars
-          && root.controller.discoveringAccountId === String(discoveryRow.modelData.id || "")
-          ? "Finding..."
-          : (root.controller && root.controller.discoveredCount(discoveryRow.modelData.id) > 0
-             ? "Refresh calendars" : discoveryRow.modelData.calendarProvider === "google" ? "Enable Google Calendar" : "Find calendars")
-          + (discoveryRow.modelData.calendarProvider === "google" ? "..." : "")
-        onClicked: {
-          resultText.text = ""
-          root.colorEditingId = ""
-          root.passwordEditingId = ""
-          root.setupAccountId = String(discoveryRow.modelData.id || "")
-          root.setupError = ""
-          root.setupComplete = false
-          if (discoveryRow.modelData.signedIn !== true) {
-            root.accountSetupRequested(root.accountIndex(root.setupAccountId))
-            return
-          }
-          if (root.controller)
-            root.controller.discoverAccountCalendars(discoveryRow.modelData.id)
+      Repeater {
+        model: accountBlock.calendars
+        CalendarRow {
+          required property var modelData
+          source: modelData
+          detail: root.nestedDetail(modelData)
+          indent: Style.space(12)
         }
       }
     }
@@ -304,6 +579,7 @@ Column {
       text: "Choose calendars to show"
       color: root.textColor
       font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
       textFormat: Text.PlainText
     }
     Text {
@@ -319,16 +595,17 @@ Column {
       model: root.controller && root.controller.discoveryChoices ? root.controller.discoveryChoices.sources.filter(function(source) {
         return source.accountId === root.controller.discoveryChoiceAccount && source.kind === "google"
       }) : []
-      delegate: Button {
+      delegate: SettingRow {
         required property var modelData
-        text: (modelData.enabled ? "✓ " : "○ ") + String(modelData.name || modelData.id)
-        foreground: root.textColor
-        accent: root.accentColor
-        selected: modelData.enabled
-        fontFamily: root.panelFontFamily
-        Accessible.role: Accessible.CheckBox
-        Accessible.checked: modelData.enabled
-        onClicked: root.controller.chooseDiscovered(modelData.id, !modelData.enabled)
+        title: String(modelData.name || modelData.id)
+        detail: modelData.readOnly === true ? "Read-only" : ""
+        ToggleSwitch {
+          objectName: "calendar-discovered-toggle"
+          checked: modelData.enabled === true
+          foreground: root.textColor
+          accent: root.accentColor
+          onToggled: root.controller.chooseDiscovered(modelData.id, !modelData.enabled)
+        }
       }
     }
     Row {
@@ -347,330 +624,23 @@ Column {
     }
   }
 
-  Repeater {
-    model: root.settingsSources
-
-    Item {
-      id: calendarEntry
-      property string groupLabel: root.accountLabel(modelData) || Sources.providerLabel(modelData.kind)
-      width: root.width
-      implicitHeight: groupHeading.height + sourceRow.height
-        + reminderActions.height + Style.space(8)
-        + (colorRow.visible ? colorRow.implicitHeight + Style.space(6) : 0)
-        + (passwordRow.visible ? passwordRow.implicitHeight + Style.space(6) : 0)
-
-      Text {
-        id: groupHeading
-        width: parent.width
-        visible: index === 0 || String(root.settingsSources[index - 1].accountId || root.settingsSources[index - 1].kind)
-          !== String(modelData.accountId || modelData.kind)
-        height: visible ? implicitHeight : 0
-        topPadding: Style.space(14)
-        bottomPadding: Style.space(8)
-        text: calendarEntry.groupLabel
-        textFormat: Text.PlainText
-        elide: Text.ElideMiddle
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.body
-      }
-
-      Item {
-        id: sourceRow
-        anchors.top: groupHeading.bottom
-        width: parent.width
-        height: Math.max(sourceText.implicitHeight, sourceActions.implicitHeight)
-
-      Column {
-        id: sourceText
-        anchors.left: parent.left
-        anchors.right: sourceActions.left
-        anchors.rightMargin: Style.space(8)
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: Style.space(2)
-
-        Text {
-          width: parent.width
-          text: String(modelData.name || modelData.id || "Calendar")
-          textFormat: Text.PlainText
-          color: root.textColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.bodySmall
-          elide: Text.ElideRight
-        }
-        Text {
-          objectName: "calendar-source-detail"
-          width: parent.width
-          text: root.sourceDetail(modelData)
-          textFormat: Text.PlainText
-          color: root.dimColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideMiddle
-        }
-      }
-
-      Row {
-        id: sourceActions
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: Style.space(4)
-        Button {
-          id: colorButton
-          objectName: "calendar-source-color"
-          focusable: true
-          width: Style.space(24)
-          height: width
-          // The switch reserves a taller cursor target than this compact
-          // button. A Row top-aligns children of different heights, so bind
-          // their centres explicitly instead of leaving the dot too high.
-          anchors.verticalCenter: sourceToggle.verticalCenter
-          horizontalPadding: 0
-          verticalPadding: 0
-          selected: root.colorEditingId === String(modelData.id)
-          foreground: root.textColor
-          accent: root.accentColor
-          tooltipText: "Change calendar color"
-          Accessible.name: "Change color for " + String(modelData.name || modelData.id)
-          enabled: !!root.controller && !root.controller.savingSource
-            && !root.controller.discoveringCalendars
-          onClicked: {
-            root.passwordEditingId = ""
-            root.colorEditingId = root.colorEditingId === String(modelData.id)
-              ? "" : String(modelData.id)
-          }
-
-          Rectangle {
-            objectName: "calendar-source-color-swatch"
-            anchors.centerIn: parent
-            width: Style.space(10)
-            height: width
-            radius: width / 2
-            color: calendarPalette.colorFor(modelData.colorKey)
-          }
-        }
-        IconTextButton {
-          visible: modelData.kind === "caldav" && modelData.discovered !== true
-          text: "Set password"
-          bordered: false
-          foreground: root.textColor
-          fontFamily: root.panelFontFamily
-          enabled: !!root.controller && !root.controller.savingSource
-            && !root.controller.discoveringCalendars
-          onClicked: {
-            root.colorEditingId = ""
-            root.passwordEditingId = String(modelData.id)
-          }
-        }
-        IconTextButton {
-          objectName: "calendar-source-remove"
-          visible: root.removable(modelData)
-          text: "Remove"
-          bordered: false
-          foreground: root.urgentColor
-          fontFamily: root.panelFontFamily
-          enabled: !!root.controller && !root.controller.savingSource
-            && !root.controller.discoveringCalendars
-          onClicked: root.controller.removeCalendar(modelData.id)
-        }
-        Button {
-          id: sourceToggle
-          objectName: "calendar-source-toggle"
-          property bool checked: modelData.enabled !== false
-          signal toggled()
-          focusable: true
-          text: checked ? "✓ Show in calendar" : "Show in calendar"
-          selected: checked
-          fontFamily: root.panelFontFamily
-          fontSize: Style.font.caption
-          Accessible.role: Accessible.CheckBox
-          Accessible.name: "Show " + String(modelData.name || modelData.id)
-          Accessible.checked: checked
-          foreground: root.textColor
-          accent: root.accentColor
-          enabled: !!root.controller && !root.controller.savingSource
-            && !root.controller.discoveringCalendars
-          onClicked: toggled()
-          onToggled: if (root.controller)
-            root.controller.setSourceEnabled(modelData.id, modelData.enabled === false)
-        }
-      }
-      }
-
-      Column {
-        id: reminderActions
-        anchors.top: sourceRow.bottom
-        width: parent.width
-        spacing: Style.space(6)
-        visible: Sources.nativeCalendarFeatures(modelData) && !!root.service && root.service.backendCanGoogleCalendars === true
-        height: visible ? implicitHeight : 0
-        Button {
-          objectName: "calendar-reminder-options"
-          text: "Desktop reminders: " + (modelData.remindersEnabled !== true ? "Off"
-            : Number(modelData.reminderMinutes) >= 0 ? String(modelData.reminderMinutes) + " min before"
-            : modelData.kind === "google" ? "Use Google event reminders" : "No custom timing") + "..."
-          foreground: root.dimColor
-          accent: root.accentColor
-          fontFamily: root.panelFontFamily
-          fontSize: Style.font.caption
-          selected: root.reminderEditingId === String(modelData.id)
-          onClicked: root.reminderEditingId = selected ? "" : String(modelData.id)
-        }
-        Column {
-          width: parent.width
-          visible: root.reminderEditingId === String(modelData.id)
-          spacing: Style.space(6)
-          Dropdown {
-            objectName: "calendar-reminder-mode"
-            width: parent.width
-            showLabel: false
-            value: modelData.remindersEnabled !== true ? "off"
-              : Number(modelData.reminderMinutes) >= 0 ? "custom" : "google"
-            options: modelData.kind === "google"
-              ? [{ value: "off", label: "Off" }, { value: "google", label: "Use Google event reminders" }, { value: "custom", label: "Custom timing" }]
-              : [{ value: "off", label: "Off" }, { value: "custom", label: "Custom timing" }]
-            foreground: root.textColor
-            accent: root.accentColor
-            fontFamily: root.panelFontFamily
-            enabled: !!root.controller && !root.controller.savingSource
-            onChanged: function(next) {
-              root.controller.setReminderPolicy(modelData.id, next !== "off",
-                next === "google" ? -1 : Number(modelData.reminderMinutes) >= 0 ? Number(modelData.reminderMinutes) : 10)
-            }
-          }
-          Row {
-            spacing: Style.space(8)
-            visible: modelData.remindersEnabled === true && Number(modelData.reminderMinutes) >= 0
-            TextField {
-              objectName: "calendar-reminder-minutes"
-              width: Style.space(85)
-              text: String(modelData.reminderMinutes)
-              foreground: root.textColor
-              accent: root.accentColor
-              font.family: root.panelFontFamily
-              Accessible.name: "Minutes before event"
-              enabled: !!root.controller && !root.controller.savingSource
-              onEditingFinished: {
-                if (/^[0-9]+$/.test(text) && Number(text) <= 40320)
-                  root.controller.setReminderPolicy(modelData.id, true, Number(text))
-                else text = String(modelData.reminderMinutes)
-              }
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: "minutes before the event"
-              color: root.dimColor
-              font.family: root.panelFontFamily
-              font.pixelSize: Style.font.caption
-            }
-          }
-        }
-      }
-
-      Row {
-        id: colorRow
-        objectName: "calendar-color-picker"
-        anchors.top: reminderActions.bottom
-        anchors.topMargin: visible ? Style.space(6) : 0
-        width: parent.width
-        visible: root.colorEditingId === String(modelData.id)
-        spacing: Style.space(6)
-
-        Text {
-          anchors.verticalCenter: parent.verticalCenter
-          text: "Color"
-          color: root.dimColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.caption
-          textFormat: Text.PlainText
-        }
-
-        Repeater {
-          model: calendarPalette.slots
-
-          Button {
-            id: paletteOption
-            required property string modelData
-            objectName: "calendar-color-" + modelData
-            focusable: true
-            width: Style.space(24)
-            height: width
-            horizontalPadding: 0
-            verticalPadding: 0
-            selected: String(modelData) === String(colorRow.modelDataForSource.colorKey || "")
-            foreground: root.textColor
-            accent: root.accentColor
-            tooltipText: "Use " + modelData
-            Accessible.name: "Use " + modelData + " for "
-              + String(colorRow.modelDataForSource.name || colorRow.modelDataForSource.id)
-            enabled: !!root.controller && !root.controller.savingSource
-              && !root.controller.discoveringCalendars
-            onClicked: {
-              root.controller.setSourceColor(colorRow.modelDataForSource.id, modelData)
-              root.colorEditingId = ""
-            }
-
-            Rectangle {
-              anchors.centerIn: parent
-              width: Style.space(14)
-              height: width
-              radius: width / 2
-              color: "transparent"
-              border.width: parent.selected ? Math.max(1, Style.normalBorderWidth) : 0
-              border.color: root.textColor
-
-              Rectangle {
-                objectName: "calendar-color-swatch-" + paletteOption.modelData
-                anchors.centerIn: parent
-                width: Style.space(8)
-                height: width
-                radius: width / 2
-                color: calendarPalette.colorFor(paletteOption.modelData)
-              }
-            }
-          }
-        }
-
-        property var modelDataForSource: modelData
-      }
-
-      Row {
-        id: passwordRow
-        anchors.top: colorRow.visible ? colorRow.bottom : reminderActions.bottom
-        anchors.topMargin: visible ? Style.space(6) : 0
-        width: parent.width
-        visible: modelData.kind === "caldav" && modelData.discovered !== true
-          && root.passwordEditingId === String(modelData.id)
-        spacing: Style.space(6)
-
-        TextField {
-          id: existingPassword
-          width: Math.max(80, parent.width - saveExisting.implicitWidth
-            - cancelExisting.implicitWidth - parent.spacing * 2)
-          password: true
-          foreground: root.textColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.bodySmall
-          placeholderText: "Password or app password"
-          onAccepted: saveExisting.clicked()
-        }
-        IconTextButton {
-          id: saveExisting
-          text: "Save"
-          foreground: root.textColor
-          fontFamily: root.panelFontFamily
-          enabled: !!root.controller && existingPassword.text !== ""
-            && !root.controller.savingSource && !root.controller.discoveringCalendars
-          onClicked: root.controller.updateCalendarPassword(modelData, existingPassword.text)
-        }
-        IconTextButton {
-          id: cancelExisting
-          text: "Cancel"
-          bordered: false
-          foreground: root.dimColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.passwordEditingId = ""
-        }
+  Column {
+    width: root.width
+    visible: root.otherSources.length > 0
+    spacing: Style.space(2)
+    Text {
+      text: "Other calendars"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+      bottomPadding: Style.space(4)
+    }
+    Repeater {
+      model: root.otherSources
+      CalendarRow {
+        required property var modelData
+        source: modelData
+        detail: root.sourceDetail(modelData)
       }
     }
   }
@@ -765,108 +735,16 @@ Column {
     textFormat: Text.PlainText
   }
 
-  Repeater {
-    model: Sources.writableGroups(Sources.groupByAccount({ sources: root.writableSources },
-      root.service ? root.service.accountSummaries : []))
-    Column {
-    id: defaultGroup
-    required property var modelData
-    width: root.width
-    spacing: Style.space(8)
-    Text {
-      width: parent.width
-      text: "Default for new events · " + defaultGroup.modelData.accountLabel
-      textFormat: Text.PlainText
-      elide: Text.ElideMiddle
-      color: root.textColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.bodySmall
-      topPadding: Style.space(12)
-    }
-    Dropdown {
-      objectName: "calendar-default-picker"
-      width: parent.width
-      showLabel: false
-      options: defaultGroup.modelData.calendars.map(function(source) {
-        return { value: source.id, label: String(source.name || source.id) }
-      })
-      value: {
-        var values = defaultGroup.modelData.calendars
-        for (var i = 0; i < values.length; i++) if (values[i].preferred) return values[i].id
-        return values.length ? values[0].id : ""
-      }
+  SettingRow {
+    title: "Unified calendar view"
+    detail: "Show every account together instead of following the current mailbox."
+    ToggleSwitch {
+      id: unifiedSwitch
+      objectName: "unifiedCalendarSwitch"
+      checked: !!root.service && root.service.unifiedCalendarView === true
       foreground: root.textColor
       accent: root.accentColor
-      fontFamily: root.panelFontFamily
-      enabled: !!root.controller && !root.controller.savingSource && !root.controller.discoveringCalendars
-      onChanged: function(next) { root.controller.setDefaultCalendar(next) }
-    }
-    }
-  }
-
-  Column {
-    width: parent.width
-    spacing: Style.space(8)
-    visible: !!root.service && root.service.backendCanGoogleCalendars === true
-      && !!root.controller && !!root.controller.availableSources
-      && root.controller.availableSources.sources.some(Sources.nativeCalendarFeatures)
-    Text {
-      text: "Google desktop reminders"
-      color: root.textColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.body
-      topPadding: Style.space(12)
-    }
-    Button {
-      objectName: "calendar-reminders-enabled"
-      text: root.service && root.service.calendarRemindersEnabled ? "✓ Desktop reminders on" : "Desktop reminders off"
-      selected: !!root.service && root.service.calendarRemindersEnabled === true
-      foreground: root.textColor
-      accent: root.accentColor
-      fontFamily: root.panelFontFamily
-      onClicked: root.service.persistSetting("calendarRemindersEnabled", !root.service.calendarRemindersEnabled)
-    }
-    Text {
-      width: parent.width
-      text: "Reminders run while Omamail is running, even with its window closed. Choose timing under each calendar above; hiding a calendar does not turn off its reminders. Google event reminders respect events with reminders turned off."
-      textFormat: Text.PlainText
-      wrapMode: Text.WordWrap
-      color: root.dimColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
-    }
-    Row {
-      spacing: Style.space(8)
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        text: "Snooze (minutes)"
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-      }
-      TextField {
-        width: Style.space(80)
-        text: String(root.service ? root.service.calendarSnoozeMinutes : 5)
-        foreground: root.textColor
-        accent: root.accentColor
-        font.family: root.panelFontFamily
-        Accessible.name: "Snooze minutes"
-        onEditingFinished: {
-          if (/^[0-9]+$/.test(text) && Number(text) >= 1 && Number(text) <= 1440)
-            root.service.persistSetting("calendarSnoozeMinutes", Number(text))
-          else text = String(root.service.calendarSnoozeMinutes)
-        }
-      }
-    }
-    Text {
-      width: parent.width
-      visible: text !== ""
-      text: String(root.service && root.service.calendarReminderError || "")
-      textFormat: Text.PlainText
-      wrapMode: Text.WordWrap
-      color: root.urgentColor
-      font.family: root.panelFontFamily
-      font.pixelSize: Style.font.caption
+      onToggled: if (root.service) root.service.setUnifiedCalendarView(!root.service.unifiedCalendarView)
     }
   }
 
@@ -880,45 +758,134 @@ Column {
     onClicked: root.openCalendarRequested()
   }
 
-  Rectangle {
+  // -------------------------------------------------------------- new events
+
+  Column {
     width: parent.width
-    implicitHeight: Math.max(unifiedText.implicitHeight, unifiedSwitch.implicitHeight) + Style.space(24)
-    radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
-    Column {
-      id: unifiedText
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(12)
-      anchors.right: unifiedSwitch.left
-      anchors.rightMargin: Style.space(10)
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(2)
-      Text {
-        text: "Unified calendar view"
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-      }
-      Text {
-        width: parent.width
-        text: "Show every account together instead of following the current mailbox."
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
+    visible: defaultGroups.count > 0
+    spacing: Style.space(2)
+    SectionHeading { text: "NEW EVENTS"; bottomPadding: Style.space(2) }
+    Repeater {
+      id: defaultGroups
+      model: Sources.writableGroups(Sources.groupByAccount({ sources: root.writableSources },
+        root.service ? root.service.accountSummaries : []))
+      SettingRow {
+        id: defaultGroup
+        required property var modelData
+        title: "Default calendar"
+        detail: defaultGroup.modelData.accountLabel
+        Dropdown {
+          objectName: "calendar-default-picker"
+          width: Style.space(200)
+          showLabel: false
+          options: defaultGroup.modelData.calendars.map(function(source) {
+            return { value: source.id, label: String(source.name || source.id) }
+          })
+          value: {
+            var values = defaultGroup.modelData.calendars
+            for (var i = 0; i < values.length; i++) if (values[i].preferred) return values[i].id
+            return values.length ? values[0].id : ""
+          }
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          enabled: !!root.controller && !root.controller.savingSource && !root.controller.discoveringCalendars
+          onChanged: function(next) { root.controller.setDefaultCalendar(next) }
+        }
       }
     }
-    ToggleSwitch {
-      id: unifiedSwitch
-      objectName: "unifiedCalendarSwitch"
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(10)
-      anchors.verticalCenter: parent.verticalCenter
-      checked: !!root.service && root.service.unifiedCalendarView === true
-      foreground: root.textColor
-      accent: root.accentColor
-      onToggled: if (root.service) root.service.setUnifiedCalendarView(!root.service.unifiedCalendarView)
+  }
+
+  // --------------------------------------------------------------- reminders
+
+  Column {
+    width: parent.width
+    spacing: Style.space(2)
+    visible: !!root.service && root.service.backendCanGoogleCalendars === true
+      && root.reminderSources.length > 0
+    SectionHeading { text: "REMINDERS"; bottomPadding: Style.space(2) }
+    SettingRow {
+      title: "Desktop reminders"
+      detail: "Shown while Omamail is running, even with its window closed. Google calendars only."
+      ToggleSwitch {
+        objectName: "calendar-reminders-enabled"
+        checked: !!root.service && root.service.calendarRemindersEnabled === true
+        foreground: root.textColor
+        accent: root.accentColor
+        onToggled: root.service.persistSetting("calendarRemindersEnabled", !root.service.calendarRemindersEnabled)
+      }
+    }
+    SettingRow {
+      visible: !!root.service && root.service.calendarRemindersEnabled === true
+      title: "Snooze"
+      detail: "How long Snooze puts a reminder off."
+      NumberField {
+        objectName: "calendar-snooze-minutes"
+        label: "Minutes"
+        from: 1
+        to: 1440
+        stepSize: 1
+        value: root.service ? root.service.calendarSnoozeMinutes : 5
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        fontSize: Style.font.bodySmall
+        onModified: function(next) { root.service.persistSetting("calendarSnoozeMinutes", next) }
+      }
+    }
+    Repeater {
+      model: !!root.service && root.service.calendarRemindersEnabled === true ? root.reminderSources : []
+      SettingRow {
+        id: reminderRow
+        required property var modelData
+        title: String(modelData.name || modelData.id)
+        detail: root.accountLabel(modelData) + (modelData.enabled === false ? " · Hidden, still reminds" : "")
+        NumberField {
+          objectName: "calendar-reminder-minutes"
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.reminderMode(reminderRow.modelData) === "custom"
+          label: "Minutes before"
+          from: 0
+          to: 40320
+          stepSize: 5
+          value: Math.max(0, Number(reminderRow.modelData.reminderMinutes))
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          fontSize: Style.font.bodySmall
+          enabled: !!root.controller && !root.controller.savingSource
+          onModified: function(next) { root.controller.setReminderPolicy(reminderRow.modelData.id, true, next) }
+        }
+        Dropdown {
+          objectName: "calendar-reminder-mode"
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(200)
+          showLabel: false
+          value: root.reminderMode(reminderRow.modelData)
+          options: [{ value: "off", label: "Off" }, { value: "google", label: "Google event reminders" },
+            { value: "custom", label: "Custom timing" }]
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          enabled: !!root.controller && !root.controller.savingSource
+          onChanged: function(next) {
+            root.controller.setReminderPolicy(reminderRow.modelData.id, next !== "off",
+              next === "google" ? -1 : Number(reminderRow.modelData.reminderMinutes) >= 0
+                ? Number(reminderRow.modelData.reminderMinutes) : 10)
+          }
+        }
+      }
+    }
+    Text {
+      width: parent.width
+      visible: text !== ""
+      topPadding: Style.space(4)
+      text: String(root.service && root.service.calendarReminderError || "")
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: root.urgentColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
     }
   }
 

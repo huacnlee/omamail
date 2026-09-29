@@ -170,38 +170,33 @@ TestCase {
     var settings = createTemporaryObject(calendarComponent, testCase)
     verify(settings)
     wait(0)
+    // A switch like every other setting on the page, and its input is the
+    // only thing that answers the pointer and the keyboard.
     var trigger = findChild(settings, "calendar-source-toggle")
     verify(trigger)
-    var input = findChild(trigger, "button-input")
-    var graphic = findChild(trigger, "toggle-switch-input")
+    var input = findChild(trigger, "toggle-switch-input")
     verify(input)
-    compare(graphic, null, "the labelled visibility button has no competing switch input")
-    compare(trigger.text, "✓ Show in calendar")
-    var position = trigger.mapToItem(testCase, trigger.width / 2, trigger.height / 2)
+    compare(trigger.checked, true)
+    var position = input.mapToItem(testCase, input.width / 2, input.height / 2)
     verify(position.x >= 0 && position.x < testCase.width
       && position.y >= 0 && position.y < testCase.height, "toggle location: " + position)
-    verify(trigger.visible && trigger.enabled && input.visible && input.enabled,
-      "trigger visible/enabled: " + trigger.visible + "/" + trigger.enabled
-        + ", input: " + input.visible + "/" + input.enabled)
-    mouseClick(trigger, trigger.width / 2, trigger.height / 2)
+    verify(input.visible && input.enabled, "input visible/enabled: " + input.visible + "/" + input.enabled)
+    mouseClick(input, input.width / 2, input.height / 2)
     compare(calendarFixture.toggleCalls, 1)
     compare(calendarFixture.enabledValue, false)
     wait(0)
     trigger = findChild(settings, "calendar-source-toggle")
-    input = findChild(trigger, "button-input")
+    input = findChild(trigger, "toggle-switch-input")
+    compare(trigger.checked, false)
     focusParking.forceActiveFocus()
     for (var tab = 0; tab < 20 && !input.activeFocus; tab++) keyClick(Qt.Key_Tab)
-    verify(input.activeFocus, "the labelled visibility button receives Tab")
-    verify(trigger.hot)
-    compare(trigger.text, "Show in calendar")
+    verify(input.activeFocus, "the visibility switch receives Tab")
     keyClick(Qt.Key_Space)
     compare(calendarFixture.toggleCalls, 2)
     compare(calendarFixture.enabledValue, true)
     wait(0)
     trigger = findChild(settings, "calendar-source-toggle")
     compare(trigger.checked, true)
-    compare(trigger.selected, true)
-    compare(trigger.text, "✓ Show in calendar")
   }
 
   function test_standalone_controls_use_semantic_omamail_style() {
