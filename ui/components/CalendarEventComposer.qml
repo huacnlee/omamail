@@ -547,15 +547,7 @@ Rectangle {
         textFormat: Text.PlainText
       }
 
-      Text {
-        visible: true
-        text: "CALENDAR"
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        font.letterSpacing: 1
-        textFormat: Text.PlainText
-      }
+      FieldLabel { text: "Calendar" }
 
       QQC.ComboBox {
         id: calendarSelector
@@ -743,21 +735,15 @@ Rectangle {
         onClicked: root.allDay = !root.allDay
       }
 
+      // Labelled above like every other field, so the form has one left edge.
+      FieldLabel { text: "Starts" }
       Row {
         width: parent.width
         spacing: Style.space(8)
-        Text {
-          width: Style.space(80)
-          anchors.verticalCenter: parent.verticalCenter
-          text: "Starts"
-          textFormat: Text.PlainText
-          color: root.dimColor
-          font.family: root.panelFontFamily
-        }
         EditorField {
           id: dateField
           objectName: "event-start-date-field"
-          width: parent.width - Style.space(80) - parent.spacing - (startField.visible ? startField.width + parent.spacing : 0)
+          width: parent.width - (startField.visible ? startField.width + parent.spacing : 0)
           foreground: root.textColor
           font.family: root.panelFontFamily
           placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
@@ -773,21 +759,14 @@ Rectangle {
           placeholderText: "Start"
         }
       }
+      FieldLabel { text: root.allDay ? "Last day" : "Ends" }
       Row {
         width: parent.width
         spacing: Style.space(8)
-        Text {
-          width: Style.space(80)
-          anchors.verticalCenter: parent.verticalCenter
-          text: root.allDay ? "Last day" : "Ends"
-          textFormat: Text.PlainText
-          color: root.dimColor
-          font.family: root.panelFontFamily
-        }
         EditorField {
           id: endDateField
           objectName: "event-end-date-field"
-          width: parent.width - Style.space(80) - parent.spacing - (endField.visible ? endField.width + parent.spacing : 0)
+          width: parent.width - (endField.visible ? endField.width + parent.spacing : 0)
           foreground: root.textColor
           font.family: root.panelFontFamily
           placeholderText: "YYYY-MM-DD"
@@ -831,7 +810,7 @@ Rectangle {
         width: parent.width
         foreground: root.textColor
         font.family: root.panelFontFamily
-        placeholderText: "Location or meeting link"
+        placeholderText: "Room, address or link"
         Accessible.name: "Location or meeting link"
       }
 
@@ -1100,7 +1079,8 @@ Rectangle {
           return busy ? "Creating" : "Create event"
         }
         iconName: root.editing ? "check" : "plus"
-        foreground: root.textColor
+        // The Enter action: accent edge and text, not a solid fill.
+        foreground: root.accentColor
         accent: root.accentColor
         fontFamily: root.panelFontFamily
         enabled: root.controller && !root.controller.creatingEvent
