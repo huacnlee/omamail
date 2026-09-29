@@ -51,7 +51,20 @@ Item {
     monthHoverDelay.stop()
     monthOverflow.close()
   }
-  onViewModeChanged: { monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null }
+  onViewModeChanged: { monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null; syncAgenda() }
+  onDaysChanged: syncAgenda()
+  // The agenda's clock ticks every minute to drop finished events. Its model
+  // changes only when the list does, so a tick leaves the scroll where it was.
+  property var agendaEvents: []
+  function syncAgenda() {
+    var next = viewMode === "agenda" ? visibleEvents() : []
+    if (!Calendar.sameEvents(agendaEvents, next)) agendaEvents = next
+  }
+  Connections {
+    target: root.controller
+    function onEventsChanged() { root.syncAgenda() }
+    function onNowMsChanged() { root.syncAgenda() }
+  }
   onVisibleMonthChanged: { monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null }
   onDetailOpenChanged: if (detailOpen) { monthOverflow.close(); monthHoverDelay.stop() }
   Timer {
@@ -980,7 +993,7 @@ Item {
       visible: root.viewMode === "agenda"
       clip: true
       spacing: Style.space(6)
-      model: root.visibleEvents()
+      model: root.agendaEvents
       ScrollBar.vertical: ScrollBar {}
       Text {
         anchors.centerIn: parent

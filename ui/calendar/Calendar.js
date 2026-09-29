@@ -1040,6 +1040,15 @@ function caldavEventUrl(sourceUrl, event) {
   return urlOrigin(resolved) === origin ? resolved : ""
 }
 
+// Whether two event lists would draw the same. A refresh that brings back what
+// is already shown must not hand the views a new array: every Repeater and
+// ListView bound to one rebuilds its delegates and loses its scroll position.
+function sameEvents(left, right) {
+  if (left === right) return true
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 function compareEvents(left, right) {
   var leftMs = left && left.start ? left.start.ms : 0
   var rightMs = right && right.start ? right.start.ms : 0

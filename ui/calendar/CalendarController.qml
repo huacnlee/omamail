@@ -123,7 +123,7 @@ Item {
   // have been fetched before the cache loaded, because fetching needs it too.
   function reloadVisibleRange() {
     if (!rangeStart || !rangeEnd) return
-    events = cachedEventsFor(calendarScope, rangeStart, rangeEnd)
+    setEvents(cachedEventsFor(calendarScope, rangeStart, rangeEnd))
     refresh(rangeStart, rangeEnd)
   }
 
@@ -180,7 +180,7 @@ Item {
     })
     var sourceIds = queue.map(function(source) { return String(source.id || "") })
     loading = true
-    events = eventCache.get(refreshScope, rangeStart, rangeEnd, sourceIds)
+    setEvents(eventCache.get(refreshScope, rangeStart, rangeEnd, sourceIds))
     processNext()
   }
 
@@ -890,7 +890,11 @@ Item {
       next.push(additions[i])
     }
     next.sort(Calendar.compareEvents)
-    events = next
+    setEvents(next)
+  }
+
+  function setEvents(next) {
+    if (!Calendar.sameEvents(events, next)) events = next
   }
 
   function failSource(reason, kind) {
@@ -910,9 +914,9 @@ Item {
       }).map(function(source) { return String(source.id || "") })
       var allowed = {}
       for (var i = 0; i < enabled.length; i++) allowed[enabled[i]] = true
-      if (refreshScope === calendarScope) events = events.filter(function(event) {
+      if (refreshScope === calendarScope) setEvents(events.filter(function(event) {
         return allowed[String(event && event.sourceId || "")] === true
-      })
+      }))
       if (rangeStart && rangeEnd && refreshScope === calendarScope)
         eventCache.put(refreshScope, rangeStart, rangeEnd, events,
           contextSources.sources.filter(function(source) { return root.sourceIncluded(source) }).map(function(source) { return String(source.id) }))

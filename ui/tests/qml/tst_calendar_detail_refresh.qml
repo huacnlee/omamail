@@ -89,6 +89,21 @@ Item {
       reply(0,"first",2)
       compare(view.detailOpen,false)
     }
+    function test_agenda_model_survives_a_clock_tick() {
+      view.visibleMonth = new Date(2026,9,1)
+      fixture.nowMs = Date.UTC(2026,9,20)
+      view.setView("agenda")
+      fixture.events = [event("first"),event("second")]
+      var agenda = view.agendaEvents
+      compare(agenda.length,2)
+      fixture.nowMs = Date.UTC(2026,9,20) + 60000
+      fixture.events = [event("first"),event("second")]
+      verify(view.agendaEvents === agenda, "an unchanged agenda keeps its model")
+      fixture.nowMs = Date.UTC(2026,9,26)
+      compare(view.agendaEvents.length,0)
+      fixture.nowMs = Date.now()
+      view.setView("month")
+    }
     function test_overflow_hover_shows_all_events_and_opens_hidden_event() {
       view.visibleMonth = new Date(2026,9,1)
       view.setView("month")
