@@ -35,7 +35,7 @@ Item {
   readonly property real allDayHeight: allDayCount > 0
     ? Style.space(6 + allDayCount * 20) : 0
 
-  CalendarPalette {
+  ThemePalette {
     id: calendarPalette
     palettePath: root.controller && root.controller.service
       ? String(root.controller.service.calendarPalettePath || "") : ""

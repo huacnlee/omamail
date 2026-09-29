@@ -66,7 +66,7 @@ Column {
     return value.readOnly === true ? detail + " · Read-only" : detail
   }
 
-  CalendarPalette {
+  ThemePalette {
     id: calendarPalette
     palettePath: root.service ? String(root.service.calendarPalettePath || "") : ""
     textColor: root.textColor

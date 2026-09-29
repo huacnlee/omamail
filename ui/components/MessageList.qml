@@ -76,6 +76,13 @@ Column {
       accentColor: root.accentColor
       dimColor: root.dimColor
       urgentColor: root.urgentColor
+      // The mailbox's own colour, where the list is made of several. A row
+      // that carries no account — an older summary, a provider that lists one
+      // mailbox — keeps the accent, which is what a single-mailbox list drew
+      // before there was anything to tell apart.
+      accountColor: modelData.accountId !== undefined && String(modelData.accountId) !== ""
+        ? themePalette.colorForIdentity("account:" + String(modelData.accountId))
+        : root.accentColor
       panelFontFamily: root.panelFontFamily
       agentState: Agent.glyphState(root.service.agentJobs[modelData.id])
       agentProgress: Agent.progressText(root.service.agentJobs[modelData.id])
@@ -205,5 +212,17 @@ Column {
       root.loadStartCount = -1
       if (startCount >= 0) root.continueAfterLoad(startCount)
     }
+  }
+
+  // The Omarchy palette, for the per-mailbox colour a merged list draws. Where
+  // a host has none, or its palette is a grey ramp, the identity colour is
+  // generated from the account itself so two mailboxes still differ.
+  ThemePalette {
+    id: themePalette
+    palettePath: root.service ? String(root.service.calendarPalettePath || "") : ""
+    textColor: root.textColor
+    accentColor: root.accentColor
+    urgentColor: root.urgentColor
+    dimColor: root.dimColor
   }
 }

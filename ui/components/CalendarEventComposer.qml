@@ -209,7 +209,7 @@ Rectangle {
     else controller.createEvent(selectedSourceId, fields)
   }
 
-  CalendarPalette {
+  ThemePalette {
     id: calendarPalette
     palettePath: root.controller && root.controller.service
       ? String(root.controller.service.calendarPalettePath || "") : ""
