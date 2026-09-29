@@ -108,6 +108,35 @@ Item {
       controller.reminderMode = false
     }
 
+    function test_confirmed_delete_carries_the_chosen_consequence() {
+      mailService.backendCanGoogleCalendars = true
+      controller.accountId = "one@gmail.com"
+      controller.sourceList = {version:1,sources:[
+        {id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary",enabled:true}]}
+      var event = {sourceId:"google:one@gmail.com",googleId:"meeting",recurringEventId:"series",
+        summary:"Review",eventType:"default",etag:"e1",organizer:{self:true},
+        attendees:[{self:true},{email:"sam@example.test"}]}
+      var request = controller.deleteRequest("google:one@gmail.com", event)
+      compare(request.choices.length, 3)
+      request.choice = "none"
+      verify(controller.confirmDelete(request))
+      compare(mailService.requests[mailService.requests.length - 1].params.operation, "delete")
+      compare(mailService.requests[mailService.requests.length - 1].params.sendUpdates, "none")
+      compare(event.deleteSendUpdates, undefined, "the event on screen is not changed")
+      controller.eventWriting = false
+      mailService.requests = []
+      mailService.nextResult = {body:JSON.stringify({id:"series",etag:"s1",summary:"Review",
+        recurrence:["RRULE:FREQ=WEEKLY"],start:{dateTime:"2026-10-01T10:00:00Z"},end:{dateTime:"2026-10-01T11:00:00Z"},
+        organizer:{self:true}})}
+      request.choice = "series"
+      verify(controller.confirmDelete(request))
+      compare(mailService.requests[0].params.operation, "get")
+      compare(mailService.requests[0].params.eventId, "series")
+      compare(mailService.requests[1].params.operation, "delete")
+      compare(mailService.requests[1].params.eventId, "series")
+      controller.eventWriting = false
+    }
+
     function test_undo_does_not_follow_the_view_to_another_account() {
       mailService.backendCanGoogleCalendars = true
       controller.accountId = "one@gmail.com"

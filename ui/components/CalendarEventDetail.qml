@@ -21,42 +21,15 @@ Rectangle {
   signal closed()
   signal editRequested(string sourceId, var event)
   signal deleteRequested(string sourceId, var event)
-  property bool readingSeries: false
   property bool refreshing: false
   property string refreshError: ""
   property bool meetingLinkCopied: false
-  property bool deleteOptionsOpen: false
-  onEventChanged: deleteOptionsOpen = false
   onMeetingLinkChanged: { meetingLinkCopied = false; copiedFeedback.stop() }
   Timer {
     id: copiedFeedback
     interval: 2000
     onTriggered: root.meetingLinkCopied = false
   }
-  readonly property bool notifiesGuests: !!event && !!event.organizer && event.organizer.self === true
-    && (event.attendees || []).some(function(attendee) { return attendee.self !== true })
-
-  function requestDelete(updates) {
-    var copy = {}
-    for (var key in event) copy[key] = event[key]
-    copy.deleteSendUpdates = updates
-    deleteRequested(String(event.sourceId || ""), copy)
-  }
-
-  function deleteSeries() {
-    if (readingSeries || !event || !event.recurringEventId || !controller || !source) return
-    readingSeries = true
-    var owner = source
-    controller.nativeRequest(owner, "get", { eventId: event.recurringEventId }, function(result, error) {
-      root.readingSeries = false
-      if (error) { root.controller.lastError = error; return }
-      var payload
-      try { payload = JSON.parse(result.body) } catch (e) { return }
-      var events = Calendar.eventsFromGoogle({ items: [payload] }, owner.id)
-      if (events.length === 1) root.deleteRequested(owner.id, events[0])
-    })
-  }
-
   readonly property var source: {
     var sources = controller && controller.availableSources
       ? controller.availableSources.sources : []
@@ -168,13 +141,6 @@ Rectangle {
         accentColor: root.accentColor
         urgentColor: root.urgentColor
         panelFontFamily: root.panelFontFamily
-      }
-
-      Rectangle {
-        width: parent.width
-        height: Style.space(4)
-        radius: height / 2
-        color: root.eventColor
       }
 
       Text {
@@ -409,7 +375,7 @@ Rectangle {
                   wrapMode: Text.Wrap
                   color: root.textColor
                   font.family: root.panelFontFamily
-                  font.bold: true
+                  font.pixelSize: Style.font.bodySmall
                 }
                 Text {
                   width: parent.width
@@ -445,18 +411,6 @@ Rectangle {
         spacing: Style.space(7)
 
         IconTextButton {
-          visible: root.canDelete
-          objectName: "event-delete-options"
-          text: "Delete..."
-          iconName: "trash"
-          selected: root.deleteOptionsOpen
-          foreground: root.dimColor
-          accent: root.urgentColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.deleteOptionsOpen = !root.deleteOptionsOpen
-        }
-
-        IconTextButton {
           visible: root.locationLink !== "" && root.locationLink !== root.meetingLink
           text: "Open location"
           iconName: "pin"
@@ -481,7 +435,7 @@ Rectangle {
           objectName: "event-copy-location"
           visible: root.locationText !== ""
           text: "Copy location"
-          iconName: "pin"
+          iconName: "copy"
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily
@@ -498,37 +452,19 @@ Rectangle {
           fontFamily: root.panelFontFamily
           onClicked: if (root.controller) root.controller.openExternal(root.providerLink)
         }
-      }
 
-      Flow {
-        visible: root.canDelete && root.deleteOptionsOpen
-        width: parent.width
-        spacing: Style.space(7)
+        // One quiet trigger; which delete — telling guests or not, one
+        // occurrence or the series — is chosen in the confirmation, where the
+        // event is named.
         IconTextButton {
-          text: root.notifiesGuests ? "Delete and notify guests..."
-            : root.event && root.event.recurringEventId ? "Delete this occurrence..." : "Delete event..."
-          foreground: root.urgentColor
+          visible: root.canDelete
+          objectName: "event-delete"
+          text: "Delete..."
+          iconName: "trash"
+          foreground: root.textColor
           accent: root.urgentColor
           fontFamily: root.panelFontFamily
-          onClicked: root.requestDelete("all")
-        }
-        IconTextButton {
-          visible: root.notifiesGuests && root.source.kind === "google"
-          text: "Delete without email..."
-          foreground: root.urgentColor
-          accent: root.urgentColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.requestDelete("none")
-        }
-        IconTextButton {
-          visible: !!root.event && !!root.event.recurringEventId
-            && !!root.controller && !!root.controller.service && root.controller.service.backendCanGoogleCalendars === true
-          text: "Delete entire series..."
-          foreground: root.urgentColor
-          accent: root.urgentColor
-          fontFamily: root.panelFontFamily
-          enabled: !root.readingSeries
-          onClicked: root.deleteSeries()
+          onClicked: root.deleteRequested(String(root.event.sourceId || ""), root.event)
         }
       }
     }

@@ -438,6 +438,43 @@ Item {
     return true
   }
 
+  // What the delete confirmation asks: named, with a button per consequence.
+  function deleteRequest(sourceId, event) {
+    var request = Calendar.deleteRequest(event, findSource(String(sourceId || "")),
+      service.backendCanGoogleCalendars === true)
+    request.sourceId = String(sourceId || "")
+    request.event = event
+    return request
+  }
+
+  // The answer: the series, or this event with or without telling guests.
+  function confirmDelete(request) {
+    if (!request || !request.event) return false
+    if (request.choice === "series") return deleteSeries(request.sourceId, request.event)
+    var event = {}
+    for (var key in request.event) event[key] = request.event[key]
+    event.deleteSendUpdates = request.choice === "none" ? "none" : "all"
+    return deleteEvent(request.sourceId, event)
+  }
+
+  // A series is deleted by its own identity: an occurrence carries only the
+  // parent's id, so the parent is read first and deleted as itself.
+  function deleteSeries(sourceId, occurrence) {
+    var owner = findSource(sourceId)
+    if (!owner || !occurrence || !occurrence.recurringEventId) return false
+    if (service.backendCanGoogleCalendars !== true) { lastError = "Update the backend to delete a series"; return false }
+    nativeRequest(owner, "get", { eventId: occurrence.recurringEventId }, function(result, error) {
+      if (error) { root.lastError = error; return }
+      var parent
+      try { parent = JSON.parse(result.body) } catch (e) { root.lastError = "Could not read the series"; return }
+      var events = Calendar.eventsFromGoogle({ items: [parent] }, owner.id)
+      if (events.length !== 1) { root.lastError = "Could not read the series"; return }
+      events[0].deleteSendUpdates = occurrence.deleteSendUpdates === "none" ? "none" : "all"
+      root.deleteEvent(owner.id, events[0])
+    })
+    return true
+  }
+
   function deleteEvent(sourceId, event) {
     if (creatingEvent || eventWriting) {
       eventDeleted(false, "Another event change is still in progress")

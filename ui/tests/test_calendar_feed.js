@@ -351,6 +351,31 @@ assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 4), 4)
 assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 5), 3)
 assert.strictEqual(feed.monthEventLimit(10, 23, 2, 16, 5), 0)
 
+{
+  const google = { kind: "google" }
+  const labels = request => Array.from(request.choices, choice => choice.value + ":" + choice.label)
+  const plain = feed.deleteRequest({ summary: "Dentist" }, google, true)
+  assert.strictEqual(plain.name, "Dentist")
+  assert.deepStrictEqual(labels(plain), ["all:Delete"])
+  const guests = { summary: "Review", organizer: { self: true },
+    attendees: [{ self: true }, { email: "sam@example.test" }] }
+  assert.deepStrictEqual(labels(feed.deleteRequest(guests, google, true)),
+    ["none:Delete without email", "all:Delete and notify guests"])
+  // Someone else's meeting sends nothing from here, and no other provider can
+  // be asked not to notify.
+  assert.deepStrictEqual(labels(feed.deleteRequest(Object.assign({}, guests, { organizer: { self: false } }), google, true)),
+    ["all:Delete"])
+  assert.deepStrictEqual(labels(feed.deleteRequest(guests, { kind: "microsoft" }, true)), ["all:Delete"])
+  const occurrence = Object.assign({ recurringEventId: "series" }, guests)
+  assert.deepStrictEqual(labels(feed.deleteRequest(occurrence, google, true)),
+    ["series:Delete series", "none:Delete occurrence without email", "all:Delete occurrence and notify guests"])
+  // A backend that cannot read the series offers only the occurrence.
+  assert.deepStrictEqual(labels(feed.deleteRequest({ summary: "Standup", recurringEventId: "series" }, google, false)),
+    ["all:Delete occurrence"])
+  assert.ok(feed.deleteRequest({ recurrence: ["RRULE:FREQ=WEEKLY"] }, google, true).message.indexOf("Every occurrence") === 0)
+  assert.strictEqual(feed.deleteRequest(null, null, false).name, "Untitled event")
+}
+
 function spanFixture(id, start, end, allDay = false) {
   return {uid:id,sourceId:"synthetic",summary:"Same title",start:{ms:start.getTime(),allDay},end:{ms:end.getTime(),allDay}}
 }

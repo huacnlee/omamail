@@ -1372,21 +1372,13 @@ Item {
 
   // Confirm the named event or series before deleting it.
   function requestEventDelete(sourceId, event) {
-    if (!event) return
-    confirmDeleteDialog.openFor({
-      kind: "event",
-      name: String(event.summary || "Untitled event"),
-      message: event.recurrence ? "This entire series will be deleted." : "This event will be permanently deleted.",
-      sourceId: String(sourceId || ""),
-      event: event
-    })
+    if (event && service) confirmDeleteDialog.openFor(service.calendarController.deleteRequest(sourceId, event))
   }
-
 
   function confirmDelete(request) {
     if (!service) return
     if (request.kind === "event" && request.event) {
-      service.calendarController.deleteEvent(request.sourceId, request.event)
+      service.calendarController.confirmDelete(request)
       calendarView.closeDetail()
     }
     if (request.kind === "label" && request.labelId) service.deleteLabel(request.labelId, request.accountId)

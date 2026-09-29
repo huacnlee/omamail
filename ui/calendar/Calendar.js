@@ -903,6 +903,41 @@ function createEvent(fields, nowMs) {
 // RECURRENCE-ID, but its href is still the series' shared file, so it answers
 // the same way. Creation asks with no event: only the source's own rules
 // apply.
+// The confirmation a delete asks for: which event, what goes with it, and
+// the answers that differ in consequence. Each choice is one button in the
+// dialog, so a guest notification or a whole series is chosen there rather
+// than on a row of destructive buttons beside the event. The last choice is
+// the default. `value` is the event's `deleteSendUpdates`, or "series".
+function deleteRequest(event, source, canReadSeries) {
+  var value = event || {}
+  var google = !!source && source.kind === "google"
+  var notifies = google && !!value.organizer && value.organizer.self === true
+    && (value.attendees || []).some(function(attendee) { return attendee.self !== true })
+  var occurrence = String(value.recurringEventId || "") !== ""
+  var series = Array.isArray(value.recurrence) && value.recurrence.length > 0
+  var choices = []
+  var message = "This event will be permanently deleted."
+  if (occurrence) {
+    var offerSeries = google && canReadSeries === true
+    message = offerSeries ? "Delete this occurrence, or every occurrence in the series."
+      : "This occurrence will be deleted. The rest of the series stays."
+    if (offerSeries) choices.push({ value: "series", label: "Delete series" })
+    if (notifies) {
+      choices.push({ value: "none", label: "Delete occurrence without email" })
+      choices.push({ value: "all", label: "Delete occurrence and notify guests" })
+    } else choices.push({ value: "all", label: "Delete occurrence" })
+  } else if (notifies) {
+    message = (series ? "Every occurrence of this series will be deleted. " : "")
+      + "Guests get a cancellation email unless you delete without one."
+    choices.push({ value: "none", label: "Delete without email" })
+    choices.push({ value: "all", label: "Delete and notify guests" })
+  } else {
+    if (series) message = "Every occurrence of this series will be deleted."
+    choices.push({ value: "all", label: "Delete" })
+  }
+  return { kind: "event", name: String(value.summary || "Untitled event"), message: message, choices: choices }
+}
+
 function writeRefusal(source, event, operation) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"

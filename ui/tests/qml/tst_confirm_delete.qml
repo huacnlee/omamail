@@ -47,6 +47,27 @@ Item {
       tryCompare(dialog,"opened",false)
       compare(confirmed.count,0)
     }
+    function test_choices_default_to_the_last_and_backtab_reaches_the_others() {
+      dialog.close()
+      tryCompare(dialog,"opened",false)
+      dialog.openFor({kind:"event",name:"Review",event:{googleId:"two"},
+        choices:[{value:"none",label:"Delete without email"},{value:"all",label:"Delete and notify guests"}]})
+      tryCompare(dialog,"opened",true)
+      keyClick(Qt.Key_Backtab,Qt.ShiftModifier)
+      keyClick(Qt.Key_Return)
+      compare(confirmed.count,1)
+      compare(confirmed.signalArguments[0][0].choice,"none")
+      compare(confirmed.signalArguments[0][0].event.googleId,"two")
+    }
+    function test_choice_default_is_the_last_one() {
+      dialog.close()
+      tryCompare(dialog,"opened",false)
+      dialog.openFor({kind:"event",name:"Review",
+        choices:[{value:"series",label:"Delete series"},{value:"all",label:"Delete occurrence"}]})
+      tryCompare(dialog,"opened",true)
+      keyClick(Qt.Key_Return)
+      compare(confirmed.signalArguments[0][0].choice,"all")
+    }
     function test_escape_cancels() {
       keyClick(Qt.Key_Escape)
       tryCompare(dialog,"opened",false)
