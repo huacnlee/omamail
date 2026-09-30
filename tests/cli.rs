@@ -1678,7 +1678,16 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
                 } else if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
                     assert!(line.contains("BODY.PEEK["));
                     assert_eq!(line.contains("BODY.PEEK[]"), read);
-                    let raw = "From: Writer <writer@example.org>\r\nSubject: Safe root result\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsafe body 工";
+                    let raw = concat!(
+                        "From: Writer <writer@example.org>\r\nSubject: Safe root result\r\n",
+                        "List-Unsubscribe: <https://news.example.org/leave>,\r\n <mailto:leave@example.org>\r\n",
+                        "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n",
+                        "Content-Type: multipart/alternative; boundary=parts\r\n\r\n",
+                        "--parts\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsafe body 工\r\n",
+                        "--parts\r\nContent-Type: text/html; charset=utf-8\r\n\r\n",
+                        "<p>safe body 工</p><a href=\"https://news.example.org/leave?a=1&amp;b=2\">Unsubscribe</a>",
+                        "<img src=\"https://tracker.example/pixel\"><a href=\"javascript:bad\">Bad</a>\r\n--parts--\r\n"
+                    );
                     format!(
                         "* 7 FETCH (UID 7 FLAGS () INTERNALDATE \"11-Sep-2026 12:00:00 +0000\" RFC822.SIZE {} BODY[] {{{}}}\r\n{}\r\n)\r\nO1 OK fetched\r\n",
                         raw.len(),
@@ -1718,6 +1727,20 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
                 value["result"]["message"]["nativeContent"]["body"]["text"],
                 "safe body 工"
             );
+            assert_eq!(
+                value["result"]["message"]["links"],
+                serde_json::json!([
+                    {"text":"Unsubscribe","url":"https://news.example.org/leave?a=1&b=2"}
+                ])
+            );
+            assert_eq!(
+                value["result"]["message"]["unsubscribe"],
+                serde_json::json!({
+                    "urls":["https://news.example.org/leave","mailto:leave@example.org"],"oneClick":true
+                })
+            );
+            assert!(!value.to_string().contains("tracker.example"));
+            assert!(!value.to_string().contains("javascript:"));
         } else {
             assert_eq!(value["result"]["messages"][0]["id"], "7:INBOX");
             assert_eq!(value["result"]["mailbox"], "inbox");

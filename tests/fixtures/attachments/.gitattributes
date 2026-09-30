@@ -1,0 +1,2 @@
+# Stream lengths and xref offsets count exact bytes, including line endings.
+*.pdf binary

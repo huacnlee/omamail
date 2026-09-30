@@ -14,6 +14,7 @@ mod reader;
 #[cfg(test)]
 mod tests;
 mod tree;
+pub(crate) use policy::decode as decode_entities;
 pub use policy::is_public_url;
 use policy::*;
 use serde_json::{Value, json};
