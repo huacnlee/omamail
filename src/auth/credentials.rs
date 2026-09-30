@@ -104,7 +104,43 @@ pub async fn password(provider: &str, account: &str) -> Result<String, &'static 
     Ok(text_secret(&secret)?.to_owned())
 }
 
-type Tokens = std::collections::HashMap<String, (String, std::time::Instant)>;
+#[derive(Clone, Copy)]
+struct TokenExpiry {
+    monotonic: std::time::Instant,
+    wall: std::time::SystemTime,
+}
+
+impl TokenExpiry {
+    fn after(
+        lifetime: Duration,
+        monotonic: std::time::Instant,
+        wall: std::time::SystemTime,
+    ) -> Self {
+        Self {
+            monotonic: monotonic + lifetime,
+            wall: wall + lifetime,
+        }
+    }
+}
+
+type Tokens = std::collections::HashMap<String, (String, TokenExpiry)>;
+
+fn cached_token(
+    tokens: &Tokens,
+    resource: &str,
+    monotonic_now: std::time::Instant,
+    wall_now: std::time::SystemTime,
+) -> Option<String> {
+    let (token, expiry) = tokens.get(resource)?;
+    // Linux's monotonic clock stops during suspend. Wall time catches sleep
+    // and forward corrections; the monotonic deadline still bounds reuse if
+    // the wall clock moves backwards. Keep the original 60-second margin.
+    let monotonic_remaining = expiry.monotonic.checked_duration_since(monotonic_now)?;
+    let wall_remaining = expiry.wall.duration_since(wall_now).ok()?;
+    let margin = Duration::from_secs(60);
+    (monotonic_remaining > margin && wall_remaining > margin).then(|| token.clone())
+}
+
 type AccountTokens = std::sync::Arc<tokio::sync::Mutex<Tokens>>;
 static TOKENS: OnceLock<tokio::sync::Mutex<std::collections::HashMap<String, AccountTokens>>> =
     OnceLock::new();
@@ -162,10 +198,13 @@ async fn access_token_with(
     // One refresh at a time per mailbox, shared by mail and Graph resources:
     // rotating a refresh token must not race another resource's exchange.
     let mut tokens = lock.lock().await;
-    if let Some((token, expiry)) = tokens.get(resource)
-        && *expiry > std::time::Instant::now() + Duration::from_secs(60)
-    {
-        return Ok(token.clone());
+    if let Some(token) = cached_token(
+        &tokens,
+        resource,
+        std::time::Instant::now(),
+        std::time::SystemTime::now(),
+    ) {
+        return Ok(token);
     }
     let key = outlook_key(client_id, account);
     let refresh_secret = store::get(key.clone()).await.map_err(store_error)?;
@@ -223,7 +262,11 @@ async fn access_token_with(
         resource.to_owned(),
         (
             access.to_owned(),
-            std::time::Instant::now() + Duration::from_secs(lifetime),
+            TokenExpiry::after(
+                Duration::from_secs(lifetime),
+                std::time::Instant::now(),
+                std::time::SystemTime::now(),
+            ),
         ),
     );
     Ok(access.to_owned())
@@ -412,6 +455,163 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn expiry_at(
+        monotonic: std::time::Instant,
+        wall: std::time::SystemTime,
+        seconds: u64,
+    ) -> TokenExpiry {
+        TokenExpiry::after(Duration::from_secs(seconds), monotonic, wall)
+    }
+
+    #[test]
+    fn outlook_cache_expires_after_long_suspend() {
+        let monotonic = std::time::Instant::now();
+        let wall = std::time::UNIX_EPOCH + Duration::from_secs(100000);
+        let expiry = expiry_at(monotonic, wall, 3600);
+        let tokens = Tokens::from([
+            ("mail".into(), ("mail-token".into(), expiry)),
+            ("graph".into(), ("graph-token".into(), expiry)),
+        ]);
+        // Linux monotonic time advanced only while awake; wall time includes
+        // the five hours asleep. Neither resource may reuse the old token.
+        for resource in ["mail", "graph"] {
+            assert!(
+                cached_token(
+                    &tokens,
+                    resource,
+                    monotonic + Duration::from_secs(10),
+                    wall + Duration::from_secs(5 * 3600)
+                )
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn outlook_cache_handles_forward_and_backward_wall_clock_changes() {
+        let monotonic = std::time::Instant::now();
+        let wall = std::time::UNIX_EPOCH + Duration::from_secs(100000);
+        let tokens = Tokens::from([(
+            "mail".into(),
+            ("token".into(), expiry_at(monotonic, wall, 3600)),
+        )]);
+        assert!(
+            cached_token(
+                &tokens,
+                "mail",
+                monotonic + Duration::from_secs(10),
+                wall + Duration::from_secs(7200)
+            )
+            .is_none(),
+            "a forward jump expires conservatively"
+        );
+        assert!(
+            cached_token(
+                &tokens,
+                "mail",
+                monotonic + Duration::from_secs(3600),
+                wall - Duration::from_secs(7200)
+            )
+            .is_none(),
+            "a backward jump cannot extend monotonic lifetime"
+        );
+    }
+
+    #[test]
+    fn outlook_cache_preserves_each_resources_real_remaining_lifetime() {
+        let monotonic = std::time::Instant::now();
+        let wall = std::time::UNIX_EPOCH + Duration::from_secs(100000);
+        let tokens = Tokens::from([
+            (
+                "mail".into(),
+                ("mail-token".into(), expiry_at(monotonic, wall, 3600)),
+            ),
+            (
+                "graph".into(),
+                ("graph-token".into(), expiry_at(monotonic, wall, 1800)),
+            ),
+        ]);
+        // Short suspend does not force a needless refresh of still-live grants.
+        assert_eq!(
+            cached_token(
+                &tokens,
+                "mail",
+                monotonic + Duration::from_secs(10),
+                wall + Duration::from_secs(600)
+            ),
+            Some("mail-token".into())
+        );
+        assert_eq!(
+            cached_token(
+                &tokens,
+                "graph",
+                monotonic + Duration::from_secs(10),
+                wall + Duration::from_secs(600)
+            ),
+            Some("graph-token".into())
+        );
+        assert_eq!(
+            cached_token(
+                &tokens,
+                "mail",
+                monotonic + Duration::from_secs(10),
+                wall + Duration::from_secs(2000)
+            ),
+            Some("mail-token".into())
+        );
+        assert!(
+            cached_token(
+                &tokens,
+                "graph",
+                monotonic + Duration::from_secs(10),
+                wall + Duration::from_secs(2000)
+            )
+            .is_none()
+        );
+        assert!(cached_token(&tokens, "missing", monotonic, wall).is_none());
+    }
+
+    #[test]
+    fn outlook_cache_keeps_the_sixty_second_refresh_margin_for_both_clocks() {
+        let monotonic = std::time::Instant::now();
+        let wall = std::time::UNIX_EPOCH + Duration::from_secs(100000);
+        for lifetime in [0, 59, 60, 61, 3600, 86400] {
+            let expiry = expiry_at(monotonic, wall, lifetime);
+            assert_eq!(
+                expiry.monotonic.duration_since(monotonic),
+                Duration::from_secs(lifetime)
+            );
+            assert_eq!(
+                expiry.wall.duration_since(wall).unwrap(),
+                Duration::from_secs(lifetime)
+            );
+            let tokens = Tokens::from([("mail".into(), ("token".into(), expiry))]);
+            assert_eq!(
+                cached_token(&tokens, "mail", monotonic, wall).is_some(),
+                lifetime > 60
+            );
+        }
+        let tokens = Tokens::from([(
+            "mail".into(),
+            ("token".into(), expiry_at(monotonic, wall, 3600)),
+        )]);
+        assert!(
+            cached_token(&tokens, "mail", monotonic + Duration::from_secs(3540), wall).is_none()
+        );
+        assert!(
+            cached_token(&tokens, "mail", monotonic, wall + Duration::from_secs(3540)).is_none()
+        );
+        assert!(
+            cached_token(
+                &tokens,
+                "mail",
+                monotonic + Duration::from_secs(3539),
+                wall + Duration::from_secs(3539)
+            )
+            .is_some()
+        );
+    }
+
     #[tokio::test]
     async fn outlook_readonly_refresh_never_persists_rotated_credentials() {
         let key = outlook_key("synthetic", "outlook:test@example.org");
@@ -467,7 +667,11 @@ mod tests {
             "mail".into(),
             (
                 "old-token".into(),
-                std::time::Instant::now() + Duration::from_secs(3600),
+                TokenExpiry::after(
+                    Duration::from_secs(3600),
+                    std::time::Instant::now(),
+                    std::time::SystemTime::now(),
+                ),
             ),
         );
         drop(rotation);
