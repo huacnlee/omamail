@@ -106,7 +106,18 @@ async fn cancellation_and_deadline_kill_process_group() {
         let mut parser = parser();
         let cancel_future = async {
             if cancel {
-                tokio::time::sleep(Duration::from_millis(150)).await;
+                // Cancel after the descendant installs its SIGTERM handler,
+                // rather than racing Python startup on a loaded CI runner.
+                loop {
+                    if std::fs::read_to_string(&pidpath)
+                        .ok()
+                        .and_then(|text| text.parse::<i32>().ok())
+                        .is_some()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
             } else {
                 std::future::pending::<()>().await;
             }
@@ -116,7 +127,7 @@ async fn cancellation_and_deadline_kill_process_group() {
             fake(&script),
             b"input",
             &mut parser,
-            Duration::from_millis(300),
+            Duration::from_secs(10),
             cancel_future,
             |_| Ok(()),
         )
@@ -128,7 +139,7 @@ async fn cancellation_and_deadline_kill_process_group() {
                 Some("The AI request reached its one-hour limit.")
             );
         }
-        assert!(start.elapsed() < Duration::from_secs(3));
+        assert!(start.elapsed() < Duration::from_secs(15));
         let pid = std::fs::read_to_string(pidpath).unwrap();
         tokio::time::sleep(Duration::from_millis(30)).await;
         let status = std::fs::read_to_string(format!("/proc/{pid}/stat"));

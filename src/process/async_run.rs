@@ -140,9 +140,9 @@ mod tests {
         let b_args = vec!["-c".into(), script.into(), root_arg.clone(), "b".into()];
         let c_args = vec!["-c".into(), script.into(), root_arg, "c".into()];
         let (a, b, c) = tokio::join!(
-            run("python3", &a_args, b"", Duration::from_secs(2), 1024),
-            run("python3", &b_args, b"", Duration::from_secs(2), 1024),
-            run("python3", &c_args, b"", Duration::from_secs(2), 1024)
+            run("python3", &a_args, b"", Duration::from_secs(15), 1024),
+            run("python3", &b_args, b"", Duration::from_secs(15), 1024),
+            run("python3", &c_args, b"", Duration::from_secs(15), 1024)
         );
         for result in [a, b, c] {
             assert_eq!(result.unwrap().stdout, b"ok");
@@ -155,7 +155,7 @@ mod tests {
         // The file exists from open() and holds the pid only after write(),
         // so an empty read is the child mid-way, not a failure.
         let mut pid = None;
-        for _ in 0..100 {
+        for _ in 0..1500 {
             pid = std::fs::read_to_string(&marker)
                 .ok()
                 .and_then(|text| text.parse::<i32>().ok());

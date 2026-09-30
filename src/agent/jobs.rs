@@ -1223,7 +1223,7 @@ mod tests {
                 let _ = std::fs::remove_dir_all(&self.0);
             }
         }
-        let temp = Temp(std::env::temp_dir().join(format!(
+        let temp = Temp(std::env::temp_dir().canonicalize().unwrap().join(format!(
                 "omamail-head-index-{}-{}",
                 std::process::id(),
                 SystemTime::now()

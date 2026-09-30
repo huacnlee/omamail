@@ -381,7 +381,9 @@ mod tests {
     struct Temp(PathBuf);
     impl Temp {
         fn new() -> Self {
-            let p = std::env::temp_dir().join(format!(
+            // macOS temp_dir() can start with the system /var symlink. Resolve
+            // only the fixture parent; storage must still reject fixture links.
+            let p = std::env::temp_dir().canonicalize().unwrap().join(format!(
                 "omamail-agent-store-{}-{}",
                 std::process::id(),
                 SERIAL.fetch_add(1, Ordering::Relaxed)
