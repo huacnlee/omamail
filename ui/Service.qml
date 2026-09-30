@@ -110,6 +110,13 @@ Item {
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
+  readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
+  readonly property bool calendarRemindersEnabled: !settings || settings.calendarRemindersEnabled !== false
+  readonly property int calendarSnoozeMinutes: Math.max(1, Math.min(1440,
+    Math.floor(Number(settings && settings.calendarSnoozeMinutes) || 5)))
+  readonly property string calendarReminderError: calendarReminderLoader.item
+    ? calendarReminderLoader.item.lastError || calendarReminderLoader.item.inbox.lastError : ""
+  readonly property var calendarReminderInbox: calendarReminderLoader.item ? calendarReminderLoader.item.inbox : null
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
@@ -138,6 +145,8 @@ Item {
     oauthPort: 9481,
     undoSendSeconds: 10,
     unifiedCalendarView: false,
+    calendarRemindersEnabled: true,
+    calendarSnoozeMinutes: 5,
     showBarIcon: true,
     unifiedMailboxes: false,
     suggestEvents: false
@@ -387,6 +396,29 @@ Item {
     if (!hasMailto || pluginDir === "" || mailtoInstaller.running) return
     mailtoInstaller.command = [pluginDir + "/scripts/register-mailto.sh", pluginDir]
     mailtoInstaller.running = true
+  }
+
+  // Whether mailto: links and Omarchy's SUPER+SHIFT+E open Omamail. Empty
+  // until default-mail.sh has been asked; the settings page asks on open,
+  // because either half can change behind this window's back.
+  property string defaultMailClient: ""
+  property bool defaultMailClientBusy: false
+  property string defaultMailClientError: ""
+
+  function refreshDefaultMailClient() {
+    if (!hasMailto || pluginDir === "" || defaultMailClientProcess.running) return
+    defaultMailClientProcess.command = [pluginDir + "/scripts/default-mail.sh", "status"]
+    defaultMailClientProcess.running = true
+  }
+
+  function setDefaultMailClient(enabled) {
+    if (!hasMailto || pluginDir === "" || defaultMailClientProcess.running) return
+    defaultMailClientBusy = true
+    defaultMailClientError = ""
+    defaultMailClientProcess.command = enabled
+      ? [pluginDir + "/scripts/default-mail.sh", "on", pluginDir]
+      : [pluginDir + "/scripts/default-mail.sh", "off"]
+    defaultMailClientProcess.running = true
   }
 
   function applySettings(values) {
@@ -1909,6 +1941,8 @@ Item {
   readonly property string selectedResponse: reading ? reading.selectedResponse : ""
   readonly property bool canRespondToInvite: !!reading && reading.canRespondToInvite
   readonly property bool rsvpSending: !!reading && reading.rsvpSending
+  readonly property bool rsvpFallbackAvailable: !!reading && reading.rsvpFallbackAvailable === true
+  readonly property string rsvpCalendarUrl: reading ? Provider.calendarAttendanceUrl(reading.providerId, reading.accountId) : ""
   // Empty when this message offers no way off a list, which is the answer for
   // everything that is not a newsletter.
   readonly property string unsubscribeLabel: reading ? reading.unsubscribeLabel : ""
@@ -2064,6 +2098,7 @@ Item {
     if (typeof callback === "function") callback("")
   }
   function rsvp(response) { if (reading) reading.rsvp(response) }
+  function rsvpMailOnly(response) { if (reading) reading.rsvpMailOnly(response) }
   function unsubscribe() { if (reading) reading.unsubscribe() }
   function cursorOffset(cursorId, delta) {
     if (unified) return Unified.cursorOffset(unifiedMessages, cursorId, delta)
@@ -2532,6 +2567,19 @@ Item {
     Component.onCompleted: Qt.callLater(root.refreshCalendarPreview)
   }
 
+  Loader {
+    id: calendarReminderLoader
+    active: root.backendCanGoogleCalendars && root.calendarRemindersEnabled
+    sourceComponent: Component {
+      CalendarReminders {
+        service: root
+        pluginDir: root.pluginDir
+        notificationForeground: Color.foreground
+        notificationAccent: Color.accent
+      }
+    }
+  }
+
   Timer {
     interval: 600000
     repeat: true
@@ -2799,6 +2847,23 @@ Item {
     stderr: StdioCollector { waitForEnd: true }
   }
 
+  Process {
+    id: defaultMailClientProcess
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (root.defaultMailClientBusy) {
+        root.defaultMailClientBusy = false
+        if (exitCode !== 0) root.defaultMailClientError =
+          String(stderr.text || "").trim() || "Could not change the default mail client"
+        // The status read cannot start from inside this process's own exit.
+        Qt.callLater(root.refreshDefaultMailClient)
+        return
+      }
+      if (exitCode === 0) root.defaultMailClient = String(stdout.text || "").trim()
+    }
+  }
+
   Component.onCompleted: {
     barBridge = BarBridge.publish(function() {
       return {
@@ -2813,6 +2878,7 @@ Item {
     Qt.callLater(root.restoreAccountRegistry)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
+    Qt.callLater(root.refreshDefaultMailClient)
   }
 
   property var barBridge: null

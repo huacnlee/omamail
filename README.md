@@ -67,9 +67,15 @@ Choose a provider in Settings. Gmail needs a Google OAuth client; Outlook needs 
 
 See [mailbox setup](docs/MAILBOXES.md) for provider instructions and limitations, including Microsoft 365 and Proton Mail Bridge.
 
+## Make Omamail the default mail client
+
+Omarchy opens HEY's web app on `SUPER+SHIFT+E`. Choose **Settings → Default mail client → Set as default** to make Omamail open `mailto:` links, `SUPER+SHIFT+E`, and `SUPER+SHIFT+ALT+E` for a new message.
+
+The key bindings go in a clearly marked block in `~/.config/hypr/bindings.lua`; Omarchy's own files are never changed. **Undo** removes the block and leaves the file as it was.
+
 ## Open the Omarchy plugin from the keyboard
 
-Add this to `~/.config/hypr/bindings.lua`:
+To use another key, add this to `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + SHIFT + G", "Omamail", "omarchy shell shell toggle omamail '{}'")

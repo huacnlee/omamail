@@ -309,6 +309,7 @@ impl Session {
             return Box::pin(self.dispatch(target, &params)).await;
         }
         if method == "calendar.request" {
+            crate::calendar::validate(params)?;
             let token = match params["source"]["kind"].as_str() {
                 Some("google") => Some(
                     self.gmail
@@ -334,7 +335,51 @@ impl Session {
             };
             return Box::pin(crate::calendar::call(params, token.as_deref())).await;
         }
+        if method == "calendar.attendance" {
+            crate::calendar::attendance::validate(params)?;
+            let token = self
+                .gmail
+                .access_token(params["accountId"].as_str().ok_or("invalid_params")?)
+                .await?;
+            let account = params["accountId"].as_str().ok_or("invalid_params")?;
+            let mut addresses = vec![account.to_owned()];
+            if let Ok(aliases) = self
+                .gmail
+                .call("gmail.sendAs", &json!({"accountId":account}))
+                .await
+            {
+                for alias in aliases.as_array().into_iter().flatten() {
+                    if let Some(email) = alias["email"].as_str().filter(|email| {
+                        !email.is_empty()
+                            && email.len() <= 1024
+                            && !email.chars().any(char::is_control)
+                    }) {
+                        addresses.push(email.to_owned());
+                    }
+                }
+            }
+            return crate::calendar::attendance::google(params, &token, &addresses).await;
+        }
+        if method == "calendar.reminders" {
+            let params = params.clone();
+            return tokio::task::spawn_blocking(move || crate::calendar::reminders::call(&params))
+                .await
+                .map_err(|_| "calendar_reminders_unavailable")?;
+        }
         if method == "calendar.discover" {
+            if let Some(account) = params["accountId"]
+                .as_str()
+                .filter(|id| id.contains('@') && !id.contains(':'))
+            {
+                if params.as_object().is_none_or(|fields| fields.len() != 1)
+                    || account.len() > 1024
+                    || account.chars().any(|c| c.is_control() || c.is_whitespace())
+                {
+                    return Err("invalid_params");
+                }
+                let token = self.gmail.access_token(account).await?;
+                return crate::calendar::discover_google(account, &token).await;
+            }
             return Box::pin(crate::calendar::discover(params)).await;
         }
         if method == "cache.bodyPutUpload" {

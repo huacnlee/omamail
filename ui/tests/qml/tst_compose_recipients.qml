@@ -29,9 +29,11 @@ Item {
     property var sendIdentities: []
     property string accountEmail: "me@example.com"
     property string activeAccountId: "me@example.com"
+    property string composeAccountId: "me@example.com"
     property string switchedTo: ""
 
     function preferredSendAs(_recipients) { return null }
+    function accountEmailFor(id) { return id === composeAccountId ? accountEmail : "" }
     function switchTo(id) {
       switchedTo = String(id || "")
       activeAccountId = switchedTo
@@ -294,4 +296,3 @@ Item {
     }
   }
 }
-

@@ -119,7 +119,7 @@ Item {
   readonly property color borderColor: Style.normalBorderColor
   readonly property int borderWidth: Style.normalBorderWidth
   readonly property color calendarBorder: Style.normalBorderColor
-  readonly property color calendarTodayBackground: Style.selectedAccentFill
+  readonly property color calendarTodayBackground: Qt.alpha(root.accent, 0.035)
   readonly property int calendarBorderWidth: Style.normalBorderWidth
   readonly property color dim: Qt.rgba(
     foreground.r * 0.68 + background.r * 0.32,
@@ -1063,8 +1063,15 @@ Item {
     if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
     if (id === "calendarToday") return calendarView.goToday()
     if (id === "calendarWeek") return calendarView.setView("week")
+    if (id === "calendarDay") return calendarView.setView("day")
+    if (id === "calendarAgenda") return calendarView.setView("agenda")
+    if (id === "calendarUndo") return root.service.calendarController.undoLastChange()
     if (id === "calendarMonth") return calendarView.setView("month")
     if (id === "send") return compose.submit()
+    if (id === "saveEvent") return eventComposer.submit("all")
+    if (id === "guestNext") return eventComposer.moveGuestSuggestion(1)
+    if (id === "guestPrevious") return eventComposer.moveGuestSuggestion(-1)
+    if (id === "guestChoose") return eventComposer.chooseGuestSuggestion()
     if (id === "undoSend") { undoPendingSend(); return }
     if (id === "search") return searchBar.focusField()
     if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
@@ -1107,6 +1114,8 @@ Item {
   // purpose: a QQC.Popup with CloseOnEscape consumes the key itself, so a
   // branch for them here would never run. Everything else is the history.
   function goBack() {
+    if (eventComposer.guestSuggestionsOpen) { eventComposer.dismissGuestSuggestions(); return }
+    if (calendarView.dismissPreview()) return
     if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
     if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
     if (activeAssistant && activeAssistant.interrupt()) return
@@ -1361,24 +1370,15 @@ Item {
     nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
   }
 
-  // A delete asks first, and asks naming the target. Only the confirmation
-  // reaches the controller, with the event the dialog named.
+  // Confirm the named event or series before deleting it.
   function requestEventDelete(sourceId, event) {
-    if (!event) return
-    confirmDeleteDialog.openFor({
-      kind: "event",
-      name: String(event.summary || "Untitled event"),
-      message: "This event will be permanently deleted.",
-      sourceId: String(sourceId || ""),
-      event: event
-    })
+    if (event && service) confirmDeleteDialog.openFor(service.calendarController.deleteRequest(sourceId, event))
   }
-
 
   function confirmDelete(request) {
     if (!service) return
     if (request.kind === "event" && request.event) {
-      service.calendarController.deleteEvent(request.sourceId, request.event)
+      service.calendarController.confirmDelete(request)
       calendarView.closeDetail()
     }
     if (request.kind === "label" && request.labelId) service.deleteLabel(request.labelId, request.accountId)
@@ -1528,20 +1528,15 @@ Item {
         assistantCommands: !!root.activeAssistant && root.activeAssistant.commandsOpen,
         showPage: root.showPage,
         composing: root.composing,
+        eventComposing: eventComposer.opened,
+        guestSuggestions: eventComposer.guestSuggestionsOpen,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
 
-      // The context owns the keyboard. Changing it moves the focus to whatever
-      // that context types into, or parks it when the context types into
-      // nothing — so a field that has been dismissed cannot go on eating keys.
-      //
-      // Keeping these as two things is the bug this replaces: the context came
-      // from the screen while the focus stayed wherever the last click left it,
-      // and a closed compose field kept swallowing j and k. One mechanism now,
-      // and there is nothing to keep in step.
+      // Context changes move or park focus so dismissed fields cannot eat keys.
       onKeyContextChanged: Qt.callLater(applyContextFocus)
       function focusWithin(container) {
         var item = focusScope.Window.activeFocusItem
@@ -1553,6 +1548,9 @@ Item {
         if (keyContext === "assistant" || keyContext === "assistantCommands") {
           if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
           else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
+        }
+        else if (keyContext === "eventCompose" || keyContext === "eventGuests") {
+          if (!focusWithin(eventComposer)) eventComposer.takeFocus()
         }
         else if (keyContext === "compose") {
           if (focusWithin(compose)) return
@@ -1585,46 +1583,23 @@ Item {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Style.space(48)
+        height: calendarHeaderSlot.visible && calendarHeaderSlot.stacked
+          ? Style.space(60) + calendarView.toolbarHeight : Math.max(Style.space(48), calendarHeaderSlot.visible ? calendarView.toolbarHeight + Style.space(12) : 0)
         visible: !root.composing
 
-        // Kept below the header controls so their own pointer handlers win.
-        // Empty title-bar space starts the platform's native move operation.
-        // A DragHandler with no target: a MouseArea keeps the grab and feeds
-        // moves into QML while the compositor is already dragging, which is
-        // the lag of a window that trails the pointer.
-        MouseArea {
-          id: windowMoveArea
-          objectName: "app-title-bar-drag-area"
+        WindowMoveArea {
           anchors.fill: parent
           enabled: root.standaloneWindowChrome
-          acceptedButtons: Qt.NoButton
-          hoverEnabled: false
-          // Exposed for tests: a target would fight the compositor drag.
-          readonly property bool dragsTheWindow: windowMoveHandler.target === null
-
-          DragHandler {
-            id: windowMoveHandler
-            enabled: windowMoveArea.enabled
-            target: null
-            dragThreshold: 0
-            acceptedButtons: Qt.LeftButton
-            onActiveChanged: {
-              if (!active) return
-              var nativeWindow = header.Window.window
-              if (nativeWindow) nativeWindow.startSystemMove()
-            }
-          }
+          nativeWindow: header.Window.window
         }
 
-        // Identity first, controls after, with a rule between them: the mark
-        // and the name say what this window is, and everything to their right
-        // does something.
+        // App identity precedes the current view's controls.
         Row {
           id: headerLeft
           anchors.left: parent.left
           anchors.leftMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
           ActionIcon {
@@ -1712,20 +1687,29 @@ Item {
           }
         }
 
+        Item {
+          id: calendarHeaderSlot
+          objectName: "calendar-header-slot"
+          readonly property bool stacked: header.width < Style.space(1100)
+          visible: root.calendarVisible && !root.showPage && !root.composing && !calendarView.detailOpen
+          x: stacked ? Style.space(14) : headerLeft.x + headerLeft.width + Style.space(20)
+          y: stacked ? Style.space(48) : (header.height - height) / 2
+          width: Math.max(0, (stacked ? header.width - Style.space(14) : headerRight.x - Style.space(20)) - x)
+          height: calendarView.toolbarHeight
+        }
+
         Row {
           id: headerRight
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
-          // Checking for mail and writing one are both things you do to the
-          // mailbox as a whole, so they sit together. The menu is the window's
-          // own, and it stays on the left with the mark.
           IconButton {
             objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing
+            visible: !root.showPage && !root.composing && !root.calendarVisible
             iconName: "refresh"
             tooltipText: root.calendarVisible
               ? (root.service && root.service.calendarController.loading
@@ -1745,21 +1729,6 @@ Item {
               if (root.calendarVisible) calendarView.refresh()
               else if (root.service) root.service.refresh()
             }
-          }
-
-          Button {
-            objectName: "create-event-button"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && root.calendarVisible
-            text: "Create event"
-            tooltipText: "Create event"
-            foreground: root.dim
-            bordered: true
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            enabled: root.ready
-            onClicked: eventComposer.begin()
           }
 
           Button {
@@ -2205,6 +2174,7 @@ Item {
           z: 10
 
           CalendarView {
+            toolbarHost: calendarHeaderSlot
             id: calendarView
             anchors.fill: parent
             controller: root.service ? root.service.calendarController : null
@@ -2408,6 +2378,14 @@ Item {
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
               onClientSetupRequested: root.openClientSetup()
+              onCalendarSignInRequested: function(index) {
+                root.editAccount(index)
+                Qt.callLater(function() { if (root.service) root.service.signIn() })
+              }
+              onOpenCalendarRequested: {
+                root.showCalendar()
+                calendarView.refresh()
+              }
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
               onEditRequested: function(index) { root.editAccount(index) }

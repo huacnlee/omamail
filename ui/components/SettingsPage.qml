@@ -28,6 +28,8 @@ Column {
   signal clientSetupRequested()
   signal addRequested()
   signal editRequested(int index)
+  signal openCalendarRequested()
+  signal calendarSignInRequested(int index)
 
   readonly property var accounts: service ? service.accountSummaries : []
   // A separate list on purpose: accountSummaries carries live mailbox state and
@@ -44,6 +46,8 @@ Column {
     var values = [{ key: "backend", title: "Mail backend", y: backendSetup.y }]
     if (!root.service || root.service.hasTray !== false)
       values.push({ key: "bar", title: "Bar", y: barHeading.y })
+    if (root.service && root.service.hasMailto === true)
+      values.push({ key: "mailClient", title: "Default mail client", y: mailClientHeading.y })
     values.push({ key: "reading", title: "Reading", y: readingHeading.y })
     if (!root.service || root.service.hasNotifications !== false
         || String(root.service.notificationError || "") !== "")
@@ -240,7 +244,17 @@ Column {
     ensureSignatureAccount()
     ensureNameAccount()
   }
+  // The page is built with the window, before `service` is bound, and either
+  // half of the answer can change from a terminal while the window is open —
+  // so ask whenever the page comes into view, not once.
+  function refreshDefaultMailClient() {
+    if (visible && service && typeof service.refreshDefaultMailClient === "function")
+      service.refreshDefaultMailClient()
+  }
+  onServiceChanged: refreshDefaultMailClient()
+  onVisibleChanged: refreshDefaultMailClient()
   Component.onCompleted: {
+    refreshDefaultMailClient()
     renderSignaturePreview()
     ensureSignatureAccount()
     ensureNameAccount()
@@ -423,6 +437,96 @@ Column {
       foreground: root.textColor
       accent: root.accentColor
       onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
+    }
+  }
+
+  // --------------------------------------------------- default mail client
+  //
+  // Omarchy opens HEY's web app on SUPER+SHIFT+E, and mailto: links go to
+  // whatever claimed them. scripts/default-mail.sh moves both, and undoing it
+  // gives the key back to Omarchy.
+
+  Text {
+    id: mailClientHeading
+    visible: !!root.service && root.service.hasMailto === true
+    text: "DEFAULT MAIL CLIENT"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    id: mailClientRow
+    objectName: "default-mail-client-settings"
+    visible: !!root.service && root.service.hasMailto === true
+    width: parent.width
+    implicitHeight: Math.max(mailClientText.implicitHeight, mailClientButton.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    readonly property bool isDefault: !!root.service
+      && root.service.defaultMailClient === "default"
+
+    Column {
+      id: mailClientText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: mailClientButton.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: mailClientRow.isDefault
+          ? "Omamail is the default mail client"
+          : "Set up Omamail as the default mail client"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Opens mailto: links, SUPER+SHIFT+E, and SUPER+SHIFT+ALT+E for a new message."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        visible: text !== ""
+        text: root.service ? String(root.service.defaultMailClientError || "") : ""
+        color: root.urgentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    IconTextButton {
+      id: mailClientButton
+      objectName: "defaultMailClientButton"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      enabled: !!root.service && !root.service.defaultMailClientBusy
+        && root.service.defaultMailClient !== ""
+      text: mailClientRow.isDefault ? "Undo" : "Set as default"
+      tooltipText: mailClientRow.isDefault
+        ? "Give SUPER+SHIFT+E back to Omarchy's own email binding"
+        : "Make Omamail open mailto: links and SUPER+SHIFT+E"
+      foreground: root.textColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.service.setDefaultMailClient(!mailClientRow.isDefault)
     }
   }
 
@@ -1227,6 +1331,14 @@ Column {
     accentColor: root.accentColor
     urgentColor: root.urgentColor
     panelFontFamily: root.panelFontFamily
+    onAccountSetupRequested: function(index) {
+      if (index < 0) return
+      if (root.accounts[index].calendarProvider === "google") root.calendarSignInRequested(index)
+      else root.editRequested(index)
+    }
+    onClientSetupRequested: root.clientSetupRequested()
+    onAddAccountRequested: root.addRequested()
+    onOpenCalendarRequested: root.openCalendarRequested()
   }
 
   PanelSeparator {
@@ -1260,7 +1372,7 @@ Column {
       Text {
         width: parent.width
         text: root.auth && root.auth.credentialsPresent
-          ? String(root.auth.clientDescription || "Google OAuth client") : "No client yet"
+          ? "Google client configured" : "Google client setup required"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
@@ -1271,7 +1383,7 @@ Column {
         width: parent.width
         // Every mailbox signs in through this one client, which is why adding
         // an account never asks for another.
-        text: "Shared by every mailbox above"
+        text: "Advanced setup · shared by Gmail and Google Calendar accounts"
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

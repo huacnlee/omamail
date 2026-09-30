@@ -93,6 +93,11 @@ async fn read_returns_only_safe_reader_content_without_conversation_metadata() {
     assert!(!result.to_string().contains("internal-reader-key"));
     assert!(result["message"]["attachments"][0]["data"].is_null());
     assert_eq!(result["conversation"], json!([]));
+    assert_eq!(result["message"]["links"], json!([]));
+    assert_eq!(
+        result["message"]["unsubscribe"],
+        json!({"urls":[],"oneClick":false})
+    );
 
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -110,6 +115,62 @@ async fn read_returns_only_safe_reader_content_without_conversation_metadata() {
         calls[0].1["options"],
         json!({"allowRemoteImages":false,"withReader":true})
     );
+}
+
+#[tokio::test]
+async fn read_exposes_links_and_unsubscribe_metadata_without_fetching_destinations() {
+    for provider in [
+        Provider::Gmail,
+        Provider::Outlook,
+        Provider::Imap,
+        Provider::Jmap,
+        Provider::Hey,
+    ] {
+        let mut response = cached_mime_reader_fixture();
+        response["payload"]["headers"] = json!([
+            {"name":"lIsT-UnSuBsCrIbE", "value":"<https://news.example.org/leave?a=1&b=2>, <mailto:leave@example.org?subject=unsubscribe>"},
+            {"name":"List-Unsubscribe-Post", "value":"List-Unsubscribe=One-Click"},
+            {"name":"X-Private", "value":"not-exported"}
+        ]);
+        response["nativeRender"]["document"]["children"] = json!([
+            {"type":"element","name":"a","attrs":[{"name":"href","value":"https://news.example.org/leave?a=1&b=2"},{"name":"onclick","value":"not-exported"}],"children":[
+                {"type":"text","text":"Leave "},
+                {"type":"element","name":"b","children":[{"type":"text","text":"工 newsletter"}]}
+            ]},
+            {"type":"element","name":"img","attrs":[{"name":"src","value":"https://tracker.example/pixel"}],"children":[]}
+        ]);
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut request = request();
+        request.account.provider = provider;
+        let result = read_with(
+            request,
+            &RecordingAdapter {
+                open_response: response,
+                conversation_response: json!({}),
+                calls: calls.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result["message"]["links"],
+            json!([{"text":"Leave 工 newsletter","url":"https://news.example.org/leave?a=1&b=2"}])
+        );
+        assert_eq!(
+            result["message"]["unsubscribe"],
+            json!({"urls":["https://news.example.org/leave?a=1&b=2","mailto:leave@example.org?subject=unsubscribe"],"oneClick":true})
+        );
+        assert!(!result.to_string().contains("not-exported"));
+        assert!(!result.to_string().contains("tracker.example"));
+        assert_eq!(
+            result["message"]["nativeRender"]["document"]["children"][0]["attrs"],
+            json!([])
+        );
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "reader.open");
+        assert_eq!(calls[0].1["options"]["allowRemoteImages"], false);
+    }
 }
 
 #[tokio::test]

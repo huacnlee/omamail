@@ -95,6 +95,8 @@
     "public.unsubscribe",
     "calendar.request",
     "calendar.discover",
+    "calendar.attendance",
+    "calendar.reminders",
     "auth.form",
     "auth.begin",
     "auth.poll",
@@ -230,6 +232,50 @@
       "method": "providers.resolve",
       "params": {"provider": "imap", "operation": "query", "mailbox": "all"},
       "equals": {"value": "search:ALL"}
+    },
+    {
+      "name": "Reminder view cache has an independent namespace",
+      "method": "cache.calendarRead",
+      "params": {"name":"calendar-reminders"},
+      "equals": {"version":3},
+      "types": {"ranges":"object"}
+    },
+    {
+      "name": "Reminder actions validate before opening the ledger",
+      "method": "calendar.reminders",
+      "params": {"operation":"dismiss","now":1,"key":"../outside"},
+      "errorCode": -32602
+    },
+    {
+      "name": "Simultaneous reminders retain each event identity",
+      "method": "calendar.reminders",
+      "params": {
+        "operation": "poll", "now": 1400000, "lastCheck": 1300000,
+        "candidates": [
+          {"key":"contract-one","occurrence":"contract-one","eventId":"one","sourceId":"calendar","accountId":"synthetic","title":"First meeting","start":2000000,"end":5600000,"due":1400000},
+          {"key":"contract-two","occurrence":"contract-two","eventId":"two","sourceId":"calendar","accountId":"synthetic","title":"Second meeting","start":2000000,"end":5600000,"due":1400000}
+        ]
+      },
+      "equals": {"notifications.length":2,"notifications.0.eventId":"one","notifications.1.eventId":"two","notifications.1.title":"Second meeting"},
+      "types": {"notifications.0.key":"string","notifications.1.key":"string"}
+    },
+    {
+      "name": "Google attendance rejects unsupported answers before authentication",
+      "method": "calendar.attendance",
+      "params": {"accountId":"missing@example.org","uid":"invite","organizer":"organizer@example.org","response":"yes"},
+      "errorCode": -32602
+    },
+    {
+      "name": "Google attendance requires the invitation organizer before authentication",
+      "method": "calendar.attendance",
+      "params": {"accountId":"missing@example.org","uid":"invite","response":"accepted"},
+      "errorCode": -32602
+    },
+    {
+      "name": "Google calendar identity is validated before authentication",
+      "method": "calendar.request",
+      "params": {"source":{"kind":"google","accountId":"missing@example.org","calendarId":".."},"operation":"get","eventId":"event"},
+      "errorCode": -32000
     },
     {
       "name": "iCloud request refuses an external credential origin",
@@ -810,7 +856,7 @@
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": ["IMAP All mail resolves to account-wide listing", "IMAP text search includes archived mail", "Outlook text search includes archived mail", "IMAP address search includes archived mail", "IMAP account search refuses an expired work continuation", "IMAP account search refuses a malformed page cursor"]
+    "methods": ["calendar.attendance", "calendar.reminders"],
+    "cases": ["IMAP All mail resolves to account-wide listing", "IMAP text search includes archived mail", "Outlook text search includes archived mail", "IMAP address search includes archived mail", "IMAP account search refuses an expired work continuation", "IMAP account search refuses a malformed page cursor", "Google calendar identity is validated before authentication", "Google attendance rejects unsupported answers before authentication", "Google attendance requires the invitation organizer before authentication", "Reminder actions validate before opening the ledger", "Reminder view cache has an independent namespace", "Simultaneous reminders retain each event identity"]
   }
 }

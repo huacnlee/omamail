@@ -351,16 +351,16 @@ for icon in chevronLeft chevronRight chevronDown mail; do
     fail "Icons.js does not define the $icon icon"
   fi
 done
-grep -q 'text: "Week"' components/CalendarView.qml \
-  || fail "the calendar needs a week-view control"
+grep -q 'objectName: "calendar-view-selector"' components/CalendarView.qml \
+  || fail "the calendar needs a view dropdown"
 python3 - <<'PY'
 from pathlib import Path
 text = Path("components/CalendarView.qml").read_text()
-if text.index('text: "Week"') > text.index('text: "Month"'):
+if '["Day", "Week", "Month", "Agenda"]' not in text:
     raise SystemExit("test_source.sh: Week must appear before Month in the view switcher")
-if 'text: "Go to today"' not in text:
+if 'text: "Today"' not in text or 'onClicked: root.goToday()' not in text:
     raise SystemExit("test_source.sh: Today must read as a navigation action")
-today = text.index('text: "Go to today"')
+today = text.index('text: "Today"')
 right = text.index('anchors.right: parent.right')
 if today > right:
     raise SystemExit("test_source.sh: Go to today must sit with the date on the left")
@@ -431,7 +431,7 @@ text = Path("App.qml").read_text()
 header = text[text.index("id: headerRight"):text.index("PanelSeparator {", text.index("id: headerRight"))]
 if "spacing: Style.space(8)" not in header:
     raise SystemExit("test_source.sh: refresh needs breathing room before the header action")
-for name in ("create-event-button", "compose-button"):
+for name in ("compose-button",):
     marker = 'objectName: "' + name + '"'
     start = text.index(marker)
     opening = text.rfind("\n          Button {", 0, start)
@@ -456,7 +456,8 @@ app = Path("App.qml").read_text()
 sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
 if "!root.calendarVisible" in sidebar_use or "calendarSelected: root.calendarVisible" not in sidebar_use:
     raise SystemExit("test_source.sh: the mailbox sidebar must remain visible and select Calendar")
-header = app[app.index("id: headerRight"):app.index("// mailbox as a whole")]
+header_start = app.index("id: headerRight")
+header = app[header_start:app.index("PanelSeparator {", header_start)]
 if 'iconName: root.calendarVisible ? "mail" : "calendar"' in header:
     raise SystemExit("test_source.sh: Calendar navigation belongs in the sidebar, not the header")
 
@@ -477,12 +478,12 @@ if "calendarTodayBackgroundColor: root.calendarTodayBackground" not in app:
     raise SystemExit("test_source.sh: App must pass the system Today background token")
 if "readonly property color calendarBorder: Style.normalBorderColor" not in app:
     raise SystemExit("test_source.sh: calendar borders must originate from the system border token")
-if "readonly property color calendarTodayBackground: Style.selectedAccentFill" not in app:
+if "readonly property color calendarTodayBackground: Qt.alpha(root.accent, 0.035)" not in app:
     raise SystemExit("test_source.sh: Today must use the quieter system accent fill token")
 if "calendarBorderWidth: root.calendarBorderWidth" not in app:
     raise SystemExit("test_source.sh: App must pass the system calendar border width")
-if "border.color: root.calendarBorderColor" not in calendar or "border.width: root.calendarBorderWidth" not in calendar:
-    raise SystemExit("test_source.sh: month cells must consume the themed calendar border")
+if "color: Qt.alpha(root.calendarBorderColor, 0.25)" not in calendar or "width: root.calendarBorderWidth" not in calendar or "height: root.calendarBorderWidth" not in calendar:
+    raise SystemExit("test_source.sh: month dividers must consume the themed calendar border")
 if "? root.calendarTodayBackgroundColor" not in calendar:
     raise SystemExit("test_source.sh: the Month Today cell must consume the themed background")
 if ("calendarBorderColor: root.calendarBorderColor" not in calendar
@@ -527,7 +528,7 @@ service = Path("Service.qml").read_text()
 if "readonly property var pendingSendHost" not in service:
     raise SystemExit("test_source.sh: an undoable send must remain reachable across accounts")
 PY
-grep -q 'allDayEventsOnDay' components/WeekCalendarView.qml \
+grep -q 'Calendar.displayInAllDayLane' components/WeekCalendarView.qml \
   || fail "all-day events must have a pinned week-view lane"
 grep -q 'signal createAt' components/WeekCalendarView.qml \
   || fail "empty week slots must start event creation"
@@ -581,9 +582,9 @@ grep -q 'leaving.kind === "calendarDetail"' App.qml \
 if grep -q 'Shortcut { sequence: "Escape"' components/CalendarEventComposer.qml; then
   fail "event creation must use the central Escape route, not an ambiguous duplicate"
 fi
-grep -q 'text: "Make recurring"' components/CalendarEventComposer.qml \
+grep -q 'objectName: "event-repeat-selector"' components/CalendarEventComposer.qml \
   || fail "event creation needs an optional recurrence section"
-grep -q 'text: "Add a calendar"' components/CalendarSettings.qml \
+grep -q 'text: "Connect a CalDAV calendar\.\.\."' components/CalendarSettings.qml \
   || fail "settings must let a user add a calendar"
 grep -q 'placeholderText: "Calendar name"' components/CalendarSettings.qml \
   || fail "calendar setup needs a name field"

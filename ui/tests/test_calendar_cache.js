@@ -6,6 +6,19 @@ const first = { uid: "one", sourceId: "google:a@example.com", start: { ms: 100 }
 const second = { uid: "two", sourceId: "caldav:work", start: { ms: 300 }, end: { ms: 400 } }
 let store = cache.putRange(cache.emptyStore(), "a@example.com", 0, 1000, [first, second], 10)
 
+{
+  const hidden = cache.putRange(store, "a@example.com", 0, 1000, [first], 20, [first.sourceId])
+  assert.strictEqual(cache.eventsFor(hidden, "a@example.com", 0, 1000, [second.sourceId]).length, 1,
+    "hiding a calendar must not erase its cached events")
+  assert.strictEqual(cache.eventsFor(hidden, "a@example.com", 250, 750, [second.sourceId]).length, 1,
+    "an overlapping cached range remains useful while offline")
+  assert.strictEqual(cache.eventsFor(hidden, "different@example.com", 250, 750, [second.sourceId]).length, 0,
+    "overlap fallback must retain the account boundary")
+  const deleted = cache.putRange(hidden, "a@example.com", 0, 1000, [], 30, [second.sourceId])
+  assert.strictEqual(cache.eventsFor(deleted, "a@example.com", 0, 1000, [second.sourceId]).length, 0,
+    "a successful empty refresh must remove deleted events")
+}
+
 assert.deepStrictEqual(JSON.parse(JSON.stringify(
   cache.eventsFor(store, "a@example.com", 0, 1000, ["google:a@example.com"]))), [first])
 assert.deepStrictEqual(JSON.parse(JSON.stringify(

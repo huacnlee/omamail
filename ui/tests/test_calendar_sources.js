@@ -161,6 +161,22 @@ assert.strictEqual(sources.calendarEditorUrl({ sources: [{
   kind: "google", enabled: true, accountId: "me@gmail.com"
 }] }), "https://calendar.google.com/calendar/u/0/r/eventedit")
 
+// Google visibility is seeded once, while future discovery refreshes access
+// and retains the local choice. A discovered primary must not become writable
+// merely because the account list is reconciled.
+{
+  const discovery = { provider: "google", accountId: "me@example.org", calendars: [
+    {sourceId: "google:me@example.org", calendarId: "me@example.org", name: "Primary", selected: true, readOnly: true},
+    {sourceId: "google:shared", calendarId: "team@example.org", name: "Team", selected: false, hidden: true}
+  ] }
+  const first = sources.applyDiscovery(sources.emptyList(), discovery)
+  assert.strictEqual(first.sources[0].enabled, true)
+  assert.strictEqual(first.sources[1].enabled, false)
+  const chosen = sources.setEnabled(first, "google:shared", true)
+  const again = sources.applyDiscovery(chosen, discovery)
+  assert.strictEqual(again.sources[1].enabled, true)
+  assert.strictEqual(again.sources[0].readOnly, true)
+}
 console.log("test_calendar_sources.js ok")
 
 assert.strictEqual(sources.sameUrl("https://CALDAV.ICLOUD.COM/Work/", "https://caldav.icloud.com/Work"), true)

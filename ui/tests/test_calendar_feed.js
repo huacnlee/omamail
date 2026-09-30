@@ -2,6 +2,64 @@ const assert = require("assert")
 const { load } = require("./load")
 const feed = load("calendar/Calendar.js")
 
+{
+  const events = [
+    {uid:"ended",start:{ms:100},end:{ms:200}},
+    {uid:"ongoing",start:{ms:150},end:{ms:250}},
+    {uid:"future",start:{ms:300},end:{ms:400}},
+    {uid:"all-day",start:{ms:0,allDay:true},end:{ms:1000,allDay:true}}
+  ]
+  assert.deepStrictEqual(Array.from(feed.agendaEvents(events,200),e=>e.uid),["all-day","ongoing","future"])
+  assert.deepStrictEqual(Array.from(feed.agendaEvents(events,250),e=>e.uid),["all-day","future"])
+  assert.strictEqual(feed.agendaEvents(events,1000).length,0)
+}
+
+{
+  const event = (id,start,end) => ({uid:id,sourceId:"calendar",start:{ms:start},end:{ms:end}})
+  const layout = feed.timedLayout([event("a",10,40),event("b",15,25),event("c",20,30),event("d",40,50)],{startMs:0,endMs:100})
+  assert.deepStrictEqual(Array.from(layout,row=>row.columns),[3,3,3,1])
+  for (let i=0;i<layout.length;i++) for (let j=i+1;j<layout.length;j++) {
+    if (layout[i].start < layout[j].end && layout[j].start < layout[i].end)
+      assert.notStrictEqual(layout[i].column,layout[j].column)
+  }
+  const resized = feed.gestureRange(event("resize",Date.UTC(2026,9,1,10),Date.UTC(2026,9,1,10,37)),0,19,"end")
+  assert.strictEqual(resized.end,Date.UTC(2026,9,1,11))
+  const guests = feed.attendeeRows({attendees:[{displayName:"<img src=x>",email:"a@example.test",responseStatus:"accepted"},{email:"b@example.test",partstat:"DECLINED"}]})
+  assert.strictEqual(guests[0].name,"<img src=x>")
+  assert.strictEqual(guests[0].label,"Accepted")
+  assert.strictEqual(guests[1].label,"Declined")
+}
+
+// Shared copies and occurrences cannot share a selection key.
+assert.notStrictEqual(feed.eventKey({sourceId:"one",googleId:"instance"}),
+  feed.eventKey({sourceId:"two",googleId:"instance"}))
+assert.notStrictEqual(feed.eventKey({sourceId:"one",googleId:"first",uid:"series"}),
+  feed.eventKey({sourceId:"one",googleId:"second",uid:"series"}))
+{
+  const source = {kind:"google",accountId:"me",canCreateMeet:true,timeZone:"Europe/Paris"}
+  const body = {start:{dateTime:"2026-10-01T08:00:00Z"},end:{dateTime:"2026-10-01T09:00:00Z"}}
+  const options = feed.googleOptions(body,{createMeet:true,conferenceRequestId:"logical-request"},source,null)
+  assert.strictEqual(options.body.start.timeZone,"Europe/Paris")
+  assert.strictEqual(options.body.conferenceData.createRequest.requestId,"logical-request")
+  assert.strictEqual(body.conferenceData,undefined)
+  const edit = feed.googleOptions(body,{createMeet:true},source,{conferenceData:{conferenceId:"existing"}})
+  assert.strictEqual(edit.body.conferenceData,undefined,"a normal patch must preserve the existing conference")
+  assert.strictEqual(feed.googleOptions(body,{createMeet:true},source,null).ok,false)
+  const recurring = feed.googleOptions(body,{changeRecurrence:true,recurrence:{enabled:true,frequency:"WEEKLY",interval:2,count:4}},source,
+    {recurrenceLines:["RRULE:FREQ=DAILY", "EXDATE:20261001T080000Z"]})
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(recurring.body.recurrence)), ["RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4", "EXDATE:20261001T080000Z"])
+  assert.strictEqual(feed.googleOptions(body,{changeRecurrence:true},source,{recurringEventId:"parent"}).ok,false)
+  const guests = feed.googleOptions(body,{guestEmails:"person@example.org, new@example.org",reminderMode:"none"},source,
+    {attendees:[{email:"person@example.org",responseStatus:"accepted",optional:true}]})
+  assert.strictEqual(guests.body.attendees[0].responseStatus,"accepted")
+  assert.strictEqual(guests.body.attendees[0].optional,true)
+  assert.strictEqual(guests.body.reminders.useDefault,false)
+  assert.strictEqual(guests.body.reminders.overrides.length,0)
+  const event = {eventType:"default",organizer:{self:true}}
+  assert.strictEqual(feed.transferRefusal(source,{kind:"google",accountId:"other"},event),"Choose a calendar in the same account")
+  assert.strictEqual(feed.transferRefusal(source,source,{...event,recurringEventId:"parent"}),"Open the entire series before changing its calendar")
+}
+
 assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
   error: {
     code: 403,
@@ -28,7 +86,7 @@ assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
 assert.strictEqual(feed.googleResponseError(500, "not json"),
   "Google Calendar returned HTTP 500")
 assert.strictEqual(feed.nativeRequestError("google"),
-  "Google calendar request failed. Sign in again and check Calendar access")
+  "Google could not complete this calendar request. Refresh the event and try again")
 
 const week = feed.weekDays(new Date(2026, 7, 23).getTime(), 1)
 assert.strictEqual(week.length, 7)
@@ -276,6 +334,102 @@ assert.strictEqual(days[41].isoDate, "2026-09-06")
 assert.strictEqual(days[5].inMonth, true)
 assert.strictEqual(days[0].inMonth, false)
 
+assert.strictEqual(feed.monthGridDays(2026, 8, 1).length, 35)
+assert.strictEqual(feed.monthGridDays(2026, 7, 1).length, 42)
+for (let year = 2024; year <= 2028; year++) {
+  for (let month = 0; month < 12; month++) {
+    const grid = feed.monthGridDays(year, month, 1)
+    assert.ok(grid.length === 35 || grid.length === 42)
+    const inMonth = grid.filter(day => day.inMonth)
+    assert.strictEqual(inMonth.length, new Date(year, month + 1, 0).getDate())
+    assert.strictEqual(inMonth[0].day, 1)
+    assert.ok(grid.length === 35 || grid.slice(35).some(day => day.inMonth))
+  }
+}
+// Fill the available rows; reserve the overflow label only when it is needed.
+assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 4), 4)
+assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 5), 3)
+assert.strictEqual(feed.monthEventLimit(10, 23, 2, 16, 5), 0)
+
+{
+  const google = { kind: "google" }
+  const labels = request => Array.from(request.choices, choice => choice.value + ":" + choice.label)
+  const plain = feed.deleteRequest({ summary: "Dentist" }, google, true)
+  assert.strictEqual(plain.name, "Dentist")
+  assert.deepStrictEqual(labels(plain), ["all:Delete"])
+  const guests = { summary: "Review", organizer: { self: true },
+    attendees: [{ self: true }, { email: "sam@example.test" }] }
+  assert.deepStrictEqual(labels(feed.deleteRequest(guests, google, true)),
+    ["none:Delete without email", "all:Delete and notify guests"])
+  // Someone else's meeting sends nothing from here, and no other provider can
+  // be asked not to notify.
+  assert.deepStrictEqual(labels(feed.deleteRequest(Object.assign({}, guests, { organizer: { self: false } }), google, true)),
+    ["all:Delete"])
+  assert.deepStrictEqual(labels(feed.deleteRequest(guests, { kind: "microsoft" }, true)), ["all:Delete"])
+  const occurrence = Object.assign({ recurringEventId: "series" }, guests)
+  assert.deepStrictEqual(labels(feed.deleteRequest(occurrence, google, true)),
+    ["series:Delete series", "none:Delete occurrence without email", "all:Delete occurrence and notify guests"])
+  // A backend that cannot read the series offers only the occurrence.
+  assert.deepStrictEqual(labels(feed.deleteRequest({ summary: "Standup", recurringEventId: "series" }, google, false)),
+    ["all:Delete occurrence"])
+  assert.ok(feed.deleteRequest({ recurrence: ["RRULE:FREQ=WEEKLY"] }, google, true).message.indexOf("Every occurrence") === 0)
+  assert.strictEqual(feed.deleteRequest(null, null, false).name, "Untitled event")
+}
+
+function spanFixture(id, start, end, allDay = false) {
+  return {uid:id,sourceId:"synthetic",summary:"Same title",start:{ms:start.getTime(),allDay},end:{ms:end.getTime(),allDay}}
+}
+const holiday = spanFixture("holiday", new Date(2026,7,29,12), new Date(2026,8,7,12))
+const overlap = spanFixture("overlap", new Date(2026,8,2), new Date(2026,8,5), true)
+const dailyOne = spanFixture("daily-one", new Date(2026,8,1,9), new Date(2026,8,1,10))
+const dailyTwo = spanFixture("daily-two", new Date(2026,8,2,9), new Date(2026,8,2,10))
+const layout = feed.monthSpanLayout([dailyOne, overlap, dailyTwo, holiday], feed.monthGridDays(2026,8,1))
+assert.strictEqual(layout.segments.length, 3)
+assert.strictEqual(layout.segments[0].event, holiday)
+assert.strictEqual(layout.segments[0].startColumn, 0)
+assert.strictEqual(layout.segments[0].endColumn, 6)
+assert.strictEqual(layout.segments[0].continuesBefore, true)
+assert.strictEqual(layout.segments[0].continuesAfter, true)
+assert.strictEqual(layout.segments[1].lane, 1)
+assert.strictEqual(layout.segments[1].endColumn, 4, "exclusive midnight does not occupy Saturday")
+assert.strictEqual(layout.segments[2].week, 1)
+assert.strictEqual(layout.segments[2].endColumn, 0)
+assert.strictEqual(layout.segments[2].continuesBefore, true)
+assert.strictEqual(layout.segments[2].continuesAfter, false)
+const midnightEnd = spanFixture("midnight", new Date(2026,8,1), new Date(2026,8,2))
+assert.strictEqual(feed.spansMultipleDays(midnightEnd), false)
+assert.strictEqual(feed.displayInAllDayLane(midnightEnd), true)
+const overnight = spanFixture("overnight", new Date(2026,8,1,23), new Date(2026,8,2,1))
+assert.strictEqual(feed.displayInAllDayLane(overnight), false)
+assert.strictEqual(feed.displayInAllDayLane(holiday), true)
+const travelDay = feed.weekDays(new Date(2026,8,2).getTime(),1)[2]
+assert.strictEqual(feed.allDayEventsOnDay([holiday,dailyTwo],travelDay)[0],holiday)
+assert.strictEqual(feed.timedLayout([holiday,dailyTwo],travelDay).length,1)
+assert.strictEqual(holiday.start.allDay,false,"display promotion must not mutate timed events")
+const originalTZ = process.env.TZ
+process.env.TZ = "Europe/Berlin"
+for (const [startDate, endDate, offset, expectedStart, expectedEnd] of [
+  [[2026,9,24], [2026,9,25], 1, "2026-10-25", "2026-10-26"],
+  [[2026,2,29], [2026,2,30], 1, "2026-03-30", "2026-03-31"],
+  [[2026,9,23], [2026,9,25], 1, "2026-10-24", "2026-10-26"],
+  [[2026,2,30], [2026,3,1], -1, "2026-03-29", "2026-03-31"]
+]) {
+  const event = spanFixture("all-day-move", new Date(...startDate), new Date(...endDate), true)
+  const moved = feed.gestureRange(event, offset, 0, "")
+  const patch = feed.updateEvent(feed.rescheduleFields(event, moved.start, moved.end), event, 1)
+  assert.strictEqual(patch.google.start.date, expectedStart)
+  assert.strictEqual(patch.google.end.date, expectedEnd)
+  assert.strictEqual(new Date(moved.start).getHours(), 0)
+  assert.strictEqual(new Date(moved.end).getHours(), 0)
+}
+for (const date of [[2026,2,29],[2026,9,25]]) {
+  const start = new Date(...date)
+  const end = new Date(start.getTime()); end.setDate(end.getDate()+1)
+  assert.strictEqual(feed.displayInAllDayLane(spanFixture("dst",start,end)),true)
+}
+if (originalTZ === undefined) delete process.env.TZ
+else process.env.TZ = originalTZ
+
 const google = feed.eventsFromGoogle({ items: [{
   id: "g1",
   summary: "Google event",
@@ -371,6 +525,28 @@ assert.strictEqual(feed.updateEvent({ title: "x", startMs: 1, endMs: 2 }, {}, 1)
 assert.strictEqual(feed.updateEvent({ title: "", startMs: 1, endMs: 2 },
   { uid: "u" }, 1).error, "Add an event title")
 
+const convertedAllDay = feed.updateEvent({title:"Converted",allDay:true,
+  startMs:new Date(2026,8,9).getTime(),endMs:new Date(2026,8,11).getTime()},
+  {uid:"convert",start:{allDay:false}},1)
+assert.deepStrictEqual(JSON.parse(JSON.stringify(convertedAllDay.google.start)),
+  {date:"2026-09-09",dateTime:null,timeZone:null})
+assert.deepStrictEqual(JSON.parse(JSON.stringify(convertedAllDay.google.end)),
+  {date:"2026-09-11",dateTime:null,timeZone:null})
+const convertedTimed = feed.updateEvent({title:"Converted",allDay:false,
+  startMs:Date.UTC(2026,8,9,10),endMs:Date.UTC(2026,8,9,11)},
+  {uid:"convert",start:{allDay:true}},1)
+assert.strictEqual(convertedTimed.google.start.date,null)
+assert.strictEqual(convertedTimed.google.end.date,null)
+assert.strictEqual(convertedTimed.google.start.dateTime,"2026-09-09T10:00:00.000Z")
+assert.strictEqual(feed.googleEventPatch({title:"Undo",start:1,end:2},false).start.date,null)
+assert.strictEqual(feed.editorDateRange("2026-09-09","11:15","2026-09-10","05:15",false).ok,true)
+assert.strictEqual(feed.editorDateRange("2026-09-09","11:15","2026-09-09","05:15",false).ok,false)
+assert.strictEqual(feed.editorDateRange("2026-09-09","11:15","2026-09-09","11:15",false).ok,false)
+assert.strictEqual(feed.editorDateRange("2026-02-30","11:15","2026-03-02","11:15",false).ok,false)
+assert.strictEqual(feed.editorDateRange("2026-09-09","24:15","2026-09-10","11:15",false).ok,false)
+assert.strictEqual(feed.editorDateRange("2026-09-09","","2026-09-09","",true).ok,true)
+assert.strictEqual(feed.editorDateRange("2026-09-10","","2026-09-09","",true).ok,false)
+
 // A CalDAV update replaces the whole resource, so fields this editor does not
 // draw must survive a change to the ones it does. In particular, editing the
 // title must not remove the organiser, attendees, alarms, timezone rules or a
@@ -389,6 +565,12 @@ const preservedXml = [
   '</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>'
 ].join("")
 const preservedEvent = feed.eventsFromCaldav(preservedXml, "work")[0]
+for (const kind of ["microsoft", "caldav", "icloud"]) {
+  assert.strictEqual(feed.writeRefusal({kind}, preservedEvent), "", "legacy editing remains available")
+  assert.strictEqual(feed.writeRefusal({kind}, preservedEvent, "reschedule"),
+    "Open the event editor to change its time", "new gestures are Google-only")
+}
+assert.strictEqual(feed.writeRefusal({kind:"google"}, {googleId:"event"}, "reschedule"), "")
 const preservedUpdate = feed.updateEvent({
   title: "After", startMs: Date.UTC(2026, 7, 24, 8, 0),
   endMs: Date.UTC(2026, 7, 24, 9, 0), location: "", description: ""
@@ -425,6 +607,8 @@ assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
   "Recurring CalDAV events can only be changed in a full calendar client")
 assert.strictEqual(feed.writeRefusal({ kind: "caldav" }, null), "")
 assert.strictEqual(feed.writeRefusal({ kind: "google" }, null), "")
+assert.match(feed.writeRefusal({ kind: "google" }, { eventType: "fromGmail" }), /created from Gmail/)
+assert.strictEqual(feed.writeRefusal({ kind: "google" }, { eventType: "fromGmail" }, "delete"), "")
 assert.strictEqual(feed.writeRefusal({ kind: "google" },
   { recurrenceRule: "FREQ=WEEKLY" }), "")
 

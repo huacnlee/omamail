@@ -309,7 +309,7 @@ Item {
       wait(20)
       compare(composer.visible, true)
       compare(app.navKinds.join(","), "list,eventComposer")
-      compare(named(app, "key-router").context, "compose")
+      compare(named(app, "key-router").context, "eventCompose")
       app.back()
       compare(composer.opened, false)
       compare(app.composing, false)

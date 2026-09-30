@@ -50,7 +50,7 @@ pub(super) fn call_at(root: &Path, method: &str, params: &Value) -> Result<Value
     let empty = || normalize(&Value::Null);
     let name = if calendar {
         let name = field(params, "name")?;
-        if !matches!(name, "calendar" | "calendar-bar") {
+        if !matches!(name, "calendar" | "calendar-bar" | "calendar-reminders") {
             return Err("cache_invalid_input");
         }
         format!("{name}.json")

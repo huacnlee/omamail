@@ -41,6 +41,7 @@ readonly property string keyContext:
 | `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the mailbox cursor and immediately open its message; `Shift+J`/`Shift+K` scroll the message body |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
+| `eventCompose` | Creating or editing an event | `Enter` saves and closes after success; `Escape` closes; modified keys remain available |
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Choosing an AI slash command | `Up`, `Down`, `Return`, `Enter`, `Escape`, and the modified keys |
 | `page` | Setup or settings | `Escape`, and the modified keys |
@@ -79,7 +80,7 @@ event is left alone, preserving normal typing, IME input and line breaks.
 context.
 
 **A text-entry context binds no bare key but `Escape`, except AI send and command
-selection described above.**
+selection described above and Enter to save in the single-line event editor.**
 There is no "is the user typing" question anywhere in the code, because there is
 nothing left for it to answer: if a bare letter is not bound in `compose`, it
 cannot fire there, and the field gets it the way any other character arrives.
@@ -147,8 +148,15 @@ used to exist, and they had.
 | `calendarNextPeriod` | `l`, `Right` | calendar | Next week or month |
 | `calendarToday` | `t` | calendar | Go to today |
 | `calendarWeek` | `w` | calendar | Show week view |
+| `calendarDay` | `d` | calendar | Show day view |
+| `calendarAgenda` | `a` | calendar | Show agenda view |
+| `calendarUndo` | `u` | calendar | Undo the last event change |
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
+| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose | Save and close the event |
+| `guestNext` | `Down` | eventGuests | Next guest suggestion |
+| `guestPrevious` | `Up` | eventGuests | Previous guest suggestion |
+| `guestChoose` | `Return`, `Enter` | eventGuests | Choose guest suggestion |
 | `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9` | mail | Go to that mailbox |
@@ -184,6 +192,8 @@ In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with wh
 The delayed-send toast does not create a keyboard context. The current screen keeps its normal keys while the toast is visible. A new draft, reply, or forward can open during the delay. The send button waits for the queued message, but every draft field remains editable. The toast button restores the queued message. `Alt+Z` does the same from every context. `Ctrl+Z` remains text undo while composing or searching. If another compose is open, Omamail saves it to the provider's Drafts storage before dropping its in-memory fallback. A failed save keeps that fallback.
 
 Back and `Escape` close an untouched composition immediately without saving, including a prefilled reply, forward, or existing provider draft. After a user edit, they open a modal with Cancel, Discard, and Save draft. Save draft initially has focus; Tab and Shift+Tab cycle through the buttons, and Enter activates the focused choice. Escape inside the popup cancels and returns to composing. A failed save restores the changed draft. The composer's bottom Discard button exits immediately.
+
+The event and label delete confirmation initially focuses Delete. Tab and Shift+Tab cycle between Delete and Cancel; Return or Enter activates the focused button. Escape cancels.
 
 ## Why the rail is numbered and not chorded
 

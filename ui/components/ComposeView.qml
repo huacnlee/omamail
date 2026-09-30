@@ -446,24 +446,21 @@ DropArea {
     fromMenu.y = y
   }
 
-  // Everyone on the original except this mailbox: replying to yourself is
-  // never what reply-all was for.
-  //
-  // "This mailbox" is the one the draft is written from, not the one on
-  // screen. Reading the active account's address dropped the wrong name: a
-  // reply owned by B, to a message addressed to both, kept B on the Cc and
-  // removed A — copying the sender and losing a real recipient.
-  function otherRecipients(summary) {
-    if (!summary) return ""
-    var mine = String(root.service
-      ? root.service.accountEmailFor(root.accountId) : "").toLowerCase()
-    var list = Array.isArray(summary.to) ? summary.to : []
-    var kept = []
-    for (var i = 0; i < list.length; i++) {
-      if (String(list[i].email || "").toLowerCase() === mine) continue
-      kept.push(list[i].email)
+  function ownReplyAddresses() {
+    if (!root.service) return []
+    var own = [{email: root.service.accountEmailFor(root.accountId)}]
+    var sources = Senders.asList(root.service.senderSources)
+    for (var i = 0; i < sources.length; i++) {
+      if (String(sources[i].id || "") !== root.accountId) continue
+      own.push({email: sources[i].email})
+      own = own.concat(Senders.asList(sources[i].aliases))
     }
-    return kept.join(", ")
+    var identities = Senders.asList(root.service.sendIdentities)
+    for (var j = 0; j < identities.length; j++) {
+      if (String(identities[j].accountId || "") === root.accountId)
+        own.push(identities[j])
+    }
+    return own
   }
 
   function updateRecipientSuggestions() {
@@ -554,8 +551,6 @@ DropArea {
     var quoted = ""
 
     if (summary && mode !== "new") {
-      var replyTo = summary.replyTo && summary.replyTo.email
-        ? summary.replyTo.email : summary.from.email
       threadId = summary.threadId
       inReplyTo = summary.messageId
       // Cc as well as To: an alias is just as often the address a thread
@@ -571,12 +566,12 @@ DropArea {
         originalAttachments = Array.isArray(attachments) ? attachments.slice() : []
         if (originalAttachments.length > 0) loadForwardAttachments()
       } else {
-        toField.text = replyTo
+        var recipients = Recipients.replyFields(summary, mode, ownReplyAddresses())
+        toField.text = recipients.to
+        ccField.text = recipients.cc
+        ccVisible = ccField.text !== ""
+        if (recipients.outgoing) replyRecipients = [summary.from]
         subjectField.text = String(summary.subject || "")
-        if (mode === "replyAll") {
-          ccField.text = otherRecipients(summary)
-          ccVisible = ccField.text !== ""
-        }
       }
       pendingQuoteSummary = summary
       pendingQuoteText = String(bodyText || "")

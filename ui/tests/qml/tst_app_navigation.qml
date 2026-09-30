@@ -582,7 +582,7 @@ Item {
       waitForRendering(app)
     }
 
-    function test_header_creation_actions_keep_their_labels() {
+    function test_header_shows_compose_for_mail_and_view_selector_for_calendar() {
       var compose = named(app, "compose-button")
       verify(compose && compose.visible)
       compare(compose.text, "Compose")
@@ -590,10 +590,14 @@ Item {
 
       app.showCalendar()
       waitForRendering(app)
-      var createEvent = named(app, "create-event-button")
-      verify(createEvent && createEvent.visible)
-      compare(createEvent.text, "Create event")
-      compare(typeof createEvent.iconName, "undefined")
+      verify(!compose.visible)
+      compare(named(app, "create-event-button"), null)
+      var selector = named(app, "calendar-view-selector")
+      verify(selector && selector.visible)
+      app.runShortcut("calendarWeek")
+      compare(selector.currentText, "Week (w)")
+      app.runShortcut("calendarDay")
+      compare(selector.currentText, "Day (d)")
     }
     function test_status_error_opens_external_diagnosis_once() {
       mailService.lastError = "Could not confirm AI started. Check the conversation before retrying."

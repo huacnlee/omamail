@@ -13,6 +13,7 @@ Item {
     property var nextResult: ({ body: "{}", status: 200 })
     property var nextError: null
     property bool backendCanDiscoverCalendars: true
+    property bool backendCanGoogleCalendars: false
     property var discoveryCallback: null
     property var credentialWrites: []
     property var configWrites: []
@@ -70,6 +71,131 @@ Item {
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
+    function test_settings_can_target_another_accounts_calendar() {
+      controller.accountId = "one@gmail.com"
+      verify(controller.findSource("google:two@gmail.com") === null,
+        "event writes remain scoped to the current mailbox")
+      controller.setReminderPolicy("google:two@gmail.com", false, -1)
+      compare(mailService.configWrites.length, 1)
+      var saved = JSON.parse(mailService.configWrites[0].payload).sources.filter(function(s) {
+        return s.id === "google:two@gmail.com"
+      })[0]
+      compare(saved.remindersEnabled, false)
+      mailService.configCallback(true, "")
+      controller.setDefaultCalendar("google:two@gmail.com")
+      compare(mailService.configWrites.length, 2)
+      saved = JSON.parse(mailService.configWrites[1].payload).sources.filter(function(s) {
+        return s.id === "google:two@gmail.com"
+      })[0]
+      compare(saved.preferred, true)
+      mailService.configCallback(true, "")
+    }
+
+    function test_legacy_sources_cannot_enter_reminder_polling_or_settings() {
+      var kinds = ["microsoft", "icloud", "caldav", "hey"]
+      for (var i = 0; i < kinds.length; i++) {
+        var source = {id:"legacy",kind:kinds[i],enabled:true,remindersEnabled:true,reminderMinutes:10}
+        controller.reminderMode = false
+        compare(controller.sourceIncluded(source), true)
+        controller.reminderMode = true
+        compare(controller.sourceIncluded(source), false)
+        controller.sourceList = {version:1,sources:[source]}
+        var writes = mailService.configWrites.length
+        controller.setReminderPolicy("legacy", true, 5)
+        compare(mailService.configWrites.length, writes)
+      }
+      compare(controller.sourceIncluded({kind:"google",enabled:false,remindersEnabled:true}), true)
+      controller.reminderMode = false
+    }
+
+    function test_confirmed_delete_carries_the_chosen_consequence() {
+      mailService.backendCanGoogleCalendars = true
+      controller.accountId = "one@gmail.com"
+      controller.sourceList = {version:1,sources:[
+        {id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary",enabled:true}]}
+      var event = {sourceId:"google:one@gmail.com",googleId:"meeting",recurringEventId:"series",
+        summary:"Review",eventType:"default",etag:"e1",organizer:{self:true},
+        attendees:[{self:true},{email:"sam@example.test"}]}
+      var request = controller.deleteRequest("google:one@gmail.com", event)
+      compare(request.choices.length, 3)
+      request.choice = "none"
+      verify(controller.confirmDelete(request))
+      compare(mailService.requests[mailService.requests.length - 1].params.operation, "delete")
+      compare(mailService.requests[mailService.requests.length - 1].params.sendUpdates, "none")
+      compare(event.deleteSendUpdates, undefined, "the event on screen is not changed")
+      controller.eventWriting = false
+      mailService.requests = []
+      mailService.nextResult = {body:JSON.stringify({id:"series",etag:"s1",summary:"Review",
+        recurrence:["RRULE:FREQ=WEEKLY"],start:{dateTime:"2026-10-01T10:00:00Z"},end:{dateTime:"2026-10-01T11:00:00Z"},
+        organizer:{self:true}})}
+      request.choice = "series"
+      verify(controller.confirmDelete(request))
+      compare(mailService.requests[0].params.operation, "get")
+      compare(mailService.requests[0].params.eventId, "series")
+      compare(mailService.requests[1].params.operation, "delete")
+      compare(mailService.requests[1].params.eventId, "series")
+      controller.eventWriting = false
+    }
+
+    function test_undo_does_not_follow_the_view_to_another_account() {
+      mailService.backendCanGoogleCalendars = true
+      controller.accountId = "one@gmail.com"
+      var change = {source:{id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary"},
+        eventId:"meeting",ifMatch:"etag",body:"{}",sendUpdates:"none",scope:controller.calendarScope}
+      controller.undoChange = change
+      controller.accountId = "two@gmail.com"
+      mailService.requests = []
+      controller.undoLastChange()
+      compare(mailService.requests.length, 0)
+      compare(controller.undoChange, null)
+    }
+
+    function test_old_backend_refuses_google_options_instead_of_dropping_them() {
+      controller.accountId = "one@gmail.com"
+      controller.sourceList = {version:1,sources:[
+        {id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary",enabled:true,canCreateMeet:true}]}
+      var start = new Date(2026, 9, 1, 10).getTime()
+      var base = {title:"Planning",allDay:false,startMs:start,endMs:start + 3600000,location:"",description:"",
+        recurrence:{enabled:false}}
+      var asks = [{guestEmails:"guest@example.org"}, {createMeet:true}]
+      for (var i = 0; i < asks.length; i++) {
+        var fields = JSON.parse(JSON.stringify(base))
+        for (var key in asks[i]) fields[key] = asks[i][key]
+        compare(controller.createEvent("google:one@gmail.com", fields), false)
+      }
+      compare(mailService.requests.length, 0)
+      var event = {sourceId:"google:one@gmail.com",googleId:"meeting",eventType:"default",organizer:{self:true},
+        start:{ms:start},end:{ms:start + 3600000}}
+      verify(controller.rescheduleRefusal(event) !== "")
+      mailService.backendCanGoogleCalendars = true
+      compare(controller.rescheduleRefusal(event), "")
+    }
+
+    function test_immediate_transfer_sends_only_move_and_uses_new_event_identity() {
+      mailService.backendCanGoogleCalendars = true
+      controller.accountId = "one@gmail.com"
+      controller.sourceList = {version:1,sources:[
+        {id:"google:one@gmail.com",kind:"google",accountId:"one@gmail.com",calendarId:"primary",enabled:true},
+        {id:"google:family",kind:"google",accountId:"one@gmail.com",calendarId:"family",enabled:true}]}
+      controller.rangeStart = 0
+      controller.rangeEnd = 0
+      var event = {googleId:"meeting",eventType:"default",etag:"before",organizer:{self:true}}
+      mailService.nextResult = {body:JSON.stringify({id:"meeting",etag:"after",summary:"Saved title",
+        start:{dateTime:"2026-10-01T10:00:00Z"},end:{dateTime:"2026-10-01T11:00:00Z"},organizer:{self:true}})}
+      var moved = null
+      verify(controller.transferEvent("google:one@gmail.com","google:family",event,function(value,error) {
+        compare(error,""); moved=value
+      }))
+      compare(mailService.requests.length,1)
+      compare(mailService.requests[0].params.operation,"move")
+      compare(mailService.requests[0].params.destination,"family")
+      compare(mailService.requests[0].params.ifMatch,"before")
+      compare(mailService.requests[0].params.body,undefined)
+      compare(moved.sourceId,"google:family")
+      compare(moved.etag,"after")
+      compare(controller.eventWriting,false)
+    }
+
     function init() {
       // Reset here rather than at the end of each case: a failed compare aborts
       // the function, so a restore on its last line does not run and one real
@@ -79,6 +205,7 @@ Item {
       mailService.nextResult = ({ body: "{}", status: 200 })
       mailService.nextError = null
       mailService.backendCanDiscoverCalendars = true
+      mailService.backendCanGoogleCalendars = false
       mailService.discoveryCallback = null
       mailService.backend.ready = false
       mailService.accountSummaries = [
@@ -207,7 +334,7 @@ Item {
       var cases = [
         {message: "auth_signed_out", expected: "Sign in to this mailbox again"},
         {message: "calendar_auth_refused", expected: "Sign in to this mailbox again"},
-        {message: "calendar_provider_unsupported", expected: "This mailbox does not provide iCloud or Microsoft calendars"},
+        {message: "calendar_provider_unsupported", expected: "This mailbox does not support calendar discovery"},
         {message: "calendar_timeout", expected: "Calendar discovery timed out"},
         {message: "private diagnostic <img src='https://example.org/tracker'>", expected: "Calendars could not be discovered"}
       ]

@@ -66,14 +66,15 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/SettingsSidebar.qml \
 	ui/components/CalendarSettings.qml \
 	ui/components/CalendarEventComposer.qml \
-	ui/components/CalendarEventDetail.qml \
+	ui/components/CalendarEventDetail.qml ui/components/CalendarReminderPanel.qml \
 	ui/components/CalendarPalette.qml \
 	ui/components/ConfirmDeleteDialog.qml \
 	ui/components/SetupPage.qml \
 	ui/components/ShortcutHelp.qml \
-	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml \
+	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml ui/calendar/CalendarReminders.qml ui/calendar/CalendarReminderInbox.qml \
 	ui/components/CalendarView.qml \
 	ui/components/WeekCalendarView.qml \
+	ui/components/WindowMoveArea.qml \
 	ui/bar/BarPreview.qml
 APP_QML_FILES := app/qml/Main.qml app/qml/StandaloneShell.qml app/qml/StandaloneManifest.qml
 APP_BUILD_DIR ?= app/build
@@ -98,6 +99,7 @@ test-local: test test-backend-process
 
 test-backend-process:
 	cargo build --locked --target-dir "$(CURDIR)/target" --bin omamail
+	node ui/tests/test_backend_queue.js target/debug/omamail
 	python3 tests/test_backend_process.py
 	python3 tests/test_agent_native_bridge.py
 
@@ -115,6 +117,7 @@ test-js:
 	node app/tests/test_shell_theme.js
 	node ui/tests/test_bar_bridge.js
 	node ui/tests/test_backend_wire.js
+	node ui/tests/test_backend_queue.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js
 	node ui/tests/test_backend_chunks.js
@@ -138,6 +141,7 @@ test-js:
 	node ui/tests/test_calendar_cache.js
 	node ui/tests/test_calendar_feed.js
 	node ui/tests/test_calendar_sources.js
+	node ui/tests/test_calendar_reminders.js
 	node ui/tests/test_calendar_palette.js
 	node ui/tests/test_bar_preview.js
 	node ui/tests/test_unsubscribe.js
@@ -179,6 +183,7 @@ test-shell-portable:
 	sh tests/test_dev.sh
 	python3 tests/test_attachment_common.py
 	python3 tests/test_notification.py
+	python3 tests/test_calendar_notifications.py
 	python3 tests/test_curl_config.py
 	python3 tests/test_public_http.py
 	python3 tests/test_contacts.py
@@ -190,6 +195,7 @@ test-shell-portable:
 	bash tests/test_agent_job.sh
 	bash tests/test_link_plugin.sh
 	bash tests/test_mailto.sh
+	bash tests/test_default_mail.sh
 	bash tests/test_transport.sh
 	bash tests/test_jmap_transport.sh
 	python3 tests/test_jmap_stream.py
