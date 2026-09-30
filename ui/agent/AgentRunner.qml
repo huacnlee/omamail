@@ -15,9 +15,18 @@ Item {
   property int availabilitySerial: 0
   function refreshAvailability() {
     var serial = ++availabilitySerial
-    if (!available() || Number(backend.apiVersion) < 6) {
+    if (!available()) {
       providerAvailable = false
-      availabilityError = "Update the mail backend to check AI availability (API 6 required)."
+      availabilityError = "Mail backend is unavailable."
+      return
+    }
+    if (Number(backend.apiVersion) < 6) {
+      // The published backend still supports Claude through Omarchy's default.
+      // It validates that default at jobStart; providerStatus is API-6 only.
+      resolvedProvider = ""
+      providerAvailable = selectedAgent === "System default" && selectedModel === ""
+      availabilityError = providerAvailable ? ""
+        : "Update the mail backend to choose an AI agent or model (API 6 required)."
       return
     }
     if (!providerAvailable) availabilityError = "Checking the selected AI agent..."
@@ -36,7 +45,7 @@ Item {
   function resetSelection() { selectionRevision++; selectionJobs = ({}) }
   onSelectedAgentChanged: { providerAvailable = false; resetSelection(); refreshAvailability() }
   onResolvedProviderChanged: resetSelection()
-  onSelectedModelChanged: resetSelection()
+  onSelectedModelChanged: { resetSelection(); refreshAvailability() }
   onSelectionResetAtChanged: resetSelection()
   function canContinueSelection(job) {
     if (!job) return false
@@ -190,7 +199,7 @@ Item {
   function selection() { return {agent: selectedAgent, model: selectedModel, revision: selectionRevision} }
   function start(payloadLine, quiet, capturedSelection) {
     if (!available()) { lastError = "Mail backend is unavailable"; return false }
-    if (Number(backend.apiVersion) >= 6 && !providerAvailable) { lastError = availabilityError; return false }
+    if (!providerAvailable) { lastError = availabilityError; return false }
     if (starting) { lastError = "AI is still starting. Try again shortly."; return false }
     var payload = payloadLine
     if (payload === null || payload === undefined || payload === "") return false
@@ -219,8 +228,10 @@ Item {
           root.startRefused(String(error && error.message ? error.message : error))
         } else {
           var code = String(error && error.message ? error.message : "")
-          root.lastError = code === "agent_choose_claude" && Number(root.backend.apiVersion) >= 6
-            ? "Choose OpenCode, Codex or Claude in Settings → AI, or select one as Omarchy's default."
+          root.lastError = code === "agent_choose_claude"
+            ? (Number(root.backend.apiVersion) >= 6
+              ? "Choose OpenCode, Codex or Claude in Settings → AI, or select one as Omarchy's default."
+              : "This backend supports Claude only. Select Claude as Omarchy's default AI agent.")
             : "Could not confirm AI started. Check the conversation before retrying."
           root.failed(root.lastError)
         }

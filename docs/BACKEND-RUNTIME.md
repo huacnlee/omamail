@@ -92,9 +92,15 @@ revision information from any other version is refused.
 
 Settings → AI follows the Omarchy system default or selects Claude, Codex or OpenCode V2, with an optional model override. `agent.providerStatus` resolves the supported provider without starting an agent or creating a job. An unsupported default leaves the AI action visible but disabled; Settings explains the supported choices. Availability checks require API 6 and are repeated while following the system default. Explicit choices bypass the system-default lookup. CLI installation and authentication are still checked when a request starts. Standalone Linux/macOS builds default to OpenCode; Windows does not advertise AI.
 
+Until the published pin advances from API 5, the plugin retains its existing Claude chat with System default and no model override. The old backend checks Omarchy's default when a job starts; it cannot preflight availability. Reader and composer requests, plain-text insertion and follow-ups remain available. Legacy follow-ups use their original context snapshot; start a new chat to include draft edits. Agent/model selection, current-context updates, proposal cards and paged history remain gated on API 6. The release workflow publishes the new backend before advancing the exact pin.
+
+`make test-agent-published PUBLISHED_BACKEND=/path/to/verified/omamail` exercises that API-5 user flow with production Service/App/AgentRunner components and the actual published binary: reader/composer entry, four jobs, two continuations and insertion. Only the Claude CLI and mail-context loading are synthetic; it asserts no send occurs. Use a checksum-verified download matching `backend-version`, not a source build.
+
 Each conversation retains one native provider session, serializes follow-ups and leaves compaction to that provider. Durable jobs retain per-turn public transcripts and proposal records; API-6 history pages and a rebuildable head index keep polling bounded. Interrupted turns preserve their session and mail context when safe to continue; crashed or unconfirmed workers require a fresh chat. Agent/model changes start new chats, preserve unsent input and retain prior chats as read-only history.
 
 The isolated provider launch preserves model/authentication configuration while excluding unrelated tools, plugins and hooks. The only mail-writing tool records a content-only draft proposal: account, recipients, threading and attachment ownership come from app-owned snapshots. Applying or sending a proposal requires a human action and uses the normal composer/outbox path. Delivery labels follow outbox receipts; the standard send toast provides Undo. Codex advertises the proposal namespace directly even for code-mode-only models, without general tool discovery.
+
+Proposal cards show their saved From, To and optional Cc, Bcc and Reply-To. If routing in the corresponding open composer changes, direct card sending is disabled and rechecked at dispatch. Use this version applies subject/body without replacing the edited recipients; the normal composer Send then reviews and sends the current routing.
 
 ## API 6 account-wide IMAP search
 

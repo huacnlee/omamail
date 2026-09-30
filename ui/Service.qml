@@ -342,12 +342,9 @@ Item {
         || String(answer || "").trim() === "") return false
     agentContext.error = ""
     var payload = { parent: String(job.id), prompt: String(answer || "").trim() }
-    if (fields) {
-      if (Number(backend.apiVersion) < 6) {
-        agentContext.error = "Update the mail backend to include current draft edits."
-        return false
-      }
-      if (!Agent.canUseDraftChat(job, fields)) return false
+    if (fields && !Agent.canUseDraftChat(job, fields)) return false
+    // API 5 keeps the original snapshot; current-draft updates need API 6.
+    if (fields && Number(backend.apiVersion) >= 6) {
       var attaching = String(job.draftKey || "") === "" && String(fields.draftKey || "") !== ""
       payload.draftUpdate = {accountId: String(fields.accountId), draftKey: String(fields.draftKey),
         draft: {from: String(fields.from || ""), to: String(fields.to || ""),

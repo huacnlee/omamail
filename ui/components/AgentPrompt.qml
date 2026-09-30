@@ -35,11 +35,17 @@ FocusScope {
     return ({subject:"",body:"",applicable:false})
   }
   signal applyProposalRequested(var envelope, string parentId)
+  readonly property string routingChangedText: "Recipients or sender changed. Use this version, then send from the composer."
+  function proposalRoutingChanged(envelope) {
+    return !!proposalComposer && typeof proposalComposer.proposalRoutingChanged === "function"
+      && proposalComposer.proposalRoutingChanged(envelope)
+  }
   function useProposal(proposal, send) {
     var envelope = proposal.envelope ? Agent.proposalEnvelope(Object.assign({}, proposal.envelope,
       {subject: String(proposal.subject), body: String(proposal.body)})) : null
     if (!envelope || !proposal.applicable || (send && sentProposals[proposal.id])) return false
     if (send) {
+      if (proposalRoutingChanged(envelope)) { localError = routingChangedText; return false }
       var accepted = proposalComposer && proposalComposer.sendProposal(envelope, proposal.id, job ? String(job.id) : "")
       if (!accepted) { localError = "Could not queue this email. Check its recipients and mailbox."; return false }
       var sent = Object.assign({}, sentProposals); sent[proposal.id] = true; sentProposals = sent
@@ -515,6 +521,7 @@ FocusScope {
               objectName: "agent-draft-proposal"
               readonly property var modelData: parent.proposal
               readonly property var envelope: modelData.envelope || null
+              readonly property bool routingChanged: root.proposalRoutingChanged(envelope)
               readonly property var queue: root.service && typeof root.service.agentProposalQueue === "function" && envelope
                 ? root.service.agentProposalQueue(envelope.accountId) : null
               readonly property string sendId: "agent-" + modelData.id
@@ -532,10 +539,13 @@ FocusScope {
                 width: parent.width - Style.space(24)
                 spacing: Style.space(8)
                 Text {
+                  objectName: "agent-proposal-recipients"
                   width: parent.width
-                  visible: !proposalCard.envelope || !!proposalCard.envelope.cc || !!proposalCard.envelope.bcc
-                  text: proposalCard.envelope ? (proposalCard.envelope.cc ? "Cc: " + proposalCard.envelope.cc : "")
-                    + (proposalCard.envelope.bcc ? (proposalCard.envelope.cc ? "\n" : "") + "Bcc: " + proposalCard.envelope.bcc : "")
+                  text: proposalCard.envelope ? "From: " + String(proposalCard.envelope.from || "")
+                    + "\nTo: " + String(proposalCard.envelope.to || "")
+                    + (proposalCard.envelope.cc ? "\nCc: " + proposalCard.envelope.cc : "")
+                    + (proposalCard.envelope.bcc ? "\nBcc: " + proposalCard.envelope.bcc : "")
+                    + (proposalCard.envelope.replyTo ? "\nReply-To: " + proposalCard.envelope.replyTo : "")
                     : "This proposal has no saved recipients or attachment snapshot. Ask again from its message or draft."
                   textFormat: Text.PlainText
                   wrapMode: Text.Wrap
@@ -589,9 +599,20 @@ FocusScope {
                       || (proposalCard.submitted ? "Checking send status..." : "Send email")
                     foreground: root.textColor; accent: root.accentColor
                     fontFamily: root.panelFontFamily; bordered: true
-                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && !proposalCard.submitted
+                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && !proposalCard.submitted && !proposalCard.routingChanged
                     onClicked: root.useProposal(proposalCard.modelData, true)
                   }
+                }
+                Text {
+                  objectName: "agent-proposal-routing-changed"
+                  width: parent.width
+                  visible: proposalCard.routingChanged && !proposalCard.submitted
+                  text: root.routingChangedText
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.dimColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.caption
                 }
               }
             }

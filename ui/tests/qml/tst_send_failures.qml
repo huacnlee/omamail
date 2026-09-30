@@ -26,6 +26,16 @@ Item {
 
   Omamail.App { id: app; service: mailService }
 
+  QtObject {
+    id: agentBackend
+    property bool ready: true
+    property int apiVersion: 6
+    function call(method, params, callback) {
+      if (method === "agent.providerStatus") callback({available:true,provider:"claude"}, "")
+      // Tests inject completed jobs/proposals; no agent process is started.
+    }
+  }
+
   SignalSpy {
     id: failureSpy
     target: mailService
@@ -36,7 +46,14 @@ Item {
     name: "SendFailures"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService) }
+    function initTestCase() {
+      var fixture = BackendFixture.install(mailService)
+      // Repeated API/account setup must not fill the bounded RPC queue with
+      // unanswered background cache reads and starve the send under test.
+      fixture.answers = {"cache.calendarRead":null, "cache.queryRestore":null}
+      BackendFixture.markReady(mailService)
+      mailService.agentRunner.backend = agentBackend
+    }
 
     readonly property string ada: "ada@example.com"
     readonly property string bob: "bob@example.com"
@@ -207,6 +224,80 @@ Item {
       return {accountId:adaId,from:ada,to:bob,cc:"",bcc:"",replyTo:"",
         subject:"Re: Proposal",body:"Exact reply\n\n> Quoted history\n",attachments:[],
         threadId:"thread",inReplyTo:"message",replyMessageId:"source",draftId:""}
+    }
+
+    function test_proposal_routing_edits_block_card_dispatch_data() {
+      var rows = []
+      var fields = ["to", "cc", "bcc", "replyTo", "from"]
+      for (var i = 0; i < fields.length; i++) {
+        rows.push({tag:fields[i]+"-pending", field:fields[i], pending:true})
+        rows.push({tag:fields[i]+"-displayed", field:fields[i], pending:false})
+      }
+      return rows
+    }
+
+    function test_proposal_routing_edits_block_card_dispatch(data) {
+      BackendFixture.markReady(mailService, 6)
+      seed([entry(ada)], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      app.opened = true
+      app.startCompose("new")
+      var compose = composeView()
+      named(compose, "compose-to-field").text = "original@example.test"
+      compose.replaceBody("Manual draft")
+      var envelope = compose.outgoingEnvelope()
+      var card = {id:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-3", jobId:"routing-chat",
+        accountId:adaId,draftKey:compose.draftKey,subject:"Proposed subject",body:"Proposed body",
+        applicable:true,envelope:envelope}
+      var job = {id:card.jobId, accountId:adaId, draftKey:compose.draftKey,
+        state:"done",canContinue:true,created:Date.now()/1000}
+      var runner = mailService.agentRunner
+      runner.providerAvailable = true
+      runner.jobs = [job]
+      var scopes = {}; scopes["draft:" + compose.draftKey] = {jobs:[job],history:[job]}
+      var accounts = {}; accounts[adaId] = scopes
+      runner.scopesByAccount = accounts
+      app.composeAgent.open()
+      runner.shownId = job.id
+      runner.shownTranscript = [{role:"assistant",text:"Here's a draft."}]
+      if (!data.pending) runner.shownProposals = [card]
+      if (data.field === "from") compose.fromEmail = "corrected@example.test"
+      else named(compose, "compose-" + (data.field === "replyTo" ? "reply-to" : data.field) + "-field").text = "corrected@example.test"
+      if (data.pending) runner.shownProposals = [card]
+      verify(waitForRendering(app.composeAgent))
+      var send = named(app.composeAgent, "agent-send-email")
+      var fixture = BackendFixture.install(mailService)
+      var start = fixture.requests.length
+      verify(!app.composeAgent.useProposal(card, true), "Imperative entry also refuses stale routing")
+      verify(!compose.sendProposal(envelope, card.id, job.id), "Composer rechecks at dispatch")
+      mouseClick(send)
+      wait(0)
+      compare(fixture.requests.slice(start).filter(function(r) {
+        return r.method === "message.compose" || r.method === "outbox.enqueue"
+      }).length, 0, "No MIME construction or outbox enqueue for the old destination")
+      compare(compose.parkedDrafts.length, 0)
+      verify(!send.enabled)
+      var recipients = named(app.composeAgent, "agent-proposal-recipients")
+      verify(recipients !== null)
+      compare(recipients.textFormat, Text.PlainText)
+      verify(recipients.text.indexOf("From: " + ada) >= 0)
+      verify(recipients.text.indexOf("To: original@example.test") >= 0)
+      verify(named(app.composeAgent, "agent-proposal-routing-changed").visible)
+      if (data.field === "to") {
+        verify(app.composeAgent.useProposal(card, false))
+        compare(named(compose, "compose-to-field").text, "corrected@example.test")
+        compare(named(compose, "compose-body-editor").text, card.body)
+        compose.submit()
+        answerQueued(adaId)
+        var composed = fixture.requests.slice(start).filter(function(r) { return r.method === "message.compose" })
+        compare(composed.length, 1)
+        compare(composed[0].params.fields.to, "corrected@example.test")
+        compare(composed[0].params.fields.body, card.body)
+      }
+      runner.shownProposals = []
+      runner.jobs = []; runner.scopesByAccount = ({})
+      app.composeAgent.close()
+      BackendFixture.markReady(mailService)
     }
 
     function test_ai_card_undo_restores_its_draft_and_queues_receipt_ack() {

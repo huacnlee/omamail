@@ -1,6 +1,7 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
+	ui/tests/compatibility/tst_published_agent.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
 	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
@@ -233,6 +234,12 @@ test-shell-libcurl:
 QMLTESTRUNNER := $(shell command -v qmltestrunner6 2>/dev/null \
 	|| ls /usr/lib/qt6/bin/qmltestrunner 2>/dev/null \
 	|| command -v qmltestrunner 2>/dev/null)
+
+# Use the verified release download, not a build from this checkout.
+.PHONY: test-agent-published
+test-agent-published:
+	@test -n "$(PUBLISHED_BACKEND)" || { echo "Set PUBLISHED_BACKEND to the verified pinned executable" >&2; exit 1; }
+	python3 tests/test_agent_published_qml.py --binary "$(PUBLISHED_BACKEND)" --runner "$(QMLTESTRUNNER)"
 
 test-qml:
 	@test -n "$(QMLTESTRUNNER)" || { \

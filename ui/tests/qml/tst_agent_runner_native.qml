@@ -77,12 +77,12 @@ Item {
       verify(runner.start({prompt:"Use explicit choice"}))
       compare(bridge.requests[0].params.provider, "codex")
     }
-    function test_availability_requires_fixed_api_and_fails_closed_on_disconnect() {
+    function test_published_backend_keeps_default_ai_and_disconnect_fails_closed() {
       bridge.holdStatus = true
       bridge.apiVersion = 5
       runner.refreshAvailability()
       compare(bridge.statuses.length, 0)
-      verify(!runner.providerAvailable)
+      verify(runner.providerAvailable)
       bridge.apiVersion = 6
       compare(bridge.statuses.length, 1)
       bridge.ready = false

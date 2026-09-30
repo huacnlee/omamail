@@ -115,15 +115,23 @@ Item {
       var proposal={id:"proposal",jobId:"chat",accountId:service.activeAccountId,messageId:"m1",
         draftKey:"",subject:"Re: Hello",body:"Exact displayed body <img src='http://invalid.example'>",applicable:true}
       proposal.envelope=service.agentReplyEnvelope(proposal)
+      proposal.envelope.from='Ada <ada@example.com>'
+      proposal.envelope.to='"李 <img>" <bob@example.com>'
+      proposal.envelope.cc='cc@example.com'
+      proposal.envelope.bcc='bcc@example.com'
+      proposal.envelope.replyTo='replies@example.com'
       service.agentShownProposals=[proposal]
       verify(waitForRendering(popup))
       verify(findChild(popup,"agent-draft-proposal")!==null)
+      var recipients=findChild(popup,"agent-proposal-recipients")
+      compare(recipients.textFormat,Text.PlainText)
+      compare(recipients.text,'From: Ada <ada@example.com>\nTo: "李 <img>" <bob@example.com>\nCc: cc@example.com\nBcc: bcc@example.com\nReply-To: replies@example.com')
       var displayed=JSON.parse(JSON.stringify(proposal.envelope))
       displayed.subject=proposal.subject;displayed.body=proposal.body
       verify(popup.useProposal(proposal,true))
       compare(service.sentEnvelope,displayed)
       compare(service.sentEnvelope.body,proposal.body)
-      compare(service.sentEnvelope.to,"bob@example.com")
+      compare(service.sentEnvelope.to,proposal.envelope.to)
       compare(popup.useProposal(proposal,true),false)
     }
     function test_reply_card_keeps_history_out_of_preview_and_adds_it_on_send() {

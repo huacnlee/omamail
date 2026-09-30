@@ -136,7 +136,7 @@ DropArea {
     return true
   }
   function sendProposal(envelope, proposalId, parentId) {
-    if (!service) return false
+    if (!service || proposalRoutingChanged(envelope)) return false
     // Prepare a real recovery draft before dispatch, without replacing newer
     // manual edits. Undo and failures use the same parked-draft path as Send.
     var draft = Agent.proposalDraft(envelope, parentId, String(envelope.draftKey || newDraftKey()))
@@ -144,6 +144,21 @@ DropArea {
     if (!accepted) return false
     parkDraftForSend(String(accepted), draft)
     return accepted
+  }
+
+  function proposalRoutingChanged(envelope) {
+    if (!opened || !envelope) return false
+    // An unrelated parked draft does not own a reader's proposal. A matching
+    // draft/reply does: never send its old routing after the owner edits it.
+    var sameDraft = envelope.draftKey ? String(envelope.draftKey) === draftKey
+      : replyMessageId !== "" && String(envelope.replyMessageId || "") === replyMessageId
+    if (!sameDraft) return false
+    return String(envelope.accountId || "") !== accountId
+      || String(envelope.from || "") !== fromEmail
+      || String(envelope.to || "") !== toField.text
+      || String(envelope.cc || "") !== ccField.text
+      || String(envelope.bcc || "") !== bccField.text
+      || String(envelope.replyTo || "") !== replyToField.text
   }
 
   function replaceBody(text) {
