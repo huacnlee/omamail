@@ -41,6 +41,7 @@ Item {
     property var recipientContacts: []
     property var sendAsAliases: []
     property var sendIdentities: []
+    property var senderSources: []
     property var auth: mailAuth
     property bool alwaysShowImages: false
     property bool alwaysRenderHeavyMessages: false
@@ -110,6 +111,8 @@ Item {
 
     function init() {
       mailService.composeAccountId = adaId
+      mailService.senderSources = []
+      mailService.sendIdentities = []
       compose.reset()
       compose.opened = false
     }
@@ -242,6 +245,51 @@ Item {
       var cc = ccText()
       verify(cc.indexOf(bobId) >= 0)
       compare(cc.indexOf(adaId) < 0, true)
+    }
+    function test_sent_follow_up_data() {
+      return [
+        {tag: "reply", mode: "reply", cc: ""},
+        {tag: "reply-all", mode: "replyAll", cc: "copied@example.com"}
+      ]
+    }
+
+    function test_sent_follow_up(data) {
+      mailService.composeAccountId = bobId
+      var original = incoming()
+      original.from = {email: bobId}
+      original.replyTo = {email: bobId}
+      original.to = [{email: "recipient@example.com"}, {email: bobId}]
+      original.cc = [{email: "copied@example.com"}, {email: "RECIPIENT@example.com"}]
+      original.bcc = [{email: "private@example.com"}]
+      compose.begin(data.mode, original, "Original body", [])
+      compare(compose.currentFields().to, "recipient@example.com")
+      compare(compose.snapshotDraft().cc, data.cc)
+      compare(compose.snapshotDraft().bcc, "")
+      compare(compose.inReplyTo, original.messageId)
+    }
+
+    function test_reply_all_keeps_original_cc_without_duplicates() {
+      mailService.composeAccountId = bobId
+      var original = incoming()
+      original.cc = [{email: "copied@example.com"}, {email: bobId},
+        {email: "SENDER@example.com"}, {email: adaId}]
+      compose.begin("replyAll", original, "Original body", [])
+      compare(compose.currentFields().to, "sender@example.com")
+      compare(compose.snapshotDraft().cc, adaId + ", copied@example.com")
+    }
+
+    function test_sent_alias_is_self_even_when_another_mailbox_is_active() {
+      mailService.composeAccountId = bobId
+      mailService.senderSources = [{id: bobId, email: bobId,
+        aliases: [{email: "alias@example.net"}]}]
+      var original = incoming()
+      original.from = {email: "ALIAS@example.net"}
+      original.to = [{email: "recipient@example.com"}]
+      original.cc = [{email: "alias@example.net"}, {email: bobId}, {email: adaId}]
+      compose.begin("replyAll", original, "Original body", [])
+      compare(compose.currentFields().to, "recipient@example.com")
+      compare(compose.snapshotDraft().cc, adaId)
+      compare(compose.replyRecipients[0].email, "ALIAS@example.net")
     }
   }
 }

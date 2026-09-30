@@ -52,4 +52,35 @@ deepEqual(recipients.filter(contacts, "morgan"), [
 ])
 deepEqual(recipients.filter(contacts, "").length, 2)
 
+const own = [{email: "me@example.com"}, {email: "alias@example.com"}]
+const sent = {
+  from: {email: "ALIAS@example.com"},
+  replyTo: {email: "different-reply@example.com"},
+  to: [{email: "person@example.com"}, {email: "second@example.com"}, {email: "me@example.com"}],
+  cc: [{email: "copy@example.com"}, {email: "PERSON@example.com"}, {email: "alias@example.com"}],
+  bcc: [{email: "private@example.com"}]
+}
+deepEqual(recipients.replyFields(sent, "reply", own), {
+  to: "person@example.com, second@example.com", cc: "", outgoing: true
+})
+deepEqual(recipients.replyFields(sent, "replyAll", own), {
+  to: "person@example.com, second@example.com", cc: "copy@example.com", outgoing: true
+})
+deepEqual(recipients.replyFields({
+  from: {email: "sender@example.com"}, replyTo: {email: "reply@example.com"},
+  to: [{email: "me@example.com"}, {email: "other-account@example.com"}],
+  cc: [{email: "copy@example.com"}, {email: "REPLY@example.com"}, {email: "alias@example.com"}]
+}, "replyAll", own), {
+  to: "reply@example.com", cc: "other-account@example.com, copy@example.com", outgoing: false
+})
+deepEqual(recipients.replyFields({from: own[0], to: own, cc: own}, "replyAll", own), {
+  to: "", cc: "", outgoing: true
+})
+deepEqual(recipients.replyFields(null, "reply", own), {to: "", cc: "", outgoing: false})
+// Header controls cannot create a second outgoing header from reply fields.
+const hostile = recipients.replyFields({from: {email: "sender@example.com"},
+  to: [{email: "me@example.com"}], cc: [{email: "copy@example.com\r\nBcc: hidden@example.com"}]
+}, "replyAll", own)
+assert(!/[\r\n]/.test(hostile.to + hostile.cc))
+
 console.log("recipient tests passed")
