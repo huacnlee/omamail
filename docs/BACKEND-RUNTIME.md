@@ -94,7 +94,7 @@ Settings → AI follows the Omarchy system default or selects Claude, Codex or O
 
 Each conversation retains one native provider session, serializes follow-ups and leaves compaction to that provider. Durable jobs retain per-turn public transcripts and proposal records; API-6 history pages and a rebuildable head index keep polling bounded. Interrupted turns preserve their session and mail context when safe to continue; crashed or unconfirmed workers require a fresh chat. Agent/model changes start new chats, preserve unsent input and retain prior chats as read-only history.
 
-The isolated provider launch preserves model/authentication configuration while excluding unrelated tools, plugins and hooks. The only mail-writing tool records a content-only draft proposal: account, recipients, threading and attachment ownership come from app-owned snapshots. Applying or sending a proposal requires a human action and uses the normal composer/outbox path. Delivery labels and targeted Undo follow outbox receipts. Codex advertises the proposal namespace directly even for code-mode-only models, without general tool discovery.
+The isolated provider launch preserves model/authentication configuration while excluding unrelated tools, plugins and hooks. The only mail-writing tool records a content-only draft proposal: account, recipients, threading and attachment ownership come from app-owned snapshots. Applying or sending a proposal requires a human action and uses the normal composer/outbox path. Delivery labels follow outbox receipts; the standard send toast provides Undo. Codex advertises the proposal namespace directly even for code-mode-only models, without general tool discovery.
 
 ## API 6 account-wide IMAP search
 

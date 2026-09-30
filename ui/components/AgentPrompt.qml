@@ -35,7 +35,6 @@ FocusScope {
     return ({subject:"",body:"",applicable:false})
   }
   signal applyProposalRequested(var envelope, string parentId)
-  signal undoProposalRequested(string sendId, string accountId)
   function useProposal(proposal, send) {
     var envelope = proposal.envelope ? Agent.proposalEnvelope(Object.assign({}, proposal.envelope,
       {subject: String(proposal.subject), body: String(proposal.body)})) : null
@@ -599,14 +598,6 @@ FocusScope {
                     fontFamily: root.panelFontFamily; bordered: true
                     enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && !proposalCard.submitted
                     onClicked: root.useProposal(proposalCard.modelData, true)
-                  }
-                  Button {
-                    text: "Undo send"
-                    visible: proposalCard.delivery === "queued"
-                    enabled: !!proposalCard.queue && !proposalCard.queue.undoBusy
-                    foreground: root.textColor; accent: root.accentColor
-                    fontFamily: root.panelFontFamily
-                    onClicked: root.undoProposalRequested(proposalCard.sendId, proposalCard.envelope.accountId)
                   }
                 }
               }

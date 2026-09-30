@@ -812,12 +812,6 @@ Item {
       if (root && id) root.restoreParkedDraft(id === true ? "" : String(id), false)
     })
   }
-  function undoProposal(sendId, accountId) {
-    var queue = service.agentProposalQueue(accountId)
-    return queue ? queue.undo(sendId, function(id) {
-      if (root && id) root.restoreParkedDraft(String(id), false)
-    }) : false
-  }
 
   Timer {
     id: draftSavedTimer
@@ -2772,9 +2766,6 @@ Item {
           sourceComponent: Component {
             AgentPrompt {
               proposalComposer: compose
-              onUndoProposalRequested: function(sendId, accountId) {
-                root.undoProposal(sendId, accountId)
-              }
               onApplyProposalRequested: function(envelope, parentId) {
                 compose.beginProposal(envelope, parentId)
                 Qt.callLater(function() { root.composeAgent.open() })
@@ -2803,7 +2794,6 @@ Item {
           anchors.fill: parent
           sourceComponent: Component {
             ComposeAgent {
-              onUndoProposalRequested: function(sendId, accountId) { root.undoProposal(sendId, accountId) }
               onOpenedChanged: if (opened) root.agentPrompt.close()
               objectName: "compose-agent"
               service: root.service
