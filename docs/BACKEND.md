@@ -159,6 +159,24 @@ subject to account capabilities. Search syntax follows the account's provider.
 List results include `accountId`, `messages`, `nextPageToken`, and `estimate`;
 an empty next-page token ends pagination. `read` returns safe text and attachment
 metadata without marking the message read or exporting attachment files.
+The `message.links` array contains `{text, url}` entries from HTML anchors in the sanitized document, including links whose destination is absent from the plain-text body. Plain-text URLs remain in `nativeContent.body.text`; they are not separately extracted. `message.unsubscribe` contains `urls` from `List-Unsubscribe` and a `oneClick` boolean for the sender's `List-Unsubscribe-Post: List-Unsubscribe=One-Click` declaration when an HTTPS target is available. Missing metadata produces empty arrays and `oneClick: false`; providers can only expose metadata they supply. These additive fields are available in builds containing the read-link projection.
+
+Destinations are data only: extracting them does not resolve their DNS, open a browser, fetch links, send unsubscribe mail or submit an unsubscribe POST. Exported destinations are absolute HTTP(S) links passing the reader's public-host spelling policy, or nonempty `mailto:` links; controls, whitespace, backslashes and HTTP credentials are refused. This is not a DNS/public-address guarantee or sender authentication. `oneClick` reports a declaration, not authorization or proof of DKIM coverage. A caller executing a request must independently enforce its network and approval policy. Raw HTML, other headers, image/resource URLs and document attributes remain excluded.
+
+For example, `omamail read MESSAGE_ID --account ACCOUNT_ID --json` now includes:
+
+```json
+{
+  "links": [{"text": "Unsubscribe", "url": "https://news.example.org/leave"}],
+  "unsubscribe": {
+    "urls": ["https://news.example.org/leave", "mailto:leave@example.org"],
+    "oneClick": true
+  }
+}
+```
+
+The fragment above is under `result.message` in CLI JSON output (under `message` in the `mail.read` RPC result).
+
 `mark` accepts exactly `read`, `unread`, `star`, and `unstar`. Actions accept
 multiple message IDs. Their previews retain `requestedIds` and show the resolved
 `targetIds`, including expanded conversation members where applicable.

@@ -82,7 +82,7 @@ fn safe_body(value: &Value) -> Result<Value, &'static str> {
     Ok(json!({"text":text,"source":source,"bodyDirection":direction}))
 }
 
-fn safe_render(value: &Value) -> Result<Value, &'static str> {
+fn safe_render(value: &Value) -> Result<(Value, Vec<Value>), &'static str> {
     let render = value.as_object().ok_or("mail_read_invalid_reader")?;
     if render.contains_key("html")
         || render
@@ -96,7 +96,12 @@ fn safe_render(value: &Value) -> Result<Value, &'static str> {
         .get("document")
         .filter(|document| document.is_object())
         .ok_or("mail_read_invalid_reader")?;
-    fn document_node(value: &Value, depth: usize, left: &mut usize) -> Result<Value, &'static str> {
+    fn document_node(
+        value: &Value,
+        depth: usize,
+        left: &mut usize,
+        links: &mut Vec<Value>,
+    ) -> Result<Value, &'static str> {
         if depth > MAX_DEPTH || *left == 0 {
             return Err("mail_read_invalid_reader");
         }
@@ -120,7 +125,7 @@ fn safe_render(value: &Value) -> Result<Value, &'static str> {
             .and_then(Value::as_array)
             .ok_or("mail_read_invalid_reader")?
             .iter()
-            .map(|child| document_node(child, depth + 1, left))
+            .map(|child| document_node(child, depth + 1, left, links))
             .collect::<Result<Vec<_>, _>>()?;
         if kind == "root" {
             return Ok(json!({"type":"root","children":children}));
@@ -132,6 +137,11 @@ fn safe_render(value: &Value) -> Result<Value, &'static str> {
                 !name.is_empty() && name.len() <= 128 && !name.chars().any(char::is_control)
             })
             .ok_or("mail_read_invalid_reader")?;
+        if name == "a"
+            && let Some(link) = super::read_links::link(value, &children)
+        {
+            links.push(link);
+        }
         Ok(json!({
             "type":"element",
             "name":name,
@@ -141,7 +151,9 @@ fn safe_render(value: &Value) -> Result<Value, &'static str> {
         }))
     }
     let mut nodes_left = MAX_NODES;
-    Ok(json!({"document":document_node(document, 0, &mut nodes_left)?}))
+    let mut links = Vec::new();
+    let document = document_node(document, 0, &mut nodes_left, &mut links)?;
+    Ok((json!({"document":document}), links))
 }
 
 fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<String>), &'static str> {
@@ -190,7 +202,8 @@ fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<Strin
         })
         .transpose()?
         .unwrap_or_default();
-    let render = safe_render(&value["nativeRender"])?;
+    let (render, links) = safe_render(&value["nativeRender"])?;
+    let unsubscribe = super::read_links::unsubscribe(&value["payload"]["headers"]);
     let content = json!({"body":body,"attachments":attachments});
     Ok((
         json!({
@@ -199,6 +212,8 @@ fn safe_message(request: &ReadRequest, value: Value) -> Result<(Value, Vec<Strin
             "nativeContent":content,
             "nativeRender":render,
             "attachments":content["attachments"],
+            "links":links,
+            "unsubscribe":unsubscribe,
         }),
         members,
     ))
@@ -287,7 +302,7 @@ mod tests {
     #[test]
     fn safe_render_matches_the_native_document_node_limit() {
         let at_limit = json!({"document":{"type":"root","children":leaf_nodes(MAX_NODES - 1)}});
-        let projected = safe_render(&at_limit).unwrap();
+        let (projected, _) = safe_render(&at_limit).unwrap();
         assert_eq!(
             projected["document"]["children"].as_array().unwrap().len(),
             MAX_NODES - 1
