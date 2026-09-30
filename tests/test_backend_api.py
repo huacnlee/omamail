@@ -40,6 +40,7 @@ def terminate_process_group(process, platform=None):
 
 HARNESS = r"""
 const fs = require('fs');
+const path = require('path');
 const assert = require('assert/strict');
 const {spawn} = require('child_process');
 const {load} = require(process.env.CONTRACT_ROOT + '/ui/tests/load.js');
@@ -152,7 +153,11 @@ function storageSnapshot(directory = process.env.HOME) {
   assert.ok(Array.isArray(contract.contractCases) && contract.contractCases.length);
   for (const fixture of contract.contractCases) {
     if (fixture.name === 'AI transcript pages preserve native session identity') {
-      const root = process.env.XDG_STATE_HOME + '/omamail/assistant';
+      // Match agent::storage::Store, including macOS where XDG_STATE_HOME
+      // is unset. Never seed a relative "undefined/" tree in the fixture home.
+      const base = process.env.XDG_STATE_HOME || path.join(process.env.HOME, '.local/state');
+      const root = path.join(base, 'omamail/assistant');
+      assert.ok(path.isAbsolute(root), 'agent fixture uses an absolute private state path');
       fs.mkdirSync(root, {recursive:true, mode:0o700});
       const id = n => (n + 1).toString(16).padStart(32, '0');
       for (let index = 0; index < 10; index++) {
