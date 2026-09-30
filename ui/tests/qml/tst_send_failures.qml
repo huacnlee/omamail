@@ -171,6 +171,95 @@ Item {
       compare(named(compose, "compose-body-editor").text, "Keep Ada's words")
     }
 
+    function test_ai_card_send_keeps_displayed_body_and_uses_normal_outbox() {
+      BackendFixture.markReady(mailService, 6)
+      var owner = entry(ada)
+      owner.signature = "Do not append this changed signature"
+      seed([owner], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      var fixture = BackendFixture.install(mailService)
+      var start = fixture.requests.length
+      var displayed = "Hi Bob,\n\nThursday works.  \n\nAda\n\n> Original question\n"
+      var id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0"
+      var compose = composeView()
+      var sendId = compose.sendProposal({accountId:adaId,from:ada,to:bob,cc:"",bcc:"",
+        subject:"Re: Check-in",body:displayed,attachments:[],threadId:"thread",inReplyTo:"message",draftId:""}, id, "chat")
+      compare(sendId, "agent-" + id)
+      var queued = answerQueued(adaId)
+      compare(queued.id, sendId)
+      var composed = null
+      for (var i = start; i < fixture.requests.length; i++)
+        if (fixture.requests[i].method === "message.compose") composed = fixture.requests[i].params.fields
+      verify(composed !== null)
+      compare(composed.body, displayed)
+      compare(composed.signature, "")
+      compare(composed.signatureHtml, "")
+      compare(composed.to, bob)
+      compare(composed.inReplyTo, "message")
+      compare(mailService.accountAt(0).sendQueue.latest.id, sendId)
+      compare(compose.parkedDrafts.length, 1)
+      compare(compose.pendingDraft.body, displayed)
+      compare(compose.pendingDraft.agentParentJobId, "chat")
+      BackendFixture.markReady(mailService)
+    }
+
+    function proposal() {
+      return {accountId:adaId,from:ada,to:bob,cc:"",bcc:"",replyTo:"",
+        subject:"Re: Proposal",body:"Exact reply\n\n> Quoted history\n",attachments:[],
+        threadId:"thread",inReplyTo:"message",replyMessageId:"source",draftId:""}
+    }
+
+    function test_ai_card_undo_restores_its_draft_and_queues_receipt_ack() {
+      seed([entry(ada)], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      var compose = composeView()
+      var envelope = proposal()
+      var id = compose.sendProposal(envelope, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1", "chat")
+      verify(!!id)
+      answerQueued(adaId)
+      app.saveComposeRecovery()
+      compare(app.composeRecovery.draft.pendingSendId, id)
+      compare(app.composeRecovery.draft.body, envelope.body)
+      verify(app.undoPendingSend())
+      var request = pending("outbox.undo", adaId)
+      verify(request !== null)
+      request.answered = true
+      BackendFixture.respond(mailService, request, {id:id,snapshot:{accountId:adaId,
+        revision:++outboxRevision,entries:[{id:id,state:"cancelled"}]}})
+      tryCompare(compose, "opened", true)
+      compare(named(compose,"compose-body-editor").text, envelope.body)
+      compare(named(compose,"compose-to-field").text, envelope.to)
+      compare(compose.threadId, envelope.threadId)
+      compare(compose.parkedDrafts.length, 0)
+      compare(app.composeReceiptAcks.filter(function(entry) { return entry.sendId === id }).length, 1)
+    }
+
+    function test_ai_card_failure_restores_snapshot_without_losing_manual_edits() {
+      seed([entry(ada)], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      var compose = composeView()
+      app.startCompose("new")
+      named(compose,"compose-to-field").text = "other@example.com"
+      named(compose,"compose-body-editor").text = "Newer manual edits"
+      var originalKey = compose.draftKey
+      var envelope = proposal()
+      var id = compose.sendProposal(envelope, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-2", "chat")
+      verify(!!id)
+      compare(compose.draftKey, originalKey)
+      compare(named(compose,"compose-body-editor").text, "Newer manual edits")
+      tryVerify(function() { return pending("outbox.enqueue", adaId) !== null })
+      var request = pending("outbox.enqueue", adaId)
+      verify(request !== null)
+      request.answered = true
+      BackendFixture.respond(mailService, request, {snapshot:{accountId:adaId,
+        revision:++outboxRevision,entries:[{id:id,state:"failed"}]}})
+      tryCompare(compose, "parkedForSend", false)
+      compare(named(compose,"compose-body-editor").text, envelope.body)
+      verify(compose.interruptedDraft !== null)
+      compare(compose.interruptedDraft.body, "Newer manual edits")
+      compare(compose.interruptedDraft.draftKey, originalKey)
+    }
+
     function test_zero_delay_native_failure_restores_the_composer_data() {
       return [{tag:"rejected",state:"failed"},{tag:"delivery-unknown",state:"unknown"}]
     }

@@ -239,6 +239,54 @@ pub(crate) fn validate_message_id(id: &str) -> Result<(), &'static str> {
 }
 
 impl Session {
+    /// Internal, read-only thread context. Never accepts a caller-selected URL.
+    pub(crate) async fn thread_resources(
+        &self,
+        account: &str,
+        id: &str,
+    ) -> Result<Vec<Value>, &'static str> {
+        if id.is_empty()
+            || id.len() > 256
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err("invalid_params");
+        }
+        let accounts = tokio::task::spawn_blocking(crate::account::list_readonly)
+            .await
+            .map_err(|_| "session_failed")??;
+        if !accounts["accounts"].as_array().is_some_and(|rows| {
+            rows.iter()
+                .any(|a| a["id"] == account && a["provider"] == "gmail")
+        }) {
+            return Err("gmail_account_unknown");
+        }
+        self.account(account)?.pace(10).await?;
+        let answer = self
+            .get_with(
+                account,
+                || refresh_grant(account.to_owned()),
+                |token| async move {
+                    gmail_http::get(
+                        &["threads", id],
+                        &[("format".into(), "full".into())],
+                        &token,
+                    )
+                    .await
+                },
+            )
+            .await?;
+        let rows = answer["messages"]
+            .as_array()
+            .filter(|rows| rows.len() <= 100)
+            .ok_or("agent_context_too_large")?;
+        Ok(rows
+            .iter()
+            .cloned()
+            .map(|row| resources::normalize("gmail.read", row))
+            .collect())
+    }
     fn account(&self, account: &str) -> Result<Arc<AccountSession>, &'static str> {
         let mut accounts = self.accounts.lock().map_err(|_| "session_failed")?;
         if let Some(session) = accounts.get(account) {

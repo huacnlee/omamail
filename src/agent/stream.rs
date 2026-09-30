@@ -31,7 +31,7 @@ pub fn valid_text(value: &str) -> Result<()> {
 
 pub fn transcript_check(items: &[Value]) -> Result<()> {
     if items.len() > 200 {
-        return Err("Conversation limit reached. Start a new conversation.");
+        return Err("The AI turn exceeded the display limit. Ask for a shorter answer.");
     }
     for item in items {
         let object = item.as_object().ok_or("Invalid conversation record")?;
@@ -49,7 +49,7 @@ pub fn transcript_check(items: &[Value]) -> Result<()> {
         .len();
     let separator_spaces = items.len().saturating_mul(4).saturating_sub(1);
     if bytes.saturating_add(separator_spaces) > TRANSCRIPT_LIMIT {
-        return Err("Conversation limit reached. Start a new conversation.");
+        return Err("The AI turn exceeded the display limit. Ask for a shorter answer.");
     }
     Ok(())
 }
@@ -75,8 +75,11 @@ fn uuid(value: &str) -> bool {
             }
         })
 }
-fn label(name: &Value) -> &'static str {
+pub(super) fn label(name: &Value) -> &'static str {
     match name.as_str().unwrap_or("") {
+        "propose_draft" | "mcp__omamail__propose_draft" | "omamail_propose_draft" => {
+            "Creating draft"
+        }
         "Bash" => "Running a command",
         "Read" => "Reading a file",
         "Write" => "Writing a file",
@@ -150,12 +153,29 @@ impl ClaudeStream {
         }
         result
     }
-    fn status(&mut self, text: &'static str) {
+    pub(super) fn set_session(&mut self, id: &str) -> Result<()> {
+        if !self.session_id.is_empty() && self.session_id != id {
+            return Err("The AI changed session identity unexpectedly.");
+        }
+        self.session_id = id.to_owned();
+        Ok(())
+    }
+    pub(super) fn begin(&mut self) {
+        self.complete = false;
+        self.final_seen = false;
+        self.output.clear();
+        self.reset_message();
+    }
+    pub(super) fn finish(&mut self) {
+        self.complete = true;
+        self.final_seen = true;
+    }
+    pub(super) fn status(&mut self, text: &'static str) {
         self.transcript.push(json!({"role":"status","text":text}));
         self.progress = text;
         self.current = None;
     }
-    fn answer(&mut self, text: &str, replace: bool) -> Result<()> {
+    pub(super) fn answer(&mut self, text: &str, replace: bool) -> Result<()> {
         valid_text(text)?;
         let index = match self.current {
             Some(index) => index,
@@ -180,7 +200,7 @@ impl ClaudeStream {
         self.progress = "Writing...";
         Ok(())
     }
-    fn reset_message(&mut self) {
+    pub(super) fn reset_message(&mut self) {
         self.current = None;
         self.message_index = None;
         self.tools_seen = 0;

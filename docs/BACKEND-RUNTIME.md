@@ -88,6 +88,14 @@ meaning require contract review, updated fixtures and a higher API revision.
 predates this field; only that exact version is recognized as legacy API 1. Missing
 revision information from any other version is refused.
 
+## Native AI conversations (API 6)
+
+Settings → AI follows the Omarchy system default or selects Claude, Codex or OpenCode V2, with an optional model override. `agent.providerStatus` resolves the supported provider without starting an agent or creating a job. An unsupported default leaves the AI action visible but disabled; Settings explains the supported choices. Availability checks require API 6 and are repeated while following the system default. Explicit choices bypass the system-default lookup. CLI installation and authentication are still checked when a request starts. Standalone Linux/macOS builds default to OpenCode; Windows does not advertise AI.
+
+Each conversation retains one native provider session, serializes follow-ups and leaves compaction to that provider. Durable jobs retain per-turn public transcripts and proposal records; API-6 history pages and a rebuildable head index keep polling bounded. Interrupted turns preserve their session and mail context when safe to continue; crashed or unconfirmed workers require a fresh chat. Agent/model changes start new chats, preserve unsent input and retain prior chats as read-only history.
+
+The isolated provider launch preserves model/authentication configuration while excluding unrelated tools, plugins and hooks. The only mail-writing tool records a content-only draft proposal: account, recipients, threading and attachment ownership come from app-owned snapshots. Applying or sending a proposal requires a human action and uses the normal composer/outbox path. Delivery labels and targeted Undo follow outbox receipts. Codex advertises the proposal namespace directly even for code-mode-only models, without general tool discovery.
+
 ## API 6 account-wide IMAP search
 
 IMAP and Outlook text searches, and IMAP address searches, resolve to `search:<criteria>`. IMAP All mail resolves to `search:ALL`; folder queries remain folder-scoped. The IMAP UI keeps Archive on API 5 and exposes All mail starting at API 6.
@@ -233,7 +241,7 @@ Current integrated-checkout audit on 2026-09-14: macOS arm64, Linux x86_64, and 
 
 ## Local verification
 
-For the standalone host, run `make app-build` to build without the AI feature and `make app-run` to launch from source resources. `make test-app-qml` builds the host and runs its composition test. A fuller local native check is:
+For the standalone host, run `make app-build` to build and `make app-run` to launch from source resources. Linux and macOS builds include the native AI feature; Windows continues to omit its runtime capability. `make test-app-qml` builds the host and runs its composition test. A fuller local native check is:
 
 ```sh
 cargo test --locked --no-default-features --features standalone

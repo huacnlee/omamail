@@ -31,7 +31,7 @@ jobs:
       - run: cargo test --locked --no-default-features --features standalone --test platform_native
       - run: cargo check --locked --all-targets --no-default-features --features standalone
       - run: cargo test --locked --no-default-features --features standalone process
-      - run: cargo test --locked --no-default-features --features standalone --test cli agent_disabled_build_has_no_worker_or_agent_rpc
+      - run: cargo test --locked --no-default-features --test cli agent_disabled_build_has_no_worker_or_agent_rpc
 
   standalone-app-macos:
     name: Standalone app (macOS arm64)

@@ -9,6 +9,7 @@ import "../message/Direction.js" as Direction
 import "../message/Message.js" as Mail
 import "../compose/Recipients.js" as Recipients
 import "../compose/Senders.js" as Senders
+import "../agent/Agent.js" as Agent
 
 // Composing takes over the whole content area of the one window rather than
 // opening a second one: Omarchy's panel mechanism would give an extra window
@@ -100,8 +101,49 @@ DropArea {
   property string draftKey: newDraftKey()
   function newDraftKey() { return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }
   function currentFields() {
-    return ({ to: toField.text, subject: subjectField.text, body: bodyEdit.text,
-      from: fromEmail, accountId: accountId, draftId: sourceDraftId, draftKey: draftKey })
+    return ({ to: toField.text, cc: ccField.text, bcc: bccField.text,
+      subject: subjectField.text, body: Agent.replyOnly(bodyEdit.text, retainedReplyQuote()),
+      from: fromEmail, accountId: accountId, draftId: sourceDraftId, draftKey: draftKey, replyMessageId: replyMessageId,
+      envelope: outgoingEnvelope() })
+  }
+
+  property string agentParentJobId: ""
+  property string replyMessageId: ""
+  function retainedReplyQuote() {
+    if (mode !== "reply" && mode !== "replyAll") return ""
+    return Agent.replyOnly(bodyEdit.text, bodyQuote) !== bodyEdit.text ? bodyQuote : ""
+  }
+  function outgoingEnvelope() {
+    if (forwardAttachmentsLoading || forwardAttachmentError !== "" || attachmentHostPending || attachmentReadPending || attachJobs.length > 0) return null
+    return {accountId: accountId, draftKey: draftKey, from: fromEmail,
+      to: toField.text, cc: ccField.text, bcc: bccField.text, replyTo: replyToField.text,
+      subject: subjectField.text, body: bodyEdit.text,
+      attachments: JSON.parse(JSON.stringify(allOutgoingAttachments())), draftId: sourceDraftId,
+      threadId: mode === "forward" ? "" : threadId, inReplyTo: mode === "forward" ? "" : inReplyTo,
+      replyMessageId: replyMessageId, replyQuote: retainedReplyQuote()}
+  }
+  function beginProposal(envelope, parentId) {
+    begin("new", null, "", [])
+    restoreDraft(Agent.proposalDraft(envelope, parentId, draftKey))
+  }
+  function applyProposal(envelope) {
+    if (!opened || String(envelope.accountId) !== accountId) return false
+    if (envelope.draftKey ? String(envelope.draftKey) !== draftKey
+        : !replyMessageId || String(envelope.replyMessageId || "") !== replyMessageId) return false
+    bodyQuote = String(envelope.replyQuote || "")
+    subjectField.text = String(envelope.subject)
+    replaceBody(envelope.body)
+    return true
+  }
+  function sendProposal(envelope, proposalId, parentId) {
+    if (!service) return false
+    // Prepare a real recovery draft before dispatch, without replacing newer
+    // manual edits. Undo and failures use the same parked-draft path as Send.
+    var draft = Agent.proposalDraft(envelope, parentId, String(envelope.draftKey || newDraftKey()))
+    var accepted = service.sendAgentProposal(proposalId, fieldsForDraft(draft))
+    if (!accepted) return false
+    parkDraftForSend(String(accepted), draft)
+    return accepted
   }
 
   function replaceBody(text) {
@@ -206,6 +248,8 @@ DropArea {
   }
 
   function clearCurrentDraft(forgetAttachments) {
+    agentParentJobId = ""
+    replyMessageId = ""
     composeTextSerial++
     pendingQuoteSummary = null
     pendingQuoteText = ""
@@ -301,12 +345,15 @@ DropArea {
   function snapshotDraft() {
     return ({
       draftKey: draftKey,
+      replyMessageId: replyMessageId,
+      agentParentJobId: agentParentJobId,
       to: toField.text,
       cc: ccField.text,
       bcc: bccField.text,
       replyTo: replyToField.text,
       subject: subjectField.text,
       body: bodyEdit.text,
+      bodyQuote: bodyQuote,
       placedBody: placedBody,
       bodyWasEdited: bodyWasEdited,
       userModified: userModified,
@@ -330,6 +377,8 @@ DropArea {
   function restoreDraft(draft) {
     var saved = draft || ({})
     draftKey = String(saved.draftKey || newDraftKey())
+    replyMessageId = String(saved.replyMessageId || "")
+    agentParentJobId = String(saved.agentParentJobId || "")
     mode = String(saved.mode || "new")
     accountId = String(saved.accountId || "")
     sourceDraftId = String(saved.sourceDraftId || "")
@@ -353,6 +402,7 @@ DropArea {
     bccField.text = String(saved.bcc || "")
     replyToField.text = String(saved.replyTo || "")
     subjectField.text = String(saved.subject || "")
+    bodyQuote = typeof saved.bodyQuote === "string" ? saved.bodyQuote : ""
     setBodyText(String(saved.body || ""))
     placedBody = String(saved.placedBody || "")
     bodyWasEdited = saved.bodyWasEdited === true
@@ -446,13 +496,7 @@ DropArea {
     fromMenu.y = y
   }
 
-  // Everyone on the original except this mailbox: replying to yourself is
-  // never what reply-all was for.
-  //
-  // "This mailbox" is the one the draft is written from, not the one on
-  // screen. Reading the active account's address dropped the wrong name: a
-  // reply owned by B, to a message addressed to both, kept B on the Cc and
-  // removed A — copying the sender and losing a real recipient.
+  // Exclude the draft-owning mailbox, which may differ from the active account.
   function otherRecipients(summary) {
     if (!summary) return ""
     var mine = String(root.service
@@ -543,6 +587,8 @@ DropArea {
 
   function begin(nextMode, summary, bodyText, attachments) {
     clearCurrentDraft(true)
+    agentParentJobId = ""
+    replyMessageId = summary && (nextMode === "reply" || nextMode === "replyAll") ? String(summary.id || "") : ""
     mode = String(nextMode || "new")
     // The mailbox the message being answered arrived in, not the one that
     // happens to be active. In a merged list those differ, and a reply sent
@@ -755,9 +801,7 @@ DropArea {
   }
 
   function parkForSend(sendId) {
-    var parked = parkedDrafts.slice()
-    parked.push({ sendId: String(sendId || ""), draft: snapshotDraft() })
-    parkedDrafts = parked
+    parkDraftForSend(sendId, snapshotDraft())
     clearCurrentDraft(false)
     opened = false
     if (interruptedDraft) {
@@ -767,6 +811,16 @@ DropArea {
     } else {
       sendQueued()
     }
+  }
+
+  function parkDraftForSend(sendId, draft) {
+    var parked = parkedDrafts.slice()
+    // A card can appear in both the reader and composer. The outbox send ID
+    // also identifies its one recovery draft.
+    if (parked.some(function(entry) { return entry.sendId === String(sendId) })) return
+    parked.push({ sendId: String(sendId || ""), draft: draft })
+    parkedDrafts = parked
+    draftChanged()
   }
 
   // The parked draft a send names — or, for a caller that does not name its

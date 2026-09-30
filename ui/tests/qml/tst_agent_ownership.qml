@@ -29,11 +29,13 @@ Item {
   QtObject {
     id: bridge
     property bool ready: true
+    property int apiVersion: 6
     property var modelBridge: null
     property var requests: []
     property var listed: []
     property var projectionErrors: []
     function call(method, params, callback) {
+      if(method === "agent.providerStatus") {callback({available:true,provider:"claude"}, "");return}
       if(method === "agent.jobsProjection") {modelBridge.call(method,params,function(result,error){if(error)bridge.projectionErrors=bridge.projectionErrors.concat([error]);callback(result,error)});return}
       if(method === "agent.jobsList") {callback(listed, "");return}
       requests=requests.concat([{method:method,params:params,callback:callback}])

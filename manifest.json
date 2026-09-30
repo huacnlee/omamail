@@ -50,7 +50,9 @@
       "calendarSnoozeMinutes": 5,
       "openOnClick": "Window",
       "showBarIcon": true,
-      "suggestEvents": false
+      "suggestEvents": false,
+      "aiAgent": "System default",
+      "aiModel": ""
     },
     "schema": [
       {
@@ -110,11 +112,26 @@
         "description": "Applies to the inbox only, and to Gmail and IMAP accounts. Gmail takes any Gmail search operator, for example `in:inbox -category:promotions`; IMAP takes IMAP SEARCH criteria. HEY accounts always open their Imbox."
       },
       {
+        "key": "aiAgent",
+        "type": "enum",
+        "label": "AI agent",
+        "options": ["System default", "OpenCode", "Codex", "Claude"],
+        "defaultValue": "System default",
+        "description": "Agent for new mail chats and calendar suggestions. System default follows Omarchy; unsupported defaults disable AI. Changing the selection starts fresh chats and keeps previous chats read-only. Requires backend API 6."
+      },
+      {
+        "key": "aiModel",
+        "type": "string",
+        "label": "AI model (optional)",
+        "defaultValue": "",
+        "description": "Leave blank for the selected agent's default model. OpenCode takes provider/model or provider/model#variant; Codex and Claude take their model names. Changing the model starts fresh chats and keeps previous chats read-only. Requires backend API 6."
+      },
+      {
         "key": "suggestEvents",
         "type": "boolean",
         "label": "Suggest calendar events from mail",
         "defaultValue": false,
-        "description": "Uses the system AI: a message from a person that names a time is sent to it once when opened, which spends tokens. Notifications, newsletters and lists are skipped. Nothing is written until you Add."
+        "description": "Uses the selected AI agent and model: a message from a person that names a time is sent to it once when opened, which spends tokens. Notifications, newsletters and lists are skipped. Nothing is written until you Add."
       },
       {
         "key": "notifyNewMail",

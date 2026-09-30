@@ -56,10 +56,11 @@ const selected = released ? {
   methods: whole.methods.filter(m => !unreleased.methods.includes(m)),
   contractCases: whole.contractCases.filter(c => !unreleased.cases.includes(c.name))
 } : whole;
-// Agent RPC is a plugin-only capability. The standalone binary must omit its
-// inventory and reject every agent method without touching storage.
-const unavailable = standalone ? selected.methods.filter(m => m.startsWith('agent.')) : [];
-const contract = standalone ? {
+// Standalone Linux/macOS share the native assistant. Windows remains deferred
+// and must reject the unavailable methods without touching storage.
+const agentUnavailable = standalone && process.platform === 'win32';
+const unavailable = agentUnavailable ? selected.methods.filter(m => m.startsWith('agent.')) : [];
+const contract = agentUnavailable ? {
   ...selected,
   methods: selected.methods.filter(m => !m.startsWith('agent.')),
   contractCases: selected.contractCases.filter(c => !c.method.startsWith('agent.'))
@@ -129,7 +130,7 @@ function storageSnapshot(directory = process.env.HOME) {
   assert.equal(api, contract.apiVersion, 'API version (only released 0.9.0 has a legacy fallback)');
   assert.ok(Array.isArray(info.methods));
   for (const method of contract.methods) assert.ok(info.methods.includes(method), 'advertised API method: ' + method);
-  if (standalone) assert.equal(info.capabilities && info.capabilities.agent, false, 'standalone disables agent capability');
+  if (standalone) assert.equal(info.capabilities && info.capabilities.agent, !agentUnavailable, 'standalone agent capability follows platform support');
   for (const method of unavailable) {
     assert.ok(!info.methods.includes(method), 'standalone does not advertise: ' + method);
     const before = storageSnapshot();
@@ -150,14 +151,36 @@ function storageSnapshot(directory = process.env.HOME) {
   function at(value, path) { return path ? path.split('.').reduce((v, key) => v === undefined || v === null ? undefined : v[key], value) : value; }
   assert.ok(Array.isArray(contract.contractCases) && contract.contractCases.length);
   for (const fixture of contract.contractCases) {
+    if (fixture.name === 'AI transcript pages preserve native session identity') {
+      const root = process.env.XDG_STATE_HOME + '/omamail/assistant';
+      fs.mkdirSync(root, {recursive:true, mode:0o700});
+      const id = n => (n + 1).toString(16).padStart(32, '0');
+      for (let index = 0; index < 10; index++) {
+        const directory = root + '/' + id(index);
+        fs.mkdirSync(directory, {mode:0o700});
+        const job = {id:id(index),conversationId:id(0),accountId:'contract-account',messageId:'mail',
+          messageIds:['mail'],draftKey:'',draftFingerprint:'',subject:'Synthetic',kind:'message',
+          state:'done',created:1,createdOrder:index+1,updated:1,resultReady:true,displayVersion:2,
+          sessionId:'11111111-2222-3333-4444-555555555555',provider:'claude'};
+        const display = {transcript:[{role:'user',text:'question-'+index},{role:'assistant',text:'answer-'+index}],
+          output:'answer-'+index,complete:true,sessionId:job.sessionId};
+        const context = {accountId:job.accountId,prompt:'question-'+index,...(index ? {parent:id(index-1)} : {})};
+        for (const [name, value] of Object.entries({'job.json':job,'display.json':display,'context.json':context,
+          ...(index < 9 ? {'next.json':id(index+1)} : {})}))
+          fs.writeFileSync(directory+'/'+name,JSON.stringify(value),{mode:0o600});
+      }
+    }
     const registryPath = process.env.CONTRACT_REGISTRY_PATH;
     const emptyRegistry = fixture.name === 'mail list requires an account';
     const registryBefore = emptyRegistry ? fs.readFileSync(registryPath) : null;
     if (emptyRegistry) fs.writeFileSync(registryPath, JSON.stringify({version:1,accounts:[]}));
     // The full isolated HOME includes seeded cache/config/state sentinels,
     // credential helper effects and any newly created outbox/draft files.
-    const noWrites = fixture.method.startsWith('mail.') || fixture.name === 'recovery rejects invalid edit history';
+    const noWrites = fixture.method.startsWith('mail.') || fixture.name === 'recovery rejects invalid edit history'
+      || fixture.name === 'AI recovery refuses nontext quote metadata';
     const before = noWrites ? storageSnapshot() : null;
+    if (fixture.name === 'AI recovery preserves app-owned quote metadata')
+      fixture.params.expectedRevision = (await call('compose.recoveryRead', {})).revision;
     const value = await call(fixture.method, fixture.params, fixture.errorCode === undefined ? null : fixture.errorCode);
     if (noWrites) assert.deepEqual(storageSnapshot(), before, fixture.name + ': no storage or credential effects');
     if (emptyRegistry) fs.writeFileSync(registryPath, registryBefore);
@@ -238,7 +261,7 @@ def main():
     parser.add_argument('--released', action='store_true',
                         help='check only the released API, as the pinned published binary speaks it')
     parser.add_argument('--standalone', action='store_true',
-                        help='check the standalone frontend subset and require agent RPC to be disabled')
+                        help='check standalone capabilities, including native agents on Linux/macOS')
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     contract = json.loads((ROOT / 'backend-api.json').read_text())

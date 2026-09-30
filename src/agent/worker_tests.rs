@@ -1,15 +1,19 @@
 use super::*;
 use serde_json::json;
 
-fn parser() -> ClaudeStream {
-    ClaudeStream::new(vec![json!({"role":"user","text":"Synthetic prompt"})]).unwrap()
+fn parser() -> ProviderStream {
+    ProviderStream::new(
+        Provider::Claude,
+        vec![json!({"role":"user","text":"Synthetic prompt"})],
+    )
+    .unwrap()
 }
 fn fake(script: &str) -> Command {
     let mut command = Command::new("python3");
     command.args(["-c", script]);
     command
 }
-async fn run_fake(script: &str) -> (Outcome, ClaudeStream) {
+async fn run_fake(script: &str) -> (Outcome, ProviderStream) {
     let mut parser = parser();
     let result = execute(
         fake(script),

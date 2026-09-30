@@ -43,29 +43,18 @@ readonly property string keyContext:
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `eventCompose` | Creating or editing an event | `Enter` saves and closes after success; `Escape` closes; modified keys remain available |
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
-| `assistantCommands` | Choosing an AI slash command | `Up`, `Down`, `Return`, `Enter`, `Escape`, and the modified keys |
+| `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
 
-While an AI request is running, Escape interrupts it and keeps the dock open;
-otherwise Escape closes the dock. An open command menu or history view is left first.
+While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock. An open command suggestion or history view is left first.
 
-The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts
-a newline. Ctrl+Return/Enter also sends for compatibility.
-While `/` command candidates are visible, `assistantCommands` owns Up/Down and
-Return/Enter; choosing a command inserts a highlighted slash token without sending it.
-Tokens expand into their full instructions only when sent. Editing through a token
-(including Backspace, Delete, or a selection replacement) removes the whole command;
-ordinary text around it remains editable. This is text-edit normalization, not an
-additional key binding. Escape
-first dismisses those candidates, then closes the dock. Both contexts keep the
-keyboard in the AI text area.
-The `assistantSend` row's `sequenceContexts` restricts bare Return/Enter to
-`assistant`, so those keys choose a candidate in `assistantCommands` instead.
-Shift+Return/Enter remains ordinary text input in both contexts.
+The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts a newline. Ctrl+Return/Enter also sends for compatibility. Typing `/` offers `/clear` (new chat), `/history` (conversation history), and `/diagnose` (diagnostics). Up/Down selects a suggestion; Return/Enter completes a partial command or executes an exact command immediately. Commands stay local. Outside suggestions, Up/Down retain normal text navigation.
+
+Changing the AI agent or model starts fresh chats and clears queued follow-ups while preserving unsent input. Previous chats remain readable in History, but cannot continue across the selection change; the cutoff persists across restarts. New chats created afterward can still resume normally.
 
 Qt 6.11's native `TextArea` accepts `ShortcutOverride` for editing keys even
 after `Keys.onShortcutOverride` leaves the event unaccepted. This was measured
@@ -79,13 +68,14 @@ event is left alone, preserving normal typing, IME input and line breaks.
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
 
-**A text-entry context binds no bare key but `Escape`, except AI send and command
-selection described above and Enter to save in the single-line event editor.**
+**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in the single-line event editor.**
 There is no "is the user typing" question anywhere in the code, because there is
 nothing left for it to answer: if a bare letter is not bound in `compose`, it
 cannot fire there, and the field gets it the way any other character arrives.
 
 ## One mechanism
+
+Implementation constraints: use an `Instantiator`, not a `Repeater`, to construct `Shortcut` objects. Park keyboard focus on a plain `Item`, not the departing focus scope, and do not leave `focus: true` on a component that can become invisible. Popups consume keys before the shortcut map: handle their keys on `contentItem` and let `CloseOnEscape` close them. Provider actions must be refused before optimistic updates even when their buttons are hidden; filter hints with `Keymap.hintsFor` too.
 
 **The context owns the keyboard.** Changing context moves the focus — to
 whatever that context types into, or to a parked home item when the context
@@ -164,9 +154,9 @@ used to exist, and they had.
 | `switchAccount` | `Alt+A` | mail | Switch account |
 | `askAgent` | `Alt+G` | mail+compose | Ask AI about the message or draft |
 | `assistantSend` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | assistant+assistantCommands | Send the AI message |
-| `assistantCommandUp` | `Up` | assistantCommands | Previous AI command |
-| `assistantCommandDown` | `Down` | assistantCommands | Next AI command |
-| `assistantChooseCommand` | `Return`, `Enter` | assistantCommands | Fill the selected AI command |
+| `assistantCommandNext` | `Down` | assistantCommands | Next command |
+| `assistantCommandPrevious` | `Up` | assistantCommands | Previous command |
+| `assistantChooseCommand` | `Return`, `Enter` | assistantCommands | Complete or run the selected AI command |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
 | `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
 | `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
@@ -262,6 +252,8 @@ find a mailbox.
 message list clamps.
 
 ## The cursor
+
+Hover must not write `cursorId`: Qt re-reports hover as content scrolls beneath a stationary pointer. Reveal keyboard selection with `Model.contentYToReveal`; the list is a `Column`, not a view with `positionViewAtIndex`.
 
 `cursorId` is where the keyboard is. `selectedId` is what the reader shows.
 They are two different things, and conflating them was the first bug in this

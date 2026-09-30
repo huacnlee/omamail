@@ -131,6 +131,8 @@ QtObject {
 
   function queueComposeReceiptAck(accountId, sendId, revision) {
     if (accountId === "" || sendId === "") return
+    // Forget releases the payload, not the send ID/digest tombstone. Proposal
+    // receipts use the same durable-recovery gate as every other send.
     var next = root.composeReceiptAcks.filter(function(entry) { return entry.accountId !== accountId || entry.sendId !== sendId })
     next.push({accountId:accountId,sendId:sendId,revision:revision})
     root.composeReceiptAcks = next

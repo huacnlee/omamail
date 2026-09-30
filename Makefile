@@ -62,7 +62,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/AccountRemovalDialog.qml \
 	ui/components/ComposeExitDialog.qml \
 	ui/components/BackBar.qml \
-	ui/components/SettingsPage.qml \
+	ui/components/SettingsPage.qml ui/components/AiSettings.qml \
 	ui/components/SettingsSidebar.qml \
 	ui/components/CalendarSettings.qml \
 	ui/components/CalendarEventComposer.qml \
@@ -124,6 +124,7 @@ test-js:
 	node tests/test_gmail_backend.js
 	node ui/tests/test_compose_recovery.js
 	node ui/tests/test_agent.js
+	node ui/tests/test_agent_options.js
 	node ui/tests/test_chat_text.js
 	node ui/tests/test_signature.js
 	node ui/tests/test_outbox.js

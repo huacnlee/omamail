@@ -352,7 +352,7 @@ messages, four concurrent reads, 200,000 UTF-16 text units and a 60-second overa
 deadline. Cancellation is account/request-scoped. It returns a bounded job
 payload, not provider resources. `agent.job*` methods own durable task lifecycle
 and status projections; the native detached worker streams only validated
-public answers into private storage. See [agent lifecycle](AGENT.md).
+public answers into private storage.
 
 ## Automatic mailbox checks
 

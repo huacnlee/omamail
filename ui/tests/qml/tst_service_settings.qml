@@ -84,6 +84,22 @@ Item {
       compare(shellStore.updatedEntry.unifiedCalendarView, true)
     }
 
+    function test_ai_settings_reach_the_native_runner_and_preserve_other_preferences() {
+      mailService.applySettings({showBarIcon:false})
+      compare(mailService.aiAgent, "System default")
+      compare(mailService.aiModel, "")
+      mailService.setAiAgent("OpenCode")
+      mailService.setAiModel(" fixture/model#variant ")
+      compare(shellStore.updatedEntry.aiAgent, "OpenCode")
+      compare(shellStore.updatedEntry.aiModel, "fixture/model#variant")
+      compare(shellStore.updatedEntry.showBarIcon, false)
+      tryCompare(mailService.agentRunner, "selectedAgent", "OpenCode")
+      compare(mailService.agentRunner.selectedModel, "fixture/model#variant")
+      mailService.applySettings({})
+      compare(mailService.agentRunner.selectedAgent, "System default")
+      compare(mailService.agentRunner.selectedModel, "")
+    }
+
     function test_unified_mailboxes_setting_defaults_off_and_persists_changes() {
       mailService.applySettings({})
       compare(mailService.unifiedMailboxes, false)

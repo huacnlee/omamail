@@ -409,7 +409,8 @@ impl Drop for ExclusiveLock {
         }
     }
 }
-pub(crate) fn lock_exclusive(dir: &File, name: &str) -> Result<ExclusiveLock> {
+/// Open and validate a lock inode without choosing the caller's waiting policy.
+pub(crate) fn open_lock(dir: &File, name: &str) -> Result<File> {
     validate_owned_root(dir)?;
     let name = cstr(name.as_ref())?;
     let flags = libc::O_RDWR | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
@@ -441,7 +442,12 @@ pub(crate) fn lock_exclusive(dir: &File, name: &str) -> Result<ExclusiveLock> {
         return Err("cache_unsafe_path");
     }
     validate_acl(&file, true)?;
-    if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    Ok(file)
+}
+
+pub(crate) fn lock_exclusive(dir: &File, name: &str) -> Result<ExclusiveLock> {
+    let file = open_lock(dir, name)?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("private_fs_busy");
     }
     Ok(ExclusiveLock {

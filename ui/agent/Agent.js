@@ -1,31 +1,96 @@
 .pragma library
 
+function suggestsClear(text) {
+  var value = String(text || "")
+  return !/[\r\n]/.test(value) && /^\s*\/[a-z]*$/.test(value)
+    && "/clear".indexOf(value.trim()) === 0
+}
+
+// Only detach the exact app-owned suffix, never text that merely looks quoted.
+function replyOnly(body, quote) {
+  body = String(body || "")
+  quote = String(quote || "")
+  if (quote === "") return body
+  if (body === quote) return ""
+  var suffix = "\n\n" + quote
+  return body.slice(-suffix.length) === suffix ? body.slice(0, -suffix.length) : body
+}
+
+function proposalEnvelope(envelope) {
+  var result = JSON.parse(JSON.stringify(envelope))
+  var quote = String(result.replyQuote || "")
+  if (quote !== "") result.body = replyOnly(result.body, quote) + "\n\n" + quote
+  return result
+}
+
+// A proposal is a separate local draft, including when another draft is open.
+// Keep attachment bytes in its recovery record rather than sharing ownership
+// of a temporary file that the current editor may remove.
+function proposalDraft(envelope, parentId, draftKey) {
+  var attachments = JSON.parse(JSON.stringify(envelope.attachments || []))
+  for (var i = 0; i < attachments.length; i++) {
+    attachments[i].owned = false
+    if (attachments[i].data) attachments[i].path = ""
+  }
+  return {draftKey: draftKey, agentParentJobId: String(parentId || ""),
+    replyMessageId: String(envelope.replyMessageId || ""),
+    accountId: String(envelope.accountId), fromEmail: String(envelope.from || ""),
+    fromWasChosen: true, to: String(envelope.to || ""), cc: String(envelope.cc || ""),
+    bcc: String(envelope.bcc || ""), replyTo: String(envelope.replyTo || ""),
+    ccVisible: !!envelope.cc, bccVisible: !!envelope.bcc, replyToVisible: !!envelope.replyTo,
+    subject: String(envelope.subject || ""), body: String(envelope.body || ""),
+    bodyQuote: typeof envelope.replyQuote === "string" ? envelope.replyQuote : "",
+    bodyWasEdited: true, userModified: true, placedBody: "",
+    mode: envelope.replyMessageId ? "reply" : "new",
+    sourceDraftId: String(envelope.draftId || ""), threadId: String(envelope.threadId || ""),
+    inReplyTo: String(envelope.inReplyTo || ""), draftAttachments: attachments,
+    originalAttachments: [], forwardedAttachments: [], replyRecipients: []}
+}
+
 // UI labels, editable prompts and local composer/queue interaction.
 // Job parsing, ownership, attention, history and payload construction live in
 // Rust; their historical JS baselines are confined to tests/oracles/agent.
 
 var ACTIVE = ["queued", "running"]
 
-var DRAFT_ASKS = [
-  { id: "review", label: "Review", prompt: "Review this draft: is it clear, complete and right in tone for its recipient? Answer with your review, not a rewrite." },
-  { id: "rewrite", label: "Rewrite", prompt: "Rewrite this draft so it reads clearly and naturally, keeping every fact and the owner's voice." },
-  { id: "shorten", label: "Shorten", prompt: "Shorten this draft to the fewest words that still say everything it says." },
-  { id: "expand", label: "Expand", prompt: "Expand this draft: fill in what a reader would need and the owner left implied, without inventing facts." },
-  { id: "formal", label: "More formal", prompt: "Rewrite this draft in a more formal register, keeping every fact." },
-  { id: "friendly", label: "Friendlier", prompt: "Rewrite this draft in a warmer, friendlier register, keeping every fact." },
-  { id: "notes", label: "From notes", prompt: "The body is notes. Write the email they describe, to this recipient, in the owner's voice." }
-]
+function canUseDraftChat(job, fields) {
+  return !!job && String(job.accountId || "") === String(fields.accountId || "")
+    && (String(job.draftKey || "") === String(fields.draftKey || "")
+      || (String(job.draftKey || "") === "" && !!fields.replyMessageId
+        && String(job.messageId || "") === String(fields.replyMessageId)))
+}
 
+function conversationWithProposals(conversation, proposals) {
+  var rows = []
+  for (var i = 0; i <= conversation.length; i++) {
+    for (var p = 0; p < proposals.length; p++) {
+      var at = typeof proposals[p].afterTurn === "number" ? proposals[p].afterTurn : conversation.length
+      at = Math.max(0, Math.min(conversation.length, at))
+      // Tool execution can precede the answer's closing explanation. Keep the
+      // draft below that complete reply, before the next user question.
+      while (at < conversation.length && conversation[at].role !== "user") at++
+      if (at === i)
+        rows.push({role: "proposal", text: String(proposals[p].id)})
+    }
+    if (i < conversation.length) rows.push(conversation[i])
+  }
+  return rows
+}
+
+function attachmentLabels(attachments) {
+  var labels = []
+  for (var i = 0; i < attachments.length; i++) {
+    var item = attachments[i]
+    var details = []
+    if (item.mimeType) details.push(String(item.mimeType))
+    if (typeof item.size === "number") details.push(item.size + " bytes")
+    labels.push(String(item.filename || item.name || "Attachment") + (details.length ? " (" + details.join(", ") + ")" : ""))
+  }
+  return labels.join("\n")
+}
+
+// Historical command answers still need their original body-only insertion rule.
 var MAIL_TRANSFORM_FORMAT = "Use exactly this reply layout: Title: <mail title>, then a blank line, then Body: on its own line followed by the mail body. Do not include any other headers or commentary."
-
-var MAIL_ASKS = [
-  {label: "Summarize", prompt: "Summarize this mail and highlight its key points."},
-  {label: "Explain", prompt: "Explain this mail in plain language, including any unfamiliar terms."},
-  {label: "Action items", prompt: "List the requested actions, deadlines, and open questions in this mail."},
-  {label: "Draft a reply", prompt: "Draft a reply to this mail. Flag any missing information instead of inventing facts."},
-  {label: "Translate to Chinese", prompt: "Translate only the mail title and body into Chinese. Exclude sender, recipients, dates, metadata, and instructions."},
-  {label: "Translate to English", prompt: "Translate only the mail title and body into English. Exclude sender, recipients, dates, metadata, and instructions."}
-]
 
 function isActive(job) {
   return !!job && ACTIVE.indexOf(String(job.state || "")) >= 0
@@ -47,7 +112,7 @@ function workingText(job, now, preparationStarted) {
   var seconds = Math.max(0, Math.floor((now - start) / 1000))
   var duration = Math.floor(seconds / 60) + "m " + (seconds % 60) + "s"
   return "• " + (active ? "Working" : "Preparing") + " (" + duration
-    + (active ? " • Esc to interrupt" : "") + " • / show commands)"
+    + (active ? " • Esc to interrupt" : "") + ")"
 }
 
 function progressText(job) {
@@ -95,17 +160,6 @@ function pluralizeMessages(count) {
   return n === 1 ? "1 message" : n + " messages"
 }
 
-function draftAsks() {
-  var out = []
-  for (var i = 0; i < DRAFT_ASKS.length; i++) {
-    var ask = DRAFT_ASKS[i]
-    var prompt = ask.prompt + " Work only on the mail title and body; do not rewrite addresses, dates, metadata, or this instruction."
-    if (ask.id !== "review") prompt = prompt.replace("Answer with your review, not a rewrite.", "") + " " + MAIL_TRANSFORM_FORMAT
-    out.push({id: ask.id, label: ask.label, prompt: prompt})
-  }
-  return out
-}
-
 function draftAnswer(job, output, transcript) {
   if (!job || (isActive(job) && !job.resultReady) || glyphState(job) === "failed" || job.question) return ""
   var text = String(output || "")
@@ -128,18 +182,6 @@ function draftFingerprint(fields) {
   return String(hash)
 }
 
-function mailAsks(multiple) {
-  var asks = []
-  for (var i = 0; i < MAIL_ASKS.length; i++) {
-    var ask = MAIL_ASKS[i]
-    asks.push({label: ask.label, prompt: ask.prompt + " Work only from the mail title and body."
-      + (ask.label.indexOf("Translate") === 0 ? " " + MAIL_TRANSFORM_FORMAT : "")})
-  }
-  asks.push({id: "rewrite", label: "Rewrite", prompt: "Rewrite only the mail title and body for clarity, preserving facts. Exclude addresses, dates, metadata and instructions. " + MAIL_TRANSFORM_FORMAT})
-  if (multiple) asks.unshift({label: "Compare mails", prompt: "Compare these mails, summarize what changed, and list shared action items and unresolved questions."})
-  return asks
-}
-
 function chatEntries(value) {
   var rows = Array.isArray(value) ? value : []
   var out = []
@@ -153,57 +195,6 @@ function chatEntries(value) {
 
 function createdOrder(job) {
   return Number(job && job.createdOrder || Number(job && job.created || 0) * 1000000000)
-}
-
-function commandSuggestions(text, choices) {
-  var value = String(text || "")
-  var match = /(?:^|\n)\/([a-z-]*)$/.exec(value)
-  if (!match) return {start: -1, items: []}
-  var items = []
-  for (var i = 0; i < choices.length; i++) {
-    var choice = choices[i]
-    var command = String(choice.id || choice.label.toLowerCase().replace(/ /g, "-"))
-    if (command.indexOf(match[1]) === 0 || choice.label.toLowerCase().indexOf(match[1]) === 0)
-      items.push({command: command, label: choice.label, prompt: choice.prompt})
-  }
-  return {start: value.lastIndexOf("/"), items: items}
-}
-
-// Selected commands keep their prompt out of the editable presentation text.
-function expandCommands(text, tokens) {
-  var result = text
-  for (var i = tokens.length - 1; i >= 0; i--)
-    result = result.slice(0, tokens[i].start) + tokens[i].prompt + result.slice(tokens[i].end)
-  return result
-}
-
-function editCommands(before, after, tokens) {
-  var start = 0
-  while (start < before.length && start < after.length && before[start] === after[start]) start++
-  var oldEnd = before.length
-  var newEnd = after.length
-  while (oldEnd > start && newEnd > start && before[oldEnd - 1] === after[newEnd - 1]) { oldEnd--; newEnd-- }
-  var from = start
-  var to = oldEnd
-  var kept = []
-  for (var i = 0; i < tokens.length; i++) {
-    var token = tokens[i]
-    if ((start < token.end && oldEnd > token.start)
-        || (start === oldEnd && start > token.start && start < token.end)) {
-      from = Math.min(from, token.start)
-      to = Math.max(to, token.end)
-    } else kept.push(token)
-  }
-  var inserted = after.slice(start, newEnd)
-  var delta = inserted.length - (to - from)
-  var shifted = []
-  for (var j = 0; j < kept.length; j++) {
-    var item = kept[j]
-    var offset = item.start >= to ? delta : 0
-    shifted.push({start: item.start + offset, end: item.end + offset, prompt: item.prompt})
-  }
-  return {text: before.slice(0, from) + inserted + before.slice(to), tokens: shifted,
-    cursor: from + inserted.length}
 }
 
 function historyLabel(job) {

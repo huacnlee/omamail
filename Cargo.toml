@@ -7,7 +7,7 @@ publish = false
 [features]
 default = ["agent"]
 agent = []
-standalone = []
+standalone = ["agent"]
 integration-test-credentials = []
 
 [dependencies]
@@ -32,6 +32,8 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
+toml_edit = "0.25"
+json5 = "0.4"
 rustls-native-certs = "0.8"
 zeroize = "1"
 

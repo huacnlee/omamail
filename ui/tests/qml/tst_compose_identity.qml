@@ -80,6 +80,7 @@ Item {
     function preferredSendAs(_recipients) { return null }
     function switchTo(_id) { return true }
     function refreshRecipientContacts() {}
+    function sendAgentProposal(id, fields) { return "agent-" + id }
     function send(fields) {
       submitted = fields
       return true
@@ -130,6 +131,113 @@ Item {
       compose.restoreDraft(snapshot)
       compare(compose.currentFields().draftKey,key)
       compare(compose.currentFields().accountId,adaId)
+    }
+
+    function test_proposal_apply_is_draft_bound() {
+      compose.begin("new", null, "", [])
+      compose.replaceBody("Manual body\n\nAda")
+      var before = compose.currentFields()
+      var proposal = compose.outgoingEnvelope()
+      proposal.subject = "Proposed subject"
+      proposal.body = "Proposed body\n\nAda"
+      verify(compose.applyProposal(proposal))
+      compare(compose.currentFields().subject, "Proposed subject")
+      compare(bodyText(), proposal.body)
+      proposal.draftKey = "another-draft"
+      compare(compose.applyProposal(proposal), false)
+      compare(bodyText(), proposal.body)
+      proposal.draftKey = before.draftKey
+      proposal.accountId = bobId
+      compare(compose.applyProposal(proposal), false)
+      compare(bodyText(), proposal.body)
+    }
+
+    function test_open_proposal_uses_recoverable_draft_data() {
+      return [{tag:"new", replyMessageId:"", mode:"new"},
+        {tag:"reply", replyMessageId:"original", mode:"reply"}]
+    }
+
+    function test_open_proposal_uses_recoverable_draft(data) {
+      var attachment = {filename:"notes.txt",mimeType:"text/plain",data:"SGVsbG8=",
+        path:"/synthetic/editor-file",owned:true}
+      var envelope = {accountId:bobId,from:bobId,to:adaId,cc:"cc@example.org",bcc:"bcc@example.org",
+        replyTo:"reply@example.org",subject:"Proposal",body:"Exact body",attachments:[attachment],
+        threadId:"thread",inReplyTo:"message",replyMessageId:data.replyMessageId}
+      compose.beginProposal(envelope, "chat")
+      compare(compose.mode, data.mode)
+      compare(compose.currentFields().accountId, bobId)
+      compare(bodyText(), envelope.body)
+      compare(compose.currentFields().cc, envelope.cc)
+      compare(compose.currentFields().bcc, envelope.bcc)
+      compare(compose.agentParentJobId, "chat")
+      verify(compose.userModified)
+      compare(compose.draftAttachments[0].data, attachment.data)
+      compare(compose.draftAttachments[0].path, "")
+      compare(compose.draftAttachments[0].owned, false)
+      compare(attachment.owned, true)
+      var saved = compose.snapshotDraft()
+      compose.clearCurrentDraft(false)
+      compose.restoreDraft(saved)
+      compare(bodyText(), envelope.body)
+      compare(compose.mode, data.mode)
+    }
+
+    function test_ai_reply_keeps_quote_separate() {
+      compose.begin("new", null, "", [])
+      compose.mode = "reply"
+      compose.replyMessageId = "original"
+      compose.bodyQuote = "On Monday, Bob wrote:\n> Original message"
+      var quote = compose.bodyQuote
+      var manual = "My manual answer\n\nAda"
+      compose.replaceBody(manual + "\n\n" + quote)
+      compare(compose.currentFields().body, manual)
+      var proposal = compose.outgoingEnvelope()
+      compare(proposal.replyQuote, quote)
+      proposal.body = "Revised answer\n\nAda\n\n" + quote
+      verify(compose.applyProposal(proposal))
+      compare(bodyText(), proposal.body)
+      compare(compose.currentFields().body, "Revised answer\n\nAda")
+      compose.replaceBody(manual)
+      compare(compose.currentFields().envelope.replyQuote, "")
+      compare(compose.currentFields().body, manual)
+    }
+
+    function test_quote_snapshot_restore_data() {
+      return [{tag:"intact", tail:""}, {tag:"edited", tail:" edited"},
+        {tag:"removed", removed:true}, {tag:"legacy", legacy:true}]
+    }
+
+    function test_quote_snapshot_restore(data) {
+      compose.begin("new", null, "", [])
+      compose.mode = "reply"
+      compose.replyMessageId = "original"
+      var quote = "On Monday, Bob wrote:\n> Original message"
+      compose.bodyQuote = quote
+      var body = data.removed ? "My answer" : "My answer\n\n" + quote + (data.tail || "")
+      compose.replaceBody(body)
+      var saved = compose.snapshotDraft()
+      compare(saved.bodyQuote, quote)
+      if (data.legacy) delete saved.bodyQuote
+      compose.clearCurrentDraft(false)
+      compose.bodyQuote = "Stale quote from another draft"
+      compose.restoreDraft(saved)
+      compare(bodyText(), body)
+      var retained = !data.removed && !data.legacy && !data.tail
+      compare(compose.currentFields().body, retained ? "My answer" : body)
+      compare(compose.currentFields().envelope.replyQuote, retained ? quote : "")
+    }
+
+    function test_proposal_send_undo_preserves_quote() {
+      var quote = "On Monday, Bob wrote:\n> Original message"
+      var envelope = {accountId:adaId,from:adaId,to:bobId,subject:"Re: Invoice",
+        body:"Proposed reply\n\n"+quote,replyQuote:quote,replyMessageId:"original",
+        threadId:"thread",inReplyTo:"message",attachments:[]}
+      var id = compose.sendProposal(envelope, "proposal", "chat")
+      verify(!!id)
+      verify(compose.resumePendingSend(id))
+      compare(bodyText(), envelope.body)
+      compare(compose.currentFields().body, "Proposed reply")
+      compare(compose.currentFields().envelope.replyQuote, quote)
     }
 
     function named(item, objectName) {
@@ -243,5 +351,6 @@ Item {
       verify(cc.indexOf(bobId) >= 0)
       compare(cc.indexOf(adaId) < 0, true)
     }
+
   }
 }

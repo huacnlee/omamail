@@ -16,7 +16,7 @@ QtObject {
   readonly property string calendarPalettePath: ""
   readonly property string notificationError: String(host && host.notificationError || "")
   readonly property var capabilities: ({
-    agent: false,
+    agent: !!host && !!host.capabilities && host.capabilities.agent === true,
     tray: false,
     mailto: false,
     notifications: !!host && !!host.capabilities

@@ -11,20 +11,20 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/agent-job.py'
 SESSION = '11111111-2222-3333-4444-555555555555'
-PRELUDE = '''import os,sys,json,time
+PRELUDE = '''import os,sys,json,time,subprocess
 from pathlib import Path
 def emit(value):
     print(json.dumps(value),flush=True)
 prompt=sys.stdin.read()
 # Record each fake invocation beside its job via the verified wrapper argv.
-parent_args=Path('/proc/%d/cmdline'%os.getppid()).read_bytes().decode().split('\\0')
+parent_args=(Path('/proc/%d/cmdline'%os.getppid()).read_bytes().decode().split('\\0') if sys.platform=='linux' else subprocess.check_output(['ps','-o','command=','-p',str(os.getppid())],text=True).split()+[''])
 ident=parent_args[-2] if parent_args[-2] != '-c' else ''
 if len(ident)!=32:
     ident=next(p.name for p in Path('.').iterdir() if p.is_dir() and json.loads((p/'job.json').read_text()).get('state')=='running')
 Path(ident,'cwd.txt').write_text(str(Path.cwd()))
 os.chdir(ident)
 Path('stdin.txt').write_text(prompt)
-Path('argv.json').write_text(json.dumps(Path('/proc/self/cmdline').read_bytes().decode().split('\\0')))
+Path('argv.json').write_text(json.dumps([sys.executable]+sys.argv))
 Path('child.pid').write_text(str(os.getpid()))
 assert not os.isatty(0) and not os.isatty(1)
 emit({'type':'system','subtype':'init','session_id':'11111111-2222-3333-4444-555555555555'})
@@ -33,10 +33,11 @@ SUCCESS = "emit({'type':'result','subtype':'success','result':'Hello مرحبا 
 
 
 class Bridge(unittest.TestCase):
+    continue_failed = False  # Legacy Python runner; native adapter can resume failures.
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.env = dict(os.environ, XDG_STATE_HOME=str(self.root/'state'), PATH=str(self.bin)+':'+os.environ['PATH'])
@@ -224,7 +225,7 @@ emit({'type':'result','subtype':'success','result':'Final answer'})
             ident=self.new();shown=self.wait(ident)
             self.assertEqual(shown['job']['state'],'failed',body)
             self.assertFalse(shown['job']['resultReady'])
-            self.assertFalse(shown['job']['canContinue'])
+            self.assertEqual(shown['job']['canContinue'], self.continue_failed)
             self.assertNotIn('SECRET-',shown['job'].get('error',''))
 
     def test_cancel_and_active_limit(self):

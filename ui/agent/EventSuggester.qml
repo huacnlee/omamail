@@ -38,8 +38,7 @@ Item {
   // finished with nowhere to go would be a message read for nothing.
   property bool preparing: false
   property int serial: 0
-  // The system AI is not one the native worker runs — Omarchy's default
-  // agent is Codex, say. Rust refuses the first look with a word; the rest
+  // The selected AI is not one the native worker runs. Rust refuses the first look; the rest
   // of the session asks nothing more, silently, and turning the setting
   // off and on asks again. The panel says why when the owner opens it.
   property bool unavailable: false
@@ -58,9 +57,13 @@ Item {
     function onSuggestEventsChanged() { root.unavailable = false; root.consider() }
     // Retry when the connected backend meets this feature's fixed API requirement.
     function onBackendCanSuggestEventsChanged() { root.consider() }
+    function onAgentAvailableChanged() { root.unavailable = false; root.consider() }
   }
   Connections {
     target: root.runner
+    ignoreUnknownSignals: true
+    function onSelectedAgentChanged() { root.unavailable = false }
+    function onSelectedModelChanged() { root.unavailable = false }
     function onStartingChanged() { if (!root.runner.starting) root.drain() }
     function onEventLooksChanged() { root.drain() }
     function onStartRefused(code) {
@@ -80,7 +83,7 @@ Item {
   // of looks already running.
   function consider() {
     var account = reading
-    if (!account || !service || service.suggestEvents !== true || !service.hasAgent || unavailable
+    if (!account || !service || service.suggestEvents !== true || !service.hasAgent || service.agentAvailable === false || unavailable
         || !service.backendCanSuggestEvents) return false
     var id = String(account.selectedId || "")
     var summary = account.selectedMessage
@@ -118,6 +121,7 @@ Item {
   function start(look) {
     if (!service || !service.backend || !service.backend.ready) return false
     var token = ++serial
+    var selected = typeof runner.selection === "function" ? runner.selection() : null
     preparing = true
     service.backend.call("agent.context", { accountId: look.accountId,
       requestId: "events-" + Date.now() + "-" + token, ids: [look.id],
@@ -131,7 +135,7 @@ Item {
           return
         }
         payload.events = true
-        if (!root.runner.start(payload, true))
+        if (!root.runner.start(payload, true, selected))
           root.started = root.started.filter(function(key) { return key !== look.key })
       })
     return true

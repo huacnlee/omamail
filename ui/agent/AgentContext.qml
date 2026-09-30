@@ -32,7 +32,7 @@ Item {
     return owner.selectedId === id ? owner.selectedMessage : null
   }
 
-  function request(owner, ids, prompt) {
+  function request(owner, ids, prompt, draftFields, envelope, continuation) {
     if (busy || runner.starting) { error = "AI is still starting. Try again shortly."; return false }
     error = ""
     if (!owner || !Array.isArray(ids) || ids.length === 0 || ids.length > 20) {
@@ -45,11 +45,19 @@ Item {
     var summaries = []
     for (var i = 0; i < ids.length; i++) {
       var summary = selectedSummary(owner, ids[i])
-      if (!summary) { error = "That message is no longer available."; return false }
-      summaries.push(summary)
+      // The native read resolves IDs within this account, independently of the
+      // visible folder. A recovered reply need not have a loaded list row.
+      summaries.push(summary || {id: String(ids[i])})
     }
     var token = ++serial
+    var selected = typeof runner.selection === "function" ? runner.selection() : null
     var capturedOwner = String(owner.accountId || "")
+    if (draftFields && String(draftFields.accountId || "") !== capturedOwner) {
+      error = "Draft belongs to another mailbox."; return false
+    }
+    var modern = Number(service.backend.apiVersion) >= 6
+    if (!modern) envelope = null
+    var replyText = envelope && owner.selectedBody ? String(owner.selectedBody.text || "") : ""
     accountId = capturedOwner
     requestId = "context-" + Date.now() + "-" + token
     busy = true
@@ -62,6 +70,14 @@ Item {
         root.finishError("That mailbox is no longer set up."); return
       }
       if (failure || !result || !result.payload) {
+        // Missing/offline original mail must not strand a valid recovered
+        // draft or an existing conversation. Keep its captured draft/context;
+        // never turn a size-limit refusal into a smaller, misleading request.
+        if (failure && failure.message !== "agent_context_too_large" && (draftFields || continuation)) {
+          launch(continuation || {draftFields: draftFields, ask: prompt,
+            account: String(owner.accountEmail || ""), accountId: capturedOwner})
+          return
+        }
         root.finishError(failure && failure.message === "agent_context_too_large"
           ? "These messages are too large. Select fewer messages."
           : "Could not prepare mail for AI. Try again.")
@@ -70,11 +86,51 @@ Item {
       if (String(result.payload.accountId || "") !== capturedOwner) {
         root.finishError("Mail context does not belong to this mailbox."); return
       }
-      root.busy = false
-      root.deadlineStop()
-      root.requestId = ""
-      root.handle = null
-      if (!root.runner.start(JSON.stringify(result.payload))) root.error = root.runner.lastError
+      function launch(payload) {
+        if (token !== root.serial) return
+        if (!owner || root.service.findAccount(capturedOwner) !== owner) {
+          root.finishError("That mailbox is no longer set up."); return
+        }
+        root.busy = false
+        root.deadlineStop()
+        root.requestId = ""
+        root.handle = null
+        var started = continuation || payload.draftFields ? root.runner.start(payload, false, selected) : root.runner.start(JSON.stringify(payload), false, selected)
+        if (!started) root.error = root.runner.lastError
+      }
+      if (continuation) {
+        var next = JSON.parse(JSON.stringify(continuation))
+        if (modern) {
+          next.mailUpdate = {accountId: capturedOwner, messageId: String(result.payload.messageId), message: String(result.payload.message)}
+          if (result.payload.threadMessages) next.mailUpdate.threadMessages = result.payload.threadMessages
+          if (result.payload.threadContext) next.mailUpdate.threadContext = result.payload.threadContext
+        }
+        launch(next)
+        return
+      }
+      if (envelope) result.payload.envelope = envelope
+      if (draftFields) {
+        if (String(draftFields.accountId) !== capturedOwner) { root.finishError("Draft belongs to another mailbox."); return }
+        result.payload.draftKey = String(draftFields.draftKey)
+        result.payload.draft = {from: String(draftFields.from || ""), to: String(draftFields.to || ""),
+          subject: String(draftFields.subject || ""), body: String(draftFields.body || "")}
+        if (modern) {
+          result.payload.draft.cc = String(draftFields.cc || "")
+          result.payload.draft.bcc = String(draftFields.bcc || "")
+          if (draftFields.envelope) result.payload.envelope = draftFields.envelope
+        }
+      }
+      if (envelope && !draftFields) {
+        root.handle = root.service.backend.call("message.composeText", {
+          summary: summaries[0], body: replyText, signature: String(envelope.body || "")
+        }, function(prepared, failure) {
+          if (token !== root.serial) return
+          if (failure || !prepared) { root.finishError("Could not prepare the reply text."); return }
+          result.payload.envelope.replyQuote = String(prepared.quote || "")
+          result.payload.envelope.subject = String(prepared.replySubject || "")
+          launch(result.payload)
+        })
+      } else launch(result.payload)
     })
     return true
   }

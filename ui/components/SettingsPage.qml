@@ -707,6 +707,17 @@ Column {
     }
   }
 
+  AiSettings {
+    objectName: "settings-ai"
+    visible: !!root.service && root.service.hasAgent !== false
+    width: parent.width
+    service: root.service
+    textColor: root.textColor
+    dimColor: root.dimColor
+    accentColor: root.accentColor
+    panelFontFamily: root.panelFontFamily
+  }
+
   // A look at every message opened, on the owner's behalf. Off until it is
   // turned on, because the message text leaves the window for the system
   // AI; the switch says in a word which way it stands.
@@ -739,7 +750,7 @@ Column {
 
       Text {
         width: parent.width
-        text: "Uses the system AI: a message from a person that names a time is "
+        text: "Uses the selected AI agent and model: a message from a person that names a time is "
           + "sent to it once when opened, which spends tokens. Notifications, "
           + "newsletters and lists are skipped. Nothing is written until you Add."
         color: root.dimColor

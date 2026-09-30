@@ -113,9 +113,7 @@ Item {
   readonly property color danger: Color.urgent
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
-  // Shared structural border used by both the mail surface and the standalone
-  // host window. Keeping this semantic role here makes the native chrome track
-  // the same active Omarchy theme as the dividers inside it.
+  // Shared themed border for mail and standalone window chrome.
   readonly property color borderColor: Style.normalBorderColor
   readonly property int borderWidth: Style.normalBorderWidth
   readonly property color calendarBorder: Style.normalBorderColor
@@ -682,8 +680,17 @@ Item {
       return
     }
     pendingComposeMode = ""
+    var keepAssistant = agentPrompt.opened
+    var conversation = keepAssistant ? agentPrompt.job : null
     compose.begin(next, service.selectedMessage, service.selectedBody.text,
       service.selectedAttachments)
+    if (keepAssistant) {
+      if ((next === "reply" || next === "replyAll") && conversation
+          && String(conversation.accountId) === compose.accountId
+          && String(conversation.messageId) === compose.replyMessageId)
+        compose.agentParentJobId = String(conversation.id)
+      composeAgent.open()
+    }
   }
 
   // A mailto: URL, or the blank draft `compose: true` asks for. The window is
@@ -805,6 +812,12 @@ Item {
       if (root && id) root.restoreParkedDraft(id === true ? "" : String(id), false)
     })
   }
+  function undoProposal(sendId, accountId) {
+    var queue = service.agentProposalQueue(accountId)
+    return queue ? queue.undo(sendId, function(id) {
+      if (root && id) root.restoreParkedDraft(String(id), false)
+    }) : false
+  }
 
   Timer {
     id: draftSavedTimer
@@ -813,25 +826,13 @@ Item {
     onTriggered: root.draftSavedToast = ""
   }
 
-  // Opened on the cursor rather than on the selection, the way every other
-  // acting key works: `v` in the list means the row under the cursor, and in
-  // the reader there is only one message it could mean. Refuse an unavailable
-  // move before asking for a destination, through the same provider guard that
-  // checks the final action before its optimistic update.
   // Opened on a message outside the ticks, the picker moves that one alone.
   property bool labelPickerOnlyCursor: false
 
   function openLabelPicker(onlyCursor) {
     if (!service || (cursorId === "" && !selectionActive)) return false
     labelPickerOnlyCursor = onlyCursor === true
-    // A merged list draws no labels, so there is nothing to offer and the
-    // picker would open empty on a destination list it cannot fill — and a
-    // chosen id would belong to whichever mailbox happened to be active
-    // rather than to the row. Refused where it cannot be honoured, which is
-    // the same rule every other unavailable action follows.
-    // Only the merged-list refusal belongs here. A single mailbox whose
-    // provider has no move verb is the provider guard's answer, and saying
-    // "needs one mailbox on screen" over it would name the wrong reason.
+    // Labels belong to one mailbox. Other refusals use the provider guard.
     if (service.unified) {
       service.fail("Moving to a label needs one mailbox on screen")
       return false
@@ -869,7 +870,7 @@ Item {
 
   // With rows ticked, the ask is about all of them, one job with a count.
   function openAgentAt(id, sceneX, sceneY) {
-    if (!service || !service.hasAgent) return false
+    if (!service || !service.hasAgent || service.agentAvailable === false) return false
     if (selectionActive && checkedIds.indexOf(String(id || "")) >= 0) {
       agentPrompt.openForSelection(checkedIds, sceneX, sceneY)
       return true
@@ -880,7 +881,7 @@ Item {
   }
 
   function openAgentCentered(id) {
-    if (!service || !service.hasAgent) return false
+    if (!service || !service.hasAgent || service.agentAvailable === false) return false
     if (selectionActive) {
       var centre = root.mapToGlobal(Math.max(0, root.width / 2 - Style.space(190)),
         Math.max(0, root.height / 2 - Style.space(90)))
@@ -996,9 +997,9 @@ Item {
   // a row fired, for the rows that bind more than one meaning.
   function runShortcut(id, sequence) {
     if (id === "assistantSend") return activeAssistant ? activeAssistant.submitCurrent() : false
-    if (id === "assistantCommandUp") return activeAssistant ? activeAssistant.moveCommand(-1) : false
-    if (id === "assistantCommandDown") return activeAssistant ? activeAssistant.moveCommand(1) : false
     if (id === "assistantChooseCommand") return activeAssistant ? activeAssistant.chooseCommand() : false
+    if (id === "assistantCommandNext") return activeAssistant ? activeAssistant.moveCommand(1) : false
+    if (id === "assistantCommandPrevious") return activeAssistant ? activeAssistant.moveCommand(-1) : false
     // The sheet is on top, so moving moves it. It is a plain overlay rather
     // than a popup, which is why its keys can come from here at all — the
     // switcher's cannot, and answers them itself.
@@ -1040,6 +1041,7 @@ Item {
     }
     if (id === "toggleCheck") return toggleCheck(cursorId)
     if (id === "askAgent") {
+      if (!service || !service.hasAgent || service.agentAvailable === false) return false
       if (root.composing) { composeAgent.open(); return true }
       var target = currentView === "reader" && service ? service.selectedId : cursorId
       return openAgentCentered(target)
@@ -1752,16 +1754,18 @@ Item {
             parent: root.composing ? composeAiSlot : headerRight
             anchors.right: root.composing ? parent.right : undefined
             objectName: "header-ai-button"
+            opacity: enabled ? 1 : 0.4
             anchors.verticalCenter: parent.verticalCenter
             visible: !!root.service && root.service.hasAgent !== false
               && !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
             width: headerComposeButton.implicitHeight
             height: headerComposeButton.implicitHeight
             Accessible.name: "AI"
-            tooltipText: "AI... · alt+g"
+            Accessible.description: tooltipText
+            tooltipText: root.service && root.service.agentAvailable === false ? root.service.agentUnavailableReason : "AI... · alt+g"
             ActionIcon {
               anchors.centerIn: parent
-              // The antenna makes the robot visually bottom-heavy.
+              // Center the robot's body.
               anchors.verticalCenterOffset: -Style.space(1)
               name: "agent"
               iconSize: Style.font.icon
@@ -1775,7 +1779,7 @@ Item {
             accent: root.accent
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
-            enabled: root.ready && (root.assistantOpen || compose.opened || root.selectionActive
+            enabled: root.ready && !!root.service && root.service.agentAvailable !== false && (root.assistantOpen || compose.opened || root.selectionActive
               || root.cursorId !== "" || (!!root.service && root.service.selectedId !== ""))
             onClicked: {
               if (root.assistantOpen) { agentPrompt.close(); composeAgent.close() }
@@ -1793,8 +1797,7 @@ Item {
         }
       }
 
-      // The same global AI control stays at the window's top-right when the
-      // composer's own header replaces the mailbox header.
+      // Reparent the AI control into the composer's header.
       Item {
         id: composeAiSlot
         anchors.top: parent.top
@@ -2126,9 +2129,7 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           contentDirection: root.service ? root.service.contentDirection : ""
-          // The stack follows the view: opening pushes, closing pops — and
-          // the pop is here rather than on `closed`, because a draft parked
-          // for sending closes without saying so.
+          // Parked sends close without emitting `closed`; navigation follows opened.
           onOpenedChanged: {
             if (opened) root.trackComposeOpened()
             else root.leaveCompose()
@@ -2770,6 +2771,14 @@ Item {
           anchors.fill: parent
           sourceComponent: Component {
             AgentPrompt {
+              proposalComposer: compose
+              onUndoProposalRequested: function(sendId, accountId) {
+                root.undoProposal(sendId, accountId)
+              }
+              onApplyProposalRequested: function(envelope, parentId) {
+                compose.beginProposal(envelope, parentId)
+                Qt.callLater(function() { root.composeAgent.open() })
+              }
               onOpenedChanged: if (opened) root.composeAgent.close()
               objectName: "agent-prompt"
               service: root.service
@@ -2794,6 +2803,7 @@ Item {
           anchors.fill: parent
           sourceComponent: Component {
             ComposeAgent {
+              onUndoProposalRequested: function(sendId, accountId) { root.undoProposal(sendId, accountId) }
               onOpenedChanged: if (opened) root.agentPrompt.close()
               objectName: "compose-agent"
               service: root.service
@@ -3006,8 +3016,7 @@ Item {
         dimColor: root.dim
         panelFontFamily: root.fontFamily
         hiddenBindings: root.service && root.service.hasAgent === false
-          ? ["askAgent", "assistantSend", "assistantCommandUp",
-             "assistantCommandDown", "assistantChooseCommand"]
+          ? ["askAgent", "assistantSend", "assistantChooseCommand", "assistantCommandNext", "assistantCommandPrevious"]
           : []
         onDismissed: root.dismissHelp()
       }
