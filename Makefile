@@ -99,6 +99,7 @@ test-local: test test-backend-process
 
 test-backend-process:
 	cargo build --locked --target-dir "$(CURDIR)/target" --bin omamail
+	node ui/tests/test_backend_queue.js target/debug/omamail
 	python3 tests/test_backend_process.py
 	python3 tests/test_agent_native_bridge.py
 
@@ -116,6 +117,7 @@ test-js:
 	node app/tests/test_shell_theme.js
 	node ui/tests/test_bar_bridge.js
 	node ui/tests/test_backend_wire.js
+	node ui/tests/test_backend_queue.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js
 	node ui/tests/test_backend_chunks.js

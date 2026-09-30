@@ -67,6 +67,160 @@ Item {
       compare(callbacks,0)
     }
 
+    function test_refresh_burst_waits_for_free_rpc_slots() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var completed = 0
+      var failed = 0
+      for (var i = 0; i < 225; i++) {
+        backend.call("gmail.read", { accountId: "account-" + Math.floor(i / 25), id: i }, function(result, error) {
+          if (error) failed++
+          else completed++
+        })
+      }
+      compare(failed, 0)
+      compare(requests(process).length, 65, "64 physical requests after the handshake")
+      for (var j = 0; j < 225; j++) {
+        verify(Object.keys(backend.pending).length <= 64)
+        var request = requests(process)[j + 1]
+        compare(request.params.id, j, "queued reads remain FIFO")
+        reply(process, request, { ok: true })
+      }
+      compare(completed, 225)
+      compare(Object.keys(backend.pending).length, 0)
+    }
+
+    function test_shutdown_drains_accepted_queue_before_quit() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var completed = 0
+      for (var i = 0; i < 80; i++)
+        backend.call("gmail.read", { id: i }, function(result, error) { if (!error) completed++ })
+      backend.shutdown(function() {})
+      for (var j = 0; j < 80; j++) {
+        var request = requests(process)[j + 1]
+        compare(request.method, "gmail.read")
+        reply(process, request, { ok: true })
+      }
+      compare(completed, 80)
+      compare(requests(process)[81].method, "system.quit")
+      reply(process, requests(process)[81], { quitReady: true })
+      process.exited(0)
+      compare(backend.shutdownError, null)
+    }
+
+    function test_internal_upload_burst_shares_one_reservation_queue() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var completed = 0
+      var failed = 0
+      var uploads = ({})
+      var nextUpload = 0
+      for (var i = 0; i < 24; i++) {
+        var callback = function(result, error) { if (error) failed++; else completed++ }
+        if (i % 3 === 0) backend.parseMessage("Subject: Test\r\n\r\nbody", callback)
+        else if (i % 3 === 1) backend.putBodyCache("test@example.org", "id-" + i, { text: "body" }, callback)
+        else backend.call("message.prepare", {text: "x".repeat(210000)}, callback)
+      }
+      compare(requests(process).length, 9, "only eight upload reservations may start")
+      var cursor = 1
+      while (cursor < requests(process).length) {
+        var request = requests(process)[cursor++]
+        var params = request.params
+        if (request.method === "upload.begin") {
+          verify(Object.keys(uploads).length < 8)
+          var id = "upload-" + (++nextUpload)
+          uploads[id] = true
+          reply(process, request, { upload: id, chunkSize: 65536 })
+        } else if (request.method === "upload.append") {
+          verify(uploads[params.upload])
+          reply(process, request, { offset: params.offset + Math.floor(params.data.length * 3 / 4) })
+        } else {
+          verify(uploads[params.upload])
+          delete uploads[params.upload]
+          reply(process, request, { ok: true })
+        }
+      }
+      compare(completed, 24)
+      compare(failed, 0)
+      compare(Object.keys(uploads).length, 0)
+    }
+
+    function test_cancel_withdraws_an_uploaded_operation_waiting_for_rpc_capacity() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var callbacks = 0
+      var handle = backend.call("cache.resourcePut", {text:"x".repeat(210000)}, function() { callbacks++ })
+      reply(process, requests(process)[1], {upload:"cancel-commit",chunkSize:65536})
+      for (var i = 1; i <= 3; i++)
+        reply(process, requests(process)[i + 1], {offset:i * 65536})
+      var lastAppend = requests(process)[5]
+      compare(lastAppend.method, "upload.append")
+      for (var j = 0; j < 80; j++) backend.call("gmail.read", {id:j}, function() {})
+      reply(process, lastAppend, {offset:210011})
+      handle.cancel()
+      var discarded = false
+      for (var cursor = 6; cursor < requests(process).length; cursor++) {
+        var request = requests(process)[cursor]
+        verify(request.method !== "request.upload", "cancelled queued write must never execute")
+        if (request.method === "upload.discard") discarded = true
+        reply(process, request, {ok:true})
+      }
+      verify(discarded)
+      compare(callbacks, 0)
+      compare(backend.uploadQueue.bytes, 0)
+    }
+
+    function test_disconnect_fails_both_queues_once_and_ignores_late_upload_ids() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var callbacks = 0
+      function done(result, error) { verify(error !== null); callbacks++ }
+      for (var i = 0; i < 80; i++) backend.call("gmail.read", {id:i}, done)
+      for (var j = 0; j < 12; j++) backend.parseMessage("body", done)
+      var before = requests(process)
+      backend.stopForFailure("Backend stopped")
+      compare(callbacks, 92)
+      compare(backend.queued.length, 0)
+      compare(backend.uploadQueue.bytes, 0)
+      compare(backend.uploadQueue.waiting.length + backend.uploadQueue.active.length, 0)
+      for (var cursor = 1; cursor < before.length; cursor++)
+        reply(process, before[cursor], {upload:"stale",chunkSize:65536})
+      compare(callbacks, 92)
+      compare(requests(process).length, before.length)
+    }
+
+    function test_queued_request_keeps_its_original_payload() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      for (var i = 0; i < 64; i++) backend.call("providers.list", {}, function() {})
+      var params = {accountId:"first@example.org", resource:{subject:"original"}}
+      backend.call("cache.resourcePut", params, function() {})
+      params.accountId = "second@example.org"
+      params.resource.subject = "changed"
+      reply(process, requests(process)[1], {})
+      var written = requests(process)[65].params
+      compare(written.accountId, "first@example.org")
+      compare(written.resource.subject, "original")
+    }
+
+    function test_shutdown_finishes_fanout_when_an_upload_receiver_throws() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var callbacks = 0
+      function done() { callbacks++ }
+      for (var i = 0; i < 8; i++) backend.parseMessage("body", done)
+      backend.parseMessage("body", function() { callbacks++; throw new Error("receiver gone") })
+      backend.parseMessage("body", done)
+      ignoreWarning("Backend upload callback failed")
+      backend.shutdown(function() {})
+      compare(callbacks, 10)
+      verify(deadlineOf(backend).running)
+      for (var cursor = 1; cursor <= 8; cursor++)
+        reply(process, requests(process)[cursor], {upload:"late",chunkSize:65536})
+      compare(requests(process)[9].method, "system.quit")
+    }
+
     function makeBackend() {
       var backend = createTemporaryObject(backendFactory, parent)
       verify(backend !== null)
