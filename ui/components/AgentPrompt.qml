@@ -532,13 +532,6 @@ FocusScope {
                 width: parent.width - Style.space(24)
                 spacing: Style.space(8)
                 Text {
-                  text: "Proposed reply"
-                  textFormat: Text.PlainText
-                  color: root.textColor
-                  font.family: root.panelFontFamily
-                  font.bold: true
-                }
-                Text {
                   width: parent.width
                   visible: !proposalCard.envelope || !!proposalCard.envelope.cc || !!proposalCard.envelope.bcc
                   text: proposalCard.envelope ? (proposalCard.envelope.cc ? "Cc: " + proposalCard.envelope.cc : "")
