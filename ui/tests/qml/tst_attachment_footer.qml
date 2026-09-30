@@ -186,8 +186,9 @@ Item {
       verify(body.height >= 100, "expanded attachments still leave reading space")
       reader.height = 280
       reader.width = 300
-      wait(0)
-      verify(body.height >= 60, "short narrow readers must retain body space")
+      // The footer Column positions its resized children on the next polish.
+      tryVerify(function() { return body.height >= 60 }, 5000,
+        "short narrow readers must retain body space")
       verify(list.height > 0 && list.height < 160)
       reader.height = 360
       reader.width = 380
