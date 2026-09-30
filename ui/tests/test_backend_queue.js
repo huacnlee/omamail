@@ -261,14 +261,33 @@ for(const shutdown of [false,true]) {
 console.log('backend request and upload back-pressure lifecycle tests passed')
 module.exports = {bridge}
 
+// Windows storage uses OS known folders, not HOME/XDG overrides. Refuse the
+// optional subprocess fixture before it can create storage or start a backend.
+if(!process.argv[2]) {
+  const probe = require('child_process').spawnSync(process.execPath, ['-e', `
+    Object.defineProperty(process, 'platform', {value:'win32'})
+    require('fs').mkdtempSync = () => {throw new Error('unisolated storage')}
+    require('child_process').spawn = () => {throw new Error('unisolated process')}
+    process.argv[2] = 'synthetic-backend'
+    try { require(${JSON.stringify(__filename)}) }
+    catch(error) {
+      if(error.message.startsWith('Native queue fixture requires Unix storage isolation')) process.exit(0)
+      console.error(error); process.exit(1)
+    }
+    process.exit(1)
+  `], {encoding:'utf8',timeout:10000})
+  assert.strictEqual(probe.status,0,probe.stderr)
+}
+
 // The same production bridge can be driven through real Rust stdin/stdout.
 // Explicit binary argument keeps the portable JS suite independent of a build.
 if(process.argv[2]) {
+  assert.notStrictEqual(process.platform,'win32','Native queue fixture requires Unix storage isolation')
   const {spawn}=require('child_process'), os=require('os')
   const home=fs.mkdtempSync(path.join(os.tmpdir(),'omamail-queue-process-'))
   const env={...process.env,HOME:home,XDG_CONFIG_HOME:path.join(home,'config'),
     XDG_DATA_HOME:path.join(home,'data'),XDG_STATE_HOME:path.join(home,'state'),
-    XDG_CACHE_HOME:path.join(home,'cache')}
+    XDG_CACHE_HOME:path.join(home,'cache'),XDG_RUNTIME_DIR:home,TMPDIR:home}
   const run=bridge(), backend=run.backend
   const child=spawn(path.resolve(process.argv[2]),['serve'],{env,stdio:['pipe','pipe','pipe']})
   const write=backend.child.write
