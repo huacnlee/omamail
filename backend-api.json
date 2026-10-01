@@ -1,6 +1,6 @@
 {
   "apiVersion": 6,
-  "releasedApiVersion": 5,
+  "releasedApiVersion": 6,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -192,11 +192,17 @@
       "params": {
         "query": "search:ALL",
         "continuation": "expired-snapshot",
-        "settings": {"username": "synthetic", "imapHost": "imap.example.invalid", "imapPort": 993},
+        "settings": {
+          "username": "synthetic",
+          "imapHost": "imap.example.invalid",
+          "imapPort": 993
+        },
         "credential": "synthetic:secret"
       },
       "errorCode": -32000,
-      "equals": {"message": "imap_search_expired"}
+      "equals": {
+        "message": "imap_search_expired"
+      }
     },
     {
       "name": "IMAP account search refuses a malformed page cursor",
@@ -204,78 +210,166 @@
       "params": {
         "query": "search:ALL",
         "pageToken": "not-a-page-cursor",
-        "settings": {"username": "synthetic", "imapHost": "imap.example.invalid", "imapPort": 993},
+        "settings": {
+          "username": "synthetic",
+          "imapHost": "imap.example.invalid",
+          "imapPort": 993
+        },
         "credential": "synthetic:secret"
       },
       "errorCode": -32602,
-      "equals": {"message": "Invalid params"}
+      "equals": {
+        "message": "Invalid params"
+      }
     },
     {
       "name": "IMAP text search includes archived mail",
       "method": "providers.resolve",
-      "params": {"provider": "imap", "operation": "query", "search": "subject:invoice"},
-      "equals": {"value": "search:SUBJECT \"invoice\""}
+      "params": {
+        "provider": "imap",
+        "operation": "query",
+        "search": "subject:invoice"
+      },
+      "equals": {
+        "value": "search:SUBJECT \"invoice\""
+      }
     },
     {
       "name": "Outlook text search includes archived mail",
       "method": "providers.resolve",
-      "params": {"provider": "outlook", "operation": "query", "search": "invoice"},
-      "equals": {"value": "search:TEXT \"invoice\""}
+      "params": {
+        "provider": "outlook",
+        "operation": "query",
+        "search": "invoice"
+      },
+      "equals": {
+        "value": "search:TEXT \"invoice\""
+      }
     },
     {
       "name": "IMAP address search includes archived mail",
       "method": "providers.resolve",
-      "params": {"provider": "imap", "operation": "addressQuery", "field": "from", "value": "ada@example.org"},
-      "equals": {"value": "search:FROM \"ada@example.org\""}
+      "params": {
+        "provider": "imap",
+        "operation": "addressQuery",
+        "field": "from",
+        "value": "ada@example.org"
+      },
+      "equals": {
+        "value": "search:FROM \"ada@example.org\""
+      }
     },
     {
       "name": "IMAP All mail resolves to account-wide listing",
       "method": "providers.resolve",
-      "params": {"provider": "imap", "operation": "query", "mailbox": "all"},
-      "equals": {"value": "search:ALL"}
+      "params": {
+        "provider": "imap",
+        "operation": "query",
+        "mailbox": "all"
+      },
+      "equals": {
+        "value": "search:ALL"
+      }
     },
     {
       "name": "Reminder view cache has an independent namespace",
       "method": "cache.calendarRead",
-      "params": {"name":"calendar-reminders"},
-      "equals": {"version":3},
-      "types": {"ranges":"object"}
+      "params": {
+        "name": "calendar-reminders"
+      },
+      "equals": {
+        "version": 3
+      },
+      "types": {
+        "ranges": "object"
+      }
     },
     {
       "name": "Reminder actions validate before opening the ledger",
       "method": "calendar.reminders",
-      "params": {"operation":"dismiss","now":1,"key":"../outside"},
+      "params": {
+        "operation": "dismiss",
+        "now": 1,
+        "key": "../outside"
+      },
       "errorCode": -32602
     },
     {
       "name": "Simultaneous reminders retain each event identity",
       "method": "calendar.reminders",
       "params": {
-        "operation": "poll", "now": 1400000, "lastCheck": 1300000,
+        "operation": "poll",
+        "now": 1400000,
+        "lastCheck": 1300000,
         "candidates": [
-          {"key":"contract-one","occurrence":"contract-one","eventId":"one","sourceId":"calendar","accountId":"synthetic","title":"First meeting","start":2000000,"end":5600000,"due":1400000},
-          {"key":"contract-two","occurrence":"contract-two","eventId":"two","sourceId":"calendar","accountId":"synthetic","title":"Second meeting","start":2000000,"end":5600000,"due":1400000}
+          {
+            "key": "contract-one",
+            "occurrence": "contract-one",
+            "eventId": "one",
+            "sourceId": "calendar",
+            "accountId": "synthetic",
+            "title": "First meeting",
+            "start": 2000000,
+            "end": 5600000,
+            "due": 1400000
+          },
+          {
+            "key": "contract-two",
+            "occurrence": "contract-two",
+            "eventId": "two",
+            "sourceId": "calendar",
+            "accountId": "synthetic",
+            "title": "Second meeting",
+            "start": 2000000,
+            "end": 5600000,
+            "due": 1400000
+          }
         ]
       },
-      "equals": {"notifications.length":2,"notifications.0.eventId":"one","notifications.1.eventId":"two","notifications.1.title":"Second meeting"},
-      "types": {"notifications.0.key":"string","notifications.1.key":"string"}
+      "equals": {
+        "notifications.length": 2,
+        "notifications.0.eventId": "one",
+        "notifications.1.eventId": "two",
+        "notifications.1.title": "Second meeting"
+      },
+      "types": {
+        "notifications.0.key": "string",
+        "notifications.1.key": "string"
+      }
     },
     {
       "name": "Google attendance rejects unsupported answers before authentication",
       "method": "calendar.attendance",
-      "params": {"accountId":"missing@example.org","uid":"invite","organizer":"organizer@example.org","response":"yes"},
+      "params": {
+        "accountId": "missing@example.org",
+        "uid": "invite",
+        "organizer": "organizer@example.org",
+        "response": "yes"
+      },
       "errorCode": -32602
     },
     {
       "name": "Google attendance requires the invitation organizer before authentication",
       "method": "calendar.attendance",
-      "params": {"accountId":"missing@example.org","uid":"invite","response":"accepted"},
+      "params": {
+        "accountId": "missing@example.org",
+        "uid": "invite",
+        "response": "accepted"
+      },
       "errorCode": -32602
     },
     {
       "name": "Google calendar identity is validated before authentication",
       "method": "calendar.request",
-      "params": {"source":{"kind":"google","accountId":"missing@example.org","calendarId":".."},"operation":"get","eventId":"event"},
+      "params": {
+        "source": {
+          "kind": "google",
+          "accountId": "missing@example.org",
+          "calendarId": ".."
+        },
+        "operation": "get",
+        "eventId": "event"
+      },
       "errorCode": -32000
     },
     {
@@ -593,9 +687,18 @@
       "method": "compose.recoverySave",
       "params": {
         "record": {
-          "version": 1, "active": true,
-          "draft": {"body": "Answer\n\n> Original", "bodyQuote": "> Original"},
-          "parked": [{"body": "Other answer\n\n> Other", "bodyQuote": "> Other"}]
+          "version": 1,
+          "active": true,
+          "draft": {
+            "body": "Answer\n\n> Original",
+            "bodyQuote": "> Original"
+          },
+          "parked": [
+            {
+              "body": "Other answer\n\n> Other",
+              "bodyQuote": "> Other"
+            }
+          ]
         }
       },
       "equals": {
@@ -617,10 +720,19 @@
       "method": "compose.recoverySave",
       "params": {
         "expectedRevision": "unused",
-        "record": {"version": 1, "active": true, "draft": {"body": "Answer", "bodyQuote": []}}
+        "record": {
+          "version": 1,
+          "active": true,
+          "draft": {
+            "body": "Answer",
+            "bodyQuote": []
+          }
+        }
       },
       "errorCode": -32000,
-      "equals": {"message": "recovery_invalid"}
+      "equals": {
+        "message": "recovery_invalid"
+      }
     },
     {
       "name": "strict handshake parameters",
@@ -858,100 +970,265 @@
     {
       "name": "AI job projections retain provider and model",
       "method": "agent.jobsProjection",
-      "params": {"jobs": [{"id":"fixture","accountId":"contract-account","messageId":"42","kind":"message","state":"done","provider":"opencode","model":"fixture/model#variant","created":1}],"accountId":"contract-account","seenIds":[]},
-      "equals": {"byMessage.42.provider":"opencode","byMessage.42.model":"fixture/model#variant"}
+      "params": {
+        "jobs": [
+          {
+            "id": "fixture",
+            "accountId": "contract-account",
+            "messageId": "42",
+            "kind": "message",
+            "state": "done",
+            "provider": "opencode",
+            "model": "fixture/model#variant",
+            "created": 1
+          }
+        ],
+        "accountId": "contract-account",
+        "seenIds": []
+      },
+      "equals": {
+        "byMessage.42.provider": "opencode",
+        "byMessage.42.model": "fixture/model#variant"
+      }
     },
     {
       "name": "AI provider override is validated before starting a worker",
       "method": "agent.jobStart",
-      "params": {"provider": "../../bin/sh", "payload": {"messageId": "synthetic", "prompt": "Synthetic question"}},
+      "params": {
+        "provider": "../../bin/sh",
+        "payload": {
+          "messageId": "synthetic",
+          "prompt": "Synthetic question"
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message": "agent_invalid_provider"}
+      "equals": {
+        "message": "agent_invalid_provider"
+      }
     },
     {
       "name": "AI model override is validated before starting a worker",
       "method": "agent.jobStart",
-      "params": {"provider": "opencode", "model": "--auto", "payload": {"messageId": "synthetic", "prompt": "Synthetic question"}},
+      "params": {
+        "provider": "opencode",
+        "model": "--auto",
+        "payload": {
+          "messageId": "synthetic",
+          "prompt": "Synthetic question"
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message": "agent_invalid_model"}
+      "equals": {
+        "message": "agent_invalid_model"
+      }
     },
     {
       "name": "AI follow-ups cannot override the saved provider or model",
       "method": "agent.jobStart",
-      "params": {"provider": "codex", "payload": {"parent": "11111111111111111111111111111111", "prompt": "Synthetic follow-up"}},
+      "params": {
+        "provider": "codex",
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Synthetic follow-up"
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message": "agent_continuation_override"}
+      "equals": {
+        "message": "agent_continuation_override"
+      }
     },
     {
       "name": "AI draft updates require a complete current snapshot",
       "method": "agent.jobStart",
-      "params": {"payload": {"parent": "11111111111111111111111111111111", "prompt": "Revise", "draftUpdate": {"accountId": "contract-account", "draftKey": "contract-draft", "draft": {"body": "Only one field"}}}},
+      "params": {
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Revise",
+          "draftUpdate": {
+            "accountId": "contract-account",
+            "draftKey": "contract-draft",
+            "draft": {
+              "body": "Only one field"
+            }
+          }
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message": "agent_invalid_draft"}
+      "equals": {
+        "message": "agent_invalid_draft"
+      }
     },
     {
       "name": "AI draft updates cannot override conversation ownership fields",
       "method": "agent.jobStart",
-      "params": {"payload": {"parent": "11111111111111111111111111111111", "prompt": "Revise", "accountId": "other-account"}},
+      "params": {
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Revise",
+          "accountId": "other-account"
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message": "agent_continuation_override"}
+      "equals": {
+        "message": "agent_continuation_override"
+      }
     },
     {
       "name": "AI envelope ownership is validated before creating a job",
       "method": "agent.jobStart",
-      "params": {"payload":{"messageId":"synthetic","accountId":"owner","prompt":"Draft","envelope":{"accountId":"other"}}},
+      "params": {
+        "payload": {
+          "messageId": "synthetic",
+          "accountId": "owner",
+          "prompt": "Draft",
+          "envelope": {
+            "accountId": "other"
+          }
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message":"agent_context_owner_mismatch"}
+      "equals": {
+        "message": "agent_context_owner_mismatch"
+      }
     },
     {
       "name": "AI mail refresh refuses routing fields before reading history",
       "method": "agent.jobStart",
-      "params": {"payload":{"parent":"11111111111111111111111111111111","prompt":"Follow up","mailUpdate":{"accountId":"owner","messageId":"synthetic","message":"Text","to":"other@example.org"}}},
+      "params": {
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Follow up",
+          "mailUpdate": {
+            "accountId": "owner",
+            "messageId": "synthetic",
+            "message": "Text",
+            "to": "other@example.org"
+          }
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message":"agent_invalid_context"}
+      "equals": {
+        "message": "agent_invalid_context"
+      }
     },
     {
       "name": "AI app-owned reply history must be text",
       "method": "agent.jobStart",
-      "params": {"payload":{"messageId":"synthetic","accountId":"owner","prompt":"Draft","envelope":{"accountId":"owner","from":"","to":"","cc":"","bcc":"","subject":"","body":"","replyTo":"","threadId":"","inReplyTo":"","draftId":"","attachments":[],"replyQuote":[]}}},
+      "params": {
+        "payload": {
+          "messageId": "synthetic",
+          "accountId": "owner",
+          "prompt": "Draft",
+          "envelope": {
+            "accountId": "owner",
+            "from": "",
+            "to": "",
+            "cc": "",
+            "bcc": "",
+            "subject": "",
+            "body": "",
+            "replyTo": "",
+            "threadId": "",
+            "inReplyTo": "",
+            "draftId": "",
+            "attachments": [],
+            "replyQuote": []
+          }
+        }
+      },
       "errorCode": -32000,
-      "equals": {"message":"agent_invalid_text"}
+      "equals": {
+        "message": "agent_invalid_text"
+      }
     },
     {
       "name": "AI conversations expose paged listings without deleting older turns",
       "method": "agent.jobsList",
-      "params": {"paged":true,"offset":0,"watchIds":[]},
-      "equals": {"jobs":[],"hasMore":false}
+      "params": {
+        "paged": true,
+        "offset": 0,
+        "watchIds": []
+      },
+      "equals": {
+        "jobs": [],
+        "hasMore": false
+      }
     },
     {
       "name": "AI projections preserve per-turn display and stop status",
       "method": "agent.jobsProjection",
-      "params": {"jobs":[{"id":"fixture","accountId":"contract-account","messageId":"42","kind":"message","state":"done","displayVersion":2,"stopUnconfirmed":false,"created":1}],"accountId":"contract-account"},
-      "equals": {"byMessage.42.displayVersion":2,"byMessage.42.stopUnconfirmed":false}
+      "params": {
+        "jobs": [
+          {
+            "id": "fixture",
+            "accountId": "contract-account",
+            "messageId": "42",
+            "kind": "message",
+            "state": "done",
+            "displayVersion": 2,
+            "stopUnconfirmed": false,
+            "created": 1
+          }
+        ],
+        "accountId": "contract-account"
+      },
+      "equals": {
+        "byMessage.42.displayVersion": 2,
+        "byMessage.42.stopUnconfirmed": false
+      }
     },
     {
       "name": "AI transcript pages preserve native session identity",
       "method": "agent.jobShow",
-      "params": {"id":"0000000000000000000000000000000a"},
-      "equals": {"job.sessionId":"11111111-2222-3333-4444-555555555555","previous":"00000000000000000000000000000002","transcript.0.text":"question-2","transcript.15.text":"answer-9"}
+      "params": {
+        "id": "0000000000000000000000000000000a"
+      },
+      "equals": {
+        "job.sessionId": "11111111-2222-3333-4444-555555555555",
+        "previous": "00000000000000000000000000000002",
+        "transcript.0.text": "question-2",
+        "transcript.15.text": "answer-9"
+      }
     },
     {
       "name": "AI earlier transcript pages retain every saved turn",
       "method": "agent.jobShow",
-      "params": {"id":"0000000000000000000000000000000a","before":"00000000000000000000000000000002"},
-      "equals": {"previous":"","transcript.0.text":"question-0","transcript.3.text":"answer-1"}
+      "params": {
+        "id": "0000000000000000000000000000000a",
+        "before": "00000000000000000000000000000002"
+      },
+      "equals": {
+        "previous": "",
+        "transcript.0.text": "question-0",
+        "transcript.3.text": "answer-1"
+      }
     },
     {
       "name": "AI watched completions remain visible on older chat pages",
       "method": "agent.jobsList",
-      "params": {"paged":true,"offset":32,"watchIds":["0000000000000000000000000000000a"]},
-      "equals": {"jobs.0.id":"0000000000000000000000000000000a","jobs.0.state":"done","hasMore":false}
+      "params": {
+        "paged": true,
+        "offset": 32,
+        "watchIds": [
+          "0000000000000000000000000000000a"
+        ]
+      },
+      "equals": {
+        "jobs.0.id": "0000000000000000000000000000000a",
+        "jobs.0.state": "done",
+        "hasMore": false
+      }
     },
     {
       "name": "AI explicit provider availability is data-only",
       "method": "agent.providerStatus",
-      "params": {"provider": "codex"},
-      "equals": {"available": true, "provider": "codex"}
+      "params": {
+        "provider": "codex"
+      },
+      "equals": {
+        "available": true,
+        "provider": "codex"
+      }
     },
     {
       "name": "gmail message mutation answers with a queue ticket",
@@ -989,7 +1266,7 @@
     }
   ],
   "unreleased": {
-    "methods": ["calendar.attendance", "calendar.reminders", "agent.providerStatus"],
-    "cases": ["IMAP All mail resolves to account-wide listing", "IMAP text search includes archived mail", "Outlook text search includes archived mail", "IMAP address search includes archived mail", "IMAP account search refuses an expired work continuation", "IMAP account search refuses a malformed page cursor", "Google calendar identity is validated before authentication", "Google attendance rejects unsupported answers before authentication", "Google attendance requires the invitation organizer before authentication", "Reminder actions validate before opening the ledger", "Reminder view cache has an independent namespace", "Simultaneous reminders retain each event identity", "AI job projections retain provider and model", "AI provider override is validated before starting a worker", "AI model override is validated before starting a worker", "AI follow-ups cannot override the saved provider or model", "AI draft updates require a complete current snapshot", "AI draft updates cannot override conversation ownership fields", "AI envelope ownership is validated before creating a job", "AI mail refresh refuses routing fields before reading history", "AI app-owned reply history must be text", "AI conversations expose paged listings without deleting older turns", "AI projections preserve per-turn display and stop status", "AI transcript pages preserve native session identity", "AI earlier transcript pages retain every saved turn", "AI watched completions remain visible on older chat pages", "AI recovery preserves app-owned quote metadata", "AI recovery reads app-owned quote metadata", "AI recovery refuses nontext quote metadata", "AI explicit provider availability is data-only"]
+    "methods": [],
+    "cases": []
   }
 }
