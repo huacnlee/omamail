@@ -359,10 +359,23 @@ Item {
       field.text = "/"
       popup.moveCommand(1)
       verify(popup.chooseCommand())
-      compare(field.text, "/history ")
-      verify(popup.submitCurrent())
+      compare(field.text, "")
       compare(popup.historyMode, true)
       compare(service.calls, 0)
+    }
+    function test_history_back_returns_to_chat() {
+      popup.openCenteredFor("m1", "Mail")
+      var back = findChild(popup, "agent-history-back")
+      compare(back.visible, false)
+      popup.showHistory()
+      verify(waitForRendering(popup))
+      compare(back.visible, true)
+      var list = findChild(popup, "agent-history")
+      verify(list.mapToItem(popup, 0, 0).y >= back.mapToItem(popup, 0, back.height).y, "history list sits below the back button")
+      mouseClick(back)
+      compare(popup.historyMode, false)
+      compare(back.visible, false)
+      verify(findChild(popup, "agent-prompt-field").activeFocus)
     }
     function test_restart_keeps_unsent_input() {
       service.jobs=[{id:"ended",messageId:"m1",accountId:service.activeAccountId,state:"failed",canContinue:false}]

@@ -1113,7 +1113,7 @@ Item {
     if (eventComposer.guestSuggestionsOpen) { eventComposer.dismissGuestSuggestions(); return }
     if (calendarView.dismissPreview()) return
     if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
-    if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
+    if (activeAssistant && activeAssistant.historyMode) { activeAssistant.leaveHistory(); return }
     if (activeAssistant && activeAssistant.interrupt()) return
     if (composeAgent.opened) { composeAgent.close(); return }
     if (agentPrompt.opened) { agentPrompt.close(); return }

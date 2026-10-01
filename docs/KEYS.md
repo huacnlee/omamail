@@ -52,7 +52,7 @@ Back returns to the previous screen with the draft intact.
 
 While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock. An open command suggestion or history view is left first.
 
-The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts a newline. Ctrl+Return/Enter also sends for compatibility. Typing `/` offers `/clear` (new chat), `/history` (conversation history), and `/diagnose` (diagnostics). Up/Down selects a suggestion; Return/Enter completes a partial command or executes an exact command immediately. Commands stay local. Outside suggestions, Up/Down retain normal text navigation.
+The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts a newline. Ctrl+Return/Enter also sends for compatibility. Typing `/` offers `/clear` (new chat), `/history` (conversation history), and `/diagnose` (diagnostics). Up/Down selects a suggestion; Return/Enter completes a partial command or executes an exact command immediately; choosing `/history` always opens the history at once. Commands stay local. Outside suggestions, Up/Down retain normal text navigation.
 
 Changing the AI agent or model starts fresh chats and clears queued follow-ups while preserving unsent input. Previous chats remain readable in History, but cannot continue across the selection change; the cutoff persists across restarts. New chats created afterward can still resume normally.
 

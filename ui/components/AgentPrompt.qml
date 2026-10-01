@@ -108,6 +108,7 @@ FocusScope {
     return defaultJob && selectionOwns(defaultJob) && String(defaultJob.id) !== ignoredJobId ? defaultJob : null
   }
   function showHistory() { historyMode = true; historyList.currentIndex = historyJobs.length ? 0 : -1; historyList.forceActiveFocus() }
+  function leaveHistory() { historyMode = false; takeFocus() }
   function selectHistory(id) {
     viewedJobId = String(id)
     viewedConversationId = ""
@@ -248,7 +249,11 @@ FocusScope {
   function chooseCommand(index) {
     if (!commandsOpen) return false
     var command = commandMatches[typeof index === "number" ? index : commandIndex]
-    if (field.text.trim() === command) return submitCurrent()
+    // History takes no argument, so choosing it opens the list at once.
+    if (field.text.trim() === command || command === "/history") {
+      field.text = command
+      return submitCurrent()
+    }
     field.text = command + " "
     dismissedCommandText = field.text
     field.cursorPosition = field.length
@@ -402,13 +407,26 @@ FocusScope {
       anchors.margins: Style.space(12)
       spacing: Style.space(8)
       Row {
+        id: header
         width: parent.width
         spacing: Style.space(8)
+        BackBar {
+          id: historyBack
+          objectName: "agent-history-back"
+          visible: root.historyMode
+          anchors.verticalCenter: parent.verticalCenter
+          label: "Chat"
+          textColor: root.textColor
+          dimColor: root.dimColor
+          panelFontFamily: root.panelFontFamily
+          onActivated: root.leaveHistory()
+        }
         Text {
-          width: parent.width
+          width: parent.width - (historyBack.visible ? historyBack.width + parent.spacing : 0)
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
-          text: root.composer ? "AI · " + (root.fields.subject || "Draft")
+          text: root.historyMode ? "AI · History"
+            : root.composer ? "AI · " + (root.fields.subject || "Draft")
             : "AI · " + (root.subject || "Message")
           color: root.textColor
           font.family: root.panelFontFamily
@@ -832,7 +850,7 @@ FocusScope {
       objectName: "agent-history"
       visible: root.historyMode
       anchors.fill: content
-      anchors.topMargin: Style.space(28)
+      anchors.topMargin: header.height + content.spacing
       clip: true
       model: root.historyJobs
       keyNavigationEnabled: true
