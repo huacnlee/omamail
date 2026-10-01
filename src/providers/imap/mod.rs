@@ -508,6 +508,8 @@ async fn resolve_account(p: &Value, method: &str) -> Result<Value> {
     };
     let provider = if account.starts_with("outlook:") {
         "outlook"
+    } else if account.starts_with("exchange:") {
+        "exchange"
     } else if account.starts_with("imap:") {
         "imap"
     } else {
@@ -525,7 +527,12 @@ async fn resolve_account(p: &Value, method: &str) -> Result<Value> {
     .await
     .map_err(|_| "worker_failed")??;
     let mut result = p.clone();
-    let credential = if provider == "outlook" {
+    let credential = if provider == "exchange" {
+        let username = account.strip_prefix("exchange:").ok_or("invalid_params")?;
+        result["settings"] = outlook_settings(&entry, username);
+        result["oauth"] = json!(true);
+        crate::auth::exchange_access_token(account).await?
+    } else if provider == "outlook" {
         let username = account.strip_prefix("outlook:").ok_or("invalid_params")?;
         result["settings"] = outlook_settings(&entry, username);
         result["oauth"] = json!(true);

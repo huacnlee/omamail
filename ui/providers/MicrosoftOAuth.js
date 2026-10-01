@@ -81,7 +81,9 @@ function tokenUrlFor(tenant) {
 // A maintainer-owned public-client registration can make Outlook a one-click
 // setup later. Until then, each user supplies the Application (client) ID of
 // their own registration, just as Gmail users supply their own OAuth client.
-var BUILTIN_CLIENT_ID = ""
+// omarchylook / omamail shared Azure App Registration (public client).
+// Registered once; all users authenticate via Device Flow with no Azure setup.
+var BUILTIN_CLIENT_ID = "9c277d6f-edb2-4f82-bda5-901b4c11c457"
 
 function trimmed(value) {
   return String(value === undefined || value === null ? "" : value).trim()

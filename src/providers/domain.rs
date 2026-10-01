@@ -67,7 +67,7 @@ fn search(id: &str, text: &str) -> String {
         return String::new();
     }
     match id {
-        "imap" | "outlook" => imap_search(text),
+        "imap" | "outlook" | "exchange" => imap_search(text),
         "hey" => format!("search:{text}"),
         "jmap" => format!("text:{text}"),
         _ => text.into(),
@@ -134,7 +134,7 @@ pub fn resolve(p: &Value) -> Result<Value, &'static str> {
                 String::new()
             } else {
                 match id.as_str() {
-                    "imap" | "outlook" => format!("folder:{}", quoted(text)),
+                    "imap" | "outlook" | "exchange" => format!("folder:{}", quoted(text)),
                     "jmap" => format!("mailbox:{text}"),
                     _ => format!("label:{text}"),
                 }

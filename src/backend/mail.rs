@@ -40,7 +40,7 @@ impl crate::mail::send::IdentityLookup for ProviderIdentities<'_> {
                     let checked = crate::providers::hey_access::checked_params(&json!({"accountId":account.id,"program":crate::providers::hey_access::program()?})).await?;
                     crate::providers::hey::call("hey.sendAs", &checked).await
                 }
-                Provider::Imap | Provider::Outlook => {
+                Provider::Imap | Provider::Outlook | Provider::Exchange => {
                     let account = account.clone();
                     tokio::task::spawn_blocking(move || {
                         let settings = crate::auth::settings_readonly(account.provider.id(), &account.id)?;
@@ -183,7 +183,7 @@ pub(crate) async fn mutate_plan(
                 match provider {
                     Provider::Gmail => "gmail.batchModify",
                     Provider::Jmap => "jmap.batchModify",
-                    Provider::Imap | Provider::Outlook => "imap.modify",
+                    Provider::Imap | Provider::Outlook | Provider::Exchange => "imap.modify",
                     Provider::Hey => unreachable!(),
                 }
             }
@@ -414,7 +414,7 @@ impl Session {
             Provider::Gmail => Box::pin(self.gmail_list(&params)).await,
             Provider::Hey => Box::pin(self.hey_list(&params)).await,
             Provider::Jmap => Box::pin(self.jmap_list(&params)).await,
-            Provider::Outlook | Provider::Imap => {
+            Provider::Outlook | Provider::Imap | Provider::Exchange => {
                 Box::pin(self.imap_list(&params, request.limit)).await
             }
         }

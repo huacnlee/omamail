@@ -1,5 +1,5 @@
 {
-  "apiVersion": 6,
+  "apiVersion": 7,
   "releasedApiVersion": 6,
   "protocolVersion": 1,
   "methods": [
@@ -106,6 +106,10 @@
     "auth.token",
     "auth.store",
     "auth.clear",
+    "auth.exchange.clear",
+    "auth.exchange.token",
+    "auth.microsoft.begin",
+    "auth.microsoft.poll",
     "outlook.graphSend",
     "outlook.connectionCheck",
     "hey.probe",
@@ -1266,7 +1270,12 @@
     }
   ],
   "unreleased": {
-    "methods": [],
+    "methods": [
+      "auth.exchange.clear",
+      "auth.exchange.token",
+      "auth.microsoft.begin",
+      "auth.microsoft.poll"
+    ],
     "cases": []
   }
 }

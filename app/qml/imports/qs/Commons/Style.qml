@@ -33,7 +33,7 @@ QtObject {
   readonly property color normalBorderColor: normalBorderFor(Color.foreground, Color.accent)
   readonly property color selectedAccentFill: selectedFillFor(Color.foreground, Color.accent)
   readonly property var font: ({
-    family: metrics.font.family,
+    family: "monospace",
     iconFamily: iconFont.status === FontLoader.Ready ? iconFont.name : metrics.font.family,
     baseSize: baseFontSize,
     title: fontToken("title", 1.167),

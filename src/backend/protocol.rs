@@ -25,7 +25,8 @@ pub fn serve(input: impl BufRead, mut output: impl Write + Send) -> io::Result<(
     let runtime = super::runtime()?;
     let session = super::Session::default();
     let (sender, receiver) = mpsc::channel::<Frame>(16);
-    let (responses, mut completed) = mpsc::channel::<Value>(2);
+    let (responses, mut completed) = mpsc::channel::<Value>(64);
+    crate::auth::set_push_sender(responses.clone());
     let end = std::thread::scope(|scope| -> io::Result<End> {
         let writer = scope.spawn(|| -> io::Result<()> {
             while let Some(value) = completed.blocking_recv() {

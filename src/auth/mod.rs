@@ -5,7 +5,10 @@ use std::{sync::OnceLock, time::Duration};
 mod callback;
 mod credentials;
 mod graph;
+mod microsoft;
 pub use credentials::{access_token, access_token_readonly, password, settings, settings_readonly};
+pub use credentials::{store_exchange_token, exchange_access_token};
+pub use microsoft::set_push_sender;
 
 #[derive(Default)]
 pub struct Session {
@@ -170,6 +173,23 @@ impl Session {
         }
         if method == "outlook.graphSend" {
             return graph::send(params).await;
+        }
+        if method.starts_with("auth.microsoft.") {
+            match method {
+                "auth.microsoft.begin" => return microsoft::begin(params).await,
+                "auth.microsoft.poll" => return microsoft::poll(params).await,
+                _ => return Err("invalid_params"),
+            }
+        }
+        if method == "auth.exchange.token" {
+            let account = params["accountId"].as_str().ok_or("invalid_params")?;
+            let access = exchange_access_token(account).await?;
+            return Ok(json!({"accessToken": access, "expiresIn": 3600}));
+        }
+        if method == "auth.exchange.clear" {
+            // No-op for now: Exchange tokens are managed by the keyring.
+            // A future implementation would revoke the token.
+            return Ok(json!({"cleared": true}));
         }
         if method != "auth.form" {
             return self.flows.call(method, params).await;

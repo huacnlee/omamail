@@ -57,7 +57,7 @@ function calendarProvider(raw) {
   var account = raw || {}
   var provider = trimmed(account.provider).toLowerCase()
   if (provider === "gmail" || provider === "") return "google"
-  if (provider === "outlook") return "microsoft"
+  if (provider === "outlook" || provider === "exchange") return "microsoft"
   if (provider !== "imap") return ""
   var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()
   var email = trimmed(account.email).toLowerCase()
@@ -90,7 +90,7 @@ function accountId(email, provider) {
 // anything written before providers existed — is Gmail: that is what every
 // account in an upgraded install actually is, and defaulting to it is what
 // stops an upgrade from presenting a working mailbox as unconfigured.
-var PROVIDERS = ["gmail", "outlook", "hey", "imap", "jmap"]
+var PROVIDERS = ["gmail", "outlook", "exchange", "hey", "imap", "jmap"]
 var DEFAULT_PROVIDER = "gmail"
 
 function normalizeProvider(value) {
@@ -252,7 +252,7 @@ function repairedAddress(entry) {
   var raw = entry || {}
   if (isValidEmail(raw.email)) return raw
   var provider = normalizeProvider(raw.provider)
-  if (provider !== "imap" && provider !== "outlook") return raw
+  if (provider !== "imap" && provider !== "outlook" && provider !== "exchange") return raw
   var username = trimmed((raw.imap || {}).username)
   if (!isValidEmail(username)) return raw
   var next = {}

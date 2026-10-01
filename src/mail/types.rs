@@ -9,6 +9,7 @@ const MAX_QUERY: usize = 32 * 1024;
 pub enum Provider {
     Gmail,
     Outlook,
+    Exchange,
     Hey,
     Jmap,
     Imap,
@@ -19,6 +20,7 @@ impl Provider {
         match self {
             Self::Gmail => "gmail",
             Self::Outlook => "outlook",
+            Self::Exchange => "exchange",
             Self::Hey => "hey",
             Self::Jmap => "jmap",
             Self::Imap => "imap",
@@ -33,6 +35,7 @@ impl TryFrom<&str> for Provider {
         match value {
             "gmail" => Ok(Self::Gmail),
             "outlook" => Ok(Self::Outlook),
+            "exchange" => Ok(Self::Exchange),
             "hey" => Ok(Self::Hey),
             "jmap" => Ok(Self::Jmap),
             "imap" => Ok(Self::Imap),
