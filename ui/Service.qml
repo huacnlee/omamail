@@ -11,6 +11,7 @@ import "diagnostics"
 import "agent/Agent.js" as Agent
 
 import "account/Accounts.js" as Accounts
+import "account/MessageActions.js" as MessageActions
 import "account/Model.js" as Model
 import "account/Unified.js" as Unified
 import "providers/Registry.js" as Provider
@@ -98,6 +99,7 @@ Item {
   // Overall update status is diagnostic, not a feature requirement: its
   // target moves whenever the checkout grows another API revision.
   readonly property bool backendNeedsUpdate: backend.needsUpdate
+  readonly property bool backendCanExportEml: MessageActions.backendCanExportEml(rustBackend)
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
@@ -2242,39 +2244,16 @@ Item {
   function selectLabel(name, labelId) {
     if (current && !unified) current.selectLabel(name, labelId)
   }
-  // Asked of the mailbox that owns the row rather than of the visible one: in
-  // a merged list `e` and `s` reach `act` for a message whose provider may not
-  // have the verb, and the refusal has to name that provider.
-  function refuseUnavailableAction(action, id) {
-    var host = id === undefined ? current : hostForId(id)
-    if (!host) host = current
-    return host ? host.refuseUnavailableAction(action) : true
-  }
-  function act(id, action, quiet, memberOnly) {
-    var host = hostForId(id)
-    return host ? host.act(sourceIdFor(id), action, quiet, memberOnly) : false
-  }
-  function toggleStar(id) {
-    var host = hostForId(id)
-    if (host) host.toggleStar(sourceIdFor(id))
-  }
-  function markAllRead() {
-    if (!unified) {
-      if (current) current.markAllRead()
-      return
-    }
-    eachHost(function(host) { host.markAllRead() })
-  }
-  // Several ticked rows at once. A merged list draws rows from several
-  // mailboxes, and a batch is one mailbox's request, so it is refused there
-  // the way a move is: the rule every unavailable action follows.
-  function actMany(ids, action) {
-    if (unified) {
-      fail("Acting on several messages needs one mailbox on screen")
-      return false
-    }
-    return current ? current.actMany(ids, action) : false
-  }
+  function refuseUnavailableAction(action, id) { return MessageActions.refuseUnavailableAction(root, action, id) }
+  function act(id, action, quiet, memberOnly) { return MessageActions.act(root, id, action, quiet, memberOnly) }
+  function toggleStar(id) { return MessageActions.toggleStar(root, id) }
+  function canExportEmlFor(id) { return MessageActions.canExportEmlFor(root, id) }
+  function accountForMessage(id) { return MessageActions.accountForMessage(root, id) }
+  function exportEmlFor(accountId, id) { return MessageActions.exportEmlFor(root, accountId, id) }
+  function exportEml(id) { return MessageActions.exportEml(root, id) }
+  function exportFromView(view, cursorId) { return MessageActions.exportFromView(root, view, cursorId) }
+  function markAllRead() { return MessageActions.markAllRead(root) }
+  function actMany(ids, action) { return MessageActions.actMany(root, ids, action) }
   // The mailbox the From address belongs to, which compose already names:
   // `sendIdentities` spans every account and carries the id, so a unified
   // view needed the routing rather than a new question.
