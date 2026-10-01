@@ -801,6 +801,117 @@ Column {
     }
   }
 
+  // ------------------------------------------------------------- spelling
+
+  Text {
+    id: spellingHeading
+    text: "SPELLING"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    objectName: "settings-spelling"
+    width: parent.width
+    implicitHeight: Math.max(spellingText.implicitHeight, spellingSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: spellingText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: spellingState.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Spell-check while composing"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Underline misspelled words in the message body with corrections, "
+          + "Ignore, and Add to dictionary. Uses the local Hunspell engine; "
+          + "nothing is sent anywhere."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      // Availability is a runtime fact, separate from the enabled request:
+      // a machine without Sonnet or the en_US dictionary still composes.
+      // Sonnet lists installed dictionaries once per process, so a dictionary
+      // installed while Omamail runs is only found after a restart.
+      Text {
+        objectName: "spellingNeedsSetup"
+        width: parent.width
+        visible: !!root.service && !root.service.spellingAvailable
+        text: root.service && root.service.spellingStatus === "no-module"
+          ? "Spell-checking is unavailable: install the Sonnet QML module, then restart Omamail."
+          : "The " + (root.service ? root.service.spellingLanguage : "en_US")
+            + " dictionary is not installed. Install the matching Hunspell "
+            + "dictionary package (for example hunspell-en_us), then restart Omamail."
+        color: root.accentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      // The personal word list is the one spelling write that can be refused
+      // by the host. The word stays in memory for the session, but a failed
+      // save has to say so rather than quietly vanish at restart.
+      Text {
+        objectName: "spellingPersonalWordsError"
+        width: parent.width
+        visible: !!root.service && String(root.service.spellingPersonalWordsError || "") !== ""
+        text: "Personal words could not be saved: "
+          + (root.service ? root.service.spellingPersonalWordsError : "")
+        color: root.accentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    Text {
+      id: spellingState
+      objectName: "spellingState"
+      anchors.right: spellingSwitch.left
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      text: spellingSwitch.checked ? "On" : "Off"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+    }
+
+    ToggleSwitch {
+      id: spellingSwitch
+      objectName: "spellingSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !root.service || root.service.spellingEnabled !== false
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service) root.service.setSpellingEnabled(!root.service.spellingEnabled)
+    }
+  }
+
   // -------------------------------------------------------- notifications
 
   Text {
