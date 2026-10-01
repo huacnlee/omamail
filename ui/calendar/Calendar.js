@@ -1241,10 +1241,23 @@ function nowOffset(day, firstHour, lastHour, hourHeight, nowMs) {
   return (minutes - first) / 60 * Number(hourHeight)
 }
 
-function timeLabel(timeMs) {
+// QML supplies Qt.locale().timeFormat(Locale.ShortFormat); keep the complete
+// pattern so Qt also owns localized separators and AM/PM text. Node tests
+// supply the Qt formatting boundary without needing the QML engine.
+function timeLabel(timeMs, localeFormat) {
   var time = new Date(Number(timeMs))
   if (!isFinite(time.getTime())) return ""
-  return two(time.getHours()) + ":" + two(time.getMinutes())
+  return time.toLocaleTimeString(Qt.locale(), localeFormat)
+}
+
+function timeRangeLabel(startMs, endMs, localeFormat, separator) {
+  return timeLabel(startMs, localeFormat) + (separator === undefined ? "–" : separator)
+    + timeLabel(endMs, localeFormat)
+}
+
+function dateTimeLabel(timeMs, dateFormat, localeFormat, separator) {
+  return Qt.formatDate(new Date(Number(timeMs)), dateFormat)
+    + (separator === undefined ? " " : separator) + timeLabel(timeMs, localeFormat)
 }
 
 // The same offset for the week as a whole, so the time rail can label the line

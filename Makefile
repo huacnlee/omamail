@@ -140,6 +140,7 @@ test-js:
 	node ui/tests/test_gmail_api.js
 	node ui/tests/test_message.js
 	node ui/tests/test_calendar.js
+	node ui/tests/test_calendar_time.js
 	node ui/tests/test_calendar_cache.js
 	node ui/tests/test_calendar_feed.js
 	node ui/tests/test_calendar_sources.js
