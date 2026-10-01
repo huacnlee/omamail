@@ -122,7 +122,8 @@ QtObject {
       root.composeRecovery = updated
       root.composeRecoveryRevision++
       root.lastComposeRecoveryText = updated.active ? JSON.stringify(updated) : ""
-      root.writeComposeRecovery(JSON.stringify(updated))
+      // Recovery.empty() is presentation state; Rust only stores versioned records.
+      root.writeComposeRecovery(all.length ? JSON.stringify(updated) : '{"version":1,"active":false}')
       for (var a = 0; a < receipts.length; a++) root.queueComposeReceiptAck(receipts[a].accountId, receipts[a].sendId, root.composeRecoveryRevision)
       Qt.callLater(root.restoreComposeRecovery)
     }

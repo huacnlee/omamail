@@ -524,6 +524,9 @@ Item {
       verify(app.composeRecovery.active !== true);verify(!composeView().opened)
       compare(lastNativeRequest("outbox.forget"),null)
       var saved = lastNativeRequest("compose.recoverySave")
+      // Rust refuses a record without version 1, which left the stale receipt on disk.
+      compare(saved.params.record.version, 1)
+      compare(saved.params.record.active, false)
       saved.done({record:saved.params.record,revision:"r2"},null)
       lastNativeRequest("outbox.snapshot").done({entries:[{state:"sent"}]},null)
       verify(lastNativeRequest("outbox.forget") !== null)
