@@ -56,6 +56,19 @@ done
 printf '%s\n' '{"zoom":1}' | "$store" window.json >/dev/null
 grep -q '"zoom":1' "$XDG_CONFIG_HOME/omamail/window.json"
 
+# The app-owned personal spelling dictionary is one of those files. The service
+# writes it through the same helper, so a name the writer refused would mean an
+# added word never reached disk while the UI said it had.
+printf '%s\n' '{"words":["blorptar"]}' | "$store" spelling.json >/dev/null
+grep -q '"blorptar"' "$XDG_CONFIG_HOME/omamail/spelling.json"
+if stat -c '%a' "$XDG_CONFIG_HOME/omamail/spelling.json" >/dev/null 2>&1; then
+  spelling_mode=$(stat -c '%a' "$XDG_CONFIG_HOME/omamail/spelling.json")
+else
+  spelling_mode=$(stat -f '%Lp' "$XDG_CONFIG_HOME/omamail/spelling.json")
+fi
+[ "$spelling_mode" = 600 ] \
+  || { echo 'config-store.sh: the personal dictionary must stay owner-only' >&2; exit 1; }
+
 # An unknown name, an empty payload, and the permissions the files are kept at.
 if printf '%s\n' 'x' | "$store" secrets.json >/dev/null 2>&1; then
   echo 'config-store.sh: an unknown file name must be refused' >&2
