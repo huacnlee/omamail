@@ -1,9 +1,11 @@
 import QtQuick
 import Quickshell.Io
 import "Reminders.js" as Reminders
+import "Calendar.js" as Calendar
 
 Item {
   id: root
+  readonly property string timeFormat: Qt.locale().timeFormat(Locale.ShortFormat)
   required property var service
   required property string pluginDir
   required property string notificationForeground
@@ -49,7 +51,7 @@ Item {
     var notice = reminderInbox.receive(record)
     // The process budget limits desktop waiters, never the actionable inbox.
     if (waiters >= 16) return
-    var body = Qt.formatDateTime(new Date(record.start), "ddd, MMM d · hh:mm")
+    var body = Calendar.dateTimeLabel(record.start, "ddd, MMM d", root.timeFormat, " · ")
     var process = notification.createObject(root, { record: notice,
       command: ["python3", pluginDir + "/scripts/notify-mail.py", "--calendar",
         notificationForeground, notificationAccent, "--", record.title, body] })
