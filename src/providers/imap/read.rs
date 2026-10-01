@@ -4,33 +4,45 @@ use base64::engine::general_purpose::{STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 use std::collections::{BTreeMap, BTreeSet};
 mod search;
 #[derive(Clone, Debug, PartialEq)]
-enum Node {
+pub(super) enum Node {
     Text(Vec<u8>),
+    /// A length-framed `{n}\r\n…` literal. Distinct from `Text` so a caller
+    /// that needs the original bytes can refuse an atom or quoted string that
+    /// merely looks like them.
+    Literal(Vec<u8>),
     List(Vec<Node>),
     End,
 }
 impl Node {
-    fn text(&self) -> &[u8] {
-        if let Self::Text(t) = self { t } else { b"" }
+    pub(super) fn text(&self) -> &[u8] {
+        match self {
+            Self::Text(t) | Self::Literal(t) => t,
+            _ => b"",
+        }
     }
-    fn is(&self, value: &str) -> bool {
+    pub(super) fn is(&self, value: &str) -> bool {
         self.text().eq_ignore_ascii_case(value.as_bytes())
     }
-    fn number(&self) -> Option<u32> {
+    pub(super) fn number(&self) -> Option<u32> {
         std::str::from_utf8(self.text())
             .ok()?
             .parse::<u32>()
             .ok()
             .filter(|n| *n > 0)
     }
-    fn list(&self) -> &[Node] {
+    pub(super) fn list(&self) -> &[Node] {
         if let Self::List(v) = self { v } else { &[] }
+    }
+    /// Whether this node was a length-framed literal rather than an atom or a
+    /// quoted string.
+    pub(super) fn is_literal(&self) -> bool {
+        matches!(self, Self::Literal(_))
     }
     fn string(&self) -> Result<String> {
         String::from_utf8(self.text().to_vec()).map_err(|_| "imap_invalid_response")
     }
 }
-fn nodes(data: &[u8]) -> Result<Vec<Vec<Node>>> {
+pub(super) fn nodes(data: &[u8]) -> Result<Vec<Vec<Node>>> {
     fn parse(
         data: &[u8],
         at: &mut usize,
@@ -115,7 +127,7 @@ fn nodes(data: &[u8]) -> Result<Vec<Vec<Node>>> {
                     if n > data.len() - *at {
                         return Err("imap_invalid_response");
                     }
-                    out.push(Node::Text(data[*at..*at + n].to_vec()));
+                    out.push(Node::Literal(data[*at..*at + n].to_vec()));
                     *at += n;
                 }
                 _ => {
