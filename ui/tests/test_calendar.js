@@ -247,6 +247,136 @@ assert.strictEqual(calendar.formatWhen(twoDays),
   assert.strictEqual(fixed.start.resolved, true)
 }
 
+// iCloud ships a zone's whole history, retired rules included. Vienna fell
+// back in late September from 1981 to 1995; that rule's UNTIL has to end it,
+// or every autumn reads as standard time a month early and an event made on
+// an iPhone shows an hour late from late September to the end of October.
+{
+  const vienna = [
+    "BEGIN:VTIMEZONE", "TZID:Europe/Vienna",
+    "BEGIN:STANDARD", "DTSTART:18930401T000000",
+    "TZOFFSETFROM:+010521", "TZOFFSETTO:+0100", "END:STANDARD",
+    "BEGIN:STANDARD", "DTSTART:19170917T030000",
+    "RRULE:FREQ=YEARLY;UNTIL=19180916T010000Z;BYMONTH=9;BYDAY=3MO",
+    "TZOFFSETFROM:+0200", "TZOFFSETTO:+0100", "END:STANDARD",
+    "BEGIN:STANDARD", "DTSTART:19461006T030000",
+    "RRULE:FREQ=YEARLY;UNTIL=19481003T010000Z;BYMONTH=10;BYDAY=1SU",
+    "TZOFFSETFROM:+0200", "TZOFFSETTO:+0100", "END:STANDARD",
+    "BEGIN:DAYLIGHT", "DTSTART:19810329T020000",
+    "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+    "TZOFFSETFROM:+0100", "TZOFFSETTO:+0200", "END:DAYLIGHT",
+    "BEGIN:STANDARD", "DTSTART:19810927T030000",
+    "RRULE:FREQ=YEARLY;UNTIL=19950924T010000Z;BYMONTH=9;BYDAY=-1SU",
+    "TZOFFSETFROM:+0200", "TZOFFSETTO:+0100", "END:STANDARD",
+    "BEGIN:STANDARD", "DTSTART:19961027T030000",
+    "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
+    "TZOFFSETFROM:+0200", "TZOFFSETTO:+0100", "END:STANDARD",
+    "END:VTIMEZONE"
+  ]
+  const at = (local) => calendar.invitationFrom([
+    "BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST"].concat(vienna, [
+    "BEGIN:VEVENT", "UID:u8", "SUMMARY:Appointment",
+    "DTSTART;TZID=Europe/Vienna:" + local,
+    "END:VEVENT", "END:VCALENDAR"]).join("\r\n")).start
+  assert.strictEqual(at("20261007T153000").ms, Date.UTC(2026, 9, 7, 13, 30, 0),
+    "early October is still summer time; the retired September rule has ended")
+  assert.strictEqual(at("20261024T120000").ms, Date.UTC(2026, 9, 24, 10, 0, 0))
+  assert.strictEqual(at("20261026T120000").ms, Date.UTC(2026, 9, 26, 11, 0, 0),
+    "the rule still in force ends summer time on the last Sunday of October")
+  assert.strictEqual(at("20260701T120000").ms, Date.UTC(2026, 6, 1, 10, 0, 0))
+  assert.strictEqual(at("20260115T120000").ms, Date.UTC(2026, 0, 15, 11, 0, 0))
+  // UNTIL=19950924T010000Z is the 03:00 summer-time transition itself. Read
+  // as a wall clock it would land after its own UNTIL and drop out, leaving
+  // October 1995 on summer time.
+  assert.strictEqual(at("19951010T120000").ms, Date.UTC(1995, 9, 10, 11, 0, 0),
+    "a rule's last transition is the one its UTC UNTIL names")
+}
+
+// Once every summer-time rule has ended, the zone stays where the last one
+// left it. Mexico City dropped summer time in 2022; years later it is on
+// -0600 all year, not on the 1922 entry that heads the list.
+{
+  const mexico = [
+    "BEGIN:VTIMEZONE", "TZID:America/Mexico_City",
+    "BEGIN:STANDARD", "DTSTART:19220101T000000",
+    "TZOFFSETFROM:-063636", "TZOFFSETTO:-0700", "END:STANDARD",
+    "BEGIN:DAYLIGHT", "DTSTART:20020407T020000",
+    "RRULE:FREQ=YEARLY;UNTIL=20220403T080000Z;BYMONTH=4;BYDAY=1SU",
+    "TZOFFSETFROM:-0600", "TZOFFSETTO:-0500", "END:DAYLIGHT",
+    "BEGIN:STANDARD", "DTSTART:20021027T020000",
+    "RRULE:FREQ=YEARLY;UNTIL=20221030T070000Z;BYMONTH=10;BYDAY=-1SU",
+    "TZOFFSETFROM:-0500", "TZOFFSETTO:-0600", "END:STANDARD",
+    "END:VTIMEZONE"
+  ]
+  const at = (local) => calendar.invitationFrom([
+    "BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST"].concat(mexico, [
+    "BEGIN:VEVENT", "UID:u9", "SUMMARY:Appointment",
+    "DTSTART;TZID=America/Mexico_City:" + local,
+    "END:VEVENT", "END:VCALENDAR"]).join("\r\n")).start
+  assert.strictEqual(at("20260701T120000").ms, Date.UTC(2026, 6, 1, 18, 0, 0),
+    "no summer time after the rules ended")
+  assert.strictEqual(at("20260115T120000").ms, Date.UTC(2026, 0, 15, 18, 0, 0),
+    "the last transition's offset, not the zone's first entry")
+  assert.strictEqual(at("20220701T120000").ms, Date.UTC(2022, 6, 1, 17, 0, 0),
+    "the final summer under the rules still counts")
+}
+
+// iCloud gathers a zone's one-off transitions into one sub-component per
+// offset pair, so the last change can be an RDATE decades after its DTSTART.
+// Moscow went to +0400 for good in 2011 and back to +0300 in 2014 — the
+// second only an RDATE of a component that starts in 1930.
+{
+  const moscow = [
+    "BEGIN:VTIMEZONE", "TZID:Europe/Moscow",
+    "BEGIN:DAYLIGHT", "DTSTART:19960331T020000",
+    "RRULE:FREQ=YEARLY;UNTIL=20100328T000000Z;BYMONTH=3;BYDAY=-1SU",
+    "TZOFFSETFROM:+0300", "TZOFFSETTO:+0400", "END:DAYLIGHT",
+    "BEGIN:STANDARD", "DTSTART:19961027T030000",
+    "RRULE:FREQ=YEARLY;UNTIL=20101031T000000Z;BYMONTH=10;BYDAY=-1SU",
+    "TZOFFSETFROM:+0400", "TZOFFSETTO:+0300", "END:STANDARD",
+    "BEGIN:STANDARD", "DTSTART:20110327T020000",
+    "TZOFFSETFROM:+0300", "TZOFFSETTO:+0400", "END:STANDARD",
+    "BEGIN:STANDARD", "DTSTART:19300621T000000",
+    "RDATE:19910929T030000,20141026T020000",
+    "TZOFFSETFROM:+0400", "TZOFFSETTO:+0300", "END:STANDARD",
+    "END:VTIMEZONE"
+  ]
+  const at = (local) => calendar.invitationFrom([
+    "BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST"].concat(moscow, [
+    "BEGIN:VEVENT", "UID:u10", "SUMMARY:Appointment",
+    "DTSTART;TZID=Europe/Moscow:" + local,
+    "END:VEVENT", "END:VCALENDAR"]).join("\r\n")).start
+  assert.strictEqual(at("20260701T120000").ms, Date.UTC(2026, 6, 1, 9, 0, 0),
+    "the 2014 return to +0300 is read from its RDATE")
+  assert.strictEqual(at("20130115T120000").ms, Date.UTC(2013, 0, 15, 8, 0, 0),
+    "between the two, +0400 all year")
+}
+
+// One rule can take effect twice in a year. Casablanca leaves +0100 for
+// Ramadan, and in 2029 Ramadan starts in January and again in December, so
+// the January date has to count although the December one is still ahead.
+{
+  const casablanca = [
+    "BEGIN:VTIMEZONE", "TZID:Africa/Casablanca",
+    "BEGIN:STANDARD", "DTSTART:20280123T030000",
+    "RDATE:20290114T030000,20291230T030000",
+    "TZOFFSETFROM:+0100", "TZOFFSETTO:+0000", "END:STANDARD",
+    "BEGIN:DAYLIGHT", "DTSTART:20280305T020000",
+    "RDATE:20290218T020000",
+    "TZOFFSETFROM:+0000", "TZOFFSETTO:+0100", "END:DAYLIGHT",
+    "END:VTIMEZONE"
+  ]
+  const at = (local) => calendar.invitationFrom([
+    "BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST"].concat(casablanca, [
+    "BEGIN:VEVENT", "UID:u11", "SUMMARY:Appointment",
+    "DTSTART;TZID=Africa/Casablanca:" + local,
+    "END:VEVENT", "END:VCALENDAR"]).join("\r\n")).start
+  assert.strictEqual(at("20290120T120000").ms, Date.UTC(2029, 0, 20, 12, 0, 0),
+    "the January start of Ramadan counts though December's is later")
+  assert.strictEqual(at("20290601T120000").ms, Date.UTC(2029, 5, 1, 11, 0, 0))
+  assert.strictEqual(at("20291231T120000").ms, Date.UTC(2029, 11, 31, 12, 0, 0))
+}
+
 // ------------------------------------------------------------- formatting
 
 assert.strictEqual(calendar.formatWhen(invite),
