@@ -77,6 +77,9 @@ var BINDINGS = [
     hint: { list: "trash", reader: "trash" } },
   { id: "star", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
+  // Save the original message bytes to Downloads.
+  { id: "exportEml", keys: ["Ctrl+Shift+S"], contexts: MAIL,
+    group: "Acting", label: "Save as .eml" },
   // `v` because that is the key Gmail moves a message with, and issue #58 asks
   // for those shortcuts one for one. Not `m`: free here, but Gmail's `m` mutes
   // a conversation, and taking it for a move would be the one binding somebody

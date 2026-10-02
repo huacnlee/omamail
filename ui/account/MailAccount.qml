@@ -12,6 +12,7 @@ import "../message/Unsubscribe.js" as Unsub
 import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
 import "Accounts.js" as Accounts
+import "MessageActions.js" as MessageActions
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
@@ -132,6 +133,9 @@ Item {
   // to it, with the row already moved.
   readonly property bool canArchive: Provider.can(providerId, "archive", capabilityRefusals)
   readonly property bool canReportSpam: Provider.can(providerId, "spam", capabilityRefusals)
+  // The provider must own the native IMAP path. Whether the connected backend
+  // actually advertises the method is a connection fact, checked by the service.
+  readonly property bool canExportEml: Provider.can(providerId, "emlExport", capabilityRefusals)
   readonly property bool canStar: Provider.can(providerId, "star", capabilityRefusals)
   readonly property bool canMove: Provider.can(providerId, "move", capabilityRefusals)
   readonly property bool hasLabels: Provider.can(providerId, "labels")
@@ -1994,6 +1998,49 @@ Item {
     return runNativeAction([], "markRead", false, false, true)
   }
 
+  // Save the message's original bytes as .eml in Downloads. One request per
+  // mailbox at a time, and the notice names the file the backend actually
+  // wrote. The id is this mailbox's own, resolved by the service.
+  property bool exportingEml: false
+  property string exportingEmlId: ""
+
+  function subjectForEml(id) {
+    for (var i = 0; i < messages.length; i++) {
+      if (String(messages[i].id) === String(id)) return String(messages[i].subject || "")
+    }
+    return ""
+  }
+
+  function exportEml(id) {
+    var target = String(id || "")
+    if (!ready || !backend || target === "") return false
+    if (!canExportEml) {
+      fail("This mailbox cannot save messages as .eml")
+      return false
+    }
+    if (exportingEml) {
+      note("Already saving a message as .eml")
+      return false
+    }
+    clearNotice()
+    var parameters = {account: accountId, id: target, suggestedName: subjectForEml(target)}
+    exportingEml = true
+    exportingEmlId = target
+    // The busy state is visible from the moment the work starts, not only when
+    // a duplicate is refused or the file lands.
+    note("Saving " + (subjectForEml(target) || "message") + " as .eml…")
+    backend.call("mail.exportEml", parameters, function(result, error) {
+      root.exportingEml = false
+      root.exportingEmlId = ""
+      if (error) {
+        root.fail(MessageActions.exportErrorText(error))
+        return
+      }
+      root.note(MessageActions.exportSavedNotice(result))
+    })
+    return true
+  }
+
   function actMany(ids, action) { return batchAction.run(ids, action) }
 
   BatchAction {
@@ -2924,7 +2971,10 @@ Item {
   Timer {
     id: noticeTimer
     interval: 4000
-    onTriggered: root.actionStatus = ""
+    // A busy notice has to outlive the timer: an export can take longer than
+    // four seconds, and a status line that blanked mid-write would look idle
+    // while the file was still being fetched.
+    onTriggered: if (!root.exportingEml) root.actionStatus = ""
   }
 
 
