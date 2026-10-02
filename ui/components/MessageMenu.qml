@@ -35,11 +35,13 @@ Item {
   // that has its own verb. Read off the summary the menu was opened on rather
   // than asked of the service, because the menu is about one message. IMAP
   // synthesises all four of these from the folder, so one rule serves both
-  // kinds of provider.
+  // kinds of provider. Spam counts as "its own verb" only where a spam verb
+  // exists: an IMAP Junk folder has no report-spam inverse to offer instead,
+  // so a Junk message there is the one spam case "Move to Inbox" still means.
   readonly property bool archived: !!root.summary
     && root.summary.inInbox === false
     && root.summary.inTrash !== true
-    && root.summary.inSpam !== true
+    && (root.summary.inSpam !== true || (root.service && !root.service.canReportSpam))
     && root.summary.isSent !== true
     && root.summary.isDraft !== true
 

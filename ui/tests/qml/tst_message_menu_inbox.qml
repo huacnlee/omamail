@@ -108,7 +108,10 @@ Item {
     }
 
     // The four that have their own verb or their own place. Adding INBOX to any
-    // of them is not what "move to the inbox" means.
+    // of them is not what "move to the inbox" means — except Junk without a
+    // spam verb: an IMAP account has no report-spam to offer instead, so the
+    // row is the only way out, and `actionPlan("unarchive")` already moves to
+    // INBOX from anywhere.
     function test_it_is_not_offered_where_it_would_lie_data() {
       return [
         { tag: "spam", field: "inSpam" },
@@ -123,6 +126,31 @@ Item {
       summary[row.field] = true
       show(summary)
       compare(menu.archived, false, row.tag + " has its own verb or its own place")
+      compare(unarchiveRow().visible, false)
+    }
+
+    // Junk without a spam verb is the exception: IMAP has no report-spam to
+    // offer instead, and `unarchive` moves to INBOX from anywhere.
+    function test_junk_without_a_spam_verb_offers_it() {
+      fakeService.canReportSpam = false
+      var summary = archivedMessage()
+      summary.inSpam = true
+      show(summary)
+      compare(menu.archived, true, "Junk with no spam verb is where Move to Inbox means")
+      compare(unarchiveRow().visible, true)
+      compare(unarchiveRow().text, "Move to Inbox")
+      unarchiveRow().activated()
+      compare(actionSpy.signalArguments[0][0], "unarchive")
+      fakeService.canReportSpam = true
+    }
+
+    // Gmail keeps its spam verb, so there the original rule stands.
+    function test_junk_with_a_spam_verb_still_hides_it() {
+      fakeService.canReportSpam = true
+      var summary = archivedMessage()
+      summary.inSpam = true
+      show(summary)
+      compare(menu.archived, false)
       compare(unarchiveRow().visible, false)
     }
 
