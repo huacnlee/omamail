@@ -31,11 +31,12 @@ var GRAPH_SCOPES = [
 ]
 
 // The tenant the sign-in is addressed to. Personal accounts live under
-// `consumers`; a Microsoft 365 mailbox lives under its own tenant, which
-// `organizations` finds from the address, or a tenant id or domain names
-// outright. Anything that is not one of those spellings is the consumer
-// tenant, so a stored value cannot steer the sign-in to another host: the
-// tenant is one path segment of a fixed URL, never a URL of its own.
+// `consumers`; a Microsoft 365 mailbox lives under its own tenant, named by
+// its id or one of its verified domain names. `organizations` is the generic
+// authority for multi-tenant registrations. Anything that is not one of those
+// spellings is the consumer tenant, so a stored value cannot steer the sign-in
+// to another host: the tenant is one path segment of a fixed URL, never a URL
+// of its own.
 // Every request names one resource, the device-code request that starts a
 // sign-in included: Microsoft refuses two in one (AADSTS28000). So consent
 // for Graph is a sign-in of its own — a second code — asked for only when
@@ -60,6 +61,35 @@ function normalizeTenant(value) {
 
 function isWorkTenant(tenant) {
   return normalizeTenant(tenant) !== "consumers"
+}
+
+function isDirectoryId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    .test(trimmed(value))
+}
+
+function isTenantDomain(value) {
+  var text = trimmed(value).toLowerCase()
+  if (text.length > 253 || text.indexOf(".") < 1) return false
+  var labels = text.split(".")
+  for (var i = 0; i < labels.length; ++i) {
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(labels[i])) return false
+  }
+  return true
+}
+
+// Empty means a registration that accepts accounts from any organization.
+// A single-tenant public client needs the directory id or a verified tenant
+// domain instead: unlike an authorization request, the device-code request
+// carries no signed-in account from which Microsoft could discover one.
+// An empty result for non-empty input tells the form that the value is not a
+// work authority rather than quietly sending that sign-in to `consumers`.
+function workTenant(value) {
+  var text = trimmed(value).toLowerCase()
+  if (text === "") return "organizations"
+  if (text === "organizations") return text
+  if (isDirectoryId(text) || isTenantDomain(text)) return text
+  return ""
 }
 
 function authorityFor(tenant) {
