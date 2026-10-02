@@ -311,8 +311,16 @@ async fn execute(
                     .get_default_collection()
                     .await
                     .map_err(|_| Fault::Transport)?;
+                // A blank-password collection is locked again by every fresh
+                // login, and unlocking it is an answer the daemon gives over a
+                // connection that is still good; a password-protected one
+                // prompts inside this operation's single deadline. Refusing
+                // instead made Google sign-in fail with a generic keyring
+                // error after Google had already handed back a token, because
+                // the refresh token is stored before the UI starts any
+                // mailbox request.
                 if collection.is_locked().await.map_err(|_| Fault::Transport)? {
-                    return Err(Fault::Answer(Error::Unavailable));
+                    collection.unlock().await.map_err(|_| Fault::Transport)?;
                 }
                 // Keep older grants intact until the current-scope item exists.
                 collection
