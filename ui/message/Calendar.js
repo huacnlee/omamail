@@ -382,20 +382,96 @@ function parseRuleParts(value) {
   return parts
 }
 
+// A VTIMEZONE's sub-components, read once. Recurrence expansion asks for an
+// offset on every day of a series and an invitation can carry thousands of
+// RDATEs, so nothing below re-reads a property after this. The plan lives on
+// the parsed zone, so a zone timezoneDocument reuses is read only once.
+//
+// STANDARD first, and that ordering is load-bearing: a zone whose rules this
+// cannot place — a lone pair of bare dates outside the years looked at, which
+// is what an Exchange zone looks like from here — falls back to rules[0], and
+// being an hour behind in winter is a better wrong answer than being an hour
+// ahead all year.
+function zonePlan(timezone) {
+  if (timezone.transitionPlan) return timezone.transitionPlan
+  var rules = []
+  var kinds = ["STANDARD", "DAYLIGHT"]
+  for (var k = 0; k < kinds.length; k++) {
+    var found = childrenNamed(timezone, kinds[k])
+    for (var i = 0; i < found.length; i++) {
+      var offset = parseOffsetMinutes(textOf(found[i], "TZOFFSETTO"))
+      if (offset === null) continue
+      rules.push(zoneRule(found[i], offset))
+    }
+  }
+  // A zone that carries its history — retired rules, RDATE lists, more than
+  // one standard/daylight pair — is also asked about each rule's final year,
+  // so one that has given up summer time stays where its last transition left
+  // it. A lone pair of bare dates is the Exchange case above and keeps its
+  // fallback.
+  var history = rules.length > 2
+  for (var q = 0; q < rules.length && !history; q++) {
+    if (rules[q].until || rules[q].listed) history = true
+  }
+  timezone.transitionPlan = { rules: rules, history: history, byYear: {} }
+  return timezone.transitionPlan
+}
+
+// One STANDARD or DAYLIGHT block. A recurring one keeps its parsed RRULE; one
+// without keeps every date it takes effect on — its DTSTART and each RDATE,
+// which is how iCloud gathers a zone's one-off transitions, so the last of
+// them can sit in an RDATE decades after the DTSTART — grouped by year.
+function zoneRule(component, offset) {
+  var rule = {
+    offset: offset,
+    from: parseOffsetMinutes(textOf(component, "TZOFFSETFROM")),
+    start: parseDateValue(textOf(component, "DTSTART")),
+    parts: null, until: null, dates: {}, listed: false, lastYear: null
+  }
+  if (!rule.start) return rule
+  var recurrence = property(component, "RRULE")
+  if (recurrence) {
+    rule.parts = parseRuleParts(recurrence.value)
+    rule.until = rule.parts.UNTIL ? parseDateValue(rule.parts.UNTIL) : null
+    rule.lastYear = rule.until ? rule.until.year : null
+    return rule
+  }
+  var dates = [rule.start]
+  var extra = properties(component, "RDATE")
+  rule.listed = extra.length > 0
+  for (var i = 0; i < extra.length; i++) {
+    var values = String(extra[i].value || "").split(",")
+    for (var j = 0; j < values.length; j++) {
+      var value = parseDateValue(values[j])
+      if (value) dates.push(value)
+    }
+  }
+  for (var d = 0; d < dates.length; d++) {
+    var year = dates[d].year
+    if (!rule.dates[year]) rule.dates[year] = []
+    rule.dates[year].push(naiveKey(dates[d]))
+    if (rule.lastYear === null || year > rule.lastYear) rule.lastYear = year
+  }
+  return rule
+}
+
 // When one of a VTIMEZONE's rules takes effect, in the year asked about. The
 // rules that matter are the ones real zones are written with: a yearly BYMONTH
 // with an ordinal BYDAY, a yearly BYMONTH with a BYMONTHDAY, or no rule at all
-// — a single dated transition, which is what a fixed-offset zone has.
-function transitionIn(rule, year) {
-  var start = parseDateValue(textOf(rule.component, "DTSTART"))
-  if (!start) return null
-  var recurrence = property(rule.component, "RRULE")
-  if (!recurrence) {
-    return start.year === year ? naiveKey(start) : null
-  }
+// — dated transitions, one for a fixed-offset zone, a list for a history.
+function transitionsIn(rule, year) {
+  if (!rule.start) return []
+  if (!rule.parts) return rule.dates[year] || []
+  var at = recurringTransition(rule, year)
+  return at === null ? [] : [at]
+}
 
-  var parts = parseRuleParts(recurrence.value)
+function recurringTransition(rule, year) {
+  var start = rule.start
+  var parts = rule.parts
+  var until = rule.until
   if (String(parts.FREQ || "").toUpperCase() !== "YEARLY") return null
+  if (until && year > until.year + 1) return null
   var month = Math.floor(Number(parts.BYMONTH) || start.month)
   if (month < 1 || month > 12) return null
 
@@ -414,7 +490,48 @@ function transitionIn(rule, year) {
   }
   if (day < 1 || day > daysInMonth(year, month)) return null
 
-  return Date.UTC(year, month - 1, day, start.hour, start.minute, start.second)
+  var at = Date.UTC(year, month - 1, day, start.hour, start.minute, start.second)
+  // A rule stops at its UNTIL. Zones keep their retired rules — iCloud ships
+  // Vienna's 1981–1995 late-September fall-back to this day — and without
+  // this one of those wins every autumn. UNTIL is normally UTC while `at` is
+  // the wall clock the rule left behind, so it is moved to UTC by the offset
+  // in force before the transition; compared naively, the last transition a
+  // zone east of UTC made under the rule would fall after its own UNTIL. A
+  // bare date includes its whole day.
+  if (until) {
+    var reading = until.utc && rule.from !== null ? at - rule.from * 60000 : at
+    var limit = naiveKey(until) + (until.dateOnly ? 86400000 - 1 : 0)
+    if (reading > limit) return null
+  }
+  return at
+}
+
+// The transitions a reading in `year` has to choose between. Every one from
+// an earlier year is behind the reading, so of those only the latest is kept;
+// the year's own follow it. A rule is asked about the year before and, for a
+// zone with a history, about its final year and the ones either side — UNTIL
+// is UTC, so the last transition can sit in the year before or after the one
+// UNTIL names. Later years cannot be behind a reading in this one.
+function transitionsAround(plan, year) {
+  if (plan.byYear[year]) return plan.byYear[year]
+  var latest = null
+  var within = []
+  for (var r = 0; r < plan.rules.length; r++) {
+    var rule = plan.rules[r]
+    var years = [year - 1]
+    var last = plan.history ? rule.lastYear : null
+    if (last !== null && last < year - 1) years.push(last - 1, last, last + 1)
+    for (var y = 0; y < years.length; y++) {
+      var earlier = transitionsIn(rule, years[y])
+      for (var e = 0; e < earlier.length; e++) {
+        if (latest === null || earlier[e] >= latest.at) latest = { at: earlier[e], offset: rule.offset }
+      }
+    }
+    var found = transitionsIn(rule, year)
+    for (var f = 0; f < found.length; f++) within.push({ at: found[f], offset: rule.offset })
+  }
+  plan.byYear[year] = latest ? [latest].concat(within) : within
+  return plan.byYear[year]
 }
 
 // The offset a zone was on at a given wall-clock reading.
@@ -427,32 +544,17 @@ function transitionIn(rule, year) {
 // no reading of that hour is more correct than another.
 function zoneOffsetMinutes(timezone, fields) {
   if (!timezone) return null
-  var rules = []
-  // STANDARD first, and that ordering is load-bearing: a zone whose rules this
-  // cannot place — no RRULE and dates outside the years looked at, which is
-  // what an RDATE-driven Exchange zone looks like from here — falls back to
-  // rules[0], and being an hour behind in winter is a better wrong answer than
-  // being an hour ahead all year.
-  var kinds = ["STANDARD", "DAYLIGHT"]
-  for (var k = 0; k < kinds.length; k++) {
-    var found = childrenNamed(timezone, kinds[k])
-    for (var i = 0; i < found.length; i++) {
-      var offset = parseOffsetMinutes(textOf(found[i], "TZOFFSETTO"))
-      if (offset === null) continue
-      rules.push({ component: found[i], offset: offset })
-    }
-  }
+  var plan = zonePlan(timezone)
+  var rules = plan.rules
   if (rules.length === 0) return null
   if (rules.length === 1) return rules[0].offset
 
   var wanted = naiveKey(fields)
   var best = null
-  for (var year = fields.year - 1; year <= fields.year + 1; year++) {
-    for (var r = 0; r < rules.length; r++) {
-      var at = transitionIn(rules[r], year)
-      if (at === null || at > wanted) continue
-      if (best === null || at >= best.at) best = { at: at, offset: rules[r].offset }
-    }
+  var candidates = transitionsAround(plan, fields.year)
+  for (var c = 0; c < candidates.length; c++) {
+    if (candidates[c].at > wanted) continue
+    if (best === null || candidates[c].at >= best.at) best = candidates[c]
   }
   if (best) return best.offset
 
@@ -460,12 +562,10 @@ function zoneOffsetMinutes(timezone, fields) {
   // the one the earliest transition moved away from.
   var earliest = null
   for (var s = 0; s < rules.length; s++) {
-    var opening = transitionIn(rules[s], fields.year - 1)
-    if (opening === null) continue
-    if (earliest === null || opening < earliest.at) {
-      earliest = {
-        at: opening,
-        offset: parseOffsetMinutes(textOf(rules[s].component, "TZOFFSETFROM"))
+    var openings = transitionsIn(rules[s], fields.year - 1)
+    for (var o = 0; o < openings.length; o++) {
+      if (earliest === null || openings[o] < earliest.at) {
+        earliest = { at: openings[o], offset: rules[s].from }
       }
     }
   }
