@@ -139,6 +139,8 @@ var BINDINGS = [
     group: "Calendar", label: "Show month view" },
   // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
   // a hand on the numpad expects the same thing of them.
+  { id: "spellingSuggestions", keys: ["Ctrl+."], contexts: ["compose"],
+    group: "Writing", label: "Spelling suggestions..." },
   { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
   { id: "saveEvent", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["eventCompose"],

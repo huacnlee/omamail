@@ -145,7 +145,9 @@ Item {
     function test_the_cursor_starts_on_the_first_usable_row() {
       editor.select(0, 5)
       show(true, "https://example.com/a")
-      compare(menu.cursorIndex, 0)
+      // The menu may carry rows above Cut (spelling), so name the row rather
+      // than its index.
+      compare(menu.cursorIndex, menu.menuRows.indexOf(menu.cutRow))
       editor.deselect()
       show(true)
       // Nothing selected: Cut and Copy are out, Paste is the first row.

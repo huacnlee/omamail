@@ -659,6 +659,13 @@ TestCase {
     verify(composition.shell.writeConfig("calendars.json", "{}", function(ok) { called = ok }))
     verify(called)
     compare(host.files["/fixture/config/omamail/calendars.json"], "{}")
+    // The personal spelling dictionary goes through the same host boundary; a
+    // name the shell refuses silently loses an added word at restart.
+    called = false
+    verify(composition.shell.writeConfig("spelling.json", "{\"words\":[\"blorptar\"]}",
+                                         function(ok) { called = ok }))
+    verify(called)
+    compare(host.files["/fixture/config/omamail/spelling.json"], "{\"words\":[\"blorptar\"]}")
     verify(!composition.shell.writeConfig("../outside", "secret", function() {}))
     verify(!Object.prototype.hasOwnProperty.call(host.files, "/fixture/config/omamail/../outside"))
   }

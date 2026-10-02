@@ -8,6 +8,8 @@ import "calendar"
 import "agent"
 import "backend"
 import "diagnostics"
+import "compose" as Compose
+import "settings/Settings.js" as Settings
 import "agent/Agent.js" as Agent
 
 import "account/Accounts.js" as Accounts
@@ -126,37 +128,9 @@ Item {
   readonly property string version: manifest && manifest.version
     ? String(manifest.version) : ""
 
-  readonly property var defaultSettingValues: ({
-    refreshIntervalSec: 120,
-    maxMessages: 50,
-    heavyMessageRendering: Html.HEAVY_MESSAGE_RENDERING_DEFAULT,
-    contentDirection: Direction.MODE_DEFAULT,
-    appearance: Appearance.MODE_DEFAULT,
-    defaultQuery: "in:inbox",
-    notifyNewMail: "On",
-    oauthPort: 9481,
-    undoSendSeconds: 10,
-    unifiedCalendarView: false,
-    calendarRemindersEnabled: true,
-    calendarSnoozeMinutes: 5,
-    showBarIcon: true,
-    unifiedMailboxes: false,
-    suggestEvents: false,
-    aiAgent: "System default",
-    aiModel: ""
-  })
-  function normalizedSettings(values) {
-    var next = ({})
-    for (var key in defaultSettingValues) next[key] = defaultSettingValues[key]
-    var source = values || ({})
-    for (var name in source) {
-      if (source[name] !== undefined && source[name] !== null) next[name] = source[name]
-    }
-    return next
-  }
   // An initial value is merged before any child account completes, so the
   // standalone host never starts account activity under transient defaults.
-  property var settings: normalizedSettings(initialSettings)
+  property var settings: Settings.normalize(initialSettings)
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     settings ? settings.undoSendSeconds : Outbox.DEFAULT_DELAY_SECONDS)
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
@@ -426,15 +400,8 @@ Item {
   readonly property bool unifiedMailboxes: !!settings
     && settings.unifiedMailboxes === true
 
-  // Whether the bar draws an envelope for this.
-  //
-  // A settings file written before this existed keeps its icon because
-  // `applySettings` lays every default down first, so a missing key is
-  // already the manifest's `true` — the same way `unifiedCalendarView` gets
-  // its `false`. What "anything but a stored false" buys instead is the
-  // hand-edited `shell.json`: a `"false"` or a `0` in there is somebody's
-  // typo rather than an answer given in the interface, and a typo should not
-  // be what takes the icon away.
+  // Missing settings retain the envelope. Only explicit false hides it;
+  // a hand-edited string "false" or 0 is not a choice made in Settings.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
   // Thunderbird and Betterbird keep both explicit and learned addresses in
@@ -482,7 +449,7 @@ Item {
   }
 
   function applySettings(values) {
-    var next = normalizedSettings(values)
+    var next = Settings.normalize(values)
     if (JSON.stringify(next) !== JSON.stringify(settings)) settings = next
   }
 
@@ -516,7 +483,7 @@ Item {
   }
 
   function writeConfig(name, text, callback) {
-    var allowed = ["credentials.json", "window.json", "calendars.json"]
+    var allowed = ["credentials.json", "window.json", "calendars.json", "spelling.json"]
     if (allowed.indexOf(String(name || "")) < 0) {
       if (typeof callback === "function") callback(false, "Invalid configuration file")
       return false
@@ -718,6 +685,19 @@ Item {
   function setUnifiedMailboxes(value) {
     persistSetting("unifiedMailboxes", value === true)
   }
+
+  Compose.SpellingState { id: spelling; service: root }
+  readonly property alias spellingEnabled: spelling.enabledRequest
+  readonly property alias spellingLanguage: spelling.language
+  readonly property alias spellingAvailable: spelling.available
+  readonly property alias spellingStatus: spelling.status
+  readonly property alias spellingWordStore: spelling.wordStore
+  readonly property alias spellingPersonalWords: spelling.words
+  readonly property alias spellingPersonalWordsError: spelling.error
+  function setSpellingEnabled(value) { persistSetting("spellingEnabled", value !== false) }
+  function setSpellingLanguage(value) { persistSetting("spellingLanguage", String(value || "en_US")) }
+  function addPersonalWord(word) { spelling.wordStore.add(word) }
+  function removePersonalWord(word) { spelling.wordStore.remove(word) }
 
   // ---------------------------------------------------------- the accounts
 
@@ -2937,7 +2917,7 @@ Item {
         barTooltip: root.barTooltip, contentDirection: root.contentDirection,
         barMessages: root.barMessages, barEvents: root.barEvents
       }
-    }, function(values) { root.applySettings(BarBridge.settings(values, root.defaultSettingValues)) },
+    }, function(values) { root.applySettings(BarBridge.settings(values, Settings.DEFAULTS)) },
       function() { root.refresh() },
       function() { root.refreshCalendarPreview() })
     Qt.callLater(root.restoreAccountRegistry)

@@ -50,6 +50,8 @@
       "calendarSnoozeMinutes": 5,
       "openOnClick": "Window",
       "showBarIcon": true,
+      "spellingEnabled": true,
+      "spellingLanguage": "en_US",
       "suggestEvents": false,
       "aiAgent": "System default",
       "aiModel": ""
@@ -198,6 +200,20 @@
         ],
         "defaultValue": "Window",
         "description": "The full window, or a small card with the most recent unread mail."
+      },
+      {
+        "key": "spellingEnabled",
+        "type": "boolean",
+        "label": "Spell-check while composing",
+        "defaultValue": true,
+        "description": "Underline misspelled words in the message body with corrections, Ignore, and Add to dictionary. Uses the local Hunspell engine; nothing is sent anywhere."
+      },
+      {
+        "key": "spellingLanguage",
+        "type": "string",
+        "label": "Spelling dictionary language",
+        "defaultValue": "en_US",
+        "description": "The Hunspell dictionary code used for spell-checking, for example en_US. Requires the matching hunspell dictionary package to be installed."
       }
     ]
   }
