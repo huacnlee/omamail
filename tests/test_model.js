@@ -590,6 +590,24 @@ assert.ok(model.setupDetail("no_credentials", [], "", "HEY", "cli").indexOf("nev
 assert.strictEqual(model.setupActionLabel("tools_missing", "HEY", "cli"), "Check again")
 assert.strictEqual(model.setupActionLabel("no_credentials", "HEY", "cli"), "Sign in to HEY...")
 
+// OAuth is not one thing: Microsoft's sign-in is a browser the user approves,
+// not a Cloud project they create. Both answer `oauth`, so the words have to
+// branch on the provider rather than on the auth kind.
+assert.strictEqual(model.setupHeadline("no_credentials", "Outlook", "oauth"),
+  "Sign in to Outlook")
+assert.strictEqual(model.setupHeadline("signing_in", "Outlook", "oauth"),
+  "Waiting for Microsoft…")
+assert.ok(model.setupDetail("no_credentials", [], "", "Outlook", "oauth")
+  .indexOf("Microsoft") >= 0)
+assert.ok(model.setupDetail("no_credentials", [], "", "Outlook", "oauth")
+  .indexOf("Google Cloud") < 0, "Outlook must not be sent to Google Cloud")
+assert.ok(model.setupDetail("no_credentials", [], "", "Gmail", "oauth")
+  .indexOf("OAuth client you own") >= 0, "Gmail's own wording is unchanged")
+assert.ok(model.setupDetail("no_credentials", [], "", "Gmail", "oauth")
+  .indexOf("Microsoft") < 0)
+assert.strictEqual(model.setupActionLabel("no_credentials", "Outlook", "oauth"),
+  "Sign in to Outlook...")
+
 // Switching accounts keeps the mailbox the person was using when the target
 // provider offers the same one. Provider-specific mailboxes do not get
 // invented on a provider that has no such destination.

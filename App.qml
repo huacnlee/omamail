@@ -945,6 +945,21 @@ Item {
     }
   }
 
+  Component {
+    id: outlookSetupPage
+
+    OutlookSetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      dangerColor: root.danger
+      accentColor: root.accent
+      panelFontFamily: root.fontFamily
+      accountCount: root.service ? root.service.accountCount : 1
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
+    }
+  }
+
   function switchAccount(index) {
     if (!service) return false
     var keepCalendar = calendarVisible
@@ -1645,7 +1660,8 @@ Item {
             sourceComponent: root.showPicker
               ? providerPickerPage
               : (setup.kind === "imap" ? imapSetupPage
-                : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))
+                : (setup.kind === "outlook" ? outlookSetupPage
+                : (setup.kind === "hey" ? heySetupPage : gmailSetupPage)))
           }
           }
         }

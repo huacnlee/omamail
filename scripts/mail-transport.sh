@@ -124,7 +124,40 @@ case "$url" in
 esac
 
 escaped_url=$(escape "$url")
+
+# A password arrives as "user:password". An OAuth mailbox has no password: the
+# field carries "oauth2:<email>:<token>", and the two halves are handed to curl
+# as `user` and `oauth2-bearer`, which makes libcurl perform XOAUTH2 for IMAP
+# and SMTP. The token itself never reaches the process table — it goes into the
+# config curl reads from stdin, exactly as a password does.
+auth_mode=basic
+auth_login=
+auth_secret=
+case "$credentials" in
+  oauth2:*)
+    auth_mode=oauth2
+    auth_login=${credentials#oauth2:}
+    auth_login=${auth_login%%:*}
+    auth_secret=${credentials#oauth2:*:}
+    ;;
+  *)
+    auth_login=$credentials
+    ;;
+esac
 escaped_credentials=$(escape "$credentials")
+escaped_auth_login=$(escape "$auth_login")
+escaped_auth_secret=$(escape "$auth_secret")
+
+# The one place the credential becomes curl options, so every mode that talks
+# to a server spells it the same way.
+write_auth() {
+  if [ "$auth_mode" = oauth2 ]; then
+    printf 'user = "%s"\n' "$escaped_auth_login"
+    printf 'oauth2-bearer = "%s"\n' "$escaped_auth_secret"
+  else
+    printf 'user = "%s"\n' "$escaped_credentials"
+  fi
+}
 
 umask 077
 work=$(mktemp -d "${TMPDIR:-/tmp}/omamail.XXXXXX") || fail 'mail-transport.sh: no temporary directory'
@@ -142,7 +175,7 @@ if [ "$mode" = "smtp" ]; then
 
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
-  printf 'user = "%s"\n' "$escaped_credentials"
+  write_auth
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
@@ -160,7 +193,7 @@ if [ "$mode" = "smtp" ]; then
 elif [ "$mode" = "imap-append" ]; then
   printf 'url = "%s"\n' "$escaped_url"
   printf 'noproxy = "*"\n'
-  printf 'user = "%s"\n' "$escaped_credentials"
+  write_auth
   printf 'max-time = 60\n'
   printf 'connect-timeout = 20\n'
   case "$url" in
@@ -207,7 +240,7 @@ else
     # keeps account credentials from being offered through an unrelated proxy.
     # Repeated because `next` resets this curl option with the rest.
     printf 'noproxy = "*"\n'
-    printf 'user = "%s"\n' "$escaped_credentials"
+    write_auth
     # These are per-transfer options too. Keeping them in every section makes
     # every command give up eventually, rather than only the final one.
     printf 'max-time = 60\n'

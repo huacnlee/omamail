@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Gmail.js" as Gmail
+.import "Outlook.js" as Outlook
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
 
@@ -121,11 +122,11 @@ function define(source) {
 
 // ---------------------------------------------------------------- registry
 
-// The order the provider chooser lists them in: the two hosted mailboxes with a
+// The order the provider chooser lists them in: the hosted mailboxes with a
 // service of their own first, then the one that is every other mailbox. IMAP is
 // last because it is the answer for a server this list does not name, and a
 // chooser that opened with it would ask the question backwards.
-var ALL = [define(Gmail), define(Hey), define(Imap)]
+var ALL = [define(Gmail), define(Outlook), define(Hey), define(Imap)]
 
 var DEFAULT_ID = "gmail"
 

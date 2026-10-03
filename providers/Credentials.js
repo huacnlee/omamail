@@ -320,6 +320,105 @@ function path(home) {
   return (base || "~") + "/.config/omamail/credentials.json"
 }
 
+// ------------------------------------------------------------- Outlook client
+//
+// Microsoft's desktop client is a public client: an application registration
+// identified by a GUID, with no secret to keep, shared by every personal
+// Outlook mailbox. It lives in the same file as the Google clients under a
+// slot of its own, because that file is already the one place the app looks
+// for an OAuth client, and it is already written with owner-only permissions.
+//
+//   {"version":2,"accounts":[],"outlook":{"clientId":"<guid>"}}
+//
+// An empty built-in is the same placeholder Google's is: filled in here once a
+// client is meant to ship with the plugin, it becomes the fallback for every
+// install with no file of its own.
+var OUTLOOK_CLIENT_ID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+
+var OUTLOOK_BUILTIN = { clientId: "" }
+
+function isValidOutlookClientId(value) {
+  return OUTLOOK_CLIENT_ID_PATTERN.test(trimmed(value))
+}
+
+function outlookBuiltin() {
+  return { clientId: OUTLOOK_BUILTIN.clientId }
+}
+
+function hasOutlookBuiltin() {
+  return isValidOutlookClientId(OUTLOOK_BUILTIN.clientId)
+}
+
+// The slot inside the store. It is read from the raw file text rather than
+// through `loadStore`, because that path is Google's and would discard any
+// file that holds no Google client.
+function outlookClientId(text) {
+  var raw = parseJson(String(text || ""), null)
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return ""
+  var slot = raw.outlook
+  if (!slot || typeof slot !== "object") return ""
+  return trimmed(slot.clientId || slot.client_id)
+}
+
+// The user's own file wins; a shipped client is the fallback — the same rule
+// as `effective`, for the same reason.
+function outlookEffective(text) {
+  var id = outlookClientId(text)
+  if (isValidOutlookClientId(id)) return { clientId: id }
+  return outlookBuiltin()
+}
+
+function isOutlookConfigured(text) {
+  return isValidOutlookClientId(outlookEffective(text).clientId)
+}
+
+// Shown under the client id so it can be told apart from a Cloud project's.
+// A GUID carries no name of its own, so the first block is what makes two of
+// them distinguishable at a glance.
+function describeOutlook(clientId) {
+  var id = trimmed(clientId)
+  if (!isValidOutlookClientId(id)) return ""
+  return "Microsoft \u00b7 " + id.substring(0, 8)
+}
+
+// A pasted client id, or a JSON file holding one. The console hands out a GUID
+// and nothing else, so unlike Google there is no client secret to read.
+function parseOutlook(text) {
+  var raw = trimmed(text)
+  if (raw === "")
+    return { ok: false, error: "Paste the Outlook client ID", clientId: "" }
+  if (raw.charAt(0) === "{") {
+    var json = parseJson(raw, null)
+    if (!json) return { ok: false, error: "That is not valid JSON", clientId: "" }
+    var slot = json.outlook || json
+    var id = trimmed(slot.clientId || slot.client_id)
+    if (!isValidOutlookClientId(id))
+      return { ok: false, error: "That file has no Outlook client ID in it", clientId: "" }
+    return { ok: true, error: "", clientId: id }
+  }
+  var value = trimmed(raw.split(/[\s,]+/)[0])
+  if (!isValidOutlookClientId(value))
+    return { ok: false, error: "That is not an Outlook client ID", clientId: "" }
+  return { ok: true, error: "", clientId: value }
+}
+
+// The whole store with the Outlook slot set, and every Google account it
+// already held carried through untouched. Rebuilt from `loadStore` rather than
+// patched in place so an entry written before a field existed comes out of a
+// save in the same shape as every other.
+function withOutlookClient(text, clientId) {
+  var store = loadStore(String(text || ""))
+  var entries = []
+  for (var i = 0; i < store.accounts.length; i++) {
+    entries.push({ id: store.accounts[i].id, installed: installedBlock(store.accounts[i]) })
+  }
+  var out = { version: FILE_VERSION, accounts: entries }
+  var id = trimmed(clientId)
+  if (isValidOutlookClientId(id)) out.outlook = { clientId: id }
+  return JSON.stringify(out)
+}
+
 // ----------------------------------------------------------------- keyring
 //
 // The refresh token is keyed by account as well as by client, because two
@@ -328,6 +427,10 @@ function path(home) {
 var KEYRING_SERVICE = "omamail"
 var RENAMED_KEYRING_SERVICE = "omarchy-gmail"
 var KEYRING_KIND = "refresh-token"
+// An Outlook refresh token is a different kind of secret from Gmail's: it
+// belongs to Microsoft rather than Google, and it rotates on every refresh.
+// Given a kind of its own it cannot be found by, or overwrite, a Gmail entry.
+var OUTLOOK_KEYRING_KIND = "outlook-refresh-token"
 // A token stored before Calendar support cannot prove it carries the new
 // permission. A versioned lookup leaves that token untouched and presents the
 // sign-in flow again, where Google extends the existing grant.
@@ -388,6 +491,17 @@ function imapKeyringAttributes(accountId) {
   // would hand back some other account's password. An account with no name yet
   // gets the literal placeholder, which no address can collide with.
   return ["service", KEYRING_SERVICE, "kind", IMAP_KEYRING_KIND,
+    "account", id || UNNAMED_ACCOUNT]
+}
+
+// An Outlook refresh token belongs to one mailbox, and one client signs in
+// every mailbox its owner has — so the account is the key, under a kind Gmail
+// never reads. The client id is deliberately not part of it: the registration
+// is fixed for the app, and keying on it would orphan every token the day the
+// shipped client changes.
+function outlookKeyringAttributes(accountId) {
+  var id = accountKey(accountId)
+  return ["service", KEYRING_SERVICE, "kind", OUTLOOK_KEYRING_KIND,
     "account", id || UNNAMED_ACCOUNT]
 }
 

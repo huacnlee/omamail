@@ -310,6 +310,67 @@ assert.strictEqual(countWith(credentials.isKeyringMatchLine, attributeLines([nul
 assert.strictEqual(countWith(credentials.isKeyringAttributedLine, recordLines(1)), 0)
 assert.strictEqual(countWith(credentials.isKeyringNamedLine, recordLines(2)), 0)
 
+// ------------------------------------------------------------- Outlook client
+//
+// A public client: one GUID, no secret, registered once for the app rather
+// than created per user. It lives under a slot of its own in the same file.
+
+assert.strictEqual(credentials.isValidOutlookClientId("9a14c565-731b-47dc-baef-63dd89ed9d7f"), true)
+assert.strictEqual(credentials.isValidOutlookClientId("  9a14c565-731b-47dc-baef-63dd89ed9d7f  "), true)
+assert.strictEqual(credentials.isValidOutlookClientId("1234-abc.apps.googleusercontent.com"), false)
+assert.strictEqual(credentials.isValidOutlookClientId("not-a-guid"), false)
+assert.strictEqual(credentials.isValidOutlookClientId(""), false)
+assert.strictEqual(credentials.isValidOutlookClientId(null), false)
+
+const outlookFile = JSON.stringify({
+  version: 2, accounts: [],
+  outlook: { clientId: "9a14c565-731b-47dc-baef-63dd89ed9d7f" }
+})
+assert.strictEqual(credentials.outlookClientId(outlookFile), "9a14c565-731b-47dc-baef-63dd89ed9d7f")
+assert.strictEqual(credentials.isOutlookConfigured(outlookFile), true)
+deepEqual(credentials.outlookEffective(outlookFile),
+  { clientId: "9a14c565-731b-47dc-baef-63dd89ed9d7f" })
+assert.strictEqual(credentials.isOutlookConfigured(""), false)
+assert.strictEqual(credentials.outlookEffective("").clientId, "",
+  "no file and no shipped client is nothing to sign in with")
+assert.strictEqual(credentials.isOutlookConfigured("garbage"), false)
+assert.strictEqual(credentials.describeOutlook("9a14c565-731b-47dc-baef-63dd89ed9d7f"),
+  "Microsoft \u00b7 9a14c565")
+assert.strictEqual(credentials.describeOutlook(""), "")
+
+assert.strictEqual(credentials.parseOutlook("9a14c565-731b-47dc-baef-63dd89ed9d7f").ok, true)
+assert.strictEqual(credentials.parseOutlook("nope").ok, false)
+assert.strictEqual(credentials.parseOutlook("").ok, false)
+
+// Saving the Outlook slot must carry every Google account the file already
+// held through untouched.
+{
+  var googleStore = credentials.withAccount(credentials.emptyStore(), "one@gmail.com",
+    { clientId: sharedClient, clientSecret: "s" })
+  var savedOutlook = credentials.withOutlookClient(credentials.serialize(googleStore),
+    "9a14c565-731b-47dc-baef-63dd89ed9d7f")
+  var saved = JSON.parse(savedOutlook)
+  assert.strictEqual(saved.accounts.length, 1, "the Google client survives the save")
+  assert.strictEqual(saved.accounts[0].installed.client_id, sharedClient)
+  assert.strictEqual(credentials.outlookClientId(savedOutlook), "9a14c565-731b-47dc-baef-63dd89ed9d7f")
+  deepEqual(credentials.accountIds(credentials.loadStore(savedOutlook)), ["one@gmail.com"])
+}
+
+// A Gmail and an Outlook token for the same address are two keyring entries,
+// under kinds that cannot find one another.
+const outlookAttributes = credentials.outlookKeyringAttributes("me@outlook.com")
+deepEqual(outlookAttributes, [
+  "service", "omamail",
+  "kind", "outlook-refresh-token",
+  "account", "me@outlook.com"
+])
+assert.strictEqual(outlookAttributes.indexOf("client-id"), -1)
+assert.ok(credentials.outlookKeyringAttributes("").indexOf("default") > 0,
+  "an account with no name yet still gets a literal account attribute")
+assert.notStrictEqual(JSON.stringify(outlookAttributes),
+  JSON.stringify(credentials.keyringAttributes(sharedClient, "me@outlook.com")),
+  "the two providers' tokens for one address must not collide")
+
 // ------------------------------------------------------------ the store
 //
 // The file written before accounts existed holds one client in the console's

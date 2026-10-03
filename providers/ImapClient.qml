@@ -33,6 +33,30 @@ Item {
 
   readonly property string transport: auth ? auth.pluginDir + "/scripts/mail-transport.sh" : ""
 
+  // One credential, two sign-ins behind it. An IMAP password arrives as
+  // "user:password"; a bearer token arrives as "oauth2:<email>:<token>", which
+  // `mail-transport.sh` turns into `--oauth2-bearer` with the address as the
+  // login name. The rest of this file neither knows nor cares which it got.
+  function loadTransportCredentials(callback) {
+    if (auth && auth.transportOAuth === true) {
+      auth.withAccessToken(function(token, tokenError) {
+        if (!root) return
+        if (!token) {
+          callback("", tokenError || "Not signed in")
+          return
+        }
+        var user = String((auth && auth.address) || root.email || "")
+        if (user === "") {
+          callback("", "This mailbox has no address to sign in with")
+          return
+        }
+        callback("oauth2:" + user + ":" + token, "")
+      })
+      return
+    }
+    auth.withCredentials(callback)
+  }
+
   // What the server said its folders are, learned once per session with a
   // single LIST. Everything that names a folder goes through here: "\\Sent" is
   // "Sent Items" on Exchange and "[Gmail]/Sent Mail" on Gmail, and a client
@@ -85,7 +109,7 @@ Item {
     }
 
     root.inFlight++
-    auth.withCredentials(function(credentials, credentialError) {
+    root.loadTransportCredentials(function(credentials, credentialError) {
       if (!root) return
       if (handle.aborted) {
         root.inFlight = Math.max(0, root.inFlight - 1)
@@ -571,10 +595,13 @@ Item {
     if (typeof callback !== "function") return newHandle()
     var settings = auth ? auth.settings : null
     var username = settings ? String(settings.username || "") : ""
+    // An OAuth provider learns its address from the token, so it is preferred
+    // over the typed-in one — a personal Outlook account never typed one.
+    var known = auth && auth.address ? String(auth.address) : ""
     Qt.callLater(function() {
       if (!root) return
       callback({
-        email: root.email || username,
+        email: known || root.email || username,
         messagesTotal: 0,
         threadsTotal: 0,
         historyId: ""
@@ -590,7 +617,7 @@ Item {
   // node tests can reach it.
   function getSendAs(callback) {
     if (typeof callback !== "function") return newHandle()
-    var address = String(root.email || "")
+    var address = String((auth && auth.address) || root.email || "")
     var configured = auth && auth.settings ? auth.settings.aliases : null
     Qt.callLater(function() {
       if (!root) return
@@ -718,7 +745,7 @@ Item {
       existingHandle) {
     var handle = existingHandle || newHandle()
     root.inFlight++
-    auth.withCredentials(function(credentials, credentialError) {
+    root.loadTransportCredentials(function(credentials, credentialError) {
       if (!root) return
       if (handle.aborted) {
         root.inFlight = Math.max(0, root.inFlight - 1)
@@ -846,7 +873,7 @@ Item {
     }
 
     root.inFlight++
-    auth.withCredentials(function(credentials, credentialError) {
+    root.loadTransportCredentials(function(credentials, credentialError) {
       if (!root) return
       if (!credentials) {
         root.inFlight = Math.max(0, root.inFlight - 1)

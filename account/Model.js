@@ -44,6 +44,15 @@ function providerName(provider) {
   return name === "" ? "Gmail" : name
 }
 
+// OAuth is not one thing. Google's sign-in needs a Cloud project the user
+// creates; Microsoft's is a browser the user approves. Both answer `oauth`, so
+// the words below cannot branch on the auth kind alone — this is the one place
+// that tells the two apart, keyed on the provider name the panel carries.
+function isOutlook(provider) {
+  var name = providerName(provider)
+  return name.toLowerCase() === "outlook"
+}
+
 function setupHeadline(state, provider, authKind) {
   var name = providerName(provider)
   if (state === "unavailable") return name + " integration is coming later"
@@ -52,16 +61,19 @@ function setupHeadline(state, provider, authKind) {
   // plugin never named.
   if (state === "tools_missing")
     return authKind === "cli" ? "Install the HEY CLI" : "Missing system tools"
-  // Three sign-ins, three first steps: a Cloud console, a server and a
-  // password, or nothing at all because the provider's own program holds it.
+  // Four sign-ins, four first steps: a Cloud console, a browser approval, a
+  // server and a password, or nothing at all because the provider's own
+  // program holds it.
   if (state === "no_credentials") {
     if (authKind === "password") return "Add this mailbox"
     if (authKind === "cli") return "Sign in to " + name
+    if (isOutlook(provider)) return "Sign in to " + name
     return "Connect a Google Cloud project"
   }
   if (state === "signing_in") {
     if (authKind === "password") return "Checking the mailbox…"
     if (authKind === "cli") return "Waiting for " + name + "…"
+    if (isOutlook(provider)) return "Waiting for Microsoft…"
     return "Waiting for Google…"
   }
   if (state === "reconnecting") return "Reconnecting to " + name + "…"
@@ -89,12 +101,12 @@ function setupDetail(state, missingTools, reason, provider, authKind) {
       return "Enter the server and the password for this mailbox. Most providers want an app password rather than the one you sign in to the website with."
     if (authKind === "cli")
       return "The HEY CLI is installed. Signing in opens HEY in your browser; the token it comes back with is the CLI's own, and Omamail never sees it."
+    if (isOutlook(provider))
+      return "Microsoft owns the sign-in for a personal Outlook account. Approve it in your browser and the mailbox follows."
     return "Gmail has no shared app to sign in through, so this plugin uses an OAuth client you own. It takes about two minutes to create."
   }
   if (state === "signing_in") {
     if (authKind === "password") return "Trying the server with those details."
-    if (authKind === "cli")
-      return "Finish the sign-in in your browser. This window updates by itself."
     return "Finish the sign-in in your browser. This window updates by itself."
   }
   if (state === "signed_out") {
@@ -102,6 +114,8 @@ function setupDetail(state, missingTools, reason, provider, authKind) {
       return "This mailbox is set up. Enter its password to let it read your mail."
     if (authKind === "cli")
       return "The HEY CLI is installed but signed out. Sign in to let it read this mailbox."
+    if (isOutlook(provider))
+      return "Sign in with Microsoft to let this mailbox be read."
     return "Your OAuth client is ready. Sign in to let it read this mailbox."
   }
   if (state === "reconnecting")
@@ -118,8 +132,10 @@ function setupActionLabel(state, provider, authKind) {
     return authKind === "cli" ? "Check again" : "See what is missing..."
   if (state === "no_credentials") {
     if (authKind === "password") return "Add the mailbox..."
-    // Nothing to configure before signing in: hey holds the whole credential.
+    // Nothing to configure before signing in: hey holds the whole credential,
+    // and Microsoft's sign-in is a browser rather than a client to create.
     if (authKind === "cli") return "Sign in to " + providerName(provider) + "..."
+    if (isOutlook(provider)) return "Sign in to " + providerName(provider) + "..."
     return "Set up the OAuth client..."
   }
   if (state === "signing_in") return "Cancel"

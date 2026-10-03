@@ -185,6 +185,54 @@ check_absent "the raw unescaped quote does not survive" "$config" 'said "hi" \ a
 config=$(config_for "imap $(b64 'imaps://imap.example.org:993/INBOX') $(b64 'jane:pw') $(b64 'UID COPY 4 "Sent Items"')")
 check "a quoted folder name survives into the command" "$config" 'UID COPY 4 \"Sent Items\"'
 
+# ------------------------------------------------------------- XOAUTH2
+#
+# A personal Outlook mailbox has no password. The credentials field carries
+# "oauth2:<address>:<token>", which the script splits into curl's `user` and
+# `oauth2-bearer` — the pair that makes libcurl perform XOAUTH2.
+
+oauth_request="imap $(b64 'imaps://outlook.office365.com:993/INBOX') $(b64 'oauth2:user@outlook.com:EwBAA8l6TOKEN') $(b64 'NOOP')"
+config=$(config_for "$oauth_request")
+check "an OAuth account logs in as its address" "$config" 'user = "user@outlook.com"'
+check "the token becomes curl's oauth2-bearer" "$config" 'oauth2-bearer = "EwBAA8l6TOKEN"'
+check_absent "the password-shaped credential does not reach curl" "$config" \
+  'user = "oauth2:user@outlook.com:EwBAA8l6TOKEN"'
+check_absent "no client secret is emitted" "$config" 'client_secret'
+
+# The token is repeated in every --next section, exactly as a password is.
+oauth_multi="imap $(b64 'imaps://outlook.office365.com:993/INBOX') $(b64 'oauth2:user@outlook.com:TOK') $(b64 'UID SEARCH UNSEEN') $(b64 'UID FETCH 1 (FLAGS)')"
+config=$(config_for "$oauth_multi")
+check "a second OAuth section carries its own bearer" "$config" 'oauth2-bearer = "TOK"'
+bearers=$(printf '%s' "$config" | grep -c '^oauth2-bearer = ' || true)
+if [ "$bearers" = "2" ]; then
+  printf '  ok   every OAuth section gets the bearer, because --next resets it\n'
+else
+  printf '  FAIL expected 2 oauth2-bearer lines, found %s\n' "$bearers"
+  failures=$(( failures + 1 ))
+fi
+
+# SMTP submission signs in the same way.
+oauth_send="smtp $(b64 'smtp://smtp.office365.com:587') $(b64 'oauth2:user@outlook.com:BTOKEN') $(b64 'user@outlook.com') $(b64 'Subject: hi
+
+body') $(b64 'friend@example.com')"
+config=$(config_for "$oauth_send")
+check "SMTP OAuth logs in as the address" "$config" 'user = "user@outlook.com"'
+check "SMTP OAuth carries the bearer" "$config" 'oauth2-bearer = "BTOKEN"'
+check "SMTP still sets the envelope sender" "$config" 'mail-from = "user@outlook.com"'
+
+# A token containing a colon is not split short: the address is the first
+# segment after the marker and everything left is the token.
+colon_token="imap $(b64 'imaps://outlook.office365.com:993/INBOX') $(b64 'oauth2:u@x.com:a:b:c') $(b64 'NOOP')"
+config=$(config_for "$colon_token")
+check "a colon inside the token survives" "$config" 'oauth2-bearer = "a:b:c"'
+check "the login name is still just the address" "$config" 'user = "u@x.com"'
+
+# A password credential is untouched by the OAuth branch.
+plain="imap $(b64 'imaps://imap.example.org:993/INBOX') $(b64 'jane:hunter2') $(b64 'NOOP')"
+config=$(config_for "$plain")
+check "a password credential still reaches curl whole" "$config" 'user = "jane:hunter2"'
+check_absent "a password credential is not a bearer" "$config" 'oauth2-bearer'
+
 # ------------------------------------------------------------ scheme guard
 #
 # The second gate. Imap.js validated the host; this is what stops a

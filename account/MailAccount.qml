@@ -2471,15 +2471,18 @@ Item {
   Loader {
     id: authLoader
     sourceComponent: root.providerId === "imap" ? imapAuthComponent
-      : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)
+      : (root.providerId === "outlook" ? outlookAuthComponent
+      : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent))
   }
 
   // The client takes the manager as a required property, so it cannot be built
-  // until there is one.
+  // until there is one. Outlook speaks IMAP, so it drives the same client the
+  // plain IMAP account does; only the manager behind it differs.
   Loader {
     id: apiLoader
     active: !!authLoader.item
-    sourceComponent: root.providerId === "imap" ? imapClientComponent
+    sourceComponent: (root.providerId === "imap" || root.providerId === "outlook")
+      ? imapClientComponent
       : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)
   }
 
@@ -2520,6 +2523,26 @@ Item {
       }
       onLoggedOut: root.clearNotice()
       onCredentialsSaved: root.note("Mailbox saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
+    id: outlookAuthComponent
+
+    OutlookAuth {
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+      oauthPort: root.oauthPort
+      email: root.configuredEmail
+      loginHint: root.configuredEmail
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("Outlook client saved")
       onSessionUnavailable: function(reason) { root.fail(reason) }
     }
   }

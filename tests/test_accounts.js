@@ -448,6 +448,10 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(accounts.makeAccount({ email: "j@x.com", provider: "pigeon" }).provider, "gmail")
   assert.strictEqual(accounts.makeAccount({ email: "j@x.com", provider: "IMAP" }).provider, "imap")
   assert.strictEqual(accounts.makeAccount({ email: "j@x.com", provider: " hey " }).provider, "hey")
+  assert.strictEqual(accounts.makeAccount({ email: "j@x.com", provider: "outlook" }).provider,
+    "outlook")
+  assert.strictEqual(accounts.makeAccount({ email: "j@x.com", provider: " Outlook " }).provider,
+    "outlook")
 
   // A Gmail account keeps the bare address as its id, so nothing already on
   // disk — its cache directory, its keyring entry, the activeId in the file —
@@ -456,6 +460,9 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
   assert.strictEqual(
     accounts.makeAccount({ email: "jane@fastmail.com", provider: "imap" }).id,
     "imap:jane@fastmail.com")
+  assert.strictEqual(
+    accounts.makeAccount({ email: "jane@outlook.com", provider: "outlook" }).id,
+    "outlook:jane@outlook.com", "a hosted provider carries its prefix in the id")
 
   // The same address reached two ways is two mailboxes, not one overwriting
   // the other.

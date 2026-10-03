@@ -8,12 +8,13 @@ const provider = load("providers/Registry.js")
 // Three providers, and the ids are what an accounts.json holds — renaming one
 // silently orphans every account already written with the old name.
 //
-// The order is the order the chooser lists them in: the two hosted mailboxes
-// with a service of their own, then the one that is every other mailbox.
-deepEqual(provider.ids(), ["gmail", "hey", "imap"])
+// The order is the order the chooser lists them in: the hosted mailboxes with a
+// service of their own, then the one that is every other mailbox.
+deepEqual(provider.ids(), ["gmail", "outlook", "hey", "imap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
+assert.strictEqual(provider.get("outlook").name, "Outlook")
 
 // An id from a newer build, or a hand-edited file, still has to open a window.
 assert.strictEqual(provider.get("nonesuch").id, "gmail")
@@ -64,6 +65,17 @@ assert.strictEqual(provider.webBoxUrl("gmail", "in:inbox"),
   "https://mail.google.com/mail/u/0/#search/in%3Ainbox")
 assert.strictEqual(provider.can("gmail", "invented"), false, "an unknown capability is a no")
 
+// Outlook is IMAP and SMTP underneath, so its capabilities, folders and
+// queries are IMAP's — only the sign-in and the servers differ.
+assert.strictEqual(provider.can("outlook", "labels"), false)
+assert.strictEqual(provider.can("outlook", "move"), true)
+assert.strictEqual(provider.can("outlook", "send"), true)
+assert.strictEqual(provider.can("outlook", "spam"), false)
+assert.strictEqual(provider.can("outlook", "web"), false)
+assert.strictEqual(provider.query("outlook", "inbox", "", ""), "folder:INBOX")
+assert.strictEqual(provider.query("outlook", "sent", "", ""), "folder:\\Sent")
+assert.strictEqual(provider.labelQuery("outlook", "Old Mail"), "folder:\"Old Mail\"")
+
 // HEY's own shape. The two that are off are off because HEY has no such verb —
 // a star that quietly moved a thread out of the Imbox, or an archive that filed
 // it in Paper Trail, would be a promise the provider cannot keep.
@@ -112,7 +124,7 @@ for (const id of ids) {
 // HEY is left out on purpose: `hey spam` moves a thread and trains the filter,
 // but the CLI serves no spam box to list, and a mailbox that cannot be opened
 // is worse than none.
-for (const id of ["gmail", "imap"]) {
+for (const id of ["gmail", "imap", "outlook"]) {
   const spam = provider.mailboxes(id).filter(box => box.key === "spam")
   assert.strictEqual(spam.length, 1, id + " has one spam mailbox")
   assert.ok(spam[0].optional, id + "/spam yields the strip before the inbox does")
@@ -239,6 +251,7 @@ assert.ok(provider.labelQuery("imap", "Old Mail").indexOf("TEXT") < 0)
 // though it has no address for an arbitrary mailbox, so the settings row can
 // link out where the "Open web inbox" row cannot.
 assert.strictEqual(provider.webHomeUrl("gmail"), "https://mail.google.com/mail/u/0/")
+assert.strictEqual(provider.webHomeUrl("outlook"), "https://outlook.live.com/mail/")
 assert.strictEqual(provider.webHomeUrl("hey"), "https://app.hey.com")
 assert.strictEqual(provider.webHomeUrl("imap"), "", "an IMAP server is not a website")
 
@@ -254,6 +267,8 @@ assert.strictEqual(provider.mark("gmail"), "gmail.png")
 assert.strictEqual(provider.logo("gmail"), "gmail.png", "one square mark serves both")
 assert.strictEqual(provider.mark("hey"), "hey-mark.png")
 assert.strictEqual(provider.logo("hey"), "hey.png")
+assert.strictEqual(provider.mark("outlook"), "outlook.svg", "the picker row needs artwork")
+assert.strictEqual(provider.logo("outlook"), "outlook.svg")
 assert.strictEqual(provider.mark("imap"), "")
 assert.strictEqual(provider.logo("imap"), "")
 
@@ -272,6 +287,12 @@ assert.strictEqual(provider.usesOAuth("gmail"), true)
 assert.strictEqual(provider.usesOAuth("imap"), false)
 assert.strictEqual(provider.usesPassword("imap"), true)
 assert.strictEqual(provider.usesPassword("gmail"), false)
+// Outlook is a browser sign-in like Gmail's, but a different authorization
+// server, a different client and a rotating token.
+assert.strictEqual(provider.authKind("outlook"), "oauth")
+assert.strictEqual(provider.usesOAuth("outlook"), true)
+assert.strictEqual(provider.usesPassword("outlook"), false)
+assert.strictEqual(provider.usesCli("outlook"), false)
 
 assert.strictEqual(provider.badge("imap"), "IMAP")
 assert.ok(provider.summary("imap").length > 0)

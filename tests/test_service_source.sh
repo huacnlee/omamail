@@ -10,6 +10,12 @@ fail() { printf 'test_service_source.sh: %s\n' "$1" >&2; exit 1; }
 grep -q 'property var shell' Service.qml || fail "Service.qml must accept an injected shell"
 grep -q 'property var manifest' Service.qml || fail "Service.qml must accept an injected manifest"
 grep -q '__sourceDir' Service.qml || fail "pluginDir must come from manifest.__sourceDir"
+# A third-party plugin is handed a sanitised manifest with __sourceDir removed.
+# The directory then has to come from the file's own URL, or every script is
+# spawned as "/scripts/...": a process that never starts, and a sign-in stuck on
+# "waiting for the browser" with nothing to report.
+grep -q 'Qt.resolvedUrl(".")' Service.qml \
+  || fail "pluginDir must fall back to the file's own URL when the manifest carries no __sourceDir"
 grep -q 'function applySettings' Service.qml || fail "the bar widget pushes settings in via applySettings"
 grep -q 'function setUndoSendSeconds' Service.qml \
   || fail "the in-app settings page must be able to change the undo window"

@@ -42,8 +42,25 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "omamail"
-  readonly property string pluginDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+  // Where this plugin's files live. The shell hands a third-party plugin a
+  // sanitised manifest with `__sourceDir` deleted — deliberately, so a plugin
+  // cannot read the host's layout — but every script this plugin runs lives
+  // beside it, so the directory is taken from this file's own URL when the
+  // manifest does not carry one.
+  //
+  // Without the fallback `pluginDir` is "", and a transport or helper is
+  // spawned as "/scripts/pkce.sh": an absolute path at the filesystem root
+  // that does not exist. Quickshell emits no `exited` for a process that never
+  // started, so the caller waits forever with nothing to report — which is a
+  // sign-in stuck on "Waiting for the browser" and no browser.
+  readonly property string pluginDir: {
+    if (manifest && String(manifest.__sourceDir || "") !== "")
+      return String(manifest.__sourceDir)
+    var url = String(Qt.resolvedUrl("."))
+    if (url.indexOf("file://") !== 0) return ""
+    var path = url.substring(7)
+    try { return decodeURIComponent(path) } catch (e) { return path }
+  }
   // Shown in the empty reader, so a screenshot in a bug report says which build
   // it came from. The shell's manifest validation requires both fields, so a
   // loaded plugin always has them; the fallbacks are for a harness that
