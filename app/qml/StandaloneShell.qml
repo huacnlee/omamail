@@ -84,7 +84,7 @@ QtObject {
   }
 
   function writeConfig(name, text, callback) {
-    var allowed = ["credentials.json", "window.json", "window-size.json", "calendars.json"]
+    var allowed = ["credentials.json", "window.json", "window-size.json", "calendars.json", "keybindings.json"]
     if (allowed.indexOf(String(name || "")) < 0 || !fileStore
         || typeof fileStore.write !== "function") {
       if (typeof callback === "function") callback(false, "Invalid configuration file")

@@ -24,6 +24,9 @@ Column {
   required property color dimColor
   required property color urgentColor
   required property string panelFontFamily
+  // Bumped by App.qml when a binding is rebound; passed to each row so the
+  // select tooltip re-reads its key. Keymap.js emits no signal of its own.
+  property int keymapRevision: 0
   property string cursorId: ""
   // The rows ticked for a bulk action, by id. Held above the list, like the
   // cursor, because a reload rebuilds every row.
@@ -77,6 +80,7 @@ Column {
       dimColor: root.dimColor
       urgentColor: root.urgentColor
       panelFontFamily: root.panelFontFamily
+      keymapRevision: root.keymapRevision
       agentState: Agent.glyphState(root.service.agentJobs[modelData.id])
       agentProgress: Agent.progressText(root.service.agentJobs[modelData.id])
       agentAttention: root.service.agentAttentionByMessage[modelData.id] === true

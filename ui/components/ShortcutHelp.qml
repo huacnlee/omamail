@@ -26,6 +26,10 @@ Rectangle {
   required property string panelFontFamily
   property var hiddenBindings: []
 
+  // Bumped by App.qml when an override changes, so the sheet redraws with the
+  // new keys — Keymap.js is a shared library and its change emits no signal.
+  property int keymapRevision: 0
+
   signal dismissed()
 
   // The keyboard's answer to a sheet that scrolls. `j`/`k` survive the overlay
@@ -57,7 +61,10 @@ Rectangle {
   // The split into columns is the table's too: balancing it here would put a
   // layout decision in a view, and the rule — in order, a heading counts as a
   // line — is worth a test.
-  readonly property var columns: Keymap.helpColumns(columnCount, hiddenBindings)
+  readonly property var columns: {
+    root.keymapRevision // re-read when an override changes; Keymap.js emits no signal
+    return Keymap.helpColumns(columnCount, hiddenBindings)
+  }
 
   color: Qt.rgba(backgroundColor.r, backgroundColor.g, backgroundColor.b, 0.96)
 

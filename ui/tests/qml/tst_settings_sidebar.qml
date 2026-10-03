@@ -278,7 +278,7 @@ Item {
       verify(rail && rail.visible, "a wide window has a rail")
       var page = named(app, "settings-page")
       var keys = page.sections.map(function(s) { return s.key })
-      compare(keys.join(","), "backend,bar,reading,notifications,writing,mailboxes,calendars,oauth")
+      compare(keys.join(","), "backend,bar,reading,notifications,writing,keyboard,mailboxes,calendars,oauth")
       for (var i = 1; i < page.sections.length; i++)
         verify(page.sections[i].y > page.sections[i - 1].y, "sections are laid out top to bottom")
       for (var j = 0; j < keys.length; j++)
@@ -352,6 +352,30 @@ Item {
       verify(page.y>0,"initial spacing belongs to scrollable content")
       view.contentY=page.y
       compare(page.mapToItem(view,0,0).y,0,"content can reach the header edge")
+    }
+
+    // The router stands down while a key is being recorded, because a window
+    // Shortcut beats the catcher's Keys handler. The two have to move together:
+    // a suspended router with no catcher on screen is a dead keyboard with no
+    // key left to recover with, and that state is reachable by leaving Settings
+    // mid-capture.
+    function test_recording_a_key_stands_the_router_down_and_gives_it_back() {
+      var page = named(app, "settings-page")
+      var router = named(app, "key-router")
+      var catcher = named(app, "key-capture")
+      verify(page && router && catcher)
+      compare(router.suspended, false)
+      compare(catcher.active, false)
+
+      page.beginCapture("archive", "Archive")
+      tryCompare(router, "suspended", true)
+      compare(catcher.active, true, "the catcher is up for exactly as long")
+
+      // Leaving Settings with a capture open is the way this used to strand.
+      app.backToList()
+      tryCompare(router, "suspended", false)
+      compare(catcher.active, false)
+      compare(page.capturingKey, false, "and the capture is ended, not merely hidden")
     }
 
     function test_a_narrow_window_has_no_rail() {

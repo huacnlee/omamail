@@ -29,6 +29,18 @@ Item {
   // consumes its own keys, so the router never sees them.
   property bool overlay: false
 
+  // Bumped by App.qml when keybindings.json loads or the Keyboard settings
+  // section changes an override. Keymap.js is a shared library and its
+  // override map changing emits no QML signal, so the model binding reads this
+  // to know it has to rebuild the Shortcuts from the new keys.
+  property int keymapRevision: 0
+
+  // While the user is recording a key in Settings, every Shortcut stands down
+  // so the press reaches the capture field instead of firing — a window
+  // Shortcut beats a focused item's Keys handler, so without this Ctrl+, could
+  // never be captured because it would open Settings again.
+  property bool suspended: false
+
   // The sequence travels with the id, because one row can bind several keys
   // that differ in what they mean: `Ctrl+1`…`Ctrl+9` are one binding and nine
   // mailboxes.
@@ -38,6 +50,8 @@ Item {
   // Shortcut can run. Decode those forwarded events, then use the same table
   // and context as the Shortcut path. Unbound events remain normal text input.
   function routeKeyEvent(event) {
+    // The other door into the router, and `suspended` means both of them.
+    if (root.suspended) return false
     var key = ""
     if (event.key === Qt.Key_Up) key = "Up"
     else if (event.key === Qt.Key_Down) key = "Down"
@@ -45,10 +59,12 @@ Item {
     else if (event.key === Qt.Key_Enter) key = "Enter"
     if (key === "") return false
     var sequence = ""
+    // Ctrl, Alt, Meta, Shift: the order keys/Keymap.js normalises to and
+    // keys/Capture.js records in, so a sequence spelled here matches one.
     if (event.modifiers & Qt.ControlModifier) sequence += "Ctrl+"
     if (event.modifiers & Qt.AltModifier) sequence += "Alt+"
-    if (event.modifiers & Qt.ShiftModifier) sequence += "Shift+"
     if (event.modifiers & Qt.MetaModifier) sequence += "Meta+"
+    if (event.modifiers & Qt.ShiftModifier) sequence += "Shift+"
     sequence += key
     var entries = Keymap.sequencesFor(root.context)
     for (var i = 0; i < entries.length; i++) {
@@ -63,7 +79,12 @@ Item {
   }
 
   Instantiator {
-    model: Keymap.sequencesFor(root.context)
+    // `root.keymapRevision` is read for the dependency, not the value: an override
+    // rebuilds the list the same way a context change does.
+    model: {
+      root.keymapRevision
+      return Keymap.sequencesFor(root.context)
+    }
 
     delegate: Shortcut {
       required property var modelData
@@ -71,8 +92,8 @@ Item {
       // Window-scoped so mailbox keys cannot match or ambiguously consume the
       // standalone close chord, which is application-wide on purpose.
       context: Qt.WindowShortcut
-      enabled: Keymap.isSequenceEnabled(modelData.binding, modelData.sequence,
-        root.context, root.overlay)
+      enabled: !root.suspended && Keymap.isSequenceEnabled(modelData.binding,
+        modelData.sequence, root.context, root.overlay)
       onActivated: root.triggered(modelData.id, modelData.sequence)
     }
   }

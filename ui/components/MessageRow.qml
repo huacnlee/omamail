@@ -17,6 +17,9 @@ Rectangle {
   required property color dimColor
   property color urgentColor: accentColor
   required property string panelFontFamily
+  // Bumped by App.qml when a binding is rebound, so the select tooltip below
+  // re-reads its key. Keymap.js is a shared library and emits no signal.
+  property int keymapRevision: 0
   // Passed down rather than read off a service: a row draws one message and
   // has no other use for one.
   // Which mailbox this row came from, present only on a merged summary.
@@ -284,7 +287,11 @@ Rectangle {
       visible: !root.selectionMode
       iconName: "star"
       filled: root.summary.starred
-      tooltipText: (root.summary.starred ? "Unstar" : "Star") + " · s"
+      tooltipText: {
+        root.keymapRevision // re-read when an override changes
+        return (root.summary.starred ? "Unstar" : "Star") + " · "
+          + Keymap.hintKeyFor(Keymap.byId("star"))
+      }
       foreground: root.summary.starred ? root.accentColor : root.dimColor
       hoverColor: root.accentColor
       iconSize: Style.font.iconSmall
@@ -370,9 +377,12 @@ Rectangle {
 
       PanelToolTip {
         visible: checkMouse.containsMouse
-        text: (root.checked ? "Deselect" : "Select") + " · "
-          + Keymap.keycapLabel(Keymap.displayFor(Keymap.byId("toggleCheck")))
-          + " · ctrl+click toggles; shift+click selects or clears a range"
+        text: {
+          root.keymapRevision // re-read when an override changes
+          return (root.checked ? "Deselect" : "Select") + " · "
+            + Keymap.keycapLabel(Keymap.displayFor(Keymap.byId("toggleCheck")))
+            + " · ctrl+click toggles; shift+click selects or clears a range"
+        }
         fontFamily: root.panelFontFamily
       }
     }

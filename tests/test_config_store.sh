@@ -56,6 +56,13 @@ done
 printf '%s\n' '{"zoom":1}' | "$store" window.json >/dev/null
 grep -q '"zoom":1' "$XDG_CONFIG_HOME/omamail/window.json"
 
+# Key overrides are not secret, but they go through the same writer as
+# everything else here, so they land with the same owner-only permissions.
+printf '%s\n' '{"version":1,"bindings":{"archive":["z"]}}' | "$store" keybindings.json >/dev/null
+grep -q '"archive":\["z"\]' "$XDG_CONFIG_HOME/omamail/keybindings.json"
+[ "$(stat -c '%a' "$XDG_CONFIG_HOME/omamail/keybindings.json")" = 600 ] \
+  || { echo 'config-store.sh: keybindings.json must stay owner-only like the rest' >&2; exit 1; }
+
 # An unknown name, an empty payload, and the permissions the files are kept at.
 if printf '%s\n' 'x' | "$store" secrets.json >/dev/null 2>&1; then
   echo 'config-store.sh: an unknown file name must be refused' >&2

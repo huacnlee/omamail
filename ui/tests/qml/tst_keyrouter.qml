@@ -3,6 +3,7 @@ import QtQuick.Window 2.15
 import QtQuick.Controls 2.15 as QQC
 import QtTest 1.3
 import "../../components" as Omamail
+import "../../keys/Keymap.js" as Keymap
 
 // The keyboard belongs to the application, and the context says what a key
 // means where. Two things are exercised: that a key is live only in the
@@ -16,10 +17,15 @@ Item {
   property string lastSequence: ""
   property string context: "list"
   property bool overlay: false
+  property int keymapRevision: 0
+  property bool suspended: false
 
   Omamail.KeyRouter {
+    id: router
     context: host.context
     overlay: host.overlay
+    keymapRevision: host.keymapRevision
+    suspended: host.suspended
     onTriggered: function(id, sequence) {
       host.lastId = id
       host.lastSequence = sequence
@@ -58,8 +64,11 @@ Item {
     function init() {
       host.context = "list"
       host.overlay = false
+      host.suspended = false
       host.lastId = ""
       host.lastSequence = ""
+      Keymap.resetAll()
+      host.keymapRevision = host.keymapRevision + 1
       compose.opened = false
       scope.applyContextFocus()
       wait(30)
@@ -286,6 +295,36 @@ Item {
       wait(20)
       keyClick(Qt.Key_0, Qt.ControlModifier)
       compare(host.lastId, "zoomReset")
+    }
+
+    // A user override moves a key. The router rebuilds its Shortcuts when the
+    // revision bumps — the override map is in a shared library and changing it
+    // emits no signal — and the old key goes dead where the new one lives.
+    function test_a_user_override_moves_a_bare_key() {
+      Keymap.applyOverride("archive", ["z"])
+      host.keymapRevision = host.keymapRevision + 1
+      wait(20)
+      keyClick(Qt.Key_Z)
+      compare(host.lastId, "archive", "the rebound key archives")
+      host.lastId = ""
+      keyClick(Qt.Key_E)
+      compare(host.lastId, "", "and the default it replaced is dead")
+      Keymap.resetAll()
+    }
+
+    // While Settings is recording a key, every Shortcut stands down so the
+    // press reaches the capture field instead of firing.
+    function test_capture_suspends_every_shortcut() {
+      host.suspended = true
+      wait(20)
+      keyClick(Qt.Key_E)
+      compare(host.lastId, "", "nothing fires while a key is being recorded")
+      keyClick(Qt.Key_Escape)
+      compare(host.lastId, "", "not even Escape")
+      host.suspended = false
+      wait(20)
+      keyClick(Qt.Key_E)
+      compare(host.lastId, "archive", "and the keyboard is back afterwards")
     }
 
     // The mechanism, not a key: leaving a text-entry context has to take the
