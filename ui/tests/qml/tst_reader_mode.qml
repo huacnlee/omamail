@@ -187,10 +187,10 @@ Item {
       verify(body().width <= reader.bodyWidth, "content remains inside the panel")
       reader.width = 900
 
-      // The other two start at the page inset, because a sender's own layout
-      // and a plain-text body both begin at the left edge.
+      // Original centres its page, without centring the text inside it.
       reader.bodyMode = "original"
-      compare(reader.bodyOffset, 0)
+      compare(reader.bodyOffset, Math.round((reader.bodyWidth - reader.preferredBodyWidth) / 2))
+      verify(reader.bodyOffset > 0)
       reader.bodyMode = "plain"
       compare(reader.bodyOffset, 0)
     }
@@ -200,6 +200,9 @@ Item {
       compare(reader.bodyOffset, 0, "there is nothing spare to centre in")
       compare(body().width, reader.bodyWidth)
       verify(body().x + body().width <= reader.width, "and nothing runs off the panel")
+      reader.bodyMode = "original"
+      compare(reader.bodyOffset, 0)
+      reader.bodyMode = "reader"
       reader.width = 900
       verify(reader.bodyOffset > 0, "and the column comes back when there is room again")
     }

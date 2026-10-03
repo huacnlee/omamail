@@ -12,7 +12,7 @@ import tempfile
 import threading
 
 ROOT=Path(__file__).resolve().parents[1]
-ALLOWED={'providers.resolve','model.intent','model.apply','model.unified','account.identities','account.conversation','agent.jobsProjection'}
+ALLOWED={'providers.resolve','model.intent','model.apply','model.unified','account.identities','account.conversation','agent.jobsProjection','message.render'}
 
 
 def main():
