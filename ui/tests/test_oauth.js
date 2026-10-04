@@ -132,6 +132,12 @@ deepEqual(
 deepEqual(
   oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify"),
   ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"])
+// The contacts scopes are asked for, but a grant that declined them is kept.
+for (var o = 0; o < oauth.OPTIONAL_SCOPES.length; o++)
+  assert.ok(oauth.SCOPES.indexOf(oauth.OPTIONAL_SCOPES[o]) < 0)
+deepEqual(
+  oauth.missingScopes(oauth.SCOPES.join(" ")),
+  [])
 assert.strictEqual(
   oauth.missingScopeMessage(["https://www.googleapis.com/auth/gmail.send"]),
   "Google sign-in finished without the gmail.send permission. Sign in again and leave every checkbox ticked")
