@@ -197,6 +197,34 @@ def release_url_allowed(url):
             and not any(ord(character) < 33 or ord(character) == 127 for character in url))
 
 
+def release_proxy():
+    """An explicit opt-in proxy for the release download, for networks that
+    cannot reach the fixed release hosts directly. Desktop proxy environment
+    variables stay ignored, exactly as for mail and calendar traffic; this is
+    the same explicit-override pattern as OMAMAIL_BIN. A plain HTTP proxy
+    carries HTTPS over CONNECT, so TLS still ends at the allowlisted hosts."""
+    value = os.environ.get("OMAMAIL_INSTALL_PROXY", "")
+    if not value:
+        return {}
+    parsed = urllib.parse.urlsplit(value)
+    try:
+        port = parsed.port
+    except ValueError:
+        port = -1
+    require(len(value) <= 256
+            and not any(ord(character) < 33 or ord(character) == 127 for character in value)
+            and parsed.scheme == "http"
+            and parsed.hostname is not None
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in ("", "/")
+            and not parsed.query
+            and not parsed.fragment
+            and (port is None or 0 < port < 65536),
+            "Invalid OMAMAIL_INSTALL_PROXY value.")
+    return {"http": value, "https": value}
+
+
 class ReleaseRedirect(urllib.request.HTTPRedirectHandler):
     max_redirections = 5
 
@@ -207,8 +235,10 @@ class ReleaseRedirect(urllib.request.HTTPRedirectHandler):
 
 def download(url, limit):
     require(release_url_allowed(url), "Release URL was refused.")
-    # Ignore proxy environment variables; redirects remain fixed HTTPS release hosts.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), ReleaseRedirect())
+    # Desktop proxy environment variables stay ignored; only the explicit,
+    # validated OMAMAIL_INSTALL_PROXY override applies, and redirects remain
+    # fixed HTTPS release hosts.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler(release_proxy()), ReleaseRedirect())
     with opener.open(url, timeout=20) as response:
         require(response.status == 200, "Release download failed.")
         content = response.read(limit + 1)

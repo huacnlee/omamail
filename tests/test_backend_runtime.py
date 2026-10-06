@@ -270,6 +270,30 @@ touch linked
         self.assertEqual(result, dict(state="missing", requiredVersion="0.8.2", requiredApiVersion=1, latestApiVersion=1, unreleasedMethods=[], installedVersion="", executable=str(self.binary), error="", cliInstalled=False))
         self.assertFalse(self.binary.parent.exists())
 
+    def test_release_download_ignores_desktop_proxy_environment_without_opt_in(self):
+        with patch.dict(os.environ, {"http_proxy": "http://10.0.0.1:3128",
+                                     "https_proxy": "http://10.0.0.1:3128",
+                                     "HTTP_PROXY": "http://10.0.0.1:3128",
+                                     "ALL_PROXY": "socks5://10.0.0.1:1080"}):
+            self.assertEqual(self.manager.release_proxy(), {})
+
+    def test_release_download_proxy_requires_valid_explicit_http_value(self):
+        with patch.dict(os.environ, {"OMAMAIL_INSTALL_PROXY": "http://127.0.0.1:8118"}):
+            self.assertEqual(self.manager.release_proxy(),
+                             {"http": "http://127.0.0.1:8118", "https": "http://127.0.0.1:8118"})
+        with patch.dict(os.environ, {"OMAMAIL_INSTALL_PROXY": "http://proxy.lan"}):
+            self.assertEqual(self.manager.release_proxy(),
+                             {"http": "http://proxy.lan", "https": "http://proxy.lan"})
+        for value in ("socks5://127.0.0.1:1080", "https://127.0.0.1:8118",
+                      "http://user:pass@127.0.0.1:8118", "http://:8118",
+                      "http://127.0.0.1:8118/pac", "http://127.0.0.1:8118?direct=1",
+                      "http://127.0.0.1:99999", "http://127.0.0.1:8118 ",
+                      "http://127.0.0.1:8118\n", "http://" + "h" * 300 + ":8118"):
+            with patch.dict(os.environ, {"OMAMAIL_INSTALL_PROXY": value}):
+                with self.subTest(value=value.strip() or repr(value)):
+                    with self.assertRaises(self.manager.Refused):
+                        self.manager.release_proxy()
+
     def test_release_status_uses_only_local_pin_and_api_despite_newer_cargo(self):
         self.local_checkout()
         self.release(self.archive())

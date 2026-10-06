@@ -22,6 +22,14 @@ layout, checks the candidate executable's version and atomically replaces the
 old executable. A failed installation preserves the working runtime. Checksums
 protect integrity, not against a compromised publisher.
 
+Desktop proxy environment variables are ignored for that download, like every
+other Omamail network path. On a network that cannot reach the release hosts
+directly, set `OMAMAIL_INSTALL_PROXY` to one plain HTTP proxy URL, for example
+`OMAMAIL_INSTALL_PROXY=http://127.0.0.1:8118 python3 scripts/backend-runtime.py install`.
+The value is validated strictly (no credentials, no path or query), applies only
+to this download, and HTTPS still ends at the fixed release hosts through the
+proxy's CONNECT tunnel; every checksum, redirect and version check stays on.
+
 `python3 scripts/backend-runtime.py enable-cli` explicitly creates
 `~/.local/bin/omamail` as a symlink to that same private executable; it refuses
 an unrelated file or link. An owned link into a previous Omamail plugin checkout's
