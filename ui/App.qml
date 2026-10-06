@@ -924,25 +924,13 @@ Item {
     if (cursorId === "") return false
     var acted = cursorId
     var row = displayMessages[Model.indexById(displayMessages, acted)]
-    // "Was open" is the conversation's: with the rail up the reader can be
-    // showing a member of the acted row rather than the row itself, and
-    // archiving from a member has to open the next row or go back rather than
-    // leave a message that has just moved on screen.
-    //
-    // And a preview is not open at all. It satisfies "is this the selected
-    // one" without having been opened, which made `e` on a previewed row call
-    // `openMessage` on the *next* one — an archive that reads a message, which
-    // is the fault this feature exists to avoid.
+    // Opening a conversation member keeps the cursor on its list row.
+    // A preview is not open: removing it must not read the next message.
     var wasOpen = currentView === "reader" && !service.selectionIsPreview
       && (service.selectedId === acted || Model.rowHoldsMember(row, service.selectedId))
     // Worked out before the action, while the row still has neighbours.
     var next = Model.cursorAfterRemoval(displayMessages, acted)
-    // The same six facts `MailAccount.act` decides with. Asking with three of
-    // them made the cursor repair disagree with the list it repairs: moving a
-    // message back to the inbox removes the row on a provider that moves, and
-    // this read it as staying. The row itself is the sixth: a conversation
-    // answers on its recomputed block, so a mark-read in the Unread view keeps
-    // the row while a reply is still unread.
+    // Match the account's action rules, including conversation flags.
     var leaves = !Model.survivesAction(service.mailboxKey, action,
       service.rawQuery, service.hasLabels, service.rawLabelId, row)
     if (leaves && action !== "markRead") heldUnreadRow = null
