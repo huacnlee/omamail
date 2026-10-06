@@ -281,6 +281,41 @@ Item {
       compare(kinds(), "list", "every test starts on the list")
     }
 
+    function test_open_read_row_stays_in_unread_until_selection_changes() {
+      mailService.mailboxKey = "unread"
+      mailService.messages = [{id: "message-1", subject: "One", unread: true},
+        {id: "message-2", subject: "Two", unread: true}]
+      app.openMessage("message-1")
+      mailService.selectedMessage = {id: "message-1", subject: "One", unread: false}
+      mailService.messages = [{id: "message-2", subject: "Two", unread: true}]
+      tryCompare(app, "cursorId", "message-1")
+      compare(app.displayMessages.length, 2)
+      compare(app.displayMessages[0].id, "message-1")
+      compare(app.displayMessages[0].unread, false)
+      app.openMessage("message-2")
+      compare(app.displayMessages.length, 1)
+      compare(app.displayMessages[0].id, "message-2")
+      mailService.messages = [{id: "message-1", subject: "One"}]
+    }
+
+    function test_combined_account_read_row_keeps_qualified_identity() {
+      mailService.mailboxKey = "unread"
+      var rowId = "me@example.com\u001fmessage-1"
+      mailService.messages = [{id: rowId, sourceId: "message-1",
+        accountId: "me@example.com", subject: "One", unread: true}]
+      app.openMessage(rowId)
+      mailService.selectedMessage = {id: "message-1", subject: "One", unread: false}
+      mailService.messages = []
+      compare(app.displayMessages.length, 1)
+      compare(app.displayMessages[0].id, rowId)
+      compare(app.displayMessages[0].unread, false)
+      mailService.mailboxKey = "inbox"
+      compare(app.displayMessages.length, 0)
+      mailService.mailboxKey = "unread"
+      compare(app.displayMessages.length, 0)
+      mailService.messages = [{id: "message-1", subject: "One"}]
+    }
+
     function test_control_comma_opens_settings_data() {
       return [{ tag: "list", context: "list" },
               { tag: "reader", context: "reader" },

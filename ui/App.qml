@@ -175,6 +175,24 @@ Item {
   readonly property bool wide: mailWidth >= Style.space(1000)
   readonly property bool compact: mailWidth < Style.space(760)
 
+  // A read row stays visible only for the selection and mailbox that opened it.
+  property var heldUnreadRow: null
+  readonly property string unreadScope: service
+    ? JSON.stringify([service.activeAccountId, service.mailboxKey, service.rawQuery]) : ""
+  onUnreadScopeChanged: heldUnreadRow = null
+  readonly property var displayMessages: Model.withOpenUnreadRow(
+    service ? service.messages : [], heldUnreadRow, unreadScope,
+    service ? service.mailboxKey : "", service ? service.selectedId : "",
+    service ? service.selectedMessage : null)
+
+  function rememberUnreadRow(id) {
+    if (!service || service.mailboxKey !== "unread") { heldUnreadRow = null; return }
+    var rows = service.messages || []
+    var index = Model.indexById(rows, id)
+    heldUnreadRow = index < 0 ? null
+      : {scope: unreadScope, row: rows[index], order: rows.slice(), index: index}
+  }
+
   property string cursorId: ""
   // The rows ticked for a bulk action, by id. Like the cursor, a fact about
   // this window rather than about the mailbox, and pruned the same way when
@@ -224,7 +242,7 @@ Item {
     var key = String(id || "")
     if (key === "") return false
     claimChecks()
-    checkedIds = Model.toggleRange(checkedIds, service.messages, cursorId, key)
+    checkedIds = Model.toggleRange(checkedIds, displayMessages, cursorId, key)
     cursorId = key
     return true
   }
@@ -234,8 +252,8 @@ Item {
   function checkAll() {
     if (!service) return false
     claimChecks()
-    var all = Model.allIds(service.messages)
-    checkedIds = Model.retainIds(checkedIds, service.messages).length === all.length ? [] : all
+    var all = Model.allIds(displayMessages)
+    checkedIds = Model.retainIds(checkedIds, displayMessages).length === all.length ? [] : all
     return true
   }
 
@@ -253,10 +271,12 @@ Item {
     var ids = checkedIds.slice()
     var leaves = !Model.survivesAction(service.mailboxKey, action,
       service.rawQuery, service.hasLabels, service.rawLabelId)
-    var next = leaves ? Model.cursorAfterRemovals(service.messages, ids, cursorId) : cursorId
+    var next = leaves ? Model.cursorAfterRemovals(displayMessages, ids, cursorId) : cursorId
     // The open message going with the selection closes the reader, the way
     // acting on it alone does: it is about to leave this list.
     var wasOpen = currentView === "reader" && ids.indexOf(service.selectedId) >= 0
+    if (leaves && action !== "markRead" && heldUnreadRow
+        && ids.indexOf(heldUnreadRow.row.id) >= 0) heldUnreadRow = null
     if (!service.actMany(ids, action)) return false
     checkedIds = []
     if (!leaves) return true
@@ -498,7 +518,7 @@ Item {
     // The list is usually already loaded by the time the window is summoned —
     // the service keeps running while it is shut — so waiting for the next
     // change to seat the cursor leaves the first j with nowhere to move from.
-    cursorId = Model.cursorAfterReload(service ? service.messages : [], cursorId)
+    cursorId = Model.cursorAfterReload(service ? displayMessages : [], cursorId)
     // A stub service in the tests carries no widths; a real one always does.
     if (service && service.sidebarWidth !== undefined) {
       sidebarWidth = service.sidebarWidth
@@ -535,6 +555,7 @@ Item {
     pendingDraftId = ""
     reader.forceRichAnyway = false
     cursorId = String(id || "")
+    rememberUnreadRow(cursorId)
     service.select(cursorId)
     // A message opens over the list. From anywhere else — a notification
     // arriving while Settings is up — it opens over a fresh list, because
@@ -632,7 +653,7 @@ Item {
   function moveCursor(delta) {
     if (!service || (focusScope.keyContext !== "list" && focusScope.keyContext !== "reader")
         || labelPicker.opened) return
-    var next = service.cursorOffset(cursorId, delta)
+    var next = Model.cursorAfterOffset(displayMessages, cursorId, delta)
     if (next === "") return
     cursorId = next
     revealCursorRow()
@@ -845,7 +866,7 @@ Item {
     cursorId = id
     if (action === "star") {
       if (selectionActive && !outside)
-        return actOnChecked(Model.starActionFor(Model.summariesById(service.messages, checkedIds)))
+        return actOnChecked(Model.starActionFor(Model.summariesById(displayMessages, checkedIds)))
       service.toggleStar(id)
       return true
     }
@@ -855,8 +876,8 @@ Item {
   // The subject the popup names, from the row or the open message.
   function agentSubjectFor(id) {
     if (!service) return ""
-    var index = Model.indexById(service.messages, id)
-    if (index >= 0) return String(service.messages[index].subject || "")
+    var index = Model.indexById(displayMessages, id)
+    if (index >= 0) return String(displayMessages[index].subject || "")
     if (service.selectedId === id && service.selectedMessage)
       return String(service.selectedMessage.subject || "")
     return ""
@@ -902,7 +923,7 @@ Item {
     if (selectionActive && onlyCursor !== true) return actOnChecked(action)
     if (cursorId === "") return false
     var acted = cursorId
-    var row = service.messages[Model.indexById(service.messages, acted)]
+    var row = displayMessages[Model.indexById(displayMessages, acted)]
     // "Was open" is the conversation's: with the rail up the reader can be
     // showing a member of the acted row rather than the row itself, and
     // archiving from a member has to open the next row or go back rather than
@@ -915,7 +936,7 @@ Item {
     var wasOpen = currentView === "reader" && !service.selectionIsPreview
       && (service.selectedId === acted || Model.rowHoldsMember(row, service.selectedId))
     // Worked out before the action, while the row still has neighbours.
-    var next = Model.cursorAfterRemoval(service.messages, acted)
+    var next = Model.cursorAfterRemoval(displayMessages, acted)
     // The same six facts `MailAccount.act` decides with. Asking with three of
     // them made the cursor repair disagree with the list it repairs: moving a
     // message back to the inbox removes the row on a provider that moves, and
@@ -924,6 +945,7 @@ Item {
     // the row while a reply is still unread.
     var leaves = !Model.survivesAction(service.mailboxKey, action,
       service.rawQuery, service.hasLabels, service.rawLabelId, row)
+    if (leaves && action !== "markRead") heldUnreadRow = null
     if (!service.act(acted, action)) return false
     if (!leaves) return true
     // The row is going and the cursor must not go with it: a cursor on a
@@ -1027,7 +1049,7 @@ Item {
     // the representative rather than the message on screen.
     if (id === "star") {
       if (selectionActive)
-        return actOnChecked(Model.starActionFor(Model.summariesById(service.messages, checkedIds)))
+        return actOnChecked(Model.starActionFor(Model.summariesById(displayMessages, checkedIds)))
       var starred = currentView === "reader" && service && service.selectedId !== ""
         ? service.selectedId : cursorId
       if (service && starred !== "") service.toggleStar(starred)
@@ -1155,6 +1177,10 @@ Item {
       root.resumeHeldCompose()
       root.resumeHeldDraft()
     }) }
+    function onSelectedIdChanged() {
+      if (!root.heldUnreadRow || root.heldUnreadRow.row.id !== root.service.selectedId)
+        root.rememberUnreadRow(root.service.selectedId)
+    }
     function onSelectedMessageChanged() { Qt.callLater(function() {
       root.resumeHeldCompose()
       root.resumeHeldDraft()
@@ -1177,9 +1203,9 @@ Item {
     function onMessagesChanged() {
       root.clearChecksIfForeign()
       root.cursorId = Model.cursorAfterReload(
-        root.service ? root.service.messages : [], root.cursorId)
+        root.service ? root.displayMessages : [], root.cursorId)
       root.checkedIds = Model.retainIds(root.checkedIds,
-        root.service ? root.service.messages : [])
+        root.service ? root.displayMessages : [])
     }
     function onDuplicateAccount(email) {
       root.notice = email + " is already added"
@@ -1946,6 +1972,7 @@ Item {
 
             MessageList {
               id: list
+              messages: root.displayMessages
               scroller: listFlick
               // Match the sidebar's first row inset below the header.
               y: Style.space(6)
@@ -2089,7 +2116,7 @@ Item {
             if (action === "star") {
               if (root.selectionActive && !outside)
                 root.actOnChecked(Model.starActionFor(Model.summariesById(
-                    root.service.messages, root.checkedIds)))
+                    root.displayMessages, root.checkedIds)))
               else
                 root.service.toggleStar(root.service.selectedId)
               return
@@ -2984,7 +3011,7 @@ Item {
           root.cursorId = id
           if (action === "moveToLabel") return root.openLabelPicker(outside)
           if ((action === "star" || action === "unstar") && root.selectionActive && !outside)
-            return root.actOnChecked(Model.starActionFor(Model.summariesById(root.service.messages, root.checkedIds)))
+            return root.actOnChecked(Model.starActionFor(Model.summariesById(root.displayMessages, root.checkedIds)))
           root.actOnCursor(action, outside)
         }
         // From a stop on the rail. A member is not a row, so the cursor stays
