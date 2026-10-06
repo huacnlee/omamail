@@ -7,6 +7,29 @@ use std::{future::Future, pin::Pin};
 #[path = "mail_action_tests.rs"]
 mod action_tests;
 
+// The send-as list of a mailbox whose identities live in its account entry
+// rather than on a server: the mailbox's own address first, under the sender
+// name the account was given, then its configured aliases. The name is the
+// account's, not the server settings', because nothing a server says sets it.
+fn configured_identities(settings: &Value) -> Result<Value, &'static str> {
+    let email = settings["email"].as_str().filter(|value| !value.is_empty()).or_else(|| settings["imap"]["username"].as_str()).ok_or("mail_send_sender_unavailable")?;
+    let name = sender_name(settings["senderName"].as_str().unwrap_or(""));
+    let aliases = settings["imap"]["aliases"].as_array().cloned().unwrap_or_default();
+    if aliases.len() > 1024 { return Err("mail_send_identities_invalid"); }
+    let default = aliases.iter().any(|alias| alias["isDefault"] == true);
+    let mut rows = vec![json!({"email":email,"displayName":name,"isPrimary":true,"isDefault":!default})];
+    rows.extend(aliases);
+    Ok(json!(rows))
+}
+
+// One header line, cleaned the way `Accounts.senderNameText` cleans it, so a
+// hand-edited entry names agent sends exactly as it names composer sends
+// instead of failing them.
+fn sender_name(raw: &str) -> String {
+    let line: String = raw.chars().map(|c| if c.is_ascii_control() { ' ' } else { c }).collect();
+    line.split(' ').filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ").trim().to_string()
+}
+
 struct ProviderList<'a> {
     session: &'a Session,
 }
@@ -44,13 +67,7 @@ impl crate::mail::send::IdentityLookup for ProviderIdentities<'_> {
                     let account = account.clone();
                     tokio::task::spawn_blocking(move || {
                         let settings = crate::auth::settings_readonly(account.provider.id(), &account.id)?;
-                        let email = settings["email"].as_str().filter(|value| !value.is_empty()).or_else(|| settings["imap"]["username"].as_str()).ok_or("mail_send_sender_unavailable")?;
-                        let aliases = settings["imap"]["aliases"].as_array().cloned().unwrap_or_default();
-                        if aliases.len() > 1024 { return Err("mail_send_identities_invalid"); }
-                        let default = aliases.iter().any(|alias| alias["isDefault"] == true);
-                        let mut rows = vec![json!({"email":email,"displayName":"","isPrimary":true,"isDefault":!default})];
-                        rows.extend(aliases);
-                        Ok(json!(rows))
+                        configured_identities(&settings)
                     }).await.map_err(|_| "worker_failed")?
                 }
             }
@@ -613,6 +630,19 @@ mod tests {
         process::{Command, Stdio},
         sync::{Arc, Mutex},
     };
+
+    #[test]
+    fn configured_identities_name_the_primary_address_with_the_sender_name() {
+        let rows = configured_identities(&json!({"email":"me@example.org","senderName":"  Jane Example ",
+            "imap":{"aliases":[{"email":"alias@example.org","displayName":"Alias","isDefault":true}]}})).unwrap();
+        assert_eq!(rows, json!([
+            {"email":"me@example.org","displayName":"Jane Example","isPrimary":true,"isDefault":false},
+            {"email":"alias@example.org","displayName":"Alias","isDefault":true}]));
+        let unnamed = configured_identities(&json!({"imap":{"username":"me@example.org"}})).unwrap();
+        assert_eq!(unnamed, json!([{"email":"me@example.org","displayName":"","isPrimary":true,"isDefault":true}]));
+        let edited = configured_identities(&json!({"email":"me@example.org","senderName":"Jane\r\nBcc: x@example.org\u{7f}\tExample"})).unwrap();
+        assert_eq!(edited[0]["displayName"], "Jane Bcc: x@example.org Example", "one header line, as the UI stores it");
+    }
 
     struct ReaderProjectionAdapter {
         opened: Value,

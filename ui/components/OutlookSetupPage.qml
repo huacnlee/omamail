@@ -68,7 +68,8 @@ Column {
       email: address,
       clientId: clientId,
       clientSecret: "",
-      imap: imap
+      imap: imap,
+      senderName: senderField.value()
     })
   }
 
@@ -113,6 +114,7 @@ Column {
 
   function syncFromStore() {
     if (!service) return
+    senderField.syncFromStore()
     addressField.text = String(service.accountAddress || "")
     if (auth && auth.configuredClientId)
       clientIdField.text = String(auth.configuredClientId)
@@ -184,6 +186,16 @@ Column {
   Column {
     width: parent.width
     spacing: Style.space(10)
+
+    SenderNameField {
+      id: senderField
+      service: root.service
+      width: parent.width
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      onAccepted: addressField.forceActiveFocus()
+    }
 
     TextField {
       id: addressField

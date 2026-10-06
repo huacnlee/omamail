@@ -27,6 +27,8 @@ Item {
     property var auth: fakeAuth
     property string accountAddress: ""
     property string accountName: "Work"
+    property string accountSenderName: "Ada Lovelace"
+    property bool backendCanNameSender: false
     property var saved: null
     property var signedIn: null
     function configureCurrentAccount(values) { saved = values }
@@ -98,6 +100,27 @@ Item {
     panelFontFamily: "monospace"
   }
 
+  QtObject {
+    id: outlookService
+    property var auth: null
+    property string accountAddress: "ada@hotmail.com"
+    property string accountSenderName: ""
+    property bool backendCanNameSender: true
+    property var saved: null
+    function configureCurrentAccount(values) { saved = values }
+  }
+
+  Mail.OutlookSetupPage {
+    id: outlookPage
+    width: 600
+    service: outlookService
+    textColor: Color.foreground
+    dimColor: Color.foreground
+    dangerColor: Color.accent
+    accentColor: Color.accent
+    panelFontFamily: "monospace"
+  }
+
   TestCase {
     name: "SetupNameField"
     when: windowShown
@@ -110,6 +133,16 @@ Item {
         return null
       }
       return find(page)
+    }
+
+    function outlookField(name) {
+      function find(item) {
+        if (item.objectName === name) return item
+        var kids = item.children || []
+        for (var i = 0; i < kids.length; i++) { var f = find(kids[i]); if (f) return f }
+        return null
+      }
+      return find(outlookPage)
     }
 
     function gmailField(name) {
@@ -188,6 +221,69 @@ Item {
       name.text = ""
       page.save()
       compare(fakeService.saved.label, "", "empty is no name, which puts the address back")
+    }
+
+    // The sender name is asked for beside the mailbox name, and the two stay
+    // apart: one is how Omamail lists the mailbox, the other what recipients
+    // see. A backend too old to write it gets no field and no value, so the
+    // entry keeps whatever it already had.
+    function test_imap_setup_names_the_sender_only_on_a_backend_that_writes_it() {
+      var sender = field("sender-name-field")
+      verify(sender !== null)
+      verify(!sender.visible, "hidden while the backend cannot name the sender")
+      field("imap-address-field").text = "ada@icloud.com"
+      page.save()
+      compare(fakeService.saved.senderName, undefined, "and left out of the form")
+
+      fakeService.backendCanNameSender = true
+      verify(sender.visible)
+      compare(sender.text, "Ada Lovelace", "the name the entry has is what the field shows")
+      verify(sender.placeholderText.indexOf("Your name") === 0)
+      verify(field("account-name-field").placeholderText.indexOf("Mailbox name") === 0)
+      sender.text = "  Ada King  "
+      field("account-name-field").text = "Home"
+      page.save()
+      compare(fakeService.saved.senderName, "Ada King", "trimmed, with the rest of the form")
+      compare(fakeService.saved.label, "Home", "beside the mailbox name, not in place of it")
+      page.signIn()
+      compare(fakeService.signedIn.senderName, "Ada King", "and on the way to a sign-in")
+      fakeService.backendCanNameSender = false
+      page.syncFromStore()
+    }
+
+    function test_outlook_setup_names_the_sender() {
+      var sender = outlookField("sender-name-field")
+      verify(sender !== null)
+      verify(sender.visible)
+      sender.text = "Ada Lovelace"
+      outlookField("outlook-address-field").text = "ada@hotmail.com"
+      outlookField("outlook-client-id-field").text = "00000000-0000-0000-0000-000000000000"
+      outlookPage.save()
+      verify(outlookService.saved !== null)
+      compare(outlookService.saved.provider, "outlook")
+      compare(outlookService.saved.senderName, "Ada Lovelace")
+    }
+
+    // The setup form's value reaches the entry through the same save as the
+    // rest of it, cleaned the way the settings field's is.
+    function test_configuring_an_account_stores_its_sender_name() {
+      var list = Accounts.emptyList()
+      list = Accounts.add(list, { email: "ada@example.com", provider: "imap", clientId: "", clientSecret: "",
+        imap: { imapHost: "imap.example.com", imapPort: 993, smtpHost: "smtp.example.com", smtpPort: 465,
+          username: "ada@example.com", aliases: [], insecure: false }, label: "", signature: "" })
+      list = Accounts.setActive(list, "imap:ada@example.com")
+      realService.activeIndex = -1
+      realService.accountList = list
+      realService.accountsLoaded = true
+      wait(0)
+      realService.refreshCurrent()
+      tryCompare(realService, "activeAccountId", "imap:ada@example.com")
+      realService.configureCurrentAccount({ senderName: "Ada\nLovelace" })
+      compare(String(realService.accountList.accounts[0].senderName || ""), "Ada Lovelace")
+      compare(realService.accountSenderName, "Ada Lovelace", "which is what the field reads back")
+      realService.configureCurrentAccount({ label: "Work" })
+      compare(String(realService.accountList.accounts[0].senderName || ""), "Ada Lovelace",
+        "a save without it keeps the name")
     }
   }
 }

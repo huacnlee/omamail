@@ -102,6 +102,10 @@ The isolated provider launch preserves model/authentication configuration while 
 
 Proposal cards show their saved From, To and optional Cc, Bcc and Reply-To. If routing in the corresponding open composer changes, direct card sending is disabled and rechecked at dispatch. Use this version applies subject/body without replacing the edited recipients; the normal composer Send then reviews and sends the current routing.
 
+## API 7 sender name for IMAP and Outlook
+
+An IMAP or Outlook account entry may carry a top-level `senderName`. `mail.send` uses it, trimmed, as the display name of the mailbox's own address in the From header; aliases keep their own names. An empty or missing value sends the bare address, as before. Starting at API 7 the UI offers the name as "Your name" in Settings → Mailboxes and on the IMAP and Outlook setup pages, and the composer names the From address with it. On an older backend the fields are hidden and the composer leaves the stored value unused, so composer and agent sends both carry the bare address rather than disagreeing.
+
 ## API 6 account-wide IMAP search
 
 IMAP and Outlook text searches, and IMAP address searches, resolve to `search:<criteria>`. IMAP All mail resolves to `search:ALL`; folder queries remain folder-scoped. The IMAP UI keeps Archive on API 5 and exposes All mail starting at API 6.
