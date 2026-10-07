@@ -1,5 +1,6 @@
 mod account;
 pub(crate) mod action;
+pub(crate) mod export;
 pub(crate) mod list;
 pub(crate) mod read;
 mod read_links;
@@ -8,8 +9,8 @@ mod types;
 
 pub use account::resolve_account;
 pub use types::{
-    Account, ActRequest, AttachmentInput, ListRequest, Mailbox, Mark, Provider, ReadRequest,
-    SendRequest,
+    Account, ActRequest, AttachmentInput, ExportRequest, ListRequest, Mailbox, Mark, Provider,
+    ReadRequest, SendRequest,
 };
 
 #[cfg(test)]

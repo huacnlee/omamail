@@ -92,6 +92,15 @@ assert.strictEqual(provider.can("imap", "star"), true, "\\Flagged is a star")
 assert.strictEqual(provider.can("imap", "web"), false, "no web UI to open a message in")
 assert.strictEqual(provider.can("gmail", "web"), true)
 
+// Saving the original message bytes is a native path only Outlook and generic
+// IMAP speak, and it is a capability like any other so the menu can hide the
+// row where it would fail.
+assert.strictEqual(provider.can("imap", "emlExport"), true)
+assert.strictEqual(provider.can("outlook", "emlExport"), true)
+assert.strictEqual(provider.can("gmail", "emlExport"), false)
+assert.strictEqual(provider.can("hey", "emlExport"), false)
+assert.strictEqual(provider.can("jmap", "emlExport"), false)
+
 // Opening a message on the web and opening *this mailbox* on the web are two
 // questions. HEY gives every thread an address of its own but has none for a
 // search or a label, so the second answer is no — an "Open web inbox" there

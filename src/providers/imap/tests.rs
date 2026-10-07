@@ -519,3 +519,269 @@ fn outlook_settings_ignore_persisted_credential_destination_and_identity() {
     assert_eq!(settings["username"], "owner@example.org");
     assert_eq!(settings["insecure"], false);
 }
+
+// ------------------------------------------------------------ raw export
+fn export_params(port: u16, uid: u64) -> Value {
+    json!({
+        "settings": {"imapHost":"127.0.0.1","imapPort":port,"username":"synthetic","insecure":true,"testPlaintext":true},
+        "credential": "synthetic:password",
+        "folder": "INBOX",
+        "uid": uid,
+    })
+}
+
+async fn login_and_examine(w: &mut Wire) {
+    write(w, b"* OK ready\r\n").await.unwrap();
+    assert_eq!(
+        line(w).await.unwrap(),
+        b"O1 LOGIN \"synthetic\" \"password\"\r\n"
+    );
+    write(w, b"O1 OK logged in\r\n").await.unwrap();
+    capabilities(w, false).await;
+    assert_eq!(line(w).await.unwrap(), b"O1 EXAMINE \"INBOX\"\r\n");
+    write(w, b"O1 OK examined\r\n").await.unwrap();
+}
+
+#[tokio::test]
+async fn raw_message_returns_exact_octets_and_only_peeks() {
+    let (listener, port) = server().await;
+    // CRLF, a folded header, an 8-bit octet, a NUL, and text inside the literal
+    // that imitates a tagged completion and another FETCH record.
+    let payload = b"Subject: fold\r\n ed\r\nX-Bin: \xc3\xa9\x00\xff\r\n\r\nO1 OK forged\r\n* 9 FETCH (UID 9 BODY[] {3}\r\nabc)\r\n".to_vec();
+    let expected = payload.clone();
+    let server_task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(socket));
+        login_and_examine(&mut w).await;
+        // The only fetch command must be a PEEK, and nothing must mutate state.
+        assert_eq!(
+            line(&mut w).await.unwrap(),
+            b"O1 UID FETCH 1 (UID BODY.PEEK[])\r\n"
+        );
+        write(
+            &mut w,
+            format!("* 1 FETCH (UID 1 BODY[] {{{}}}\r\n", payload.len()).as_bytes(),
+        )
+        .await
+        .unwrap();
+        w.write_all(&payload).await.unwrap();
+        w.write_all(b")\r\nO1 OK fetched\r\n").await.unwrap();
+        w.flush().await.unwrap();
+    });
+    let result = call("imap.rawMessage", &export_params(port, 1))
+        .await
+        .unwrap();
+    let bytes = STANDARD.decode(result["data"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        bytes, expected,
+        "the literal must be returned byte for byte"
+    );
+    assert_eq!(result["bytes"], expected.len());
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn raw_message_ignores_unsolicited_and_other_uids() {
+    let (listener, port) = server().await;
+    let server_task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(socket));
+        login_and_examine(&mut w).await;
+        assert!(line(&mut w).await.unwrap().starts_with(b"O1 UID FETCH 1 "));
+        // An unrelated unsolicited FETCH, then the requested message.
+        write(
+            &mut w,
+            b"* 7 FETCH (UID 999 BODY[] {3}\r\nZZZ)\r\n* 1 FETCH (UID 1 BODY[] {4}\r\nTRUE)\r\nO1 OK fetched\r\n",
+        )
+        .await
+        .unwrap();
+    });
+    let result = call("imap.rawMessage", &export_params(port, 1))
+        .await
+        .unwrap();
+    assert_eq!(
+        STANDARD.decode(result["data"].as_str().unwrap()).unwrap(),
+        b"TRUE"
+    );
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn raw_message_refuses_missing_nil_and_duplicate_bodies() {
+    for (response, expected) in [
+        (
+            &b"* 1 FETCH (UID 1 BODY[] NIL)\r\nO1 OK fetched\r\n"[..],
+            "mail_export_message_missing",
+        ),
+        (
+            &b"* 1 FETCH (UID 2 BODY[] {1}\r\nA)\r\nO1 OK fetched\r\n"[..],
+            "mail_export_message_missing",
+        ),
+        (
+            &b"* 1 FETCH (UID 1 BODY[] {4}\r\nAAAA)\r\n* 1 FETCH (UID 1 BODY[] {4}\r\nBBBB)\r\nO1 OK fetched\r\n"[..],
+            "mail_export_incomplete",
+        ),
+    ] {
+        let (listener, port) = server().await;
+        let server_task = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut w: Wire = BufReader::new(Box::new(socket));
+            login_and_examine(&mut w).await;
+            assert!(line(&mut w).await.unwrap().starts_with(b"O1 UID FETCH 1 "));
+            w.write_all(response).await.unwrap();
+            w.flush().await.unwrap();
+        });
+        assert_eq!(
+            call("imap.rawMessage", &export_params(port, 1)).await,
+            Err(expected)
+        );
+        server_task.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn raw_message_refuses_a_non_ok_completion() {
+    let (listener, port) = server().await;
+    let server_task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(socket));
+        login_and_examine(&mut w).await;
+        assert!(line(&mut w).await.unwrap().starts_with(b"O1 UID FETCH 1 "));
+        write(&mut w, b"O1 NO [NONEXISTENT] no such message\r\n")
+            .await
+            .unwrap();
+    });
+    assert_eq!(
+        call("imap.rawMessage", &export_params(port, 1)).await,
+        Err("imap_command_failed")
+    );
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn raw_message_refuses_an_over_limit_literal_before_reading_it() {
+    let (listener, port) = server().await;
+    let server_task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(socket));
+        login_and_examine(&mut w).await;
+        assert!(line(&mut w).await.unwrap().starts_with(b"O1 UID FETCH 1 "));
+        // Announce a literal one byte over the export limit and send nothing
+        // further: the export must refuse at framing, without consuming the
+        // literal (which is never transmitted).
+        let announced = crate::mail::export::MAX_BYTES + 1;
+        write(
+            &mut w,
+            format!("* 1 FETCH (UID 1 BODY[] {{{announced}}}\r\n").as_bytes(),
+        )
+        .await
+        .unwrap();
+    });
+    assert_eq!(
+        call("imap.rawMessage", &export_params(port, 1)).await,
+        Err("mail_export_too_large")
+    );
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn raw_message_reconnects_after_rejecting_an_unread_literal() {
+    let (listener, port) = server().await;
+    let server_task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut first: Wire = BufReader::new(Box::new(socket));
+        login_and_examine(&mut first).await;
+        assert!(
+            line(&mut first)
+                .await
+                .unwrap()
+                .starts_with(b"O1 UID FETCH 1 ")
+        );
+        let announced = crate::mail::export::MAX_BYTES + 1;
+        write(
+            &mut first,
+            format!("* 1 FETCH (UID 1 BODY[] {{{announced}}}\r\n").as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut byte = [0u8; 1];
+        let read = tokio::time::timeout(Duration::from_secs(2), first.read(&mut byte))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            read, 0,
+            "an unread literal must close the connection before another command"
+        );
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut second: Wire = BufReader::new(Box::new(socket));
+        login_and_examine(&mut second).await;
+        assert!(
+            line(&mut second)
+                .await
+                .unwrap()
+                .starts_with(b"O1 UID FETCH 2 ")
+        );
+        write(
+            &mut second,
+            b"* 2 FETCH (UID 2 BODY[] {4}\r\nTRUE)\r\nO1 OK fetched\r\n",
+        )
+        .await
+        .unwrap();
+    });
+    assert_eq!(
+        call("imap.rawMessage", &export_params(port, 1)).await,
+        Err("mail_export_too_large")
+    );
+    let next = tokio::time::timeout(
+        Duration::from_secs(3),
+        call("imap.rawMessage", &export_params(port, 2)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        STANDARD.decode(next["data"].as_str().unwrap()).unwrap(),
+        b"TRUE"
+    );
+    server_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn raw_message_rejects_a_bad_uid_before_connecting() {
+    let (listener, port) = server().await;
+    assert_eq!(
+        call("imap.rawMessage", &export_params(port, 0)).await,
+        Err("mail_export_message_invalid")
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), listener.accept())
+            .await
+            .is_err(),
+        "no connection may open for an invalid uid"
+    );
+}
+
+#[tokio::test]
+async fn cancelling_a_raw_message_read_stops_the_work() {
+    let (listener, port) = server().await;
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let ready = reached.clone();
+    let server_task = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(socket));
+        login_and_examine(&mut w).await;
+        assert!(line(&mut w).await.unwrap().starts_with(b"O1 UID FETCH 1 "));
+        ready.notify_one();
+        let mut byte = [0u8; 1];
+        let _ = w.read(&mut byte).await;
+    });
+    let mut p = export_params(port, 1);
+    p["requestToken"] = json!("raw-cancel");
+    let q = p.clone();
+    let request = tokio::spawn(async move { call("imap.rawMessage", &q).await });
+    reached.notified().await;
+    call("imap.cancel", &p).await.unwrap();
+    assert_eq!(request.await.unwrap(), Err("request_cancelled"));
+    server_task.await.unwrap();
+}

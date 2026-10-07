@@ -90,6 +90,71 @@ fn broken_output_stops_backend_while_input_remains_open() {
 }
 
 #[test]
+#[cfg(all(unix, feature = "integration-test-credentials"))]
+fn closed_output_cancels_when_input_submission_is_backpressured() {
+    let sandbox = Sandbox::new();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mut child = sandbox
+        .command()
+        .arg("serve")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    // Each request waits for a synthetic peer's greeting. More than the 32
+    // running and 16 queued frames fills the submission queue without replies.
+    for id in 0..60 {
+        writeln!(
+            input,
+            "{}",
+            serde_json::json!({
+                "jsonrpc":"2.0", "id":id, "method":"imap.check",
+                "params":{"settings":{"imapHost":"127.0.0.1","imapPort":port,
+                    "username":"synthetic","insecure":true,"testPlaintext":true},
+                    "credential":"synthetic:password"}
+            })
+        )
+        .unwrap();
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut sockets = Vec::new();
+    while sockets.len() < 32 {
+        match listener.accept() {
+            Ok((socket, _)) => sockets.push(socket),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                    panic!("all request slots must reach the synthetic peer");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("synthetic listener failed: {error}"),
+        }
+    }
+    drop(child.stdout.take().unwrap());
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(!status.success());
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("closed output must wake a blocked frame submission");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(input);
+    drop(sockets);
+}
+
+#[test]
 fn backend_replies_before_eof_and_drains_requests_before_quit() {
     let sandbox = Sandbox::new();
     let mut child = sandbox

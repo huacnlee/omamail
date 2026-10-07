@@ -21,7 +21,7 @@ function install(service) {
   if (!pipe) throw new Error("No backend fixture pipe")
   for (var i = 0; i < installed.length; i++)
     if (installed[i].service === service) return installed[i].listener
-  var listener = Qt.createQmlObject('import QtQuick; Connections { target: null; objectName: "native-domain-fixture"; property var handler; property var requests: []; property var answers: ({}); property var record: ({active:false,returnView:"",draft:null,parked:[]}); property int revision: 1; function onWrittenChanged() { handler(target.written) } }', service)
+  var listener = Qt.createQmlObject('import QtQuick; Connections { target: null; objectName: "native-domain-fixture"; property var handler; property var requests: []; property var answers: ({}); property var errors: ({}); property var record: ({active:false,returnView:"",draft:null,parked:[]}); property int revision: 1; function onWrittenChanged() { handler(target.written) } }', service)
   var offset = pipe.written.length
   listener.handler = function(written) {
     var lines = written.slice(offset).split("\n")
@@ -37,6 +37,11 @@ function install(service) {
         result = {record:listener.record,revision:String(listener.revision)}
       }
       if (request.method === "outbox.snapshot") result = {accountId:request.params.accountId,revision:0,entries:[]}
+      if (Object.prototype.hasOwnProperty.call(listener.errors, request.method)) {
+        var failure = listener.errors[request.method]
+        respond(service, request, null, typeof failure === "function" ? failure(request.params || {}, request) : failure)
+        continue
+      }
       if (Object.prototype.hasOwnProperty.call(listener.answers, request.method)) {
         var override = listener.answers[request.method]
         result = typeof override === "function" ? override(request.params || {}, request) : override

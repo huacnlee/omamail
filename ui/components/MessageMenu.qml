@@ -28,9 +28,15 @@ Item {
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
+  // The mailbox that owns the message this menu was opened on, and that
+  // mailbox's own name for it. Captured at open time: a menu can outlive an
+  // account switch, and "42:INBOX" is a different message in the next account,
+  // so resolving the owner when the row is chosen would reach the wrong mail.
+  property string ownerAccountId: ""
+  property string nativeId: ""
   readonly property var menuRows: [continueRow, replyRow, replyAllRow, forwardRow, archiveRow,
     unarchiveRow, moveRow,
-    trashRow, spamRow, readRow, starRow, browserRow, aiRow]
+    trashRow, spamRow, readRow, starRow, exportRow, exportFolderRow, browserRow, aiRow]
   // Whether this message is archived — out of the inbox and not somewhere
   // that has its own verb. Read off the summary the menu was opened on rather
   // than asked of the service, because the menu is about one message. IMAP
@@ -89,6 +95,15 @@ Item {
   function openMenu(id, sceneX, sceneY) {
     root.messageId = String(id || "")
     if (!root.summary) return
+    // Capture the owner and the provider's own id now, while the menu still
+    // names the message it was opened on. A member of a conversation is one
+    // message, so the native member id is what is kept rather than the row.
+    root.ownerAccountId = root.service
+      && typeof root.service.accountForMessage === "function"
+      ? String(root.service.accountForMessage(root.messageId) || "") : ""
+    root.nativeId = root.service && typeof root.service.sourceIdFor === "function"
+      ? String(root.service.sourceIdFor(root.messageId) || root.messageId)
+      : root.messageId
     var local = root.mapFromGlobal(sceneX, sceneY)
     anchorX = local.x
     anchorY = local.y
@@ -129,6 +144,25 @@ Item {
     menu.close()
     if (member) root.memberComposeRequested(mode, id)
     else root.composeRequested(mode, id)
+  }
+
+  // Saved through the same boundary the keyboard uses, with the account and
+  // native id captured when the menu opened rather than resolved now.
+  function exportMessage() {
+    var account = root.ownerAccountId
+    var id = root.nativeId
+    menu.close()
+    if (root.service && typeof root.service.exportEmlFor === "function")
+      root.service.exportEmlFor(account, id)
+  }
+
+  // The same, into a folder the user picks before anything is fetched.
+  function exportMessageToFolder() {
+    var account = root.ownerAccountId
+    var id = root.nativeId
+    menu.close()
+    if (root.service && typeof root.service.exportEmlToFolder === "function")
+      root.service.exportEmlToFolder(account, id)
   }
 
   QQC.Popup {
@@ -240,6 +274,26 @@ Item {
         visible: !root.service || root.service.canStar
         text: root.summary && root.summary.starred ? "Unstar" : "Star"
         onActivated: root.run(root.summary && root.summary.starred ? "unstar" : "star")
+      }
+      // Saving the message out as a file. Hidden where the provider has no
+      // native path or the connected backend does not advertise the method,
+      // like every other verb this cannot keep.
+      MenuRow {
+        id: exportRow
+        objectName: "message-menu-export-eml"
+        visible: !!root.service && root.service.canExportEmlFor(root.messageId)
+        text: "Save as .eml"
+        // Writes to the user's disk through the backend rather than through a
+        // provider verb, so it goes straight to the service the way Open in
+        // browser does.
+        onActivated: root.exportMessage()
+      }
+      MenuRow {
+        id: exportFolderRow
+        objectName: "message-menu-export-eml-folder"
+        visible: exportRow.visible && root.service.standalone !== true
+        text: "Save as .eml to folder..."
+        onActivated: root.exportMessageToFolder()
       }
 
       MenuSeparatorLine {

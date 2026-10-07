@@ -1,5 +1,5 @@
 {
-  "apiVersion": 6,
+  "apiVersion": 7,
   "releasedApiVersion": 6,
   "protocolVersion": 1,
   "methods": [
@@ -72,6 +72,7 @@
     "mail.read",
     "mail.act",
     "mail.send",
+    "mail.exportEml",
     "mail.watch",
     "mail.unwatch",
     "mail.check",
@@ -1263,10 +1264,132 @@
       "types": {
         "ticket": "string"
       }
+    },
+    {
+      "name": "mail.exportEml refuses an unknown account without provider work",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "imap:missing@example.invalid",
+        "id": "1:INBOX"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_account_unknown"
+      }
+    },
+    {
+      "name": "mail.exportEml requires an explicit account",
+      "method": "mail.exportEml",
+      "params": {
+        "id": "1:INBOX"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail.exportEml does not fall back to the active account",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "",
+        "id": "1:INBOX"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_account_unknown"
+      }
+    },
+    {
+      "name": "mail.exportEml refuses unsupported providers",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "contract@example.org",
+        "id": "1:INBOX"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_export_unsupported"
+      }
+    },
+    {
+      "name": "mail.exportEml rejects unknown fields",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "imap:sender@example.org",
+        "id": "1:INBOX",
+        "path": "/tmp/untrusted.eml"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail.exportEml rejects a malformed UID before provider work",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "imap:sender@example.org",
+        "id": "0:INBOX"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_export_message_invalid"
+      }
+    },
+    {
+      "name": "mail.exportEml rejects controlled filename hints",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "imap:sender@example.org",
+        "id": "1:INBOX",
+        "suggestedName": "subject\n"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail.exportEml rejects account controls before normalization",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "imap:sender@example.org\n",
+        "id": "1:INBOX"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_account_unknown"
+      }
+    },
+    {
+      "name": "mail.exportEml refuses a folder that is not an absolute plain path",
+      "method": "mail.exportEml",
+      "params": {
+        "account": "imap:sender@example.org",
+        "id": "1:INBOX",
+        "directory": "../Downloads"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": [
+      "mail.exportEml"
+    ],
+    "cases": [
+      "mail.exportEml refuses an unknown account without provider work",
+      "mail.exportEml requires an explicit account",
+      "mail.exportEml does not fall back to the active account",
+      "mail.exportEml refuses unsupported providers",
+      "mail.exportEml rejects unknown fields",
+      "mail.exportEml rejects a malformed UID before provider work",
+      "mail.exportEml rejects controlled filename hints",
+      "mail.exportEml rejects account controls before normalization",
+      "mail.exportEml refuses a folder that is not an absolute plain path"
+    ]
   }
 }

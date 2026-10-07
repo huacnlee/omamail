@@ -2,6 +2,7 @@ QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
 	ui/tests/compatibility/tst_published_agent.qml \
+	ui/tests/qml/tst_export_routing.qml ui/tests/qml/tst_message_menu_export.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
 	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
@@ -49,6 +50,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/LabelPicker.qml \
 	ui/components/UndoSendToast.qml \
 	ui/components/DraftSavedToast.qml \
+	ui/components/EmlSavedToast.qml \
 	ui/components/SearchBar.qml \
 	ui/components/AppMenu.qml \
 	ui/components/AccountSwitcher.qml \
@@ -164,6 +166,7 @@ test-js:
 	node ui/tests/test_aliases.js
 	node ui/tests/test_menu.js
 	node ui/tests/test_provider.js
+	node ui/tests/test_eml_export.js
 	node ui/tests/test_imap.js
 	node ui/tests/test_jmap.js
 	node ui/tests/test_jmap_threads.js
