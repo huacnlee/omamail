@@ -537,12 +537,12 @@ Item {
     return true
   }
 
-  function chooseFiles(callback) {
+  function chooseFiles(callback, folder) {
     if (platform && typeof platform.chooseFiles === "function")
-      return platform.chooseFiles(callback)
+      return !folder && platform.chooseFiles(callback)
     var request = hostProcessComponent.createObject(root, {
       operation: "result", callback: callback,
-      command: [root.pluginDir + "/scripts/attachment.sh", "pick"]
+      command: [root.pluginDir + "/scripts/attachment.sh", folder ? "folder" : "pick"]
     })
     if (!request) {
       if (typeof callback === "function") callback(({ok:false,error:"No file picker is available"}))
@@ -2250,6 +2250,8 @@ Item {
   function canExportEmlFor(id) { return MessageActions.canExportEmlFor(root, id) }
   function accountForMessage(id) { return MessageActions.accountForMessage(root, id) }
   function exportEmlFor(accountId, id) { return MessageActions.exportEmlFor(root, accountId, id) }
+  function exportEmlToFolder(accountId, id) { return MessageActions.exportEmlToFolder(root, accountId, id) }
+  signal emlSaved(var result)
   function exportEml(id) { return MessageActions.exportEml(root, id) }
   function exportFromView(view, cursorId) { return MessageActions.exportFromView(root, view, cursorId) }
   function markAllRead() { return MessageActions.markAllRead(root) }
@@ -2683,6 +2685,7 @@ Item {
       onReplySent: function(sendId) { root.replySent(String(sendId || "")) }
       onReplyFailed: function(sendId) { root.forwardReplyFailure(index, sendId) }
       onMonitoredMigrated: function(ids) { root.setMonitoredIds(index, ids) }
+      onEmlSaved: function(result) { root.emlSaved(result) }
 
       // What a merged list is made of, and everything a merged list says
       // about itself. `recount` is not enough and is deliberately not used:

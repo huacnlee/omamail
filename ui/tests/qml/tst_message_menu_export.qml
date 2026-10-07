@@ -35,6 +35,13 @@ Item {
       var at = String(id).indexOf("/")
       return at > 0 ? String(id).substring(at + 1) : String(id)
     }
+    property bool folderable: true
+    property var chosen: []
+    readonly property bool standalone: !folderable
+    function exportEmlToFolder(accountId, id) {
+      chosen = chosen.concat([{ account: String(accountId), id: String(id) }])
+      return true
+    }
     function exportEmlFor(accountId, id) {
       exported = exported.concat([{ account: String(accountId), id: String(id) }])
       return true
@@ -59,6 +66,7 @@ Item {
 
     // exportRow sits after star, before the browser and AI rows.
     function exportRow() { return menu.menuRows[11] }
+    function exportFolderRow() { return menu.menuRows[12] }
 
     function summary() {
       return { id: "42:INBOX", subject: "Project update", unread: false,
@@ -93,7 +101,11 @@ Item {
       wait(20)
     }
 
-    function cleanup() { menu.close() }
+    function cleanup() {
+      menu.close()
+      fakeService.chosen = []
+      fakeService.folderable = true
+    }
 
     function test_the_row_appears_only_when_the_service_says_it_can() {
       fakeService.exportable = true
@@ -113,6 +125,25 @@ Item {
       exportRow().activated()
       compare(fakeService.exported, [{ account: fakeService.ada, id: "42:INBOX" }])
       compare(menu.opened, false, "the menu closes on choosing")
+    }
+
+    function test_the_folder_row_routes_the_owner_and_native_id() {
+      fakeService.exportable = true
+      showMember(fakeService.ada + "/17:INBOX")
+      compare(exportFolderRow().visible, true)
+      compare(String(exportFolderRow().text), "Save as .eml to folder...")
+      exportFolderRow().activated()
+      compare(fakeService.chosen, [{ account: fakeService.ada, id: "17:INBOX" }])
+      compare(fakeService.exported, [], "the Downloads path is not taken as well")
+      compare(menu.opened, false)
+    }
+
+    function test_the_folder_row_needs_a_chooser() {
+      fakeService.exportable = true
+      fakeService.folderable = false
+      show()
+      compare(exportRow().visible, true)
+      compare(exportFolderRow().visible, false)
     }
 
     // A stop on the conversation rail is one message, and its id is the

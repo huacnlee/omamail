@@ -1,4 +1,5 @@
-//! Save one message's original bytes as `.eml` in the user's Downloads folder.
+//! Save one message's original bytes as `.eml` in the user's Downloads folder,
+//! or in a folder the user picked.
 //!
 //! The bytes come from the provider's raw-message operation (`imap.rawMessage`)
 //! and are written unchanged. The `mail.exportEml` RPC contract is fixed; this
@@ -323,6 +324,10 @@ async fn run_export(
     let downloads = downloads.to_path_buf();
     let deadline_std = deadline.into_std();
     let cancel = control.cancel.clone();
+    // Downloads is created on first use. A folder the user picked must already
+    // exist and pass the same ownership checks: a picker answer is never a
+    // reason to create directories.
+    let create = request.directory.is_none();
     // Storage is synchronous create/write/fsync, so it runs on a blocking
     // worker rather than a Tokio worker. The destination directory is anchored
     // to a descriptor before the deadline is observed, so a path swap after the
@@ -330,7 +335,7 @@ async fn run_export(
     // point: a cancellation or an expired deadline observed before it leaves no
     // file; after it the write completes and success is returned.
     let path = tokio::task::spawn_blocking(move || {
-        let dir = crate::platform::private_fs::directories(&downloads, &[], true)
+        let dir = crate::platform::private_fs::directories(&downloads, &[], create)
             .map_err(|_| "mail_export_write_failed")?
             .ok_or("mail_export_write_failed")?;
         write_unique_in(&downloads, &dir, &filename, &bytes, deadline_std, &cancel)
@@ -530,6 +535,52 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_chosen_folder_must_be_an_absolute_plain_path() {
+        if crate::mail::tests::isolated() {
+            return;
+        }
+        let fixture = crate::mail::tests::account_fixture(json!({
+            "version": 1,
+            "activeId": "imap:owner@example.org",
+            "accounts": [{"provider": "imap", "email": "owner@example.org",
+                "imap": {"username": "owner@example.org"}}]
+        }));
+        let before = crate::mail::tests::fixture_tree(&fixture.root);
+        let parse = |directory: Value| {
+            ExportRequest::try_from(&json!({
+                "account": "imap:owner@example.org", "id": "1:INBOX", "directory": directory
+            }))
+            .map(|request| request.directory)
+        };
+        assert_eq!(
+            parse(json!("/home/owner/Mail")),
+            Ok(Some(PathBuf::from("/home/owner/Mail")))
+        );
+        for refused in [
+            json!(""),
+            json!("Mail"),
+            json!("./Mail"),
+            json!("/home/owner/../other"),
+            json!("/home/owner/./Mail"),
+            json!("/home/owner//Mail"),
+            json!("/home/owner/Mail/"),
+            json!("/home/owner/Mail\n"),
+            json!("/home/owner/\u{0}Mail"),
+            json!(null),
+            json!(7),
+        ] {
+            assert_eq!(parse(refused.clone()), Err("invalid_params"), "{refused}");
+        }
+        let request = ExportRequest::try_from(&json!({
+            "account": "imap:owner@example.org", "id": "1:INBOX"
+        }))
+        .unwrap();
+        assert_eq!(request.directory, None, "no folder means Downloads");
+        assert_eq!(crate::mail::tests::fixture_tree(&fixture.root), before);
     }
 
     #[test]
@@ -771,6 +822,7 @@ mod tests {
             },
             id: "42:INBOX".into(),
             suggested_name: "Project update".into(),
+            directory: None,
         }
     }
 
@@ -1110,6 +1162,65 @@ mod tests {
         assert!(a1.await.unwrap().is_ok());
         assert!(a2.await.unwrap().is_ok());
         assert!(b1.await.unwrap().is_ok());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // A picked folder receives the file, and one that is missing is refused
+    // rather than created: only Downloads is made on first use.
+    #[tokio::test]
+    async fn a_chosen_folder_is_written_to_but_never_created() {
+        let dir = scratch("chosen");
+        let limits = ExportLimits::new();
+        let adapter = Fake {
+            payload: json!({"bytes": 4, "data": STANDARD.encode(b"body")}),
+        };
+        let mut chosen = request();
+        chosen.directory = Some(dir.clone());
+        let saved = export_with(
+            chosen,
+            &adapter,
+            &dir,
+            &Value::Null,
+            &limits,
+            &ExportControl::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            Path::new(saved["path"].as_str().unwrap()),
+            dir.join("Project update.eml")
+        );
+        assert_eq!(fs::read(dir.join("Project update.eml")).unwrap(), b"body");
+
+        let missing = dir.join("not-there");
+        let mut chosen = request();
+        chosen.directory = Some(missing.clone());
+        assert_eq!(
+            export_with(
+                chosen,
+                &adapter,
+                &missing,
+                &Value::Null,
+                &limits,
+                &ExportControl::new()
+            )
+            .await,
+            Err("mail_export_write_failed")
+        );
+        assert!(!missing.exists(), "a picked folder is never created");
+
+        let downloads = dir.join("Downloads");
+        let made = export_with(
+            request(),
+            &adapter,
+            &downloads,
+            &Value::Null,
+            &limits,
+            &ExportControl::new(),
+        )
+        .await;
+        assert!(made.is_ok(), "{made:?}");
+        assert!(downloads.join("Project update.eml").is_file());
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -50,6 +50,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/LabelPicker.qml \
 	ui/components/UndoSendToast.qml \
 	ui/components/DraftSavedToast.qml \
+	ui/components/EmlSavedToast.qml \
 	ui/components/SearchBar.qml \
 	ui/components/AppMenu.qml \
 	ui/components/AccountSwitcher.qml \

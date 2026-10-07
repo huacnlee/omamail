@@ -36,7 +36,7 @@ Item {
   property string nativeId: ""
   readonly property var menuRows: [continueRow, replyRow, replyAllRow, forwardRow, archiveRow,
     unarchiveRow, moveRow,
-    trashRow, spamRow, readRow, starRow, exportRow, browserRow, aiRow]
+    trashRow, spamRow, readRow, starRow, exportRow, exportFolderRow, browserRow, aiRow]
   // Whether this message is archived — out of the inbox and not somewhere
   // that has its own verb. Read off the summary the menu was opened on rather
   // than asked of the service, because the menu is about one message. IMAP
@@ -154,6 +154,15 @@ Item {
     menu.close()
     if (root.service && typeof root.service.exportEmlFor === "function")
       root.service.exportEmlFor(account, id)
+  }
+
+  // The same, into a folder the user picks before anything is fetched.
+  function exportMessageToFolder() {
+    var account = root.ownerAccountId
+    var id = root.nativeId
+    menu.close()
+    if (root.service && typeof root.service.exportEmlToFolder === "function")
+      root.service.exportEmlToFolder(account, id)
   }
 
   QQC.Popup {
@@ -278,6 +287,13 @@ Item {
         // provider verb, so it goes straight to the service the way Open in
         // browser does.
         onActivated: root.exportMessage()
+      }
+      MenuRow {
+        id: exportFolderRow
+        objectName: "message-menu-export-eml-folder"
+        visible: exportRow.visible && root.service.standalone !== true
+        text: "Save as .eml to folder..."
+        onActivated: root.exportMessageToFolder()
       }
 
       MenuSeparatorLine {

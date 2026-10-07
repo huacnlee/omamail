@@ -2426,6 +2426,8 @@ Item {
         panelFontFamily: root.fontFamily
       }
 
+      EmlSavedToast { app: root; clearance: reader.visible ? reader.footerHeight : 0 }
+
       // --------------------------------------------------------- status bar
 
       Item {

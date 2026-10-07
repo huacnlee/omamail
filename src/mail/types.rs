@@ -381,13 +381,15 @@ pub struct ExportRequest {
     pub account: Account,
     pub id: String,
     pub suggested_name: String,
+    /// A folder the user picked. `None` saves to Downloads.
+    pub directory: Option<PathBuf>,
 }
 
 impl TryFrom<&Value> for ExportRequest {
     type Error = &'static str;
 
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        let object = params_object(value, &["account", "id", "suggestedName"])?;
+        let object = params_object(value, &["account", "id", "suggestedName", "directory"])?;
         let wanted = object
             .get("account")
             .and_then(Value::as_str)
@@ -404,12 +406,40 @@ impl TryFrom<&Value> for ExportRequest {
         if suggested_name.chars().any(char::is_control) {
             return Err("invalid_params");
         }
+        let directory = export_directory(object.get("directory"))?;
         Ok(Self {
             account,
             id,
             suggested_name,
+            directory,
         })
     }
+}
+
+/// A chosen destination is an absolute, already normalized folder path. The
+/// writer still anchors it by descriptor and refuses a missing or unsafe one;
+/// this only rejects what can never name a folder before any work starts.
+fn export_directory(value: Option<&Value>) -> Result<Option<PathBuf>, &'static str> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let text = value.as_str().ok_or("invalid_params")?;
+    let path = std::path::Path::new(text);
+    // `components()` quietly drops an inner `.`, a doubled or trailing
+    // separator, so the path must also be exactly its own normal form.
+    let normal: PathBuf = path.components().collect();
+    if text.is_empty()
+        || text.len() > 4096
+        || text.chars().any(char::is_control)
+        || !path.is_absolute()
+        || normal.as_os_str() != path.as_os_str()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("invalid_params");
+    }
+    Ok(Some(path.to_path_buf()))
 }
 
 /// Export needs an explicit account. An empty or unknown id is refused and

@@ -1998,7 +1998,8 @@ Item {
     return runNativeAction([], "markRead", false, false, true)
   }
 
-  // Save the message's original bytes as .eml in Downloads. One request per
+  // Save the message's original bytes as .eml in Downloads, or in a folder
+  // the user picked. One request per
   // mailbox at a time, and the notice names the file the backend actually
   // wrote. The id is this mailbox's own, resolved by the service.
   property bool exportingEml: false
@@ -2011,8 +2012,11 @@ Item {
     return ""
   }
 
-  function exportEml(id) {
+  signal emlSaved(var result)
+
+  function exportEml(id, directory) {
     var target = String(id || "")
+    var folder = String(directory || "")
     if (!ready || !backend || target === "") return false
     if (!canExportEml) {
       fail("This mailbox cannot save messages as .eml")
@@ -2024,6 +2028,7 @@ Item {
     }
     clearNotice()
     var parameters = {account: accountId, id: target, suggestedName: subjectForEml(target)}
+    if (folder !== "") parameters.directory = folder
     exportingEml = true
     exportingEmlId = target
     // The busy state is visible from the moment the work starts, not only when
@@ -2033,10 +2038,11 @@ Item {
       root.exportingEml = false
       root.exportingEmlId = ""
       if (error) {
-        root.fail(MessageActions.exportErrorText(error))
+        root.fail(MessageActions.exportErrorText(error, folder))
         return
       }
       root.note(MessageActions.exportSavedNotice(result))
+      root.emlSaved(result)
     })
     return true
   }

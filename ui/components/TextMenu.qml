@@ -29,7 +29,12 @@ Item {
   property int cursorIndex: -1
   readonly property bool opened: menu.opened
   readonly property bool hasSelection: !!target && String(target.selectedText || "") !== ""
-  readonly property var menuRows: [cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow]
+  // The reader's body offers the message itself as a file too. Off in the
+  // composer, which has no saved message yet.
+  property bool canSaveEml: false
+  property bool canSaveEmlToFolder: false
+  readonly property var menuRows: [cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow,
+    saveEmlRow, saveEmlFolderRow]
 
   readonly property alias cutRow: cutRow
   readonly property alias copyRow: copyRow
@@ -37,12 +42,15 @@ Item {
   readonly property alias selectAllRow: selectAllRow
   readonly property alias openLinkRow: openLinkRow
   readonly property alias copyLinkRow: copyLinkRow
+  readonly property alias saveEmlRow: saveEmlRow
+  readonly property alias saveEmlFolderRow: saveEmlFolderRow
 
   signal copyRequested(string text)
   // Paste is the owner's: a compose form tries the clipboard for an image
   // before it pastes text, and only it knows how.
   signal pasteRequested(var target)
   signal openLinkRequested(string url)
+  signal saveEmlRequested(bool chooseFolder)
 
   anchors.fill: parent
   z: 50
@@ -174,6 +182,26 @@ Item {
         visible: root.link !== ""
         text: "Copy URL"
         onActivated: { var url = root.link; menu.close(); root.copyRequested(url) }
+      }
+
+      MenuSeparatorLine {
+        visible: root.canSaveEml
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
+      MenuRow {
+        id: saveEmlRow
+        objectName: "text-menu-save-eml"
+        visible: root.canSaveEml
+        text: "Save as .eml"
+        onActivated: { menu.close(); root.saveEmlRequested(false) }
+      }
+      MenuRow {
+        id: saveEmlFolderRow
+        objectName: "text-menu-save-eml-folder"
+        visible: root.canSaveEml && root.canSaveEmlToFolder
+        text: "Save as .eml to folder..."
+        onActivated: { menu.close(); root.saveEmlRequested(true) }
       }
     }
   }

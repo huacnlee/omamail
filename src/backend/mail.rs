@@ -394,7 +394,10 @@ impl Session {
             "mail.exportEml" => {
                 let request = ExportRequest::try_from(params)?;
                 let refusals = crate::account::refusals_readonly(&request.account.id)?;
-                let downloads = crate::platform::dirs::AppDirs::discover()?.downloads;
+                let downloads = match &request.directory {
+                    Some(chosen) => chosen.clone(),
+                    None => crate::platform::dirs::AppDirs::discover()?.downloads,
+                };
                 let control = crate::mail::export::ExportControl::new();
                 crate::mail::export::export_with(
                     request,

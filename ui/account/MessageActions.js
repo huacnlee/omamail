@@ -35,7 +35,7 @@ function accountForMessage(service, id) {
 // message, captured by a caller that must keep them across an account
 // switch. A non-unified view refuses when the captured mailbox is no longer
 // the one on screen: 42:INBOX is a different message in the next account.
-function exportEmlFor(service, accountId, id) {
+function exportEmlFor(service, accountId, id, directory) {
   var target = String(id || "")
   if (target === "") return false
   if (!service.backendCanExportEml) {
@@ -59,7 +59,19 @@ function exportEmlFor(service, accountId, id) {
     owner.fail("This mailbox cannot save messages as .eml")
     return false
   }
-  return owner.exportEml(target)
+  return owner.exportEml(target, directory)
+}
+// The same export into a folder the user picks first. Only the desktop plugin
+// has the out-of-process chooser, so callers offer it where `standalone` is
+// false. The boundary above runs again once the chooser answers, so an
+// account switch while it was open still refuses.
+function exportEmlToFolder(service, accountId, id) {
+  if (String(id || "") === "" || !service || service.standalone || !service.backendCanExportEml) return false
+  return service.chooseFiles(function(answer) {
+    var folder = answer && answer.ok && answer.paths ? String(answer.paths[0] || "") : ""
+    if (folder !== "") exportEmlFor(service, accountId, id, folder)
+    else if (answer && answer.error !== "cancelled") service.fail(String(answer.error || "No folder picker is available"))
+  }, true)
 }
 function exportEml(service, id) {
   if (!canExportEmlFor(service, id)) {
@@ -104,6 +116,19 @@ function exportSavedNotice(result) {
   return at > 0 ? "Saved " + name + " to " + path.substring(0, at) : "Saved " + (name || "the message as .eml")
 }
 
+// What the saved-file toast shows: the name, and the folder it went to with
+// the home directory shortened, so the folder is the part that stays visible.
+function exportSavedFile(result, home) {
+  var path = String(result && result.path || "")
+  var at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"))
+  var folder = at > 0 ? path.substring(0, at) : ""
+  var root = String(home || "")
+  var shown = root !== "" && (folder === root || folder.indexOf(root + "/") === 0)
+    ? "~" + folder.substring(root.length) : folder
+  return { name: String(result && result.filename || "") || path.substring(at + 1),
+    folder: folder, shownFolder: shown }
+}
+
 // The backend refuses with a code; the status line says what happened.
 var EXPORT_ERRORS = {
   mail_export_too_large: "This message is larger than 25 MB, so it was not saved",
@@ -116,8 +141,10 @@ var EXPORT_ERRORS = {
   request_cancelled: "Saving the message as .eml was cancelled",
   backend_needs_update: "Saving .eml needs a newer Omamail backend"
 }
-function exportErrorText(error) {
+function exportErrorText(error, directory) {
   var code = String(error && error.message || error || "")
+  if (code === "mail_export_write_failed" && String(directory || "") !== "")
+    return "Could not write the .eml file to " + directory
   return EXPORT_ERRORS.hasOwnProperty(code) ? EXPORT_ERRORS[code] : "Could not save the message as .eml"
 }
 

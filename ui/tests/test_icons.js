@@ -26,6 +26,10 @@ assert.strictEqual(icons.glyph("unread", true), icons.glyph("unread", false), "n
 assert.notStrictEqual(icons.glyph("forward"), icons.glyph("chevronRight"))
 assert.strictEqual(icons.glyph("sent").codePointAt(0), 0xF10DD,
   "the Sent mailbox uses the balanced email-send-outline glyph")
+// Save buttons draw download-outline. 0xF0DA9, used before, is
+// badge-account-alert-outline: a badge with an exclamation mark.
+assert.strictEqual(icons.glyph("download").codePointAt(0), 0xF0B8F,
+  "download is the download-outline glyph")
 
 // Every icon a view asks for by name is defined. Scans the QML for the
 // literal names handed to ActionIcon, IconButton, IconTextButton and

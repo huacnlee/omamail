@@ -93,4 +93,50 @@ for (const code of ["mail_export_write_failed", "mail_export_message_missing", "
 assert.strictEqual(actions.exportErrorText({ message: "mail_tls_failed" }), "Could not save the message as .eml")
 assert.strictEqual(actions.exportErrorText({ message: "constructor" }), "Could not save the message as .eml")
 assert.strictEqual(actions.exportErrorText(null), "Could not save the message as .eml")
+// A picked folder rides the same dispatch boundary, captured owner and all.
+const folderCalls = []
+const desk = account("imap:desk@example.org", "imap")
+desk.exportEml = (nativeId, directory) => { folderCalls.push({ id: nativeId, directory }); return true }
+let chooserAnswer = null
+const plugin = { current: desk, unified: false, standalone: false, selectedId: "",
+  backendCanExportEml: true, failures: [], fail: text => plugin.failures.push(text),
+  findAccount: id => id === desk.accountId ? desk : null,
+  hostForId: () => plugin.current, sourceIdFor: id => id,
+  chooseFiles: (done, folder) => { assert.strictEqual(folder, true); done(chooserAnswer); return true } }
+plugin.canExportEmlFor = id => actions.canExportEmlFor(plugin, id)
+chooserAnswer = { ok: true, paths: ["/home/ada/Mail archive"] }
+assert.strictEqual(actions.exportEmlToFolder(plugin, desk.accountId, "9:INBOX"), true)
+assert.deepStrictEqual(folderCalls.pop(), { id: "9:INBOX", directory: "/home/ada/Mail archive" })
+chooserAnswer = { ok: false, error: "cancelled" }
+actions.exportEmlToFolder(plugin, desk.accountId, "9:INBOX")
+assert.strictEqual(folderCalls.length, 0, "a cancelled chooser saves nothing")
+assert.deepStrictEqual(plugin.failures, [], "and says nothing")
+chooserAnswer = { ok: false, error: "No folder picker is available" }
+actions.exportEmlToFolder(plugin, desk.accountId, "9:INBOX")
+assert.deepStrictEqual(plugin.failures, ["No folder picker is available"])
+// An account switch while the chooser was open refuses, as a stale menu does.
+chooserAnswer = { ok: true, paths: ["/home/ada/Mail archive"] }
+plugin.chooseFiles = done => { plugin.current = bob; done(chooserAnswer); return true }
+plugin.findAccount = id => [desk, bob].find(a => a.accountId === id) || null
+actions.exportEmlToFolder(plugin, desk.accountId, "9:INBOX")
+assert.strictEqual(folderCalls.length, 0, "the folder answer cannot reach another mailbox")
+plugin.current = desk
+plugin.standalone = true
+assert.strictEqual(actions.exportEmlToFolder(plugin, desk.accountId, "9:INBOX"), false,
+  "the standalone app has no out-of-process chooser")
+plugin.standalone = false
+plugin.backendCanExportEml = false
+assert.strictEqual(actions.exportEmlToFolder(plugin, desk.accountId, "9:INBOX"), false,
+  "no chooser opens for a backend that cannot export")
+
+assert.deepStrictEqual(JSON.parse(JSON.stringify(actions.exportSavedFile({ filename: "Project update (2).eml",
+  path: "/home/ada/Downloads/Project update (2).eml" }, "/home/ada"))),
+  { name: "Project update (2).eml", folder: "/home/ada/Downloads", shownFolder: "~/Downloads" })
+assert.strictEqual(actions.exportSavedFile({ path: "/home/adam/x.eml" }, "/home/ada").shownFolder,
+  "/home/adam", "a sibling of home is not shortened")
+assert.strictEqual(actions.exportSavedFile({ path: "/srv/mail/x.eml" }, "").shownFolder, "/srv/mail")
+assert.strictEqual(actions.exportErrorText({ message: "mail_export_write_failed" }, "/home/ada/Mail"),
+  "Could not write the .eml file to /home/ada/Mail", "a picked folder is named in the failure")
+assert.strictEqual(actions.exportErrorText({ message: "mail_export_write_failed" }),
+  "Could not write the .eml file to Downloads")
 console.log("eml export API gate and account routing tests passed")
