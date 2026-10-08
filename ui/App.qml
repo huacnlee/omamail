@@ -2969,7 +2969,7 @@ Item {
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
-        onConfirmed: root.service.clearing.start()
+        onConfirmed: if (root.service) root.service.clearing.start()
       }
 
       MessageMenu {

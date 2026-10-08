@@ -19,7 +19,7 @@ use super::{Account, ActRequest, ClearUnreadRequest, Mailbox};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
-/// The most `mail.list` returns in one page.
+/// Messages per step: one provider page, far below the 1,000 IDs an action plan takes.
 pub(crate) const STEP_SIZE: u16 = 100;
 
 /// The first `limit` IDs a provider query matches, newest first, without

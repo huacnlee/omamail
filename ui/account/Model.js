@@ -1358,10 +1358,15 @@ function markAllReadNote(rows, expanded) {
 // (`UNREAD_CAP` in src/sync/mod.rs), so a count at the cap is a floor.
 var UNREAD_CAP = 500
 
+// Lists read back through a QML `var` property can be array-like rather
+// than an Array, so the clear-unread rules accept either.
+function clearUnreadList(value) {
+  return value && typeof value.length === "number" ? value : []
+}
+
 // What "Mark these read" would change: the loaded rows still unread.
 function loadedUnreadCount(rows) {
-  // Rows read back through a QML `var` property can be array-like, not an Array.
-  var list = rows && typeof rows.length === "number" ? rows : []
+  var list = clearUnreadList(rows)
   var count = 0
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].unread === true) count++
   return count
@@ -1376,7 +1381,7 @@ function unreadCountText(count) {
 // summaries' order. A signed-out mailbox cannot be reached, and one with
 // nothing unread has nothing to say.
 function clearUnreadLines(summaries) {
-  var list = Array.isArray(summaries) ? summaries : []
+  var list = clearUnreadList(summaries)
   var out = []
   for (var i = 0; i < list.length; i++) {
     var summary = list[i] || {}
@@ -1391,7 +1396,7 @@ function clearUnreadLines(summaries) {
 // The confirmation names what will be cleared. A capped count never goes on
 // the button: "Mark 500 read" would promise a number the run will exceed.
 function clearUnreadConfirmation(lines) {
-  var list = Array.isArray(lines) ? lines : []
+  var list = Array.prototype.slice.call(clearUnreadList(lines))
   var capped = false
   for (var i = 0; i < list.length; i++) if (list[i].capped === true) capped = true
   var single = list.length === 1

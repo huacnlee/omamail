@@ -36,9 +36,12 @@ QtObject {
       steps++
       account.backend.call("mail.clearUnread", { account: mailbox, execute: true }, function(result, error) {
         if (error) {
-          var message = error.message !== undefined ? String(error.message) : String(error)
-          if (message === "mail_clear_unread_stalled") total.stalled = true
-          else total.error = message
+          var code = error.message !== undefined ? String(error.message) : String(error)
+          // The provider client owns the wording of its backend's errors.
+          var api = account.api
+          if (code === "mail_clear_unread_stalled") total.stalled = true
+          else total.error = api && typeof api.backendError === "function"
+            ? String(api.backendError(error, "mail.clearUnread")) : code
           finish(stillHere())
           return
         }

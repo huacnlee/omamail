@@ -31,8 +31,18 @@ Item {
     property bool ready: true
     property string accountId: "gmail:ada@example.org"
     property var backend: backend
+    // The provider client, which owns the wording of its backend's errors.
+    property var api: null
     property int refreshes: 0
     function refresh() { refreshes++ }
+  }
+
+  QtObject {
+    id: translator
+    function backendError(error, method) {
+      return error.message === "gmail_rate_limited" && method === "mail.clearUnread"
+        ? "Gmail is rate limiting this account. Wait a moment, then try again." : "unexpected"
+    }
   }
 
   Account.ClearUnread {
@@ -57,6 +67,7 @@ Item {
       account.ready = true
       account.accountId = "gmail:ada@example.org"
       account.refreshes = 0
+      account.api = null
       run.stepLimit = 200
       progress = []
       outcome = null
@@ -108,6 +119,14 @@ Item {
       compare(outcome.marked, 100)
       compare(outcome.error, "Backend stopped")
       compare(account.refreshes, 1)
+    }
+
+    function test_error_uses_the_provider_wording() {
+      account.api = translator
+      backend.answers = [step(100), { error: "gmail_rate_limited" }]
+      start()
+      finish()
+      compare(outcome.error, "Gmail is rate limiting this account. Wait a moment, then try again.")
     }
 
     function test_step_limit() {

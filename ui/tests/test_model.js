@@ -419,6 +419,9 @@ deepEqual(model.clearUnreadLines([
   { label: "empty", unread: 0, signedIn: true },
   { label: "signed out", unread: 9, signedIn: false }
 ]), [perso, work], "only signed-in mailboxes with something to clear")
+deepEqual(model.clearUnreadLines({ length: 1, 0: { label: "perso", unread: 234, signedIn: true } }), [perso],
+  "summaries read back through a QML property may be array-like")
+assert.strictEqual(model.clearUnreadConfirmation({ length: 1, 0: perso }).action, "Mark 234 read")
 deepEqual(model.clearUnreadConfirmation([perso]), {
   title: "Mark all read in perso?", message: clearMessage, extra: "",
   action: "Mark 234 read", lines: [perso]
