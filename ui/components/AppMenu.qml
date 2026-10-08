@@ -26,6 +26,15 @@ Item {
   // Only the standalone host owns the application process. A plugin menu
   // must never offer to terminate the shell that loaded it.
   property bool canQuit: false
+  // "Mark all read..." needs a backend that clears Unread one step at a time.
+  property bool canClearUnread: false
+  property bool clearingUnread: false
+  property int clearedSoFar: 0
+  // Each scope shows the count it clears, so the two rows read apart: the
+  // loaded rows still unread, and what the Unread tab counts. Empty when
+  // there is nothing to clear.
+  property string loadedUnreadSuffix: ""
+  property string unreadSuffix: ""
   readonly property bool opened: menu.opened
 
   // Positioned against the window rather than a button, and flipped when it
@@ -34,7 +43,7 @@ Item {
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
-  readonly property var menuRows: [inboxRow, calendarRow, markRow, webRow,
+  readonly property var menuRows: [inboxRow, calendarRow, markRow, clearRow, webRow,
     switchRow, settingsRow, shortcutsRow, projectRow, authorRow, quitRow]
 
   function openAt(sceneX, sceneY) {
@@ -71,6 +80,7 @@ Item {
   function close() { menu.close() }
 
   signal markAllReadRequested()
+  signal clearUnreadRequested()
   signal openWebRequested()
   signal shortcutsRequested()
   // The two places the window is for, as a pair. The sidebar has both, but
@@ -156,11 +166,25 @@ Item {
 
       MenuRow {
         id: markRow
+        objectName: "app-menu-mark-these-read"
         // "These" and not "all": it marks the messages that are loaded, which
         // is what you are looking at, not every message the mailbox holds.
         text: "Mark these read"
+        suffix: root.loadedUnreadSuffix
         enabled: root.signedIn
         onActivated: { menu.close(); root.markAllReadRequested() }
+      }
+      MenuRow {
+        id: clearRow
+        objectName: "app-menu-clear-unread"
+        // Every message the Unread tab counts, which can be thousands more
+        // than are loaded; it asks first. While a run is going the row says
+        // so and stays locked, so a second press cannot start another.
+        text: root.clearingUnread ? "Marking all read" : "Mark all read..."
+        suffix: root.clearingUnread ? String(root.clearedSoFar) : root.unreadSuffix
+        visible: root.canClearUnread
+        enabled: root.signedIn && !root.clearingUnread && root.unreadSuffix !== ""
+        onActivated: { menu.close(); root.clearUnreadRequested() }
       }
       MenuRow {
         id: webRow
