@@ -10,9 +10,10 @@
 //! One step per call keeps every request inside the backend's request
 //! timeout however deep the mailbox is, and lets the caller show progress.
 //!
-//! The step lists IDs only. It marks messages nobody looks at, and a listing
-//! that reads each message it returns (Gmail's does) costs a provider read per
-//! message: a few steps of that and Gmail rate-limits the account.
+//! A step needs IDs only. Gmail's listing reads every message it returns, and
+//! 100 reads per step make Gmail rate-limit the account within a few steps, so
+//! the Gmail lister asks for the bare listing. The other providers list as they
+//! always do and the step keeps the IDs.
 use super::action::{ActionLookup, ActionMutation, dry_run_result, execute_action, plan_action};
 use super::list::provider_query;
 use super::{Account, ActRequest, ClearUnreadRequest, Mailbox};
@@ -22,8 +23,7 @@ use std::{future::Future, pin::Pin};
 /// Messages per step: one provider page, far below the 1,000 IDs an action plan takes.
 pub(crate) const STEP_SIZE: u16 = 100;
 
-/// The first `limit` IDs a provider query matches, newest first, without
-/// reading the messages.
+/// The first `limit` IDs a provider query matches, newest first.
 pub(crate) trait UnreadIds: Send + Sync {
     fn unread_ids<'a>(
         &'a self,

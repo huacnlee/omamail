@@ -599,8 +599,16 @@ impl crate::mail::clear_unread::UnreadIds for ProviderList<'_> {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, &'static str>> + Send + 'a>> {
         Box::pin(async move {
             // Gmail's listing reads every message it returns; its bare listing
-            // is one request for the page, which is all a step needs.
-            let page = if account.provider == Provider::Gmail {
+            // is one request for the page, which is all a step needs. The
+            // other providers keep their usual listing and the step keeps
+            // only its IDs.
+            let gmail = account.provider == Provider::Gmail;
+            let malformed = if gmail {
+                "gmail_invalid_response"
+            } else {
+                "mail_list_incomplete"
+            };
+            let page = if gmail {
                 let params = json!({
                     "accountId":account.id,"query":provider_query,"pageSize":limit,"pageToken":"",
                 });
@@ -617,9 +625,9 @@ impl crate::mail::clear_unread::UnreadIds for ProviderList<'_> {
             };
             page["ids"]
                 .as_array()
-                .ok_or("mail_list_incomplete")?
+                .ok_or(malformed)?
                 .iter()
-                .map(|id| id.as_str().map(str::to_owned).ok_or("mail_list_incomplete"))
+                .map(|id| id.as_str().map(str::to_owned).ok_or(malformed))
                 .collect()
         })
     }

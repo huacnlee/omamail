@@ -118,9 +118,9 @@ Search includes aggregate All Mail destinations and excludes Trash/Junk membersh
 
 ## API 7 clearing Unread
 
-`mail.clearUnread` takes `account` and `execute` and does one step of marking that account's Unread mailbox read. It lists up to 100 IDs from the top of Unread without reading the messages. It then marks them through the same planner and mutation as `mail.act`, so a Gmail change counts only once its queue confirms it. It answers `{"done":false,"marked":N,"failed":N}`, or `{"done":true,...}` once Unread is empty. Without `execute`, it answers the step's dry-run plan with `"done":false` and changes nothing.
+`mail.clearUnread` takes `account` and `execute` and does one step of marking that account's Unread mailbox read. It lists up to 100 messages from the top of Unread and keeps their IDs. On Gmail it uses the bare `gmail.list`, which reads none of them, because 100 reads per step make Gmail rate-limit the account. It then marks them through the same planner and mutation as `mail.act`, so a Gmail change counts only once its queue confirms it. It answers `{"done":false,"marked":N,"failed":N}`, or `{"done":true,...}` once Unread is empty. Without `execute`, it answers the step's dry-run plan with `"done":false` and changes nothing.
 
-A step takes no page token: a message marked read leaves the query, so the next step's first page holds the next messages. A step that confirms nothing answers `mail_clear_unread_stalled`, so a message the provider keeps refusing cannot hold a caller in a loop. The UI repeats the step from `ui/account/ClearUnread.qml` and offers "Mark all read..." only from API 7.
+A step takes no page token: a message marked read leaves the query, so the next step's first page holds the next messages. A step that confirms nothing answers `mail_clear_unread_stalled`, so a message the provider keeps refusing cannot hold a caller in a loop. The frame deadline that bounds `gmail.*` calls also bounds the step. A step held by Gmail's rate-limit backoff thus answers `request_timed_out` before the UI's watchdog stops the backend. The change it queued may still complete. The UI repeats the step from `ui/account/ClearUnread.qml` and offers "Mark all read..." only from API 7.
 
 ## Released and unreleased: one step ahead of the pin
 
