@@ -2679,7 +2679,16 @@ Item {
         canOpenWebInbox: !!root.service && root.service.canOpenWebInbox
         accountCount: root.service ? root.service.accountCount : 1
         canQuit: root.standaloneWindowChrome
+        canClearUnread: !!root.service && root.service.backendCanClearUnread
+        clearingUnread: !!root.service && root.service.clearingUnread
+        clearedSoFar: root.service ? root.service.clearedSoFar : 0
+        loadedUnreadSuffix: root.service && root.service.loadedUnread > 0
+          ? Model.unreadCountText(root.service.loadedUnread) : ""
+        unreadSuffix: root.service && root.service.inboxUnread > 0
+          ? Model.unreadCountText(root.service.inboxUnread) : ""
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
+        onClearUnreadRequested: if (root.service)
+          clearUnreadDialog.openFor(Model.clearUnreadConfirmation(root.service.clearUnreadLines))
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
         onShortcutsRequested: root.openHelp()
         onInboxRequested: {
@@ -2958,6 +2967,17 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onConfirmed: function(request) { root.confirmDelete(request) }
+      }
+      ClearUnreadDialog {
+        id: clearUnreadDialog
+        anchors.fill: parent
+        textColor: root.foreground
+        dimColor: root.dim
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onConfirmed: if (root.service) root.service.clearUnread()
       }
 
       MessageMenu {
