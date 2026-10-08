@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Dialogs
 import qs.Commons
+import qs.Commons as Commons
 
 QtObject {
   id: root
@@ -24,7 +25,7 @@ QtObject {
     reopen: !!host && !!host.capabilities && host.capabilities.reopen === true,
     // An installed Omarchy theme is the palette; the appearance setting only
     // has something to decide where the fallback palettes are in use.
-    appearance: !Color.hasOmarchyTheme
+    appearance: !Commons.Color.hasOmarchyTheme
   })
 
   property var fileCallback: null

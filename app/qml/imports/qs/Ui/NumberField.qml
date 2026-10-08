@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
@@ -10,8 +11,8 @@ Item {
   property int from: 0
   property int to: 100
   property int stepSize: 1
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.bodySmall
   property real fieldWidth: Style.space(80)
@@ -48,7 +49,7 @@ Item {
     editable: true
     font.family: root.fontFamily
     font.pixelSize: root.fontSize
-    palette.window: Color.background
+    palette.window: Commons.Color.background
     palette.windowText: root.foreground
     palette.highlight: root.accent
     onValueModified: {

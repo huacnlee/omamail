@@ -4,6 +4,7 @@ import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 import "account/Model.js" as Model
@@ -106,13 +107,13 @@ Item {
     onTriggered: root.saveComposeRecovery()
   }
 
-  readonly property color foreground: Color.foreground
-  readonly property color background: Color.background
-  readonly property color accent: Color.accent
-  readonly property color urgent: Color.urgent
-  readonly property color danger: Color.urgent
-  readonly property color popupBackground: Color.popups.background
-  readonly property color popupBorder: Color.popups.border
+  readonly property color foreground: Commons.Color.foreground
+  readonly property color background: Commons.Color.background
+  readonly property color accent: Commons.Color.accent
+  readonly property color urgent: Commons.Color.urgent
+  readonly property color danger: Commons.Color.urgent
+  readonly property color popupBackground: Commons.Color.popups.background
+  readonly property color popupBorder: Commons.Color.popups.border
   // Shared themed border for mail and standalone window chrome.
   readonly property color borderColor: Style.normalBorderColor
   readonly property int borderWidth: Style.normalBorderWidth

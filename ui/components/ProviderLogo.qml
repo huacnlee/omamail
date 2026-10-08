@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The mark of the service a setup page is about.
@@ -29,7 +30,7 @@ Item {
   // and no brand this could put a name to. Left empty where a missing mark
   // should simply take no room.
   property string fallbackIcon: ""
-  property color fallbackColor: Color.foreground
+  property color fallbackColor: Commons.Color.foreground
 
   readonly property bool present: logo !== "" || fallbackIcon !== ""
   readonly property bool drawn: logo !== ""
