@@ -2091,6 +2091,7 @@ Item {
     return total
   }
   readonly property string activityStatus: Model.activityStatus({
+    clearing: clearingUnread, cleared: clearedSoFar,
     sending: sendingCount, queuedSends: sendPendingCount,
     running: runningActionCount, waiting: queuedActionCount
   })
@@ -2264,6 +2265,35 @@ Item {
       return
     }
     eachHost(function(host) { host.markAllRead() })
+  }
+
+  // "Mark all read...": the Unread mailbox of each mailbox on screen, one
+  // after another. The backend step it repeats arrived in API 7.
+  readonly property bool backendCanClearUnread: backend.ready && backend.apiVersion >= 7
+  readonly property bool clearingUnread: clearUnreadQueue.running
+  readonly property int clearedSoFar: clearUnreadQueue.cleared
+  // What "Mark these read" would change, for its count in the menu.
+  readonly property int loadedUnread: {
+    if (!unified) return current ? Model.loadedUnreadCount(current.messages) : 0
+    var total = 0
+    for (var i = 0; i < accountHosts.count; i++) {
+      var host = accountHosts.objectAt(i)
+      if (host) total += Model.loadedUnreadCount(host.messages)
+    }
+    return total
+  }
+  readonly property var clearUnreadLines: Model.clearUnreadLines(unified ? accountSummaries
+    : accountSummaries.filter(function(summary) { return !!current && summary.id === current.accountId }))
+  function clearUnread() {
+    if (!backendCanClearUnread) return false
+    var hosts = []
+    if (unified) eachHost(function(host) { if (host.ready && host.inboxUnread > 0) hosts.push(host) })
+    else if (current) hosts.push(current)
+    return clearUnreadQueue.run(hosts)
+  }
+  ClearUnreadQueue {
+    id: clearUnreadQueue
+    onFinished: function(total) { root.note(Model.clearUnreadNote(total)) }
   }
   // Several ticked rows at once. A merged list draws rows from several
   // mailboxes, and a batch is one mailbox's request, so it is refused there
