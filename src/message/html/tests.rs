@@ -307,3 +307,37 @@ fn attribute_names_and_nonanchor_urls_cannot_create_resource_markup() {
         assert_eq!(result["remoteImageSources"], json!([]));
     }
 }
+
+// A picture the reader approved arrives as a data URI in the document. Its
+// bytes are not markup Qt has to lay out, so one large picture must not turn a
+// small message into the plain-text refusal the moment its pictures load.
+#[test]
+fn approved_image_bytes_do_not_make_a_small_message_too_heavy() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.resize(300_000, 0);
+    let data = format!("data:image/png;base64,{}", STANDARD.encode(&png));
+    let source = "<p>Hello</p><img src='https://cdn.example.com/hero.png'><p>Bye</p>";
+    let blocked = sanitize(
+        source,
+        &json!({"allowRemoteImages":false,"withReader":true}),
+    )
+    .unwrap();
+    assert_eq!(blocked["tooHeavy"], false);
+    let shown = sanitize(
+        source,
+        &json!({"allowRemoteImages":true,"withReader":true,
+            "remoteImageData":{"https://cdn.example.com/hero.png":data}}),
+    )
+    .unwrap();
+    assert!(shown["html"].as_str().unwrap().contains("<img"));
+    assert_eq!(shown["tooHeavy"], false, "{}", shown["complexity"]);
+    assert_eq!(
+        shown["reader"]["tooHeavy"], false,
+        "{}",
+        shown["reader"]["complexity"]
+    );
+    // The bound on markup itself still holds.
+    let markup = format!("<p>{}</p>", "x".repeat(130_000));
+    assert_eq!(sanitize(&markup, &json!({})).unwrap()["tooHeavy"], true);
+}

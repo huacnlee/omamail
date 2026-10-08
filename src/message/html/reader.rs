@@ -702,6 +702,6 @@ pub fn render(n: &Node, options: &Value) -> Result<Value, &'static str> {
     let html = serialize(&document)?;
     let size = measure(&document, &html);
     Ok(
-        json!({"html":html,"empty":document.children.is_empty(),"document":document,"images":ctx.kept,"blockedImages":ctx.blocked,"tooHeavy":too_heavy(&size),"complexity":size}),
+        json!({"html":html,"empty":document.children.is_empty(),"document":document,"images":ctx.kept,"blockedImages":ctx.blocked,"tooHeavy":too_heavy_to_draw(&document, &size),"complexity":size}),
     )
 }
