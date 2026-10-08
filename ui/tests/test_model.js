@@ -404,6 +404,45 @@ assert.strictEqual(model.markAllReadNote(3, false), "3 messages marked read")
 assert.strictEqual(model.markAllReadNote(1, true), "1 conversation marked read")
 assert.strictEqual(model.markAllReadNote(1, false), "1 message marked read")
 
+// "Mark these read" counts the loaded rows it will change; "Mark all read..."
+// counts what the Unread tab counts, which the backend stops counting at 500.
+assert.strictEqual(model.loadedUnreadCount([{ unread: true }, { unread: false }, {}, { unread: true }]), 2)
+assert.strictEqual(model.loadedUnreadCount(null), 0)
+assert.strictEqual(model.unreadCountText(499), "499")
+assert.strictEqual(model.unreadCountText(500), "500 or more", "a capped count does not claim a number")
+var clearMessage = "Every message the Unread tab counts. They cannot be marked unread again as a group."
+var perso = { label: "perso", count: "234", capped: false }
+var work = { label: "work", count: "500 or more", capped: true }
+deepEqual(model.clearUnreadLines([
+  { label: "perso", unread: 234, signedIn: true },
+  { label: "work", unread: 500, signedIn: true },
+  { label: "empty", unread: 0, signedIn: true },
+  { label: "signed out", unread: 9, signedIn: false }
+]), [perso, work], "only signed-in mailboxes with something to clear")
+deepEqual(model.clearUnreadConfirmation([perso]), {
+  title: "Mark all read in perso?", message: clearMessage, extra: "",
+  action: "Mark 234 read", lines: [perso]
+})
+deepEqual(model.clearUnreadConfirmation([work]), {
+  title: "Mark all read in work?", message: clearMessage,
+  extra: "The count stops at 500. Every unread message is marked, however many there are.",
+  action: "Mark all read", lines: [work]
+}, "a capped count is not put on the button")
+deepEqual(model.clearUnreadConfirmation([perso, work]), {
+  title: "Mark all read in every account?", message: clearMessage,
+  extra: "The count stops at 500. Every unread message is marked, however many there are.",
+  action: "Mark all read", lines: [perso, work]
+})
+assert.strictEqual(model.clearUnreadNote({ marked: 2431 }), "2431 messages marked read")
+assert.strictEqual(model.clearUnreadNote({ marked: 1 }), "1 message marked read")
+assert.strictEqual(model.clearUnreadNote({ marked: 0 }), "No unread messages left")
+assert.strictEqual(model.clearUnreadNote({ marked: 2400, failed: 31 }), "2400 marked read, some could not be changed",
+  "a refused message is listed again on every step, so no exact count")
+assert.strictEqual(model.clearUnreadNote({ marked: 2400, stalled: true }), "2400 marked read, some could not be changed")
+assert.strictEqual(model.clearUnreadNote({ marked: 20000, limited: true }), "20000 marked read. Run it again to continue.")
+assert.strictEqual(model.clearUnreadNote({ marked: 100, stalled: true, error: "Backend stopped" }),
+  "100 marked read, then stopped: Backend stopped", "an error outranks the rest")
+
 // ------------------------------------------------------------ list edits
 
 assert.strictEqual(model.showInitialListSkeleton(true, 0), true,
@@ -1602,6 +1641,10 @@ assert.strictEqual(model.activityStatus({ sending: 1 }), "Sending")
 assert.strictEqual(model.activityStatus({ sending: 2, queuedSends: 3 }), "Sending 2 \u00b7 3 queued to send")
 assert.strictEqual(model.activityStatus({ running: 1, waiting: 4 }), "1 action running \u00b7 4 waiting")
 assert.strictEqual(model.activityStatus({ sending: "x", waiting: -2 }), "", "nonsense counts are zero")
+assert.strictEqual(model.activityStatus({ clearing: true, cleared: 1200, sending: 1 }),
+  "Marking all read: 1200 so far \u00b7 Sending")
+assert.strictEqual(model.activityStatus({ clearing: true }), "Marking all read: 0 so far")
+assert.strictEqual(model.activityStatus({ clearing: false, cleared: 9 }), "", "a finished run says nothing")
 
 // ------------------------------------------------------------ label names
 {

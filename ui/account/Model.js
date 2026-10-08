@@ -1354,6 +1354,69 @@ function markAllReadNote(rows, expanded) {
     + " marked read"
 }
 
+// The backend counts Unread from listed ids and stops at this many
+// (`UNREAD_CAP` in src/sync/mod.rs), so a count at the cap is a floor.
+var UNREAD_CAP = 500
+
+// What "Mark these read" would change: the loaded rows still unread.
+function loadedUnreadCount(rows) {
+  var list = Array.isArray(rows) ? rows : []
+  var count = 0
+  for (var i = 0; i < list.length; i++) if (list[i] && list[i].unread === true) count++
+  return count
+}
+
+function unreadCountText(count) {
+  var value = Math.max(0, Math.floor(Number(count)) || 0)
+  return value >= UNREAD_CAP ? UNREAD_CAP + " or more" : String(value)
+}
+
+// One line per mailbox that "Mark all read..." will clear, in the account
+// summaries' order. A signed-out mailbox cannot be reached, and one with
+// nothing unread has nothing to say.
+function clearUnreadLines(summaries) {
+  var list = Array.isArray(summaries) ? summaries : []
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var summary = list[i] || {}
+    var unread = Math.max(0, Math.floor(Number(summary.unread)) || 0)
+    if (summary.signedIn !== true || unread === 0) continue
+    out.push({ label: String(summary.label || ""), count: unreadCountText(unread),
+      capped: unread >= UNREAD_CAP })
+  }
+  return out
+}
+
+// The confirmation names what will be cleared. A capped count never goes on
+// the button: "Mark 500 read" would promise a number the run will exceed.
+function clearUnreadConfirmation(lines) {
+  var list = Array.isArray(lines) ? lines : []
+  var capped = false
+  for (var i = 0; i < list.length; i++) if (list[i].capped === true) capped = true
+  var single = list.length === 1
+  return {
+    title: single ? "Mark all read in " + list[0].label + "?" : "Mark all read in every account?",
+    message: "Every message the Unread tab counts. They cannot be marked unread again as a group.",
+    extra: capped ? "The count stops at " + UNREAD_CAP
+      + ". Every unread message is marked, however many there are." : "",
+    action: single && !capped ? "Mark " + list[0].count + " read" : "Mark all read",
+    lines: list
+  }
+}
+
+// How a "Mark all read..." run ended. A refused message is listed again on
+// every step, so a failure count would count it more than once: the note
+// says that some failed, not how many.
+function clearUnreadNote(result) {
+  var r = result || {}
+  var marked = Math.max(0, Math.floor(Number(r.marked)) || 0)
+  if (r.error) return marked + " marked read, then stopped: " + r.error
+  if (Number(r.failed) > 0 || r.stalled === true) return marked + " marked read, some could not be changed"
+  if (r.limited === true) return marked + " marked read. Run it again to continue."
+  if (marked === 0) return "No unread messages left"
+  return pluralize(marked, "message") + " marked read"
+}
+
 // What the rows on screen are, for the footer that counts them.
 //
 // On the evidence of the rows themselves rather than on the provider's
@@ -2003,6 +2066,7 @@ function activityStatus(counts) {
   var running = count(c.running)
   var waiting = count(c.waiting)
   var parts = []
+  if (c.clearing === true) parts.push("Marking all read: " + count(c.cleared) + " so far")
   if (sending > 0) parts.push(sending === 1 ? "Sending" : "Sending " + sending)
   if (queuedSends > 0) parts.push(queuedSends + " queued to send")
   if (running > 0) parts.push(running === 1 ? "1 action running" : running + " actions running")
