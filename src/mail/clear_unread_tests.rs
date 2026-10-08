@@ -211,6 +211,28 @@ async fn stops_when_nothing_was_marked() {
     assert_eq!(result, Err("mail_clear_unread_stalled"));
 }
 
+#[tokio::test]
+async fn a_conversation_past_the_target_limit_stops_the_step() {
+    // JMAP lists one row per conversation, and reading marks the whole one.
+    let (list, _) = page(&["e1"]);
+    let members: Vec<String> = (0..2_001).map(|n| format!("m{n}")).collect();
+    let effects = Arc::new(Effects::default());
+    let mutation = PartialMutation::default();
+    let result = step(
+        &request(true),
+        &list,
+        &lookup(
+            json!({}),
+            &[json!({"id":"e1","thread":{"id":"t1","memberIds":members}})],
+            effects,
+        ),
+        &mutation,
+    )
+    .await;
+    assert_eq!(result, Err("mail_action_target_limit"));
+    assert_eq!(mutation.calls.load(Ordering::SeqCst), 0);
+}
+
 #[test]
 fn request_accepts_only_account_and_execute() {
     for params in [
