@@ -1416,6 +1416,16 @@ function clearUnreadProgress(cleared) {
   return "Marking all read: " + Math.max(0, Math.floor(Number(cleared)) || 0) + " so far"
 }
 
+// Why a run stopped, for a mail client with no wording of its own for the
+// backend's codes. Only the codes this path itself causes get a sentence;
+// any other code is shown as it came, which still names the fault.
+function clearUnreadErrorText(code) {
+  var value = String(code || "")
+  if (value === "mail_action_target_limit") return "a conversation has more messages than one step can mark"
+  if (value === "request_timed_out") return "the mail server took too long to answer"
+  return value
+}
+
 // How a "Mark all read..." run ended. A refused message is listed again on
 // every step, so a failure count would count it more than once: the note
 // says that some failed, not how many.

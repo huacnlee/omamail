@@ -437,6 +437,10 @@ deepEqual(model.clearUnreadConfirmation([perso, work]), {
   action: "Mark all read", lines: [perso, work]
 })
 assert.strictEqual(model.clearUnreadProgress(1200), "Marking all read: 1200 so far")
+assert.strictEqual(model.clearUnreadErrorText("mail_action_target_limit"),
+  "a conversation has more messages than one step can mark")
+assert.strictEqual(model.clearUnreadErrorText("request_timed_out"), "the mail server took too long to answer")
+assert.strictEqual(model.clearUnreadErrorText("hey_unexpected"), "hey_unexpected", "an unknown code is still shown")
 assert.strictEqual(model.clearUnreadNote({ marked: 2431 }), "2431 messages marked read")
 assert.strictEqual(model.clearUnreadNote({ marked: 1 }), "1 message marked read")
 assert.strictEqual(model.clearUnreadNote({ marked: 0 }), "No unread messages left")

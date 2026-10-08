@@ -1,4 +1,5 @@
 import QtQuick
+import "Model.js" as Model
 
 // "Mark all read..." for one mailbox. The backend marks at most one page of
 // Unread per call, so a deep mailbox takes many calls; this repeats the step
@@ -37,11 +38,14 @@ QtObject {
       account.backend.call("mail.clearUnread", { account: mailbox, execute: true }, function(result, error) {
         if (error) {
           var code = error.message !== undefined ? String(error.message) : String(error)
-          // The provider client owns the wording of its backend's errors.
+          // The provider client owns the wording of its backend's errors:
+          // Gmail and IMAP name it backendError, JMAP sentence, HEY has none.
           var api = account.api
           if (code === "mail_clear_unread_stalled") total.stalled = true
-          else total.error = api && typeof api.backendError === "function"
-            ? String(api.backendError(error, "mail.clearUnread")) : code
+          else if (api && typeof api.backendError === "function")
+            total.error = String(api.backendError(error, "mail.clearUnread"))
+          else if (api && typeof api.sentence === "function") total.error = String(api.sentence(error))
+          else total.error = Model.clearUnreadErrorText(code)
           finish(stillHere())
           return
         }

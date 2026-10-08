@@ -45,6 +45,13 @@ Item {
     }
   }
 
+  QtObject {
+    id: sentenceOnly
+    function sentence(error) {
+      return error.message === "jmap_timeout" ? "The mail server took too long to answer" : "unexpected"
+    }
+  }
+
   Account.ClearUnread {
     id: run
     account: account
@@ -127,6 +134,21 @@ Item {
       start()
       finish()
       compare(outcome.error, "Gmail is rate limiting this account. Wait a moment, then try again.")
+    }
+
+    function test_error_uses_the_client_sentence_when_there_is_no_backend_error() {
+      account.api = sentenceOnly
+      backend.answers = [{ error: "jmap_timeout" }]
+      start()
+      finish()
+      compare(outcome.error, "The mail server took too long to answer")
+    }
+
+    function test_error_without_client_wording_is_still_readable() {
+      backend.answers = [{ error: "mail_action_target_limit" }]
+      start()
+      finish()
+      compare(outcome.error, "a conversation has more messages than one step can mark")
     }
 
     function test_step_limit() {
