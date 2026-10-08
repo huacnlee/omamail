@@ -26,15 +26,16 @@ Item {
   // Only the standalone host owns the application process. A plugin menu
   // must never offer to terminate the shell that loaded it.
   property bool canQuit: false
-  // "Mark all read..." needs a backend that clears Unread one step at a time.
-  property bool canClearUnread: false
-  property bool clearingUnread: false
-  property int clearedSoFar: 0
-  // Each scope shows the count it clears, so the two rows read apart: the
-  // loaded rows still unread, and what the Unread tab counts. Empty when
-  // there is nothing to clear.
-  property string loadedUnreadSuffix: ""
-  property string unreadSuffix: ""
+  // The service's ClearUnreadQueue: whether "Mark all read..." can run, its
+  // progress, and the two counts that tell it from "Mark these read". The
+  // second is the Unread tab's own number; the confirmation explains a cap.
+  property var clearUnread: null
+  readonly property bool canClearUnread: !!clearUnread && clearUnread.available === true
+  readonly property bool clearingUnread: !!clearUnread && clearUnread.running === true
+  readonly property string loadedUnreadSuffix: clearUnread && clearUnread.loadedUnread > 0
+    ? String(clearUnread.loadedUnread) : ""
+  readonly property string unreadSuffix: clearUnread && clearUnread.unread > 0
+    ? String(clearUnread.unread) : ""
   readonly property bool opened: menu.opened
 
   // Positioned against the window rather than a button, and flipped when it
@@ -181,7 +182,7 @@ Item {
         // than are loaded; it asks first. While a run is going the row says
         // so and stays locked, so a second press cannot start another.
         text: root.clearingUnread ? "Marking all read" : "Mark all read..."
-        suffix: root.clearingUnread ? String(root.clearedSoFar) : root.unreadSuffix
+        suffix: root.clearingUnread ? String(root.clearUnread.cleared) : root.unreadSuffix
         visible: root.canClearUnread
         enabled: root.signedIn && !root.clearingUnread && root.unreadSuffix !== ""
         onActivated: { menu.close(); root.clearUnreadRequested() }

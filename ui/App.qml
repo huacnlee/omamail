@@ -2680,6 +2680,8 @@ Item {
         accountCount: root.service ? root.service.accountCount : 1
         canQuit: root.standaloneWindowChrome
         onMarkAllReadRequested: if (root.service) root.service.markAllRead()
+        clearUnread: root.service ? root.service.clearing : null
+        onClearUnreadRequested: clearUnreadDialog.openFor(Model.clearUnreadConfirmation(clearUnread.lines))
         onOpenWebRequested: if (root.service) root.service.openWebInbox()
         onShortcutsRequested: root.openHelp()
         onInboxRequested: {
@@ -2958,6 +2960,16 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onConfirmed: function(request) { root.confirmDelete(request) }
+      }
+      ClearUnreadDialog {
+        id: clearUnreadDialog
+        textColor: root.foreground
+        dimColor: root.dim
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        popupBorderColor: root.popupBorder
+        panelFontFamily: root.fontFamily
+        onConfirmed: root.service.clearing.start()
       }
 
       MessageMenu {

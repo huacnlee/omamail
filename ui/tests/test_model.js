@@ -433,6 +433,7 @@ deepEqual(model.clearUnreadConfirmation([perso, work]), {
   extra: "The count stops at 500. Every unread message is marked, however many there are.",
   action: "Mark all read", lines: [perso, work]
 })
+assert.strictEqual(model.clearUnreadProgress(1200), "Marking all read: 1200 so far")
 assert.strictEqual(model.clearUnreadNote({ marked: 2431 }), "2431 messages marked read")
 assert.strictEqual(model.clearUnreadNote({ marked: 1 }), "1 message marked read")
 assert.strictEqual(model.clearUnreadNote({ marked: 0 }), "No unread messages left")
@@ -1641,10 +1642,6 @@ assert.strictEqual(model.activityStatus({ sending: 1 }), "Sending")
 assert.strictEqual(model.activityStatus({ sending: 2, queuedSends: 3 }), "Sending 2 \u00b7 3 queued to send")
 assert.strictEqual(model.activityStatus({ running: 1, waiting: 4 }), "1 action running \u00b7 4 waiting")
 assert.strictEqual(model.activityStatus({ sending: "x", waiting: -2 }), "", "nonsense counts are zero")
-assert.strictEqual(model.activityStatus({ clearing: true, cleared: 1200, sending: 1 }),
-  "Marking all read: 1200 so far \u00b7 Sending")
-assert.strictEqual(model.activityStatus({ clearing: true }), "Marking all read: 0 so far")
-assert.strictEqual(model.activityStatus({ clearing: false, cleared: 9 }), "", "a finished run says nothing")
 
 // ------------------------------------------------------------ label names
 {

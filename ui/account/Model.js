@@ -1360,7 +1360,8 @@ var UNREAD_CAP = 500
 
 // What "Mark these read" would change: the loaded rows still unread.
 function loadedUnreadCount(rows) {
-  var list = Array.isArray(rows) ? rows : []
+  // Rows read back through a QML `var` property can be array-like, not an Array.
+  var list = rows && typeof rows.length === "number" ? rows : []
   var count = 0
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].unread === true) count++
   return count
@@ -1402,6 +1403,12 @@ function clearUnreadConfirmation(lines) {
     action: single && !capped ? "Mark " + list[0].count + " read" : "Mark all read",
     lines: list
   }
+}
+
+// While a "Mark all read..." run goes. It is the status line's note, renewed
+// after every step, until the run's own ending note replaces it.
+function clearUnreadProgress(cleared) {
+  return "Marking all read: " + Math.max(0, Math.floor(Number(cleared)) || 0) + " so far"
 }
 
 // How a "Mark all read..." run ended. A refused message is listed again on
@@ -2066,7 +2073,6 @@ function activityStatus(counts) {
   var running = count(c.running)
   var waiting = count(c.waiting)
   var parts = []
-  if (c.clearing === true) parts.push("Marking all read: " + count(c.cleared) + " so far")
   if (sending > 0) parts.push(sending === 1 ? "Sending" : "Sending " + sending)
   if (queuedSends > 0) parts.push(queuedSends + " queued to send")
   if (running > 0) parts.push(running === 1 ? "1 action running" : running + " actions running")

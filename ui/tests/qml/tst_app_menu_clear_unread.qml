@@ -17,6 +17,16 @@ Item {
   }
   SignalSpy { id: clearRequested; target: appMenu; signalName: "clearUnreadRequested" }
 
+  // The members of the service's ClearUnreadQueue that the menu reads.
+  QtObject {
+    id: controller
+    property bool available: true
+    property bool running: false
+    property int cleared: 0
+    property int loadedUnread: 12
+    property int unread: 734
+  }
+
   TestCase {
     name: "AppMenuClearUnread"
     when: windowShown
@@ -30,11 +40,12 @@ Item {
 
     function init() {
       clearRequested.clear()
-      appMenu.canClearUnread = true
-      appMenu.clearingUnread = false
-      appMenu.clearedSoFar = 0
-      appMenu.loadedUnreadSuffix = "12"
-      appMenu.unreadSuffix = "734"
+      controller.available = true
+      controller.running = false
+      controller.cleared = 0
+      controller.loadedUnread = 12
+      controller.unread = 734
+      appMenu.clearUnread = controller
       appMenu.openAt(10, 10)
       tryCompare(appMenu, "opened", true)
     }
@@ -44,8 +55,10 @@ Item {
     }
 
     function test_hidden_without_backend_support() {
-      appMenu.canClearUnread = false
+      controller.available = false
       compare(row("app-menu-clear-unread").visible, false)
+      appMenu.clearUnread = null
+      compare(row("app-menu-clear-unread").visible, false, "no service, no row")
     }
 
     function test_counts_tell_the_rows_apart() {
@@ -56,20 +69,24 @@ Item {
       compare(all.text, "Mark all read...")
       compare(all.suffix, "734")
       verify(all.enabled)
+      controller.unread = 534
+      compare(all.suffix, "534", "the Unread tab's number, which can pass 500 across mailboxes")
       compare(rowIndex("app-menu-clear-unread"), rowIndex("app-menu-mark-these-read") + 1,
         "the two scopes sit together")
     }
 
     function test_disabled_without_a_count() {
-      appMenu.unreadSuffix = ""
+      controller.unread = 0
+      controller.loadedUnread = 0
       var all = row("app-menu-clear-unread")
       verify(all.visible)
       verify(!all.enabled)
+      compare(row("app-menu-mark-these-read").suffix, "")
     }
 
     function test_locked_while_running() {
-      appMenu.clearingUnread = true
-      appMenu.clearedSoFar = 1200
+      controller.running = true
+      controller.cleared = 1200
       var all = row("app-menu-clear-unread")
       compare(all.text, "Marking all read")
       compare(all.suffix, "1200")

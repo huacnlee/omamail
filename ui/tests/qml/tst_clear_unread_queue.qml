@@ -3,8 +3,9 @@ import QtTest
 import "../../account" as Account
 import "../../account/Model.js" as Model
 
-// "Mark all read..." over several mailboxes: one after another, totals added,
-// and one mailbox failing does not keep the next from running.
+// "Mark all read..." over the mailboxes on screen: which ones, one after
+// another, totals added, and one mailbox failing does not keep the next from
+// running. The service it reads is a stand-in with the same members.
 Item {
   width: 200
   height: 100
@@ -13,8 +14,12 @@ Item {
     id: hostFactory
     QtObject {
       property string name: ""
+      property string accountId: name
+      property bool ready: true
+      property int inboxUnread: 1
+      property var messages: []
       // {marked, failed, stalled, limited, error} to finish with, or null to
-      // refuse the start the way a busy or signed-out mailbox does.
+      // refuse the start the way a busy mailbox does.
       property var outcome: null
       property var recorder: null
       function clearUnread(onProgress, onDone) {
@@ -38,6 +43,19 @@ Item {
     function record(name) { names = names.concat([name]) }
   }
 
+  QtObject {
+    id: service
+    property bool unified: false
+    property var current: null
+    property var hosts: []
+    property var backend: ({ ready: true, apiVersion: 7 })
+    property var accountSummaries: []
+    property int inboxUnread: 0
+    property var notes: []
+    function eachHost(callback) { for (var i = 0; i < hosts.length; i++) callback(hosts[i]) }
+    function note(text) { notes = notes.concat([text]) }
+  }
+
   Account.ClearUnreadQueue { id: queue }
   SignalSpy { id: finished; target: queue; signalName: "finished" }
 
@@ -45,8 +63,10 @@ Item {
     name: "ClearUnreadQueue"
     when: windowShown
 
-    function host(name, outcome) {
-      return hostFactory.createObject(null, { name: name, outcome: outcome, recorder: recorder })
+    function host(name, outcome, extra) {
+      var properties = { name: name, outcome: outcome, recorder: recorder }
+      for (var key in extra || {}) properties[key] = extra[key]
+      return hostFactory.createObject(null, properties)
     }
     function result(marked, error) {
       return { marked: marked, failed: 0, stalled: false, limited: false, error: error || "" }
@@ -55,6 +75,13 @@ Item {
     function init() {
       recorder.names = []
       finished.clear()
+      service.unified = false
+      service.current = null
+      service.hosts = []
+      service.backend = { ready: true, apiVersion: 7 }
+      service.accountSummaries = []
+      service.notes = []
+      queue.service = null
     }
 
     function test_unified_runs_accounts_in_turn() {
@@ -112,6 +139,73 @@ Item {
       verify(!queue.running)
       wait(10)
       compare(finished.count, 0)
+    }
+
+    function test_available_needs_a_ready_api_7_backend() {
+      queue.service = service
+      verify(queue.available)
+      service.backend = { ready: true, apiVersion: 6 }
+      verify(!queue.available, "an older backend has no clear-unread step")
+      service.backend = { ready: false, apiVersion: 7 }
+      verify(!queue.available)
+      service.current = host("perso", result(1))
+      verify(!queue.start(), "nothing starts without the step")
+      compare(recorder.names.length, 0)
+    }
+
+    function test_start_runs_the_mailbox_on_screen() {
+      service.current = host("perso", result(3))
+      service.hosts = [service.current, host("work", result(9))]
+      queue.service = service
+      verify(queue.start())
+      tryCompare(finished, "count", 1)
+      compare(JSON.stringify(recorder.names), JSON.stringify(["perso"]))
+    }
+
+    function test_start_in_the_unified_view_takes_signed_in_mailboxes_with_unread() {
+      service.unified = true
+      service.hosts = [
+        host("perso", result(3), { inboxUnread: 3 }),
+        host("empty", result(1), { inboxUnread: 0 }),
+        host("signed-out", result(1), { inboxUnread: 9, ready: false }),
+        host("work", result(2), { inboxUnread: 2 })
+      ]
+      queue.service = service
+      verify(queue.start())
+      tryCompare(finished, "count", 1)
+      compare(JSON.stringify(recorder.names), JSON.stringify(["perso", "work"]))
+    }
+
+    function test_notes_show_progress_then_the_result() {
+      service.current = host("perso", result(100))
+      queue.service = service
+      queue.start()
+      tryCompare(finished, "count", 1)
+      compare(JSON.stringify(service.notes), JSON.stringify([
+        "Marking all read: 100 so far", "100 messages marked read"]))
+    }
+
+    function test_loaded_unread_counts_the_loaded_rows_of_the_view() {
+      var unread = [{ unread: true }, { unread: false }, { unread: true }]
+      service.current = host("perso", null, { messages: unread })
+      service.hosts = [service.current, host("work", null, { messages: [{ unread: true }] })]
+      queue.service = service
+      compare(queue.loadedUnread, 2)
+      service.unified = true
+      compare(queue.loadedUnread, 3)
+    }
+
+    function test_lines_follow_the_view() {
+      service.current = host("perso", null)
+      service.accountSummaries = [
+        { id: "perso", label: "perso", unread: 234, signedIn: true },
+        { id: "work", label: "work", unread: 500, signedIn: true }
+      ]
+      queue.service = service
+      compare(JSON.stringify(queue.lines), JSON.stringify([{ label: "perso", count: "234", capped: false }]))
+      service.unified = true
+      compare(queue.lines.length, 2)
+      compare(queue.lines[1].count, "500 or more")
     }
   }
 }
