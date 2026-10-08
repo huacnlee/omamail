@@ -116,6 +116,12 @@ Each call advances at most four scan or page-verification folders, with at most 
 
 Search includes aggregate All Mail destinations and excludes Trash/Junk membership from aggregate results. Cross-folder copies are collapsed using server-provided `EMAILID`/`X-GM-MSGID`. A generic server that advertises `\All` but no server identity is searched through its `\All` mailbox alone, because RFC 6154 defines it as every message in the store; scanning physical folders as well would only add copies that cannot be matched without reading them. Its Message-ID header and RFC822.SIZE nominate possible overlaps between All and Trash/Junk, then SHA-256 of complete message bytes verifies those candidates before excluding any aggregate result. Verification reads at most 64 candidates and 8 MiB per folder step with `BODY.PEEK[]` and retains only digests; a candidate larger than 8 MiB is not read and stays in the results. A server with neither `\All` nor a server identity preserves folder/UID copies, so overlapping folders may produce duplicate rows. A sender-written Message-ID, headers or size alone never suppress a result. Copies within one physical folder remain distinct. `mail.list` follows search continuations for at most 120 seconds; other IMAP listings still accept one continuation.
 
+## API 7 clearing Unread
+
+`mail.clearUnread` takes `account` and `execute` and does one step of marking that account's Unread mailbox read. It lists up to 100 IDs from the top of Unread without reading the messages. It then marks them through the same planner and mutation as `mail.act`, so a Gmail change counts only once its queue confirms it. It answers `{"done":false,"marked":N,"failed":N}`, or `{"done":true,...}` once Unread is empty. Without `execute`, it answers the step's dry-run plan with `"done":false` and changes nothing.
+
+A step takes no page token: a message marked read leaves the query, so the next step's first page holds the next messages. A step that confirms nothing answers `mail_clear_unread_stalled`, so a message the provider keeps refusing cannot hold a caller in a loop. The UI repeats the step from `ui/account/ClearUnread.qml` and offers "Mark all read..." only from API 7.
+
 ## Released and unreleased: one step ahead of the pin
 
 Backends ship in batches, not per merge, so `main` may implement an API the pinned

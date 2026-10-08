@@ -221,7 +221,7 @@ Menus follow these behavior rules:
 - unavailable provider capabilities are omitted rather than disabled;
 - temporary unavailability may be disabled when its reason is apparent.
 
-Menu labels describe the actual scope. `Mark these read` is correct when only loaded messages are affected. Brevity does not justify a broader promise.
+Menu labels describe the actual scope. `Mark these read` is correct when only loaded messages are affected. Brevity does not justify a broader promise. `Mark all read...` marks every message the Unread tab counts, so it asks first, and the two rows sit together, each with the count it clears as its suffix.
 
 ## Popups and positioning
 
