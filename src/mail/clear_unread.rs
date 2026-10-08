@@ -9,42 +9,40 @@
 //!
 //! One step per call keeps every request inside the backend's request
 //! timeout however deep the mailbox is, and lets the caller show progress.
+//!
+//! The step lists IDs only. It marks messages nobody looks at, and a listing
+//! that reads each message it returns (Gmail's does) costs a provider read per
+//! message: a few steps of that and Gmail rate-limits the account.
 use super::action::{ActionLookup, ActionMutation, dry_run_result, execute_action, plan_action};
-use super::list::{ListAdapter, list_with};
-use super::{ActRequest, ClearUnreadRequest, ListRequest, Mailbox};
+use super::list::provider_query;
+use super::{Account, ActRequest, ClearUnreadRequest, Mailbox};
 use serde_json::{Value, json};
+use std::{future::Future, pin::Pin};
 
 /// The most `mail.list` returns in one page.
 pub(crate) const STEP_SIZE: u16 = 100;
 
+/// The first `limit` IDs a provider query matches, newest first, without
+/// reading the messages.
+pub(crate) trait UnreadIds: Send + Sync {
+    fn unread_ids<'a>(
+        &'a self,
+        account: &'a Account,
+        provider_query: String,
+        limit: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, &'static str>> + Send + 'a>>;
+}
+
 pub(crate) async fn step(
     request: &ClearUnreadRequest,
-    list: &impl ListAdapter,
+    lister: &impl UnreadIds,
     lookup: &impl ActionLookup,
     mutation: &impl ActionMutation,
 ) -> Result<Value, &'static str> {
-    let page = list_with(
-        ListRequest {
-            account: request.account.clone(),
-            mailbox: Mailbox::Unread,
-            query: String::new(),
-            limit: STEP_SIZE,
-            page_token: String::new(),
-        },
-        list,
-    )
-    .await?;
-    let ids = page["messages"]
-        .as_array()
-        .ok_or("mail_list_incomplete")?
-        .iter()
-        .map(|message| {
-            message["id"]
-                .as_str()
-                .map(str::to_owned)
-                .ok_or("mail_list_incomplete")
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let query = provider_query(&request.account, Mailbox::Unread, "")?;
+    let ids = lister
+        .unread_ids(&request.account, query, STEP_SIZE)
+        .await?;
     if ids.is_empty() {
         return Ok(json!({"done":true,"marked":0,"failed":0}));
     }

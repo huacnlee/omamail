@@ -590,6 +590,41 @@ impl crate::mail::list::ListAdapter for ProviderList<'_> {
     }
 }
 
+impl crate::mail::clear_unread::UnreadIds for ProviderList<'_> {
+    fn unread_ids<'a>(
+        &'a self,
+        account: &'a crate::mail::Account,
+        provider_query: String,
+        limit: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, &'static str>> + Send + 'a>> {
+        Box::pin(async move {
+            // Gmail's listing reads every message it returns; its bare listing
+            // is one request for the page, which is all a step needs.
+            let page = if account.provider == Provider::Gmail {
+                let params = json!({
+                    "accountId":account.id,"query":provider_query,"pageSize":limit,"pageToken":"",
+                });
+                Box::pin(self.session.gmail.call("gmail.list", &params)).await?
+            } else {
+                let request = ListRequest {
+                    account: account.clone(),
+                    mailbox: crate::mail::Mailbox::Unread,
+                    query: String::new(),
+                    limit,
+                    page_token: String::new(),
+                };
+                Box::pin(self.session.provider_list(&request, provider_query)).await?
+            };
+            page["ids"]
+                .as_array()
+                .ok_or("mail_list_incomplete")?
+                .iter()
+                .map(|id| id.as_str().map(str::to_owned).ok_or("mail_list_incomplete"))
+                .collect()
+        })
+    }
+}
+
 impl crate::mail::read::ReadAdapter for ProviderRead<'_> {
     fn call<'a>(
         &'a self,

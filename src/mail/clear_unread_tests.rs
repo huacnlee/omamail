@@ -1,8 +1,7 @@
 use super::action::{ActionMutation, ActionPlan};
 use super::action_tests::{Effects, lookup, row};
-use super::clear_unread::{STEP_SIZE, step};
-use super::list::ListAdapter;
-use super::{Account, ClearUnreadRequest, ListRequest, Provider};
+use super::clear_unread::{STEP_SIZE, UnreadIds, step};
+use super::{Account, ClearUnreadRequest, Mailbox, Provider};
 use serde_json::{Value, json};
 use std::{
     future::Future,
@@ -20,25 +19,19 @@ struct UnreadPage {
     seen: Arc<Mutex<Vec<Value>>>,
 }
 
-impl ListAdapter for UnreadPage {
-    fn list<'a>(
+impl UnreadIds for UnreadPage {
+    fn unread_ids<'a>(
         &'a self,
-        request: &'a ListRequest,
+        account: &'a Account,
         provider_query: String,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
+        limit: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, &'static str>> + Send + 'a>> {
         self.seen.lock().unwrap().push(json!({
+            "account": account.id,
             "query": provider_query,
-            "limit": request.limit,
-            "pageToken": request.page_token,
+            "limit": limit,
         }));
-        Box::pin(async move {
-            Ok(json!({
-                "ids": self.ids,
-                "messages": self.ids.iter().map(|id| json!({"id":id})).collect::<Vec<_>>(),
-                "nextPageToken": "",
-                "estimate": self.ids.len(),
-            }))
-        })
+        Box::pin(async move { Ok(self.ids.iter().map(|id| (*id).to_owned()).collect()) })
     }
 }
 
@@ -112,18 +105,12 @@ async fn lists_unread_from_the_top_in_steps_of_100() {
     )
     .await
     .unwrap();
-    let unread = crate::providers::domain::resolve(&json!({
-        "operation":"query",
-        "provider":"jmap",
-        "mailbox":crate::providers::domain::query_mailbox("jmap", "unread").unwrap(),
-        "search":"",
-    }))
-    .unwrap()["value"]
-        .clone();
+    let unread = super::list::provider_query(&request(true).account, Mailbox::Unread, "").unwrap();
+    assert!(unread.contains("unseen"), "{unread}");
     assert_eq!(STEP_SIZE, 100);
     assert_eq!(
         *seen.lock().unwrap(),
-        vec![json!({"query":unread,"limit":100,"pageToken":""})]
+        vec![json!({"account":ACCOUNT,"query":unread,"limit":100})]
     );
 }
 
