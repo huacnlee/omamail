@@ -378,7 +378,7 @@ Item {
       mailService.attachmentCallback = null
       mailService.mailboxKey = "inbox"
       mailService.detailLoading = false
-      mailService.detailPainted = false
+      mailService.detailPainted = true
       mailService.selectedId = "message-1"
       mailService.selectedBody = ({ text: "Original body", source: "plain" })
       mailService.selectedAttachments = []
