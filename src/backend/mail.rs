@@ -1,5 +1,7 @@
 use super::Session;
-use crate::mail::{ActRequest, ListRequest, Provider, ReadRequest, SendRequest};
+use crate::mail::{
+    ActRequest, ClearUnreadRequest, ListRequest, Provider, ReadRequest, SendRequest,
+};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
@@ -359,6 +361,16 @@ impl Session {
                 let request = ActRequest::try_from(params)?;
                 crate::mail::action::act(
                     &request,
+                    &AccountActionLookup { session: self },
+                    &ProviderMutation { session: self },
+                )
+                .await
+            }
+            "mail.clearUnread" => {
+                let request = ClearUnreadRequest::try_from(params)?;
+                crate::mail::clear_unread::step(
+                    &request,
+                    &ProviderList { session: self },
                     &AccountActionLookup { session: self },
                     &ProviderMutation { session: self },
                 )
