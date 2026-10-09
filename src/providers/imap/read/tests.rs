@@ -260,3 +260,101 @@ async fn original_query_controls_are_rejected_before_connecting() {
             .is_err()
     );
 }
+/// A 10 000-message INBOX on a server that answers every command in three
+/// seconds: nine replies, twenty-seven seconds, and nothing wrong with either
+/// side. The call budget has to clear that, because what it exists to stop is a
+/// call that never ends rather than one that is merely slow. Real seconds, on
+/// purpose: the budget this replaces is a wall-clock 22 s, and there is no way
+/// to spend more than that without spending it.
+#[tokio::test]
+async fn a_slow_server_that_answers_every_command_still_pages() {
+    const SLOW: Duration = Duration::from_secs(3);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(stream));
+        write(&mut w, b"* OK ready\r\n").await.unwrap();
+        let mut replies = 0u32;
+        loop {
+            let request = String::from_utf8(line(&mut w).await.unwrap()).unwrap();
+            replies += 1;
+            // Well inside one command's budget, and well outside the call's
+            // old one once the conversation has run its length.
+            tokio::time::sleep(SLOW).await;
+            let mut response = String::new();
+            let last = if request.starts_with("O1 LOGIN") {
+                response.push_str("O1 OK login\r\n");
+                false
+            } else if request.starts_with("O1 CAPABILITY") {
+                response.push_str("* CAPABILITY IMAP4rev1\r\nO1 OK caps\r\n");
+                false
+            } else if request.starts_with("O1 LIST") {
+                response.push_str("* LIST () \"/\" INBOX\r\nO1 OK folders\r\n");
+                false
+            } else if request == "O1 SELECT \"INBOX\"\r\n" {
+                response.push_str("O1 OK selected\r\n");
+                false
+            } else if let Some(fetch) = request.strip_prefix("O1 UID FETCH ") {
+                let (set, fields) = fetch.trim_end().split_once(' ').unwrap();
+                let dated = fields.contains("INTERNALDATE");
+                let ids: Vec<u32> = if set == "1:*" {
+                    (1..=9000).collect()
+                } else {
+                    set.split(',').map(|id| id.parse().unwrap()).collect()
+                };
+                for uid in &ids {
+                    response.push_str(&if dated {
+                        format!("* {uid} FETCH (UID {uid} INTERNALDATE \"21-Sep-2026 12:00:00 +0000\")\r\n")
+                    } else {
+                        format!("* {uid} FETCH (UID {uid})\r\n")
+                    });
+                }
+                response.push_str("O1 OK fetched\r\n");
+                // The snapshot, then one date window per 4 096 UIDs.
+                dated && ids.last() == Some(&9000)
+            } else {
+                panic!("unexpected command: {request}");
+            };
+            write(&mut w, response.as_bytes()).await.unwrap();
+            if last {
+                break;
+            }
+        }
+        replies
+    });
+    let mut p = params(port);
+    p["query"] = json!("folder:INBOX");
+    p["limit"] = json!(3);
+    let listed = super::super::call("imap.list", &p).await.unwrap();
+    assert_eq!(
+        listed["page"]["ids"],
+        json!(["9000:INBOX", "8999:INBOX", "8998:INBOX"])
+    );
+    let replies = peer.await.unwrap();
+    assert!(replies >= 9, "the conversation has to be the long one");
+    assert!(
+        SLOW * replies > Duration::from_secs(22),
+        "the test only means something while the conversation outlasts the budget it replaced"
+    );
+}
+/// The other half of the same budget: a server that takes a command and then
+/// says nothing is a hang, and it has to end the call long before the whole
+/// conversation's allowance would. Thirty real seconds, for the reason above.
+#[tokio::test]
+async fn a_command_that_is_never_answered_ends_the_call() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(stream));
+        write(&mut w, b"* OK ready\r\n").await.unwrap();
+        assert!(line(&mut w).await.unwrap().starts_with(b"O1 LOGIN"));
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+    });
+    assert_eq!(
+        super::super::call("imap.list", &params(port)).await,
+        Err("request_timed_out")
+    );
+    peer.abort();
+}

@@ -232,6 +232,20 @@ for(const reason of ['cancel','append failure']) {
   reply(sent[0],{})
   assert.deepStrictEqual(sent[64].params,{accountId:'one@example.org',message:{subject:'original'}})
 }
+// A slow IMAP server is not a hung backend: it charges about half a second for
+// every command and a large mailbox needs dozens of them, so an imap frame has
+// to outlive the backend's own call budget instead of being killed at the 30 s
+// every other request gets.
+{
+  const {backend,sent}=bridge()
+  backend.call('imap.list',{accountId:'one@example.org'},()=>{})
+  backend.call('providers.list',{},()=>{})
+  const imap=backend.pending[sent[0].id].deadline-Date.now()
+  const other=backend.pending[sent[1].id].deadline-Date.now()
+  assert(imap>120000,'an imap frame outlives the backend call budget')
+  assert(other<=30000,'every other frame keeps the short deadline')
+  assert.strictEqual(sent.length,2)
+}
 // Failure fanout is still complete if a receiver has been destroyed or throws.
 for(const shutdown of [false,true]) {
   const {backend,sent,reply}=bridge()
