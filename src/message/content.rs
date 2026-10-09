@@ -424,6 +424,21 @@ fn walk(
     }
     Ok(())
 }
+// Some senders put the markup itself in the text/plain alternative. That part
+// is a page of tags when shown as text, so the HTML part is read instead. Text
+// that merely opens with an angle bracket — a quoted address, a sentence about
+// a tag — neither opens with a whole tag nor ends on one.
+fn markup_as_text(plain: &str) -> bool {
+    static OPENS: OnceLock<Regex> = OnceLock::new();
+    let opens = OPENS.get_or_init(|| {
+        Regex::new(
+            r"(?i)^<(?:!--|!doctype\s|(?:html|head|body|div|table|style|center|span|p)[\s>])",
+        )
+        .unwrap()
+    });
+    let text = plain.trim();
+    opens.is_match(text) && text.ends_with('>') && text.contains("</")
+}
 pub fn prepare(message: &Value, now: i64) -> Result<Value> {
     prepare_content(message, now, true)
 }
@@ -446,7 +461,7 @@ fn prepare_content(message: &Value, now: i64, read_html: bool) -> Result<Value> 
         &mut html,
         &mut files,
     )?;
-    let source = if !plain.is_empty() {
+    let source = if !plain.is_empty() && !(markup_as_text(&plain) && !html.is_empty()) {
         "plain"
     } else if !html.is_empty() {
         "html"
