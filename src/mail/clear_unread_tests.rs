@@ -236,12 +236,17 @@ async fn stops_when_nothing_was_marked() {
 }
 
 #[tokio::test]
-async fn a_conversation_past_the_target_limit_stops_the_step() {
-    // JMAP lists one row per conversation, and reading marks the whole one.
+async fn a_conversation_row_marks_only_the_listed_message() {
+    // JMAP lists one row per conversation. Expanding it would mark read
+    // members and members outside the Inbox too, so the run would not match
+    // the count the menu showed, and a 2,000-member thread would block it.
     let (list, _) = page(&["e1"]);
     let members: Vec<String> = (0..2_001).map(|n| format!("m{n}")).collect();
     let effects = Arc::new(Effects::default());
-    let mutation = PartialMutation::default();
+    let mutation = PartialMutation {
+        confirms: vec!["e1"],
+        ..Default::default()
+    };
     let result = step(
         &request(true),
         &list,
@@ -252,9 +257,13 @@ async fn a_conversation_past_the_target_limit_stops_the_step() {
         ),
         &mutation,
     )
-    .await;
-    assert_eq!(result, Err("mail_action_target_limit"));
-    assert_eq!(mutation.calls.load(Ordering::SeqCst), 0);
+    .await
+    .unwrap();
+    assert_eq!(result, json!({"done":false,"marked":1,"failed":0}));
+    assert_eq!(
+        *mutation.plans.lock().unwrap(),
+        vec![("read".to_owned(), vec!["e1".to_owned()])]
+    );
 }
 
 #[test]

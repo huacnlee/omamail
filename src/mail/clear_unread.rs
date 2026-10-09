@@ -15,7 +15,9 @@
 //! 100 reads per step make Gmail rate-limit the account within a few steps, so
 //! the Gmail lister asks for the bare listing. The other providers list as they
 //! always do and the step keeps the IDs.
-use super::action::{ActionLookup, ActionMutation, dry_run_result, execute_action, plan_action};
+use super::action::{
+    ActionAvailability, ActionLookup, ActionMutation, dry_run_result, execute_action, plan_action,
+};
 use super::list::provider_query;
 use super::{Account, ActRequest, ClearUnreadRequest, Mailbox, Provider};
 use serde_json::{Value, json};
@@ -48,6 +50,40 @@ fn inbox_unread_query(account: &Account) -> Result<String, &'static str> {
     }
 }
 
+/// Plans each listed message alone. A conversation row (JMAP lists one per
+/// thread) would expand to every member, read ones and ones outside the Inbox
+/// included, so the run would not match the count the menu showed. The
+/// thread's other unread members come up in later steps on their own.
+struct ListedOnly<'l, L>(&'l L);
+
+impl<L: ActionLookup> ActionLookup for ListedOnly<'_, L> {
+    fn availability<'a>(
+        &'a self,
+        account: &'a Account,
+        operation: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ActionAvailability, &'static str>> + Send + 'a>> {
+        self.0.availability(account, operation)
+    }
+
+    fn rows<'a>(
+        &'a self,
+        account: &'a Account,
+        ids: &'a [String],
+        availability: &'a ActionAvailability,
+        operation: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, &'static str>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut rows = self.0.rows(account, ids, availability, operation).await?;
+            for row in &mut rows {
+                if let Some(row) = row.as_object_mut() {
+                    row.remove("thread");
+                }
+            }
+            Ok(rows)
+        })
+    }
+}
+
 pub(crate) async fn step(
     request: &ClearUnreadRequest,
     lister: &impl UnreadIds,
@@ -68,7 +104,7 @@ pub(crate) async fn step(
             ids,
             execute: request.execute,
         },
-        lookup,
+        &ListedOnly(lookup),
     )
     .await?;
     if !request.execute {
