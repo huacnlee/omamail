@@ -40,6 +40,12 @@ irm https://huacnlee.github.io/omamail/install.ps1 | iex
 
 Each installer verifies the release package before replacing an existing version. The macOS app and Windows executable are unsigned. The macOS installer removes quarantine only after verifying the downloaded archive. See [standalone runtime and release details](docs/BACKEND-RUNTIME.md#standalone-bundled-backend) for package layout, platform integration, installer behavior, and security checks.
 
+### Optional spelling support
+
+Composer body spellchecking uses KDE Sonnet and a local Hunspell dictionary. On Arch, install `sonnet` and `hunspell-en_us`. On Debian and Ubuntu releases that provide Qt 6 Sonnet, install `qml6-module-org-kde-sonnet`, `sonnet6-plugins`, and `hunspell-en-us`. Restart Omamail after installing a dictionary.
+
+Spelling checks default to US English and can be turned off in Settings. Without the Sonnet QML module or the selected dictionary, composing remains available and Settings explains what is missing. Omamail does not install system packages. Personal words are saved in Omamail's own `spelling.json`; Add to dictionary does not change a global Hunspell dictionary.
+
 ## Run from source
 
 Install Rust, CMake 3.21 or newer, and Qt 6.5 or newer, then use the repository Make targets:

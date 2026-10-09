@@ -20,6 +20,7 @@ class SettingsTest : public QObject {
 private slots:
     void initTestCase();
     void atomicSettingsRoundTrip();
+    void acceptsSpellingSettings();
     void invalidJsonIsPreserved();
     void rejectsCredentialAndUnknownFields();
     void fileStoreReadsWritesAndWatches();
@@ -61,6 +62,19 @@ void SettingsTest::atomicSettingsRoundTrip()
     QVERIFY(!permissions.testFlag(QFileDevice::ReadGroup));
     QVERIFY(!permissions.testFlag(QFileDevice::ReadOther));
 #endif
+}
+
+void SettingsTest::acceptsSpellingSettings()
+{
+    QTemporaryDir directory;
+    const QString path = directory.filePath(QStringLiteral("settings.json"));
+    SettingsStore store(path);
+    QString error;
+    const QVariantMap settings{{QStringLiteral("spellingEnabled"), false},
+                               {QStringLiteral("spellingLanguage"), QStringLiteral("en_US")}};
+    QVERIFY2(store.replace(settings, &error), qPrintable(error));
+    QCOMPARE(store.load(&error), settings);
+    QVERIFY(error.isEmpty());
 }
 
 void SettingsTest::invalidJsonIsPreserved()

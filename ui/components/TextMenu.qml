@@ -27,9 +27,26 @@ Item {
   // The link under the pointer when it opened, or "" for none.
   property string link: ""
   property int cursorIndex: -1
+  // Spelling, set by the owner before opening. An empty suggestion list with
+  // spellingMisspelled false hides the whole section. spellingPosition is the
+  // UTF-16 offset the suggestions were taken from, kept so a correction still
+  // targets the clicked word if the caret has moved by the time one is picked.
+  property int spellingPosition: -1
+  // The document revision the suggestions were taken from. The owner refuses
+  // a correction when its live revision has moved on, so editing elsewhere
+  // cannot redirect the correction to the same word at a shifted position.
+  property int spellingRevision: -1
+  property string spellingWord: ""
+  property bool spellingMisspelled: false
+  property var spellingSuggestions: []
+  readonly property bool spellingVisible: spellingSuggestions.length > 0 || spellingMisspelled
+  readonly property bool spellingActionsVisible: spellingMisspelled && spellingWord !== ""
   readonly property bool opened: menu.opened
   readonly property bool hasSelection: !!target && String(target.selectedText || "") !== ""
-  readonly property var menuRows: [cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow]
+  readonly property var menuRows: [
+    suggestion0, suggestion1, suggestion2, suggestion3, suggestion4,
+    ignoreRow, addRow, cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow
+  ]
 
   readonly property alias cutRow: cutRow
   readonly property alias copyRow: copyRow
@@ -37,12 +54,17 @@ Item {
   readonly property alias selectAllRow: selectAllRow
   readonly property alias openLinkRow: openLinkRow
   readonly property alias copyLinkRow: copyLinkRow
+  readonly property alias ignoreWordRow: ignoreRow
+  readonly property alias addToDictionaryRow: addRow
 
   signal copyRequested(string text)
   // Paste is the owner's: a compose form tries the clipboard for an image
   // before it pastes text, and only it knows how.
   signal pasteRequested(var target)
   signal openLinkRequested(string url)
+  signal spellingCorrect(string replacement)
+  signal spellingIgnore(string word)
+  signal spellingAddToDictionary(string word)
 
   anchors.fill: parent
   z: 50
@@ -78,6 +100,12 @@ Item {
   function moveCursor(step) { cursorIndex = Menu.nextSelectable(selectableRows(), cursorIndex, step) }
   function runCursor() { if (cursorIndex >= 0) menuRows[cursorIndex].activated() }
   function close() { menu.close() }
+
+  function chooseSuggestion(index) {
+    var replacement = String(root.spellingSuggestions[index] || "")
+    menu.close()
+    if (replacement !== "") root.spellingCorrect(replacement)
+  }
 
   function copySelection() {
     var text = hasSelection ? String(target.selectedText) : ""
@@ -132,6 +160,58 @@ Item {
         }
       }
 
+      MenuRow {
+        id: suggestion0
+        visible: root.spellingSuggestions.length > 0
+        text: String(root.spellingSuggestions[0] || "")
+        onActivated: root.chooseSuggestion(0)
+      }
+      MenuRow {
+        id: suggestion1
+        visible: root.spellingSuggestions.length > 1
+        text: String(root.spellingSuggestions[1] || "")
+        onActivated: root.chooseSuggestion(1)
+      }
+      MenuRow {
+        id: suggestion2
+        visible: root.spellingSuggestions.length > 2
+        text: String(root.spellingSuggestions[2] || "")
+        onActivated: root.chooseSuggestion(2)
+      }
+      MenuRow {
+        id: suggestion3
+        visible: root.spellingSuggestions.length > 3
+        text: String(root.spellingSuggestions[3] || "")
+        onActivated: root.chooseSuggestion(3)
+      }
+      MenuRow {
+        id: suggestion4
+        visible: root.spellingSuggestions.length > 4
+        text: String(root.spellingSuggestions[4] || "")
+        onActivated: root.chooseSuggestion(4)
+      }
+      MenuSeparatorLine {
+        visible: root.spellingVisible
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
+      MenuRow {
+        id: ignoreRow
+        visible: root.spellingActionsVisible
+        text: "Ignore for this session"
+        onActivated: { var word = root.spellingWord; menu.close(); root.spellingIgnore(word) }
+      }
+      MenuRow {
+        id: addRow
+        visible: root.spellingActionsVisible
+        text: "Add to dictionary"
+        onActivated: { var word = root.spellingWord; menu.close(); root.spellingAddToDictionary(word) }
+      }
+      MenuSeparatorLine {
+        visible: root.spellingVisible
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
       MenuRow {
         id: cutRow
         visible: root.editable
