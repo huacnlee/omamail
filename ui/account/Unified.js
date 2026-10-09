@@ -246,6 +246,26 @@ function sourceIdOf(id) {
   return splitUnifiedId(id).id
 }
 
+// Ticked merged rows as one batch per mailbox: each account with the ids it
+// issued, in the order its first row was ticked. A batch is one mailbox's
+// request, so a selection spanning two of them is two batches. An id that
+// names no account is dropped rather than guessed at.
+function groupByAccount(ids) {
+  var values = Array.isArray(ids) ? ids : []
+  var groups = []
+  var at = ({})
+  for (var i = 0; i < values.length; i++) {
+    var parts = splitUnifiedId(values[i])
+    if (parts.accountId === "") continue
+    if (!(parts.accountId in at)) {
+      at[parts.accountId] = groups.length
+      groups.push({ accountId: parts.accountId, ids: [] })
+    }
+    groups[at[parts.accountId]].ids.push(parts.id)
+  }
+  return groups
+}
+
 // The row itself, for the reader: a merged row carries the account it came
 // from and the account's own copy does not.
 function rowOf(messages, id) {
