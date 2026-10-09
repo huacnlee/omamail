@@ -115,6 +115,30 @@ async fn lists_unread_from_the_top_in_steps_of_100() {
 }
 
 #[tokio::test]
+async fn gmail_clears_every_category_of_the_inbox() {
+    // Gmail's Unread mailbox leaves Promotions, Social and Forums out; clearing
+    // the Inbox must not.
+    let (list, seen) = page(&[]);
+    let effects = Arc::new(Effects::default());
+    let request = ClearUnreadRequest {
+        account: Account {
+            id: "gmail:me@example.org".into(),
+            provider: Provider::Gmail,
+        },
+        execute: true,
+    };
+    step(
+        &request,
+        &list,
+        &lookup(json!({}), &[], effects),
+        &PartialMutation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(seen.lock().unwrap()[0]["query"], "in:inbox is:unread");
+}
+
+#[tokio::test]
 async fn marks_listed_ids_and_reports_progress() {
     let (list, _) = page(&["e1", "e2"]);
     let effects = Arc::new(Effects::default());

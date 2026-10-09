@@ -1,9 +1,10 @@
-//! Mark an account's Unread mailbox read, one bounded step per call.
+//! Mark every unread message in an account's Inbox read, one bounded step per
+//! call.
 //!
-//! A step lists the first page of Unread and marks those messages read through
-//! the same planner and mutation `mail.act` uses. It takes no page token: a
-//! message marked read leaves the query, so the next step's first page is the
-//! next messages. A message the provider refuses stays and is listed again,
+//! A step lists the first page of the Inbox's unread messages and marks them
+//! read through the same planner and mutation `mail.act` uses. It takes no page
+//! token: a message marked read leaves the query, so the next step's first page
+//! is the next messages. A message the provider refuses stays and is listed again,
 //! but the rest of its page still advances; when a step confirms nothing, it
 //! reports a stall instead of letting the caller list the same page forever.
 //!
@@ -16,7 +17,7 @@
 //! always do and the step keeps the IDs.
 use super::action::{ActionLookup, ActionMutation, dry_run_result, execute_action, plan_action};
 use super::list::provider_query;
-use super::{Account, ActRequest, ClearUnreadRequest, Mailbox};
+use super::{Account, ActRequest, ClearUnreadRequest, Mailbox, Provider};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
@@ -33,13 +34,27 @@ pub(crate) trait UnreadIds: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, &'static str>> + Send + 'a>>;
 }
 
+/// Every unread message in the Inbox. Gmail's Unread mailbox leaves the noisy
+/// categories out, so Gmail gets the Inbox with `is:unread`; every other
+/// provider's Unread mailbox already is the Inbox's unread messages.
+fn inbox_unread_query(account: &Account) -> Result<String, &'static str> {
+    if account.provider == Provider::Gmail {
+        Ok(format!(
+            "{} is:unread",
+            provider_query(account, Mailbox::Inbox, "")?
+        ))
+    } else {
+        provider_query(account, Mailbox::Unread, "")
+    }
+}
+
 pub(crate) async fn step(
     request: &ClearUnreadRequest,
     lister: &impl UnreadIds,
     lookup: &impl ActionLookup,
     mutation: &impl ActionMutation,
 ) -> Result<Value, &'static str> {
-    let query = provider_query(&request.account, Mailbox::Unread, "")?;
+    let query = inbox_unread_query(&request.account)?;
     let ids = lister
         .unread_ids(&request.account, query, STEP_SIZE)
         .await?;
