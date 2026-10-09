@@ -175,7 +175,9 @@ Item {
         // is what you are looking at, not every message the mailbox holds.
         text: "Mark these read"
         suffix: root.loadedUnreadSuffix
-        enabled: root.signedIn
+        // With its count shown, a row that would mark nothing is disabled,
+        // like the one below it.
+        enabled: root.signedIn && (!root.clearUnread || root.clearUnread.loadedUnread > 0)
         onActivated: { menu.close(); root.markAllReadRequested() }
       }
       MenuRow {
