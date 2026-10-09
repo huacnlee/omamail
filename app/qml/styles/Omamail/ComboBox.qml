@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import qs.Commons
+import qs.Commons as Commons
 
 // The shell's Dropdown, drawn here: a platform ComboBox brings its own
 // up/down arrows and its own type size, which read as a foreign control in a
@@ -87,9 +88,9 @@ T.ComboBox {
     }
 
     background: Rectangle {
-      color: Color.popups.background
+      color: Commons.Color.popups.background
       border.width: 1
-      border.color: Color.popups.border
+      border.color: Commons.Color.popups.border
       radius: Style.cornerRadius
     }
   }

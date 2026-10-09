@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
@@ -10,8 +11,8 @@ Item {
   property bool interactive: true
   property bool cursorRing: false
   property bool hasCursor: false
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   signal toggled()
 
   onCheckedChanged: {
@@ -28,7 +29,7 @@ Item {
     checked: root.checked
     enabled: root.interactive && !root.busy
     focusPolicy: root.interactive ? Qt.StrongFocus : Qt.NoFocus
-    palette.window: Color.background
+    palette.window: Commons.Color.background
     palette.windowText: root.foreground
     palette.highlight: root.accent
     onToggled: {
@@ -53,7 +54,7 @@ Item {
     height: parent.height
     running: root.busy
     visible: running
-    palette.window: Color.background
+    palette.window: Commons.Color.background
     palette.windowText: root.foreground
     palette.highlight: root.accent
   }

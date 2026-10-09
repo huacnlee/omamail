@@ -3,6 +3,7 @@ import QtTest
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "../../../ui" as Omamail
 import "../../../ui/components" as Components
@@ -99,7 +100,7 @@ TestCase {
     visible: false
     Button { id: button; text: "Save"; tooltipText: "Save help" }
     TextField { id: textField; password: true }
-    BorderSurface { id: surface; borderSpec: Border.controlSpec("normal", Color.foreground, Color.accent) }
+    BorderSurface { id: surface; borderSpec: Border.controlSpec("normal", Commons.Color.foreground, Commons.Color.accent) }
     NumberField { id: numberField; label: "Count"; from: 1; to: 10; value: 4 }
     PanelActionButton { id: actionButton; iconText: "+" }
     PanelSeparator { id: separator }
@@ -113,17 +114,17 @@ TestCase {
     host.reset()
     Quickshell.nativeHost = host
     Quickshell.fileStore = host
-    Color.reload()
+    Commons.Color.reload()
   }
 
   function test_panel_tooltip_uses_shared_hover_delay() {
     compare(toolTip.delay, Style.tooltipDelay)
-    compare(String(toolTip.palette.window), String(Color.popups.background))
-    compare(String(toolTip.palette.windowText), String(Color.popups.text))
+    compare(String(toolTip.palette.window), String(Commons.Color.popups.background))
+    compare(String(toolTip.palette.windowText), String(Commons.Color.popups.text))
   }
 
   function test_tooltip_draws_an_opaque_nonzero_surface_behind_its_text() {
-    Color.applySystemAppearance("light")
+    Commons.Color.applySystemAppearance("light")
     toolTip.visible = true
     tryCompare(toolTip, "opened", true, Style.tooltipDelay + 1000)
     verify(toolTip.width > toolTip.contentItem.implicitWidth)
@@ -134,8 +135,8 @@ TestCase {
     compare(toolTip.background.opacity, 1)
     compare(toolTip.background.color.a, 1)
     verify(toolTip.background.z < toolTip.contentItem.z)
-    compare(String(toolTip.background.color), String(Color.popups.background))
-    compare(String(toolTip.background.color), String(Color.background))
+    compare(String(toolTip.background.color), String(Commons.Color.popups.background))
+    compare(String(toolTip.background.color), String(Commons.Color.background))
     toolTip.visible = false
     tryCompare(toolTip, "opened", false)
   }
@@ -169,17 +170,17 @@ TestCase {
   }
 
   function test_semantic_theme_comes_from_a_valid_system_palette() {
-    verify(Color.foreground.valid)
-    verify(Color.background.valid)
-    verify(Color.accent.valid)
-    verify(Color.urgent.valid)
-    verify(Color.popups.background.valid)
-    compare(String(Color.popups.background), String(Color.background))
-    verify(Color.popups.border.valid)
+    verify(Commons.Color.foreground.valid)
+    verify(Commons.Color.background.valid)
+    verify(Commons.Color.accent.valid)
+    verify(Commons.Color.urgent.valid)
+    verify(Commons.Color.popups.background.valid)
+    compare(String(Commons.Color.popups.background), String(Commons.Color.background))
+    verify(Commons.Color.popups.border.valid)
     verify(Style.normalBorderColor.valid)
     verify(Style.selectedAccentFill.valid)
     verify(Style.space(8) > 0)
-    verify(Style.mutedColorFor(Color.foreground, Color.background).valid)
+    verify(Style.mutedColorFor(Commons.Color.foreground, Commons.Color.background).valid)
     compare(Style.cornerRadius, 0)
     compare(Style.font.body, 12)
     compare(Style.font.caption, 10)
@@ -211,9 +212,9 @@ TestCase {
       "/fixture/home/.config/omarchy/current/theme/colors.toml":
         "background='#ffffff'\nforeground='#000000'\naccent='#abcdef'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
     })
-    verify(Color.reload())
-    compare(String(Color.background), "#111111")
-    compare(String(Color.accent), "#123456")
+    verify(Commons.Color.reload())
+    compare(String(Commons.Color.background), "#111111")
+    compare(String(Commons.Color.accent), "#123456")
   }
 
   function test_legacy_theme_is_used_only_without_state_current() {
@@ -221,9 +222,9 @@ TestCase {
       "/fixture/home/.config/omarchy/current/theme/colors.toml":
         "background='#ffffff'\nforeground='#000000'\naccent='#205ea6'\nred='#af3029'\nyellow='#855b00'\ngreen='#526600'"
     })
-    verify(Color.reload())
-    compare(String(Color.background), "#ffffff")
-    compare(String(Color.accent), "#205ea6")
+    verify(Commons.Color.reload())
+    compare(String(Commons.Color.background), "#ffffff")
+    compare(String(Commons.Color.accent), "#205ea6")
   }
 
   function test_invalid_current_theme_falls_back_atomically() {
@@ -233,70 +234,70 @@ TestCase {
       "/fixture/home/.config/omarchy/current/theme/colors.toml":
         "background='#ffffff'\nforeground='#000000'\naccent='#abcdef'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
     })
-    Color.applySystemAppearance("dark")
-    verify(!Color.reload())
-    compare(String(Color.background), "#1a1b26")
-    compare(String(Color.foreground), "#a9b1d6")
-    compare(String(Color.accent), "#7aa2f7")
-    compare(String(Color.urgent), "#f7768e")
+    Commons.Color.applySystemAppearance("dark")
+    verify(!Commons.Color.reload())
+    compare(String(Commons.Color.background), "#1a1b26")
+    compare(String(Commons.Color.foreground), "#a9b1d6")
+    compare(String(Commons.Color.accent), "#7aa2f7")
+    compare(String(Commons.Color.urgent), "#f7768e")
   }
 
 
   function test_system_scheme_switches_complete_fallback_but_not_omarchy_theme() {
     host.files = ({})
-    Color.reload()
-    verify(!Color.hasOmarchyTheme)
-    verify(Color.applySystemAppearance("light"))
-    compare(Color.dark, false)
-    compare(String(Color.background), "#fffcf0")
-    compare(String(Color.foreground), "#100f0f")
-    compare(String(Color.accent), "#205ea6")
-    compare(String(Color.surface), "#f2f0e5")
-    compare(String(Color.inset), "#e6e4d9")
-    compare(String(Color.border), "#b7b5ac")
+    Commons.Color.reload()
+    verify(!Commons.Color.hasOmarchyTheme)
+    verify(Commons.Color.applySystemAppearance("light"))
+    compare(Commons.Color.dark, false)
+    compare(String(Commons.Color.background), "#fffcf0")
+    compare(String(Commons.Color.foreground), "#100f0f")
+    compare(String(Commons.Color.accent), "#205ea6")
+    compare(String(Commons.Color.surface), "#f2f0e5")
+    compare(String(Commons.Color.inset), "#e6e4d9")
+    compare(String(Commons.Color.border), "#b7b5ac")
 
-    verify(Color.applySystemAppearance("dark"))
-    compare(Color.dark, true)
-    compare(String(Color.background), "#1a1b26")
+    verify(Commons.Color.applySystemAppearance("dark"))
+    compare(Commons.Color.dark, true)
+    compare(String(Commons.Color.background), "#1a1b26")
 
     var path = "/fixture/home/.local/state/omarchy/current/theme/colors.toml"
     host.files[path] =
       "mode='light'\nbackground='#ffffff'\nforeground='#111111'\naccent='#123456'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
-    verify(Color.reload())
-    verify(Color.hasOmarchyTheme)
-    compare(String(Color.accent), "#123456")
-    verify(!Color.applySystemAppearance("dark"))
-    compare(String(Color.accent), "#123456")
-    compare(Color.dark, false)
+    verify(Commons.Color.reload())
+    verify(Commons.Color.hasOmarchyTheme)
+    compare(String(Commons.Color.accent), "#123456")
+    verify(!Commons.Color.applySystemAppearance("dark"))
+    compare(String(Commons.Color.accent), "#123456")
+    compare(Commons.Color.dark, false)
   }
 
   function test_preferred_appearance_overrides_the_desktop_but_not_omarchy() {
     host.files = ({})
-    Color.preferredAppearance = ""
-    Color.reload()
-    verify(!Color.hasOmarchyTheme)
-    Color.preferredAppearance = "dark"
-    compare(Color.dark, true)
-    compare(String(Color.background), "#1a1b26")
-    Color.preferredAppearance = "light"
-    compare(Color.dark, false)
-    compare(String(Color.background), "#fffcf0")
+    Commons.Color.preferredAppearance = ""
+    Commons.Color.reload()
+    verify(!Commons.Color.hasOmarchyTheme)
+    Commons.Color.preferredAppearance = "dark"
+    compare(Commons.Color.dark, true)
+    compare(String(Commons.Color.background), "#1a1b26")
+    Commons.Color.preferredAppearance = "light"
+    compare(Commons.Color.dark, false)
+    compare(String(Commons.Color.background), "#fffcf0")
     // The desktop's scheme only decides when nothing is preferred.
-    verify(Color.applySystemAppearance("dark"))
-    compare(Color.dark, true)
-    compare(Color.fallbackAppearance(), "light")
-    Color.reload()
-    compare(Color.dark, false)
+    verify(Commons.Color.applySystemAppearance("dark"))
+    compare(Commons.Color.dark, true)
+    compare(Commons.Color.fallbackAppearance(), "light")
+    Commons.Color.reload()
+    compare(Commons.Color.dark, false)
 
     var path = "/fixture/home/.local/state/omarchy/current/theme/colors.toml"
     host.files[path] =
       "mode='dark'\nbackground='#010203'\nforeground='#fefefe'\naccent='#123456'\nred='#990000'\nyellow='#996600'\ngreen='#006600'"
-    verify(Color.reload())
-    verify(Color.hasOmarchyTheme)
-    Color.preferredAppearance = "light"
-    compare(Color.dark, true)
-    compare(String(Color.background), "#010203")
-    Color.preferredAppearance = ""
+    verify(Commons.Color.reload())
+    verify(Commons.Color.hasOmarchyTheme)
+    Commons.Color.preferredAppearance = "light"
+    compare(Commons.Color.dark, true)
+    compare(String(Commons.Color.background), "#010203")
+    Commons.Color.preferredAppearance = ""
   }
 
   function test_theme_change_reloads_the_active_palette() {
@@ -304,14 +305,14 @@ TestCase {
     host.files = ({})
     host.files[path] =
       "background='#111111'\nforeground='#eeeeee'\naccent='#123456'\nred='#cc3333'\nyellow='#cccc33'\ngreen='#33cc33'"
-    verify(Color.reload())
+    verify(Commons.Color.reload())
     verify(host.watched[path])
 
     host.files[path] =
       "background='#222222'\nforeground='#ffffff'\naccent='#654321'\nred='#dd4444'\nyellow='#dddd44'\ngreen='#44dd44'"
     host.changed(path)
-    compare(String(Color.background), "#222222")
-    compare(String(Color.accent), "#654321")
+    compare(String(Commons.Color.background), "#222222")
+    compare(String(Commons.Color.accent), "#654321")
   }
 
   function test_shell_theme_and_user_override_apply_atomically() {
@@ -329,16 +330,16 @@ TestCase {
       "[font]\nbase-size=16\n[spacing]\ncontrol-height=38\n"
       + "[controls]\nnormal-fill-alpha=0.2"
 
-    verify(Color.reload())
+    verify(Commons.Color.reload())
     compare(Style.font.body, 17)
     compare(Style.font.caption, 13)
     compare(Style.spacing.controlHeight, 38)
     compare(Style.space(10), 15)
-    fuzzyCompare(Style.normalFillFor(Color.foreground, Color.accent).a, 0.2, 0.001)
-    compare(String(Style.selectedStateColor(Color.foreground, Color.accent)), "#336699")
-    compare(String(Color.popups.text), "#336699")
-    fuzzyCompare(Color.popups.background.a, 0.8, 0.001)
-    fuzzyCompare(Color.popups.border.a, 0.3, 0.001)
+    fuzzyCompare(Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent).a, 0.2, 0.001)
+    compare(String(Style.selectedStateColor(Commons.Color.foreground, Commons.Color.accent)), "#336699")
+    compare(String(Commons.Color.popups.text), "#336699")
+    fuzzyCompare(Commons.Color.popups.background.a, 0.8, 0.001)
+    fuzzyCompare(Commons.Color.popups.border.a, 0.3, 0.001)
     verify(host.watched[themeRoot + "/shell.toml"])
     verify(host.watched[userShell])
   }
@@ -351,7 +352,7 @@ TestCase {
       "background='#101010'\nforeground='#eeeeee'\naccent='#336699'\nred='#cc3333'\nyellow='#cccc33'\ngreen='#33cc33'"
     host.files[themeRoot + "/shell.toml"] = "[font]\nbase-size=14\n[spacing]\ncontrol-height=30"
     host.files[userShell] = "[font]\nbase-size=18\n[spacing]\ncontrol-height=44"
-    verify(Color.reload())
+    verify(Commons.Color.reload())
     compare(Style.font.body, 18)
     compare(Style.spacing.controlHeight, 44)
 
