@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // A drawn icon on the kit's shared hover/cursor surface. qs.Ui's
@@ -10,9 +11,9 @@ Item {
 
   property string iconName: ""
   property string tooltipText: ""
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property color hoverColor: foreground
-  property color accent: Color.accent
+  property color accent: Commons.Color.accent
   property bool filled: false
   property bool hasCursor: false
   // Held down for as long as a menu this button opened is on screen. A trigger

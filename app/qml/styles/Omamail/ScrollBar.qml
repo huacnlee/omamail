@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import qs.Commons
+import qs.Commons as Commons
 
 T.ScrollBar {
   id: control
@@ -19,10 +20,10 @@ T.ScrollBar {
     implicitHeight: control.interactive ? Style.space(8) : Style.space(3)
     radius: Style.cornerRadius
     color: control.pressed
-      ? Style.pressedFillFor(Color.foreground, Color.accent)
+      ? Style.pressedFillFor(Commons.Color.foreground, Commons.Color.accent)
       : (control.hovered
-        ? Style.selectedFillFor(Color.foreground, Color.accent)
-        : Style.hoverFillFor(Color.foreground, Color.accent))
+        ? Style.selectedFillFor(Commons.Color.foreground, Commons.Color.accent)
+        : Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent))
     opacity: control.policy === T.ScrollBar.AlwaysOn
       || (control.active && control.size < 1.0) ? 1 : 0
 
@@ -33,6 +34,6 @@ T.ScrollBar {
     visible: control.policy === T.ScrollBar.AlwaysOn
       || (control.active && control.size < 1.0)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(Color.foreground, Color.accent)
+    color: Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent)
   }
 }

@@ -1,20 +1,21 @@
 import QtQuick
 import QtQuick.Controls.Basic as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 QQC.TextField {
   id: root
 
   property bool password: false
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property real verticalPadding: Style.spacing.inputPaddingY
   property real horizontalPadding: Style.spacing.controlPaddingX
 
   color: foreground
   selectionColor: Style.selectionFillFor(foreground, accent)
   selectedTextColor: foreground
-  placeholderTextColor: Style.mutedColorFor(foreground, Color.background)
+  placeholderTextColor: Style.mutedColorFor(foreground, Commons.Color.background)
   echoMode: password ? TextInput.Password : TextInput.Normal
   topPadding: verticalPadding
   bottomPadding: verticalPadding
