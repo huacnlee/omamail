@@ -16,6 +16,9 @@ Item {
       property string name: ""
       property string accountId: name
       property bool ready: true
+      property string mailboxKey: "inbox"
+      property bool viewingSearch: false
+      property string defaultQuery: "in:inbox"
       // The Inbox's exact unread count, or null when it cannot be read.
       property var inboxCount: 1
       property var messages: []
@@ -149,6 +152,7 @@ Item {
     }
 
     function test_available_needs_a_ready_api_7_backend() {
+      service.current = host("perso", result(1))
       queue.service = service
       verify(queue.available)
       service.backend = { ready: true, apiVersion: 6 }
@@ -156,13 +160,37 @@ Item {
       service.backend = { ready: false, apiVersion: 7 }
       verify(!queue.available)
       service.backend = { ready: true, apiVersion: 7 }
+      service.current = null
+      verify(!queue.available, "no mailbox to clear")
+      service.current = host("perso", result(1))
       service.mailboxKey = "unread"
       verify(queue.available, "the Unread tab is part of the Inbox")
       service.mailboxKey = "starred"
       verify(!queue.available, "outside the Inbox, clearing it would not be what the view shows")
-      service.current = host("perso", result(1))
       verify(!queue.start(), "nothing starts without the step")
       compare(recorder.names.length, 0)
+    }
+
+    function test_hidden_when_a_search_label_or_custom_query_narrows_the_view() {
+      service.current = host("perso", result(1))
+      queue.service = service
+      verify(queue.available)
+      service.current.viewingSearch = true
+      verify(!queue.available, "a search or a label lists more than the Inbox")
+      service.current.viewingSearch = false
+      service.current.defaultQuery = "in:inbox -label:newsletters"
+      verify(!queue.available, "a custom Inbox query is not the Inbox the step clears")
+      service.current.defaultQuery = ""
+      verify(queue.available)
+    }
+
+    function test_unified_view_needs_every_mailbox_on_the_inbox() {
+      service.unified = true
+      service.hosts = [host("perso", result(1)), host("work", result(1))]
+      queue.service = service
+      verify(queue.available)
+      service.hosts[1].viewingSearch = true
+      verify(!queue.available)
     }
 
     function test_start_runs_the_mailbox_on_screen() {

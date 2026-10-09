@@ -25,11 +25,21 @@ QtObject {
   signal finished(var total)
 
   // The backend step this repeats arrived in API 7. It clears the Inbox, so
-  // it is offered only where the list shown is the Inbox or part of it; on a
-  // label or Starred it would clear something other than what is on screen.
+  // it is offered only where every mailbox in view lists the Inbox or part of
+  // it; on a label, a search or Starred it would clear something other than
+  // what is on screen, and "all" could count fewer than "these".
   readonly property bool available: !!service && !!service.backend
     && service.backend.ready === true && service.backend.apiVersion >= 7
     && (service.mailboxKey === "inbox" || service.mailboxKey === "unread")
+    && hostsInView().length > 0 && hostsInView().every(showsInbox)
+
+  // Inbox or Unread, not narrowed by a search or a label, and with no custom
+  // default query standing in for the Inbox's own.
+  function showsInbox(host) {
+    var custom = String(host.defaultQuery || "")
+    return (host.mailboxKey === "inbox" || host.mailboxKey === "unread")
+      && host.viewingSearch !== true && (custom === "" || custom === "in:inbox")
+  }
   // What "Mark these read" would change, for its count in the menu.
   readonly property int loadedUnread: {
     if (!service) return 0
