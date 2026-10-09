@@ -1,10 +1,10 @@
 import QtQuick
 import "Model.js" as Model
 
-// "Mark all read..." over the mailboxes on screen: the mailbox shown, or each
-// signed-in one with something unread in the merged view. They run one after
-// another, so the status line counts one run, and every mailbox gets its turn
-// even when an earlier one fails. The first error is the one reported.
+// "Mark all read...": every unread message in the Inbox of the mailbox shown,
+// or of each signed-in one in the merged view. They run one after another, so
+// the status line counts one run, and every mailbox gets its turn even when
+// an earlier one fails. The first error is the one reported.
 //
 // The service owns this for the shell's lifetime, so a run carries on after
 // the window closes. Everything the window reads about the action is here,
@@ -16,12 +16,20 @@ QtObject {
   property bool running: false
   // Messages marked so far across every mailbox in this run.
   property int cleared: 0
+  // Each mailbox's Inbox unread count by account id, read when the menu
+  // opens: a number, or null when that mailbox could not say.
+  property var counts: ({})
+  property bool counting: false
+  property int countEpoch: 0
 
   signal finished(var total)
 
-  // The backend step this repeats arrived in API 7.
+  // The backend step this repeats arrived in API 7. It clears the Inbox, so
+  // it is offered only where the list shown is the Inbox or part of it; on a
+  // label or Starred it would clear something other than what is on screen.
   readonly property bool available: !!service && !!service.backend
     && service.backend.ready === true && service.backend.apiVersion >= 7
+    && (service.mailboxKey === "inbox" || service.mailboxKey === "unread")
   // What "Mark these read" would change, for its count in the menu.
   readonly property int loadedUnread: {
     if (!service) return 0
@@ -30,23 +38,52 @@ QtObject {
     service.eachHost(function(host) { total += Model.loadedUnreadCount(host.messages) })
     return total
   }
-  readonly property int unread: service ? service.inboxUnread : 0
-  // One line per mailbox the confirmation names.
+  // One line per mailbox the confirmation names, from the counts.
   readonly property var lines: {
     if (!service) return []
     var current = service.current
     var summaries = service.accountSummaries || []
     return Model.clearUnreadLines(service.unified ? summaries : summaries.filter(function(summary) {
       return !!current && summary.id === current.accountId
-    }))
+    }), counts)
+  }
+  // How many messages a run will mark, or -1 while counting or unknown.
+  readonly property int unread: counting ? -1 : Model.clearUnreadTotal(lines)
+
+  // The mailboxes in view that can be reached.
+  function hostsInView() {
+    var hosts = []
+    if (!service) return hosts
+    if (service.unified) service.eachHost(function(host) { if (host.ready) hosts.push(host) })
+    else if (service.current && service.current.ready) hosts.push(service.current)
+    return hosts
+  }
+
+  // Ask each mailbox in view for its Inbox unread count. A later call
+  // supersedes an earlier one still answering.
+  function refreshCounts() {
+    var hosts = hostsInView()
+    var epoch = ++countEpoch
+    counts = ({})
+    counting = hosts.length > 0
+    var pending = hosts.length
+    hosts.forEach(function(host) {
+      var id = String(host.accountId || "")
+      host.countInboxUnread(function(value) {
+        if (epoch !== root.countEpoch) return
+        var next = Object.assign({}, root.counts)
+        next[id] = value
+        root.counts = next
+        if (--pending === 0) root.counting = false
+      })
+    })
   }
 
   function start() {
     if (!available) return false
-    var hosts = []
-    if (service.unified) service.eachHost(function(host) { if (host.ready && host.inboxUnread > 0) hosts.push(host) })
-    else if (service.current) hosts.push(service.current)
-    return run(hosts)
+    // Skip only a mailbox known to have nothing; one whose count failed
+    // still gets its run.
+    return run(hostsInView().filter(function(host) { return root.counts[String(host.accountId || "")] !== 0 }))
   }
 
   // `hosts` answer `clearUnread(onProgress, onDone)`, returning false when

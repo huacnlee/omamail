@@ -129,17 +129,6 @@ Item {
         font.pixelSize: Style.font.bodySmall
         wrapMode: Text.Wrap
       }
-      Text {
-        objectName: "clear-unread-extra"
-        width: parent.width
-        visible: text !== ""
-        textFormat: Text.PlainText
-        text: String(root.request && root.request.extra || "")
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.Wrap
-      }
       Flow {
         width: parent.width
         spacing: Style.space(8)

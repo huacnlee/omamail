@@ -16,8 +16,13 @@ Item {
       property string name: ""
       property string accountId: name
       property bool ready: true
-      property int inboxUnread: 1
+      // The Inbox's exact unread count, or null when it cannot be read.
+      property var inboxCount: 1
       property var messages: []
+      function countInboxUnread(callback) {
+        var value = inboxCount
+        Qt.callLater(function() { callback(value) })
+      }
       // {marked, failed, stalled, limited, error} to finish with, or null to
       // refuse the start the way a busy mailbox does.
       property var outcome: null
@@ -49,6 +54,7 @@ Item {
     property var current: null
     property var hosts: []
     property var backend: ({ ready: true, apiVersion: 7 })
+    property string mailboxKey: "inbox"
     property var accountSummaries: []
     property int inboxUnread: 0
     property var notes: []
@@ -79,6 +85,7 @@ Item {
       service.current = null
       service.hosts = []
       service.backend = { ready: true, apiVersion: 7 }
+      service.mailboxKey = "inbox"
       service.accountSummaries = []
       service.notes = []
       queue.service = null
@@ -148,6 +155,11 @@ Item {
       verify(!queue.available, "an older backend has no clear-unread step")
       service.backend = { ready: false, apiVersion: 7 }
       verify(!queue.available)
+      service.backend = { ready: true, apiVersion: 7 }
+      service.mailboxKey = "unread"
+      verify(queue.available, "the Unread tab is part of the Inbox")
+      service.mailboxKey = "starred"
+      verify(!queue.available, "outside the Inbox, clearing it would not be what the view shows")
       service.current = host("perso", result(1))
       verify(!queue.start(), "nothing starts without the step")
       compare(recorder.names.length, 0)
@@ -162,18 +174,49 @@ Item {
       compare(JSON.stringify(recorder.names), JSON.stringify(["perso"]))
     }
 
-    function test_start_in_the_unified_view_takes_signed_in_mailboxes_with_unread() {
+    function test_start_in_the_unified_view_skips_empty_and_signed_out_mailboxes() {
       service.unified = true
       service.hosts = [
-        host("perso", result(3), { inboxUnread: 3 }),
-        host("empty", result(1), { inboxUnread: 0 }),
-        host("signed-out", result(1), { inboxUnread: 9, ready: false }),
-        host("work", result(2), { inboxUnread: 2 })
+        host("perso", result(3), { inboxCount: 3 }),
+        host("empty", result(1), { inboxCount: 0 }),
+        host("signed-out", result(1), { inboxCount: 9, ready: false }),
+        host("lost", result(2), { inboxCount: null })
       ]
       queue.service = service
+      queue.refreshCounts()
+      tryCompare(queue, "counting", false)
       verify(queue.start())
       tryCompare(finished, "count", 1)
-      compare(JSON.stringify(recorder.names), JSON.stringify(["perso", "work"]))
+      compare(JSON.stringify(recorder.names), JSON.stringify(["perso", "lost"]),
+        "a mailbox whose count failed still gets its run")
+    }
+
+    function test_counts_are_exact_and_summed() {
+      service.unified = true
+      service.hosts = [host("perso", null, { inboxCount: 234 }), host("work", null, { inboxCount: 2020 })]
+      service.accountSummaries = [
+        { id: "perso", label: "perso", signedIn: true },
+        { id: "work", label: "work", signedIn: true }
+      ]
+      queue.service = service
+      queue.refreshCounts()
+      verify(queue.counting)
+      compare(queue.unread, -1, "no number while counting")
+      tryCompare(queue, "counting", false)
+      compare(queue.unread, 2254, "past 500 too")
+      compare(queue.lines.length, 2)
+      compare(queue.lines[1].count, "2020")
+    }
+
+    function test_an_unknown_count_hides_the_total() {
+      service.current = host("perso", null, { inboxCount: null })
+      service.hosts = [service.current]
+      service.accountSummaries = [{ id: "perso", label: "perso", signedIn: true }]
+      queue.service = service
+      queue.refreshCounts()
+      tryCompare(queue, "counting", false)
+      compare(queue.unread, -1)
+      compare(queue.lines[0].count, "?")
     }
 
     function test_notes_show_progress_then_the_result() {
@@ -196,16 +239,21 @@ Item {
     }
 
     function test_lines_follow_the_view() {
-      service.current = host("perso", null)
+      service.current = host("perso", null, { inboxCount: 234 })
+      service.hosts = [service.current, host("work", null, { inboxCount: 600 })]
       service.accountSummaries = [
-        { id: "perso", label: "perso", unread: 234, signedIn: true },
-        { id: "work", label: "work", unread: 500, signedIn: true }
+        { id: "perso", label: "perso", signedIn: true },
+        { id: "work", label: "work", signedIn: true }
       ]
       queue.service = service
-      compare(JSON.stringify(queue.lines), JSON.stringify([{ label: "perso", count: "234", capped: false }]))
+      queue.refreshCounts()
+      tryCompare(queue, "counting", false)
+      compare(JSON.stringify(queue.lines), JSON.stringify([{ label: "perso", count: "234", known: true }]))
       service.unified = true
+      queue.refreshCounts()
+      tryCompare(queue, "counting", false)
       compare(queue.lines.length, 2)
-      compare(queue.lines[1].count, "500 or more")
+      compare(queue.lines[1].count, "600")
     }
   }
 }

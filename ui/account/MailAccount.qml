@@ -1994,10 +1994,11 @@ Item {
     return runNativeAction([], "markRead", false, false, true)
   }
 
-  // "Mark all read...": every message the Unread tab counts, not only the
-  // loaded rows. ClearUnread.qml repeats the backend's step until Unread is
-  // empty; `onProgress(marked)` follows it and `onDone(total)` ends it.
+  // "Mark all read...": every unread message in the Inbox, not only the
+  // loaded rows. ClearUnread.qml counts them and repeats the backend's step
+  // until none is left; `onProgress(marked)` follows it, `onDone(total)` ends it.
   function clearUnread(onProgress, onDone) { return clearUnreadRun.run(onProgress, onDone) }
+  function countInboxUnread(callback) { clearUnreadRun.countInbox(callback) }
 
   ClearUnread {
     id: clearUnreadRun

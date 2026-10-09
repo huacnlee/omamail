@@ -36,8 +36,8 @@ Item {
     function init() {
       confirmed.clear()
       dialog.openFor(Model.clearUnreadConfirmation([
-        { label: "perso", count: "234", capped: false },
-        { label: "work", count: "500 or more", capped: true }
+        { label: "perso", count: "234", known: true },
+        { label: "work", count: "2020", known: true }
       ]))
       tryCompare(dialog, "opened", true)
     }
@@ -72,12 +72,12 @@ Item {
       compare(confirmed.count, 0)
     }
 
-    function test_names_every_account_and_the_cap() {
+    function test_names_every_account_and_the_exact_total() {
       compare(shown("clear-unread-title").text, "Mark all read in every account?")
-      compare(shown("clear-unread-count-1").text, "500 or more")
       compare(shown("clear-unread-label-0").text, "perso")
-      verify(shown("clear-unread-extra").visible, "the cap is explained")
-      compare(shown("clear-unread-confirm").text, "Mark all read")
+      compare(shown("clear-unread-count-1").text, "2020")
+      compare(shown("clear-unread-confirm").text, "Mark 2254 read")
+      compare(shown("clear-unread-extra"), null, "no cap left to explain")
     }
   }
 }

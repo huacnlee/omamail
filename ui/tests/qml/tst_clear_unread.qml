@@ -33,8 +33,25 @@ Item {
     property var backend: backend
     // The provider client, which owns the wording of its backend's errors.
     property var api: null
+    property string providerId: "gmail"
+    property int inboxUnread: 0
     property int refreshes: 0
     function refresh() { refreshes++ }
+  }
+
+  // A client's mailbox counter, as Gmail, IMAP and JMAP clients expose it.
+  QtObject {
+    id: counter
+    property var asked: []
+    property var answer: ({ unread: 2020 })
+    property var failure: ""
+    property var mailboxList: []
+    function getLabelCounts(id, callback) {
+      asked = asked.concat([id])
+      var reply = answer
+      var error = failure
+      Qt.callLater(function() { callback(error ? null : reply, error) })
+    }
   }
 
   QtObject {
@@ -75,6 +92,12 @@ Item {
       account.accountId = "gmail:ada@example.org"
       account.refreshes = 0
       account.api = null
+      account.providerId = "gmail"
+      account.inboxUnread = 0
+      counter.asked = []
+      counter.answer = { unread: 2020 }
+      counter.failure = ""
+      counter.mailboxList = []
       run.stepLimit = 200
       progress = []
       outcome = null
@@ -149,6 +172,45 @@ Item {
       start()
       finish()
       compare(outcome.error, "a conversation has more messages than one step can mark")
+    }
+
+    function count() {
+      var result = { value: undefined }
+      run.countInbox(function(value) { result.value = value })
+      tryVerify(function() { return result.value !== undefined }, 2000, "the count answers")
+      return result.value
+    }
+
+    function test_counts_the_gmail_and_imap_inbox_label() {
+      account.api = counter
+      compare(count(), 2020, "past 500 too")
+      account.providerId = "outlook"
+      compare(count(), 2020)
+      compare(JSON.stringify(counter.asked), JSON.stringify(["INBOX", "INBOX"]))
+    }
+
+    function test_counts_the_jmap_inbox_by_its_role() {
+      account.api = counter
+      account.providerId = "jmap"
+      counter.mailboxList = [{ id: "m-archive", role: "archive" }, { id: "m-inbox", role: "inbox" }]
+      compare(count(), 2020)
+      compare(JSON.stringify(counter.asked), JSON.stringify(["m-inbox"]))
+    }
+
+    function test_a_count_that_fails_is_unknown() {
+      account.api = counter
+      counter.failure = "gmail_rate_limited"
+      compare(count(), null)
+      account.providerId = "jmap"
+      compare(count(), null, "a JMAP account without an inbox mailbox")
+    }
+
+    function test_hey_uses_its_own_unread_count_below_the_cap() {
+      account.providerId = "hey"
+      account.inboxUnread = 42
+      compare(count(), 42)
+      account.inboxUnread = 500
+      compare(count(), null, "the backend stops counting at 500, so 500 is not a number to show")
     }
 
     function test_step_limit() {

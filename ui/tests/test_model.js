@@ -404,38 +404,37 @@ assert.strictEqual(model.markAllReadNote(3, false), "3 messages marked read")
 assert.strictEqual(model.markAllReadNote(1, true), "1 conversation marked read")
 assert.strictEqual(model.markAllReadNote(1, false), "1 message marked read")
 
-// "Mark these read" counts the loaded rows it will change; "Mark all read..."
-// counts what the Unread tab counts, which the backend stops counting at 500.
+// Each row shows how many messages it will mark: "Mark these read" the loaded
+// rows still unread, "Mark all read..." every unread message in the Inbox, as
+// each mailbox counted it when the menu opened.
 assert.strictEqual(model.loadedUnreadCount([{ unread: true }, { unread: false }, {}, { unread: true }]), 2)
 assert.strictEqual(model.loadedUnreadCount(null), 0)
-assert.strictEqual(model.unreadCountText(499), "499")
-assert.strictEqual(model.unreadCountText(500), "500 or more", "a capped count does not claim a number")
-var clearMessage = "Every message the Unread tab counts. They cannot be marked unread again as a group."
-var perso = { label: "perso", count: "234", capped: false }
-var work = { label: "work", count: "500 or more", capped: true }
-deepEqual(model.clearUnreadLines([
-  { label: "perso", unread: 234, signedIn: true },
-  { label: "work", unread: 500, signedIn: true },
-  { label: "empty", unread: 0, signedIn: true },
-  { label: "signed out", unread: 9, signedIn: false }
-]), [perso, work], "only signed-in mailboxes with something to clear")
-deepEqual(model.clearUnreadLines({ length: 1, 0: { label: "perso", unread: 234, signedIn: true } }), [perso],
+var clearMessage = "Every unread message in the Inbox. They cannot be marked unread again as a group."
+var perso = { label: "perso", count: "234", known: true }
+var work = { label: "work", count: "2020", known: true }
+var lost = { label: "lost", count: "?", known: false }
+var summaries = [
+  { id: "p", label: "perso", signedIn: true },
+  { id: "w", label: "work", signedIn: true },
+  { id: "e", label: "empty", signedIn: true },
+  { id: "o", label: "signed out", signedIn: false },
+  { id: "l", label: "lost", signedIn: true }
+]
+deepEqual(model.clearUnreadLines(summaries, { p: 234, w: 2020, e: 0, o: 9, l: null }), [perso, work, lost],
+  "signed-in mailboxes with something to clear, and the ones whose count failed")
+deepEqual(model.clearUnreadLines({ length: 1, 0: summaries[0] }, { p: 234 }), [perso],
   "summaries read back through a QML property may be array-like")
-assert.strictEqual(model.clearUnreadConfirmation({ length: 1, 0: perso }).action, "Mark 234 read")
+assert.strictEqual(model.clearUnreadTotal([perso, work]), 2254)
+assert.strictEqual(model.clearUnreadTotal([perso, lost]), -1, "an unknown count makes the total unknown")
+assert.strictEqual(model.clearUnreadTotal([]), 0)
 deepEqual(model.clearUnreadConfirmation([perso]), {
-  title: "Mark all read in perso?", message: clearMessage, extra: "",
-  action: "Mark 234 read", lines: [perso]
+  title: "Mark all read in perso?", message: clearMessage, action: "Mark 234 read", lines: [perso]
 })
-deepEqual(model.clearUnreadConfirmation([work]), {
-  title: "Mark all read in work?", message: clearMessage,
-  extra: "The count stops at 500. Every unread message is marked, however many there are.",
-  action: "Mark all read", lines: [work]
-}, "a capped count is not put on the button")
-deepEqual(model.clearUnreadConfirmation([perso, work]), {
-  title: "Mark all read in every account?", message: clearMessage,
-  extra: "The count stops at 500. Every unread message is marked, however many there are.",
-  action: "Mark all read", lines: [perso, work]
-})
+deepEqual(model.clearUnreadConfirmation({ length: 2, 0: perso, 1: work }), {
+  title: "Mark all read in every account?", message: clearMessage, action: "Mark 2254 read", lines: [perso, work]
+}, "the button names the exact number, past 500 too")
+assert.strictEqual(model.clearUnreadConfirmation([perso, lost]).action, "Mark all read",
+  "no number on the button when one count is unknown")
 assert.strictEqual(model.clearUnreadProgress(1200), "Marking all read: 1200 so far")
 assert.strictEqual(model.clearUnreadErrorText("mail_action_target_limit"),
   "a conversation has more messages than one step can mark")

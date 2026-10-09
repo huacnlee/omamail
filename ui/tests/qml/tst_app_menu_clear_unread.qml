@@ -24,7 +24,11 @@ Item {
     property bool running: false
     property int cleared: 0
     property int loadedUnread: 12
+    // How many messages a run will mark; -1 while counting or unknown.
     property int unread: 734
+    property bool counting: false
+    property int refreshes: 0
+    function refreshCounts() { refreshes++ }
   }
 
   TestCase {
@@ -45,6 +49,8 @@ Item {
       controller.cleared = 0
       controller.loadedUnread = 12
       controller.unread = 734
+      controller.counting = false
+      controller.refreshes = 0
       appMenu.clearUnread = controller
       appMenu.openAt(10, 10)
       tryCompare(appMenu, "opened", true)
@@ -52,6 +58,25 @@ Item {
     function cleanup() {
       appMenu.close()
       tryCompare(appMenu, "opened", false)
+    }
+
+    function test_opening_the_menu_counts_the_inbox() {
+      compare(controller.refreshes, 1, "every opening asks for fresh counts")
+    }
+
+    function test_counting_shows_an_ellipsis_and_waits() {
+      controller.counting = true
+      controller.unread = -1
+      var all = row("app-menu-clear-unread")
+      compare(all.suffix, "\u2026")
+      verify(!all.enabled, "the dialog needs the numbers")
+    }
+
+    function test_an_unknown_count_shows_no_number_but_still_runs() {
+      controller.unread = -1
+      var all = row("app-menu-clear-unread")
+      compare(all.suffix, "")
+      verify(all.enabled)
     }
 
     function test_hidden_without_backend_support() {
@@ -69,8 +94,8 @@ Item {
       compare(all.text, "Mark all read...")
       compare(all.suffix, "734")
       verify(all.enabled)
-      controller.unread = 534
-      compare(all.suffix, "534", "the Unread tab's number, which can pass 500 across mailboxes")
+      controller.unread = 2254
+      compare(all.suffix, "2254", "the exact number, past 500 too")
       compare(rowIndex("app-menu-clear-unread"), rowIndex("app-menu-mark-these-read") + 1,
         "the two scopes sit together")
     }

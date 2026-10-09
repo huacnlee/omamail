@@ -27,15 +27,17 @@ Item {
   // must never offer to terminate the shell that loaded it.
   property bool canQuit: false
   // The service's ClearUnreadQueue: whether "Mark all read..." can run, its
-  // progress, and the two counts that tell it from "Mark these read". The
-  // second is the Unread tab's own number; the confirmation explains a cap.
+  // progress, and how many messages each row would mark. The Inbox is counted
+  // when the menu opens; until it answers the row shows an ellipsis, and a
+  // count no mailbox could give shows no number rather than a wrong one.
   property var clearUnread: null
   readonly property bool canClearUnread: !!clearUnread && clearUnread.available === true
   readonly property bool clearingUnread: !!clearUnread && clearUnread.running === true
+  readonly property bool countingUnread: !!clearUnread && clearUnread.counting === true
   readonly property string loadedUnreadSuffix: clearUnread && clearUnread.loadedUnread > 0
     ? String(clearUnread.loadedUnread) : ""
-  readonly property string unreadSuffix: clearUnread && clearUnread.unread > 0
-    ? String(clearUnread.unread) : ""
+  readonly property string unreadSuffix: countingUnread ? "\u2026"
+    : clearUnread && clearUnread.unread > 0 ? String(clearUnread.unread) : ""
   readonly property bool opened: menu.opened
 
   // Positioned against the window rather than a button, and flipped when it
@@ -127,6 +129,7 @@ Item {
       // loses nothing.
       root.cursorIndex = -1
       root.place()
+      if (root.canClearUnread && !root.clearingUnread) root.clearUnread.refreshCounts()
     }
     background: Rectangle {
       radius: Style.cornerRadius
@@ -184,7 +187,8 @@ Item {
         text: root.clearingUnread ? "Marking all read" : "Mark all read..."
         suffix: root.clearingUnread ? String(root.clearUnread.cleared) : root.unreadSuffix
         visible: root.canClearUnread
-        enabled: root.signedIn && !root.clearingUnread && root.unreadSuffix !== ""
+        enabled: root.signedIn && !root.clearingUnread && !root.countingUnread
+          && !!root.clearUnread && root.clearUnread.unread !== 0
         onActivated: { menu.close(); root.clearUnreadRequested() }
       }
       MenuRow {

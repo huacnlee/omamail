@@ -1,9 +1,10 @@
 import QtQuick
 import "Model.js" as Model
 
-// "Mark all read..." for one mailbox. The backend marks at most one page of
-// Unread per call, so a deep mailbox takes many calls; this repeats the step
-// until Unread is empty and reports the running total after each one.
+// "Mark all read..." for one mailbox: every unread message in its Inbox. The
+// backend marks at most one page of them per call, so a deep Inbox takes many
+// calls; this repeats the step until none is left and reports the running
+// total after each one.
 //
 // It stops, and says why, on anything that is not progress: a stall (the
 // backend confirmed nothing, so the same page would come back forever), an
@@ -17,6 +18,40 @@ QtObject {
   // it says so, and running it again carries on where it stopped.
   property int stepLimit: 200
   property bool running: false
+  // The backend's own unread counter stops at this many (`UNREAD_CAP` in
+  // src/sync/mod.rs), so a count at the cap is a floor, not a number to show.
+  readonly property int unreadCap: 500
+
+  // How many messages a run would mark: the Inbox's unread count, read from
+  // the provider's mailbox counter, past 500 too. Calls back with a number,
+  // or null when no exact count is available.
+  function countInbox(callback) {
+    var api = account ? account.api : null
+    var provider = account ? String(account.providerId || "") : ""
+    function answer(result, error) {
+      callback(!error && result && result.unread !== undefined
+        ? Math.max(0, Math.floor(Number(result.unread)) || 0) : null)
+    }
+    if (api && typeof api.getLabelCounts === "function") {
+      if (provider !== "jmap") {
+        api.getLabelCounts("INBOX", answer)
+        return
+      }
+      // JMAP names mailboxes by opaque ids; the Inbox is the one by role.
+      var boxes = api.mailboxList || []
+      for (var i = 0; i < boxes.length; i++) {
+        if (boxes[i] && boxes[i].role === "inbox") {
+          api.getLabelCounts(String(boxes[i].id), answer)
+          return
+        }
+      }
+      Qt.callLater(function() { callback(null) })
+      return
+    }
+    // HEY has no mailbox counter; its Unread mailbox is the Imbox's unread.
+    var unread = account ? Math.max(0, Math.floor(Number(account.inboxUnread)) || 0) : 0
+    Qt.callLater(function() { callback(unread < root.unreadCap ? unread : null) })
+  }
 
   function run(onProgress, onDone) {
     if (running || !account || !account.ready || !account.backend) return false

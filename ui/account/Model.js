@@ -1354,10 +1354,6 @@ function markAllReadNote(rows, expanded) {
     + " marked read"
 }
 
-// The backend counts Unread from listed ids and stops at this many
-// (`UNREAD_CAP` in src/sync/mod.rs), so a count at the cap is a floor.
-var UNREAD_CAP = 500
-
 // Lists read back through a QML `var` property can be array-like rather
 // than an Array, so the clear-unread rules accept either.
 function clearUnreadList(value) {
@@ -1372,40 +1368,50 @@ function loadedUnreadCount(rows) {
   return count
 }
 
-function unreadCountText(count) {
-  var value = Math.max(0, Math.floor(Number(count)) || 0)
-  return value >= UNREAD_CAP ? UNREAD_CAP + " or more" : String(value)
-}
-
 // One line per mailbox that "Mark all read..." will clear, in the account
-// summaries' order. A signed-out mailbox cannot be reached, and one with
-// nothing unread has nothing to say.
-function clearUnreadLines(summaries) {
+// summaries' order. `counts` maps an account id to its Inbox's unread count,
+// or to null when that count could not be read: the line then says "?"
+// rather than a number the run would not match. A signed-out mailbox cannot
+// be reached, and one with nothing unread has nothing to say.
+function clearUnreadLines(summaries, counts) {
   var list = clearUnreadList(summaries)
+  var known = counts || {}
   var out = []
   for (var i = 0; i < list.length; i++) {
     var summary = list[i] || {}
-    var unread = Math.max(0, Math.floor(Number(summary.unread)) || 0)
-    if (summary.signedIn !== true || unread === 0) continue
-    out.push({ label: String(summary.label || ""), count: unreadCountText(unread),
-      capped: unread >= UNREAD_CAP })
+    var id = String(summary.id || "")
+    if (summary.signedIn !== true || !(id in known)) continue
+    var value = known[id]
+    if (value === null || value === undefined) {
+      out.push({ label: String(summary.label || ""), count: "?", known: false })
+      continue
+    }
+    var unread = Math.max(0, Math.floor(Number(value)) || 0)
+    if (unread > 0) out.push({ label: String(summary.label || ""), count: String(unread), known: true })
   }
   return out
 }
 
-// The confirmation names what will be cleared. A capped count never goes on
-// the button: "Mark 500 read" would promise a number the run will exceed.
+// How many messages the run will mark, or -1 while any line is unknown.
+function clearUnreadTotal(lines) {
+  var list = clearUnreadList(lines)
+  var total = 0
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].known !== true) return -1
+    total += Number(list[i].count) || 0
+  }
+  return total
+}
+
+// The confirmation names what will be cleared, and the button carries the
+// exact number unless a mailbox could not say how many it holds.
 function clearUnreadConfirmation(lines) {
   var list = Array.prototype.slice.call(clearUnreadList(lines))
-  var capped = false
-  for (var i = 0; i < list.length; i++) if (list[i].capped === true) capped = true
-  var single = list.length === 1
+  var total = clearUnreadTotal(list)
   return {
-    title: single ? "Mark all read in " + list[0].label + "?" : "Mark all read in every account?",
-    message: "Every message the Unread tab counts. They cannot be marked unread again as a group.",
-    extra: capped ? "The count stops at " + UNREAD_CAP
-      + ". Every unread message is marked, however many there are." : "",
-    action: single && !capped ? "Mark " + list[0].count + " read" : "Mark all read",
+    title: list.length === 1 ? "Mark all read in " + list[0].label + "?" : "Mark all read in every account?",
+    message: "Every unread message in the Inbox. They cannot be marked unread again as a group.",
+    action: total > 0 ? "Mark " + total + " read" : "Mark all read",
     lines: list
   }
 }
