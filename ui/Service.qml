@@ -58,7 +58,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 5 : 0
+    bundledApiVersion: root.standalone ? 6 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -103,6 +103,8 @@ Item {
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
+  // Older backends send the bare address.
+  readonly property bool backendCanNameSender: backend.ready && backend.apiVersion >= 7
   readonly property bool calendarRemindersEnabled: !settings || settings.calendarRemindersEnabled !== false
   readonly property int calendarSnoozeMinutes: Math.max(1, Math.min(1440,
     Math.floor(Number(settings && settings.calendarSnoozeMinutes) || 5)))
@@ -1013,13 +1015,9 @@ Item {
 
     var entry = {}
     for (var key in accounts[index]) entry[key] = accounts[index][key]
-    if (raw.provider !== undefined) entry.provider = raw.provider
-    if (raw.email !== undefined) entry.email = raw.email
-    if (raw.clientId !== undefined) entry.clientId = raw.clientId
-    if (raw.clientSecret !== undefined) entry.clientSecret = raw.clientSecret
-    if (raw.imap !== undefined) entry.imap = raw.imap
-    if (raw.jmap !== undefined) entry.jmap = raw.jmap
-    if (raw.label !== undefined) entry.label = raw.label
+    var keys = ["provider", "email", "clientId", "clientSecret", "imap", "jmap", "label", "senderName"]
+    for (var k = 0; k < keys.length; k++)
+      if (raw[keys[k]] !== undefined) entry[keys[k]] = raw[keys[k]]
 
     // Never rebuild through `add`: a colliding id replaces the *other* row
     // and drops this one, which is how re-authing Proton deleted iCloud.
@@ -1078,11 +1076,8 @@ Item {
   function toggleMonitored(labelId, accountId) {
     var owner = labelOwner(accountId)
     if (!owner) return
-    var next = Accounts.toggleMonitored(accountList, owner.accountId, labelId)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
-    owner.labelActions.refreshMonitored()
+    if (commitAccounts(Accounts.toggleMonitored(accountList, owner.accountId, labelId)))
+      owner.labelActions.refreshMonitored()
   }
 
   // The watched ids an account's rename or move left behind, written to its
@@ -1090,32 +1085,21 @@ Item {
   function setMonitoredIds(index, ids) {
     var account = accountAt(index)
     if (!account) return
-    var next = Accounts.setMonitored(accountList, account.accountId, ids)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
+    commitAccounts(Accounts.setMonitored(accountList, account.accountId, ids))
   }
 
-  function setAccountLabel(id, text) {
-    var next = Accounts.setLabel(accountList, id, text)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+  // Writes only when the edit changed something.
+  function commitAccounts(next) {
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return false
     accountList = next
     saveAccounts()
+    return true
   }
 
-  function setAccountSignatureHtml(id, html) {
-    var next = Accounts.setSignatureHtml(accountList, id, html)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
-  }
-
-  function setAccountSignature(id, text) {
-    var next = Accounts.setSignature(accountList, id, text)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
-  }
+  function setAccountLabel(id, text) { commitAccounts(Accounts.setLabel(accountList, id, text)) }
+  function setAccountSenderName(id, text) { commitAccounts(Accounts.setSenderName(accountList, id, text)) }
+  function setAccountSignatureHtml(id, html) { commitAccounts(Accounts.setSignatureHtml(accountList, id, html)) }
+  function setAccountSignature(id, text) { commitAccounts(Accounts.setSignature(accountList, id, text)) }
 
   function saveAccounts(opts) {
     if (!accountsLoaded) return
@@ -1444,6 +1428,8 @@ Item {
         // The name as it was typed, empty when none was, so a field editing
         // it shows what is there rather than the address standing in for it.
         label: String(accounts[i].label || ""),
+        provider: String(accounts[i].provider || ""),
+        senderName: String(accounts[i].senderName || ""),
         signature: String(accounts[i].signature || ""),
         signatureHtml: String(accounts[i].signatureHtml || "")
       })
@@ -1751,20 +1737,17 @@ Item {
       root.sendIdentities = result.identities || []
     })
   }
-  // The name the entry being edited was given, or "" for none: what the
-  // setup page's name field shows. `accountLabel` cannot say, because it
-  // falls through to the address's local part.
-  readonly property string accountName: {
+  // The name the entry being edited was given, and the rest the setup page
+  // shows for it, "" for none. `accountLabel` cannot say, because it falls
+  // through to the address's local part.
+  function editingEntry() {
     var accounts = accountList ? accountList.accounts : []
     var index = editingIndex()
-    return index >= 0 && index < accounts.length ? String(accounts[index].label || "") : ""
+    return index >= 0 && index < accounts.length ? accounts[index] : ({})
   }
-
-  readonly property string accountAddress: {
-    var accounts = accountList ? accountList.accounts : []
-    var index = editingIndex()
-    return index >= 0 && index < accounts.length ? String(accounts[index].email || "") : ""
-  }
+  readonly property string accountName: String(editingEntry().label || "")
+  readonly property string accountSenderName: String(editingEntry().senderName || "")
+  readonly property string accountAddress: String(editingEntry().email || "")
   readonly property int inboxUnread: unified
     ? Number(unifiedSnapshot.totalUnread || 0) : (current ? current.inboxUnread : 0)
   readonly property var messages: unified
@@ -2680,6 +2663,7 @@ Item {
       providerId: entry ? entry.provider : Provider.DEFAULT_ID
       imapSettings: entry ? entry.imap : null
       jmapSettings: entry ? entry.jmap : null
+      senderName: entry ? String(entry.senderName || "") : ""
       // Only a Gmail account has a client-keyed refresh token to inherit, and
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")

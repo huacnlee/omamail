@@ -324,6 +324,8 @@ def main():
             {'email': 'contract@example.org'},
             {'provider': 'imap', 'email': 'sender@example.org',
              'imap': {'username': 'sender@example.org'}},
+            {'provider': 'imap', 'email': 'named@example.org', 'senderName': 'Jane Example',
+             'imap': {'username': 'named@example.org'}},
             {'provider': 'hey', 'email': 'sender@example.org'},
             {'provider': 'outlook', 'email': 'sender@example.org'}]
         registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org',

@@ -12,6 +12,7 @@ import "../message/Unsubscribe.js" as Unsub
 import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
 import "Accounts.js" as Accounts
+import "Aliases.js" as Aliases
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
@@ -52,6 +53,8 @@ Item {
   // Server settings for an IMAP account, straight off the account entry. Unused
   // by the others, and normalised before anything can dial one.
   property var imapSettings: null
+  // The account's sender name, for the providers whose From name it sets.
+  property string senderName: ""
   // The same for a JMAP account, and the same rule: what is on the entry is
   // what a hand edit could have written, so it is normalised before anything
   // sends a credential to it.
@@ -397,9 +400,15 @@ Item {
   property var profile: null
   readonly property string accountEmail: profile ? String(profile.email || "") : ""
   readonly property var availableSendAsAliases: {
-    if (sendAsAliases.length > 0) return sendAsAliases
-    if (accountEmail === "") return []
-    return [{ email: accountEmail, displayName: "", isPrimary: true, isDefault: true }]
+    var rows = sendAsAliases.length > 0 ? sendAsAliases
+      : (accountEmail === "" ? []
+        : [{ email: accountEmail, displayName: "", isPrimary: true, isDefault: true }])
+    // Named here rather than in the provider's own list so that a rename
+    // shows in the composer at once, without reloading the send-as list.
+    // Only on a backend that names agent sends too (API 7), so the composer
+    // and `mail.send` never disagree about who a message is from.
+    var named = Accounts.namesSender(providerId) && !!backend && backend.ready && backend.apiVersion >= 7
+    return named ? Aliases.withSenderName(rows, senderName) : rows
   }
   // The address this mailbox answers as when nothing more specific applies.
   // The profile is authoritative once it has loaded; until then the address the

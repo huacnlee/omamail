@@ -28,9 +28,14 @@ Item {
     property string activeAccountId: "a@example.org"
     property var accountSummaries: []
     property var accountSignatures: [
-      { id: "a@example.org", email: "a@example.org", label: "", signature: "" },
-      { id: "b@example.net", email: "b@example.net", label: "Work", signature: "" }
+      { id: "a@example.org", email: "a@example.org", label: "", signature: "",
+        provider: "imap", senderName: "" },
+      { id: "b@example.net", email: "b@example.net", label: "Work", signature: "",
+        provider: "gmail", senderName: "" },
+      { id: "c@example.com", email: "c@example.com", label: "", signature: "",
+        provider: "outlook", senderName: "Jane Example" }
     ]
+    property bool backendCanNameSender: true
     property int undoSendSeconds: 10
     property bool unifiedCalendarView: false
     property bool notifyNewMail: true
@@ -50,6 +55,16 @@ Item {
       namedId = String(id || "")
       namedText = String(text || "")
       nameWrites += 1
+    }
+
+    property string senderNamedId: ""
+    property string senderNamedText: ""
+    property int senderNameWrites: 0
+
+    function setAccountSenderName(id, text) {
+      senderNamedId = String(id || "")
+      senderNamedText = String(text || "")
+      senderNameWrites += 1
     }
 
     function setAccountSignature(_id, _text) {}
@@ -92,11 +107,26 @@ Item {
       return find("settings-name-editor")
     }
 
+    // Laid out before it is clicked: switching mailboxes in `init` can show
+    // or hide the field, and the column places it on the next polish.
+    function senderField() {
+      var field = find("settings-sender-name-editor")
+      if (field && field.visible) waitForPolish(field.parent)
+      return field
+    }
+
     function init() {
+      fakeService.backendCanNameSender = true
+      page.selectNameAccount("a@example.org")
+      // The fake service keeps nothing it is given, so the fields go back to
+      // the stored values rather than carrying one test's typing into the next.
+      page.showNameAccount(page.signatureAccount("a@example.org"))
       fakeService.namedId = ""
       fakeService.namedText = ""
       fakeService.nameWrites = 0
-      page.selectNameAccount("a@example.org")
+      fakeService.senderNamedId = ""
+      fakeService.senderNamedText = ""
+      fakeService.senderNameWrites = 0
     }
 
     function test_signature_import_waits_for_native_result_and_keeps_original_account() {
@@ -180,6 +210,56 @@ Item {
       compare(fakeService.namedId, "a@example.org",
         "what was typed belongs to the mailbox it was typed for")
       compare(fakeService.namedText, "x")
+    }
+
+    // ---------------------------------------------------------- sender name
+
+    // An IMAP mailbox has no server to name its sender, so the name is set
+    // here, and typed the way a person types it.
+    function test_an_imap_mailbox_takes_a_sender_name() {
+      var field = senderField()
+      verify(field, "the sender name field has to exist")
+      verify(field.visible, "an IMAP mailbox's From name is set here")
+      compare(field.text, "")
+      mouseClick(field, field.width / 2, field.height / 2)
+      verify(field.activeFocus, "a click must put the cursor in the field")
+      keyClick(Qt.Key_J)
+      keyClick(Qt.Key_O)
+      compare(fakeService.senderNameWrites, 0, "nothing is written per keystroke")
+      keyClick(Qt.Key_Return)
+      compare(fakeService.senderNameWrites, 1)
+      compare(fakeService.senderNamedId, "a@example.org")
+      compare(fakeService.senderNamedText, "jo")
+    }
+
+    // Leaving for another mailbox saves the name for the one it was typed for.
+    function test_moving_away_saves_the_sender_name_where_it_was_typed() {
+      var field = senderField()
+      mouseClick(field, field.width / 2, field.height / 2)
+      keyClick(Qt.Key_Z)
+      page.selectNameAccount("c@example.com")
+      compare(fakeService.senderNamedId, "a@example.org")
+      compare(fakeService.senderNamedText, "z")
+      compare(field.text, "Jane Example", "an Outlook mailbox shows its own stored name")
+      verify(field.visible)
+    }
+
+    // A server-named mailbox would ignore the field, so there is none.
+    function test_a_server_named_mailbox_has_no_sender_name_field() {
+      page.selectNameAccount("b@example.net")
+      verify(!senderField().visible, "Gmail names the sender itself")
+      compare(page.senderNameEditable, false)
+      page.saveSenderName()
+      compare(fakeService.senderNameWrites, 0, "nothing is written for it either")
+    }
+
+    // A backend older than API 7 sends the bare address whatever is stored, so
+    // the field waits for one that writes the name.
+    function test_an_older_backend_hides_the_sender_name_field() {
+      fakeService.backendCanNameSender = false
+      verify(!senderField().visible)
+      fakeService.backendCanNameSender = true
+      verify(senderField().visible)
     }
   }
 }

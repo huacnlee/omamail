@@ -1,5 +1,5 @@
 {
-  "apiVersion": 6,
+  "apiVersion": 7,
   "releasedApiVersion": 6,
   "protocolVersion": 1,
   "methods": [
@@ -524,6 +524,30 @@
         ],
         "subject": "Contract preview",
         "body": "Hello \u5408\u6210\nSecond line",
+        "attachments": []
+      }
+    },
+    {
+      "name": "mail send dry run names the IMAP sender",
+      "method": "mail.send",
+      "params": {
+        "account": "imap:named@example.org",
+        "to": [
+          "recipient@example.org"
+        ],
+        "subject": "Contract preview",
+        "body": "Hello"
+      },
+      "equals": {
+        "dryRun": true,
+        "executed": false,
+        "accountId": "imap:named@example.org",
+        "from": "Jane Example <named@example.org>",
+        "to": [
+          "recipient@example.org"
+        ],
+        "subject": "Contract preview",
+        "body": "Hello",
         "attachments": []
       }
     },
@@ -1267,6 +1291,8 @@
   ],
   "unreleased": {
     "methods": [],
-    "cases": []
+    "cases": [
+      "mail send dry run names the IMAP sender"
+    ]
   }
 }
