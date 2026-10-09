@@ -390,6 +390,34 @@ pub fn too_heavy(size: &Value) -> bool {
         || size["tables"].as_u64().unwrap_or(0) > 60
         || size["tableDepth"].as_u64().unwrap_or(0) > 4
 }
+// The length bounds the markup Qt has to lay out. The bytes of a picture
+// carried as a data URI are not markup, and counting them turned a small
+// message into the plain-text refusal the moment its pictures loaded.
+pub fn too_heavy_to_draw(n: &Node, size: &Value) -> bool {
+    fn embedded(n: &Node) -> u64 {
+        n.children
+            .iter()
+            .filter(|c| c.kind != "text")
+            .map(|c| {
+                let source = c.attr("src");
+                let own = if c.name == "img" && source.starts_with("data:") {
+                    source.encode_utf16().count() as u64
+                } else {
+                    0
+                };
+                own + embedded(c)
+            })
+            .sum()
+    }
+    let mut drawn = size.clone();
+    drawn["length"] = json!(
+        size["length"]
+            .as_u64()
+            .unwrap_or(0)
+            .saturating_sub(embedded(n))
+    );
+    too_heavy(&drawn)
+}
 pub fn read_plain(n: &Node) -> Value {
     fn walk(n: &Node, text: &mut String, images: &mut Vec<String>) {
         for c in &n.children {
@@ -458,7 +486,7 @@ pub fn sanitize(source: &str, options: &Value) -> Result<Value, &'static str> {
     collapse(&mut root);
     let html = serialize(&root)?;
     let size = measure(&root, &html);
-    let heavy = too_heavy(&size);
+    let heavy = too_heavy_to_draw(&root, &size);
     Ok(
         json!({"html":html,"blockedImages":images.blocked,"images":images.kept,"remoteImages":images.loadable,"remoteImageSources":images.sources,"complexity":size,"tooHeavy":heavy,"plainText":plain,"reader":reader,"document":root}),
     )
