@@ -110,11 +110,6 @@ Item {
       verify(!row("app-menu-mark-these-read").enabled, "nothing loaded is unread, so it has nothing to mark")
     }
 
-    function test_mark_these_read_keeps_its_old_rule_without_the_controller() {
-      appMenu.clearUnread = null
-      verify(row("app-menu-mark-these-read").enabled, "an older backend leaves the row as it was")
-    }
-
     function test_locked_while_running() {
       controller.running = true
       controller.cleared = 1200

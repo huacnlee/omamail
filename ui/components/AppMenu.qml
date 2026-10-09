@@ -183,9 +183,10 @@ Item {
       MenuRow {
         id: clearRow
         objectName: "app-menu-clear-unread"
-        // Every message the Unread tab counts, which can be thousands more
-        // than are loaded; it asks first. While a run is going the row says
-        // so and stays locked, so a second press cannot start another.
+        // Every unread message in the Inbox, in every category, which can be
+        // thousands more than are loaded; it asks first. While a run is going
+        // the row says so and stays locked, so a second press cannot start
+        // another.
         text: root.clearingUnread ? "Marking all read" : "Mark all read..."
         suffix: root.clearingUnread ? String(root.clearUnread.cleared) : root.unreadSuffix
         visible: root.canClearUnread

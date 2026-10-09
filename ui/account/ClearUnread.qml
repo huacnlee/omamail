@@ -18,9 +18,6 @@ QtObject {
   // it says so, and running it again carries on where it stopped.
   property int stepLimit: 200
   property bool running: false
-  // The backend's own unread counter stops at this many (`UNREAD_CAP` in
-  // src/sync/mod.rs), so a count at the cap is a floor, not a number to show.
-  readonly property int unreadCap: 500
 
   // How many messages a run would mark: the Inbox's unread count, read from
   // the provider's mailbox counter, past 500 too. Calls back with a number,
@@ -48,9 +45,10 @@ QtObject {
       Qt.callLater(function() { callback(null) })
       return
     }
-    // HEY has no mailbox counter; its Unread mailbox is the Imbox's unread.
+    // HEY has no mailbox counter. Its unread count is the size of the whole
+    // `box:imbox unseen` listing, which is the Imbox's unread messages.
     var unread = account ? Math.max(0, Math.floor(Number(account.inboxUnread)) || 0) : 0
-    Qt.callLater(function() { callback(unread < root.unreadCap ? unread : null) })
+    Qt.callLater(function() { callback(unread) })
   }
 
   function run(onProgress, onDone) {

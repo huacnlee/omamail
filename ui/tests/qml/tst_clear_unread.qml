@@ -205,12 +205,12 @@ Item {
       compare(count(), null, "a JMAP account without an inbox mailbox")
     }
 
-    function test_hey_uses_its_own_unread_count_below_the_cap() {
+    function test_hey_uses_its_own_unread_count() {
       account.providerId = "hey"
       account.inboxUnread = 42
       compare(count(), 42)
-      account.inboxUnread = 500
-      compare(count(), null, "the backend stops counting at 500, so 500 is not a number to show")
+      account.inboxUnread = 600
+      compare(count(), 600, "HEY counts its whole Imbox listing, with no cap")
     }
 
     function test_step_limit() {
