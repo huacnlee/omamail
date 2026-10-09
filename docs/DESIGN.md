@@ -221,7 +221,7 @@ Menus follow these behavior rules:
 - unavailable provider capabilities are omitted rather than disabled;
 - temporary unavailability may be disabled when its reason is apparent.
 
-Menu labels describe the actual scope. `Mark these read` is correct when only loaded messages are affected. Brevity does not justify a broader promise.
+Menu labels describe the actual scope. `Mark these read` is correct when only loaded messages are affected. Brevity does not justify a broader promise. `Mark all read...` marks every unread message in the Inbox, in every category. It shows only on Inbox and Unread with no search or label narrowing them, where the loaded rows are part of that set. It asks first, and the two rows sit together, each with the exact number of messages it will mark as its suffix.
 
 ## Popups and positioning
 

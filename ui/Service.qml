@@ -2265,6 +2265,7 @@ Item {
     }
     eachHost(function(host) { host.markAllRead() })
   }
+  property ClearUnreadQueue clearing: ClearUnreadQueue { service: root }
   // Several ticked rows at once. A merged list draws rows from several
   // mailboxes, and a batch is one mailbox's request, so it is refused there
   // the way a move is: the rule every unavailable action follows.

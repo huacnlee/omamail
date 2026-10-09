@@ -1,5 +1,7 @@
 use super::Session;
-use crate::mail::{ActRequest, ListRequest, Provider, ReadRequest, SendRequest};
+use crate::mail::{
+    ActRequest, ClearUnreadRequest, ListRequest, Provider, ReadRequest, SendRequest,
+};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
@@ -364,6 +366,16 @@ impl Session {
                 )
                 .await
             }
+            "mail.clearUnread" => {
+                let request = ClearUnreadRequest::try_from(params)?;
+                crate::mail::clear_unread::step(
+                    &request,
+                    &ProviderList { session: self },
+                    &AccountActionLookup { session: self },
+                    &ProviderMutation { session: self },
+                )
+                .await
+            }
             _ => Err("unknown_method"),
         }
     }
@@ -575,6 +587,49 @@ impl crate::mail::list::ListAdapter for ProviderList<'_> {
         provider_query: String,
     ) -> Pin<Box<dyn Future<Output = Result<Value, &'static str>> + Send + 'a>> {
         Box::pin(self.session.provider_list(request, provider_query))
+    }
+}
+
+impl crate::mail::clear_unread::UnreadIds for ProviderList<'_> {
+    fn unread_ids<'a>(
+        &'a self,
+        account: &'a crate::mail::Account,
+        provider_query: String,
+        limit: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, &'static str>> + Send + 'a>> {
+        Box::pin(async move {
+            // Gmail's listing reads every message it returns; its bare listing
+            // is one request for the page, which is all a step needs. The
+            // other providers keep their usual listing and the step keeps
+            // only its IDs.
+            let gmail = account.provider == Provider::Gmail;
+            let malformed = if gmail {
+                "gmail_invalid_response"
+            } else {
+                "mail_list_incomplete"
+            };
+            let page = if gmail {
+                let params = json!({
+                    "accountId":account.id,"query":provider_query,"pageSize":limit,"pageToken":"",
+                });
+                Box::pin(self.session.gmail.call("gmail.list", &params)).await?
+            } else {
+                let request = ListRequest {
+                    account: account.clone(),
+                    mailbox: crate::mail::Mailbox::Unread,
+                    query: String::new(),
+                    limit,
+                    page_token: String::new(),
+                };
+                Box::pin(self.session.provider_list(&request, provider_query)).await?
+            };
+            page["ids"]
+                .as_array()
+                .ok_or(malformed)?
+                .iter()
+                .map(|id| id.as_str().map(str::to_owned).ok_or(malformed))
+                .collect()
+        })
     }
 }
 
