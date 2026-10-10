@@ -1,0 +1,23 @@
+kind = "app"
+name = "Omamail"
+summary = "Native mail and calendar app for Gmail, Outlook, HEY, JMAP and IMAP, with multiple accounts and keyboard navigation."
+categories = ["Network", "Email", "Office"]
+icon = "app/resources/icons/omamail.svg"
+screenshots = [
+  "docs/images/full-mail.webp",
+  "docs/images/full-calendar.webp",
+  "docs/images/full-compose.webp",
+  "docs/images/mini-list.webp",
+]
+
+# The release also ships the Omarchy plugin backend (omamail-linux-*.tar.gz);
+# OmaStore installs the standalone desktop app and launches its Qt host.
+[linux.x86_64]
+asset = "omamail-app-linux-x86_64.tar.gz"
+exec = "omamail.app/bin/omamail-app"
+
+# Not published yet: until it is, the app is not installable on ARM rather than
+# getting the plugin backend in its place.
+[linux.aarch64]
+asset = "omamail-app-linux-aarch64.tar.gz"
+exec = "omamail.app/bin/omamail-app"
