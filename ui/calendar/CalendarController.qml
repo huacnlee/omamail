@@ -63,6 +63,11 @@ Item {
   property string caldavServerDiscoveryError: ""
   property var caldavServerDiscoveryResults: []
   property int caldavServerDiscoverySerial: 0
+  // What the walk that produced the results above was given. The calendars
+  // picked from them are saved under exactly these, never under whatever the
+  // form says by the time Add is pressed.
+  property string caldavServerDiscoveryUsername: ""
+  property string caldavServerDiscoveryPassword: ""
   property var caldavAddQueue: []
   property string caldavAddUsername: ""
   property string caldavAddPassword: ""
@@ -329,6 +334,12 @@ Item {
     writeSources()
   }
 
+  // The walk is the backend's: calendar.discoverCaldavServer arrived with API 7.
+  function canDiscoverCaldavServer() {
+    return !!service && !!service.backend && service.backend.ready === true
+      && Number(service.backend.apiVersion) >= 7
+  }
+
   function caldavServerDiscoveryFailure(error) {
     var code = String(error && error.message || error || "")
     if (code === "calendar_auth_refused") return "That username or password was refused"
@@ -347,17 +358,19 @@ Item {
       caldavServerDiscoveryFinished(false, caldavServerDiscoveryError)
       return false
     }
-    if (service.backendCanDiscoverCaldavServer !== true) {
+    if (!canDiscoverCaldavServer()) {
       caldavServerDiscoveryError = "Update the backend to discover CalDAV calendars"
       caldavServerDiscoveryFinished(false, caldavServerDiscoveryError)
       return false
     }
     var serial = ++caldavServerDiscoverySerial
+    var asked = { url: String(url || ""), username: String(username || ""), password: String(password || "") }
     caldavServerDiscovering = true
     caldavServerDiscoveryError = ""
     caldavServerDiscoveryResults = []
-    service.backend.call("calendar.discoverCaldavServer",
-      { url: String(url || ""), username: String(username || ""), password: String(password || "") },
+    caldavServerDiscoveryUsername = ""
+    caldavServerDiscoveryPassword = ""
+    service.backend.call("calendar.discoverCaldavServer", asked,
       function(result, error) {
         if (serial !== root.caldavServerDiscoverySerial) return
         root.caldavServerDiscovering = false
@@ -366,21 +379,39 @@ Item {
           root.caldavServerDiscoveryFinished(false, root.caldavServerDiscoveryError)
           return
         }
+        root.caldavServerDiscoveryUsername = asked.username
+        root.caldavServerDiscoveryPassword = asked.password
         root.caldavServerDiscoveryResults = result.calendars
         root.caldavServerDiscoveryFinished(true, "")
       })
     return true
   }
 
-  function addDiscoveredCaldavCalendars(selected, username, password) {
-    if (savingSource || discoveringCalendars || caldavAdding) return false
-    var picked = (Array.isArray(selected) ? selected : []).filter(function(item) {
-      return item && String(item.url || "") !== ""
+  // Cancel ends the walk as far as this window is concerned: an answer that
+  // arrives afterwards belongs to a serial nobody is waiting on, so it can
+  // neither bring a dismissed checklist back nor leave the wizard busy. A
+  // save already under way keeps its own copy of the credentials and runs on.
+  function cancelCaldavServerDiscovery() {
+    caldavServerDiscoverySerial++
+    caldavServerDiscovering = false
+    caldavServerDiscoveryError = ""
+    caldavServerDiscoveryResults = []
+    caldavServerDiscoveryUsername = ""
+    caldavServerDiscoveryPassword = ""
+  }
+
+  // `urls` picks from the current results by address; the name, the access
+  // and the credentials all come from the discovery itself.
+  function addDiscoveredCaldavCalendars(urls) {
+    if (savingSource || discoveringCalendars || caldavServerDiscovering || caldavAdding) return false
+    var wanted = Array.isArray(urls) ? urls.map(function(url) { return String(url || "") }) : []
+    var picked = caldavServerDiscoveryResults.filter(function(item) {
+      return item && String(item.url || "") !== "" && wanted.indexOf(String(item.url)) >= 0
     })
     if (picked.length === 0) return false
     caldavAddQueue = picked
-    caldavAddUsername = String(username || "")
-    caldavAddPassword = String(password || "")
+    caldavAddUsername = caldavServerDiscoveryUsername
+    caldavAddPassword = caldavServerDiscoveryPassword
     caldavAddTotal = picked.length
     caldavAddFailed = 0
     caldavAdding = true

@@ -49,8 +49,30 @@ Item {
     property string discoveryChoiceAccount: ""
     property string defaultId: ""
     property var reminderPolicy: null
+    property bool caldavAvailable: true
+    property bool caldavServerDiscovering: false
+    property var caldavServerDiscoveryResults: []
+    property bool caldavAdding: false
+    property var caldavAsked: null
+    property var caldavAdded: null
+    property int caldavCancels: 0
     signal calendarSaved(bool ok, string error)
     signal discoveryFinished(bool ok, string error, int count)
+    signal caldavServerDiscoveryFinished(bool ok, string error)
+    signal caldavCalendarsAdded(bool ok, string error, int added, int total)
+
+    function discoverCaldavServer(url, username, password) {
+      caldavAsked = { url: url, username: username, password: password }
+      caldavServerDiscovering = true
+      return true
+    }
+    function canDiscoverCaldavServer() { return caldavAvailable }
+    function cancelCaldavServerDiscovery() {
+      caldavCancels++
+      caldavServerDiscovering = false
+      caldavServerDiscoveryResults = []
+    }
+    function addDiscoveredCaldavCalendars(urls) { caldavAdded = Array.prototype.slice.call(arguments); return true }
 
     function addCalDavCalendar(_source, _password) {}
     function removeCalendar(sourceId) { removeCalls++; removedId = sourceId }
@@ -102,6 +124,12 @@ Item {
       calendarController.defaultId = ""
       calendarController.reminderPolicy = null
       calendarController.discoveryChoices = null
+      calendarController.caldavServerDiscovering = false
+      calendarController.caldavServerDiscoveryResults = []
+      calendarController.caldavAdding = false
+      calendarController.caldavAsked = null
+      calendarController.caldavAdded = null
+      calendarController.caldavAvailable = true
       signInSpy.clear()
       wait(1)
     }
@@ -278,6 +306,83 @@ Item {
       mode.changed("off")
       compare(calendarController.reminderPolicy.enabled, false)
       compare(calendarController.toggleCalls, 0)
+    }
+
+    function openCaldavWizard() {
+      // Each case starts from a closed wizard, whatever the last one left.
+      var cancel = findChild(settings, "calendar-caldav-find")
+      if (cancel && cancel.visible) findChild(settings, "calendar-caldav-password").text = ""
+      var open = findChild(settings, "calendar-caldav-discover")
+      verify(open !== null)
+      if (open.visible) open.clicked()
+      findChild(settings, "calendar-caldav-url").text = "https://caldav.example"
+      findChild(settings, "calendar-caldav-username").text = "me@example.org"
+      findChild(settings, "calendar-caldav-password").text = "first"
+      wait(1)
+    }
+
+    function allNamed(item, name, out) {
+      if (item.objectName === name) out.push(item)
+      var children = item.children || []
+      for (var i = 0; i < children.length; i++) allNamed(children[i], name, out)
+      return out
+    }
+
+    function test_caldav_discovery_is_offered_only_by_a_backend_that_has_it() {
+      calendarController.caldavAvailable = false
+      wait(1)
+      compare(findChild(settings, "calendar-caldav-discover").visible, false)
+    }
+
+    function test_caldav_form_cannot_be_retyped_while_it_is_looked_up() {
+      openCaldavWizard()
+      findChild(settings, "calendar-caldav-find").clicked()
+      compare(JSON.stringify(calendarController.caldavAsked), JSON.stringify({
+        url: "https://caldav.example", username: "me@example.org", password: "first" }))
+      var fields = ["calendar-caldav-url", "calendar-caldav-username", "calendar-caldav-password"]
+      for (var i = 0; i < fields.length; i++)
+        compare(findChild(settings, fields[i]).readOnly, true, fields[i] + " is frozen while finding")
+      findChild(settings, "calendar-caldav-find").parent.children[1].clicked()
+    }
+
+    function test_cancelling_caldav_discovery_tells_the_controller_and_forgets_the_password() {
+      openCaldavWizard()
+      findChild(settings, "calendar-caldav-find").clicked()
+      var before = calendarController.caldavCancels
+      // Cancel sits beside Find calendars.
+      findChild(settings, "calendar-caldav-find").parent.children[1].clicked()
+      compare(calendarController.caldavCancels, before + 1)
+      compare(calendarController.caldavServerDiscovering, false)
+      compare(findChild(settings, "calendar-caldav-password").text, "")
+      compare(findChild(settings, "calendar-caldav-discover").visible, true, "the wizard is closed")
+    }
+
+    function test_discovered_caldav_names_are_plain_text_and_added_by_address_only() {
+      openCaldavWizard()
+      findChild(settings, "calendar-caldav-find").clicked()
+      calendarController.caldavServerDiscovering = false
+      calendarController.caldavServerDiscoveryResults = [
+        { name: "<b>Home</b><img src=\"http://127.0.0.1:9/x\">", url: "https://caldav.example/home/", readOnly: false },
+        { name: "Shared", url: "https://caldav.example/shared/", readOnly: true }
+      ]
+      calendarController.caldavServerDiscoveryFinished(true, "")
+      wait(1)
+      var names = allNamed(settings, "calendar-caldav-discovered-name", [])
+      compare(names.length, 2)
+      compare(names[0].text, "<b>Home</b><img src=\"http://127.0.0.1:9/x\">",
+        "the server's name reaches the row unchanged")
+      for (var i = 0; i < names.length; i++)
+        compare(names[i].textFormat, Text.PlainText, "a calendar name is never HTML")
+
+      // Typing over the form after the answer changes nothing that is saved:
+      // the page hands the controller addresses, not credentials.
+      findChild(settings, "calendar-caldav-password").text = "something else"
+      findChild(settings, "calendar-caldav-discovered-0").clicked()
+      findChild(settings, "calendar-caldav-add").clicked()
+      compare(calendarController.caldavAdded.length, 1, "no credentials cross from the form")
+      compare(JSON.stringify(calendarController.caldavAdded[0]),
+        JSON.stringify(["https://caldav.example/shared/"]))
+      findChild(settings, "calendar-caldav-add").parent.children[1].clicked()
     }
   }
 }

@@ -15,13 +15,18 @@ Item {
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: false
     property var discoveryCallback: null
+    property var caldavCallback: null
     property var credentialWrites: []
     property var configWrites: []
     property var configCallback: null
-    property var backend: ({ ready: false, call: function(method, params, callback) {
+    property var backend: ({ ready: false, apiVersion: 7, call: function(method, params, callback) {
       mailService.requests.push({ method: method, params: params })
       if (method === "calendar.discover") {
         mailService.discoveryCallback = callback
+        return
+      }
+      if (method === "calendar.discoverCaldavServer") {
+        mailService.caldavCallback = callback
         return
       }
       callback(mailService.nextResult, mailService.nextError)
@@ -68,6 +73,8 @@ Item {
   TestCase {
     name: "CalendarController"
     SignalSpy { id: discoverySpy; target: controller; signalName: "discoveryFinished" }
+    SignalSpy { id: caldavSpy; target: controller; signalName: "caldavServerDiscoveryFinished" }
+    SignalSpy { id: caldavAddedSpy; target: controller; signalName: "caldavCalendarsAdded" }
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
@@ -196,6 +203,84 @@ Item {
       compare(controller.eventWriting,false)
     }
 
+    function test_a_caldav_answer_after_cancel_restores_nothing() {
+      mailService.backend.ready = true
+      verify(controller.discoverCaldavServer("https://caldav.example", "me@example.org", "first"))
+      compare(controller.caldavServerDiscovering, true)
+      compare(JSON.stringify(mailService.requests[0].params), JSON.stringify({
+        url: "https://caldav.example", username: "me@example.org", password: "first" }))
+      var late = mailService.caldavCallback
+      controller.cancelCaldavServerDiscovery()
+      compare(controller.caldavServerDiscovering, false, "Cancel leaves nothing busy")
+
+      late({ calendars: [{ name: "Late", url: "https://caldav.example/late/", readOnly: false }] }, null)
+      compare(controller.caldavServerDiscoveryResults.length, 0,
+        "an answer nobody is waiting on cannot bring the checklist back")
+      compare(controller.caldavServerDiscoveryPassword, "")
+      compare(caldavSpy.count, 0)
+      verify(!controller.addDiscoveredCaldavCalendars(["https://caldav.example/late/"]),
+        "and nothing from it can be added")
+
+      // The wizard is usable again straight away, and the stale answer cannot
+      // pass for the new request's either.
+      verify(controller.discoverCaldavServer("https://caldav.example", "me@example.org", "second"))
+      late({ calendars: [{ name: "Late", url: "https://caldav.example/late/" }] }, null)
+      compare(controller.caldavServerDiscovering, true)
+      compare(controller.caldavServerDiscoveryResults.length, 0)
+      mailService.caldavCallback(null, { code: -32000, message: "calendar_auth_refused" })
+      compare(controller.caldavServerDiscovering, false)
+      compare(controller.caldavServerDiscoveryError, "That username or password was refused")
+      compare(controller.caldavServerDiscoveryPassword, "", "a refused password is not kept")
+    }
+
+    function test_discovered_caldav_calendars_are_saved_with_the_credentials_that_found_them() {
+      mailService.backend.ready = true
+      verify(controller.discoverCaldavServer("https://caldav.example", "me@example.org", "first"))
+      mailService.caldavCallback({ calendars: [
+        { name: "Home", url: "https://caldav.example/home/", readOnly: false },
+        { name: "Shared", url: "https://caldav.example/shared/", readOnly: true }
+      ] }, null)
+      compare(caldavSpy.count, 1)
+      compare(controller.caldavServerDiscoveryResults.length, 2)
+
+      var configs = mailService.configWrites.length
+      var secrets = mailService.credentialWrites.length
+      // The caller names calendars by address and nothing else: an address the
+      // server did not list is not a calendar this discovery can add.
+      verify(!controller.addDiscoveredCaldavCalendars(["https://elsewhere.example/home/"]))
+      compare(mailService.configWrites.length, configs)
+      verify(controller.addDiscoveredCaldavCalendars(["https://caldav.example/shared/"]))
+      compare(controller.caldavAdding, true)
+      // Closing the wizard now does not disturb the save that is under way.
+      controller.cancelCaldavServerDiscovery()
+      compare(mailService.configWrites.length, configs + 1)
+      var saved = JSON.parse(mailService.configWrites[configs].payload).sources.filter(function(s) {
+        return s.url === "https://caldav.example/shared/"
+      })
+      compare(saved.length, 1)
+      compare(saved[0].name, "Shared")
+      compare(saved[0].username, "me@example.org")
+      compare(saved[0].readOnly, true)
+      mailService.configCallback(true, "")
+      compare(mailService.credentialWrites.length, secrets + 1)
+      compare(mailService.credentialWrites[secrets].secret, "first")
+      compare(mailService.credentialWrites[secrets].accountId, saved[0].id)
+      compare(controller.caldavAdding, false)
+      compare(controller.caldavAddPassword, "")
+      compare(caldavAddedSpy.count, 1)
+      compare(caldavAddedSpy.signalArguments[0][0], true)
+      compare(caldavAddedSpy.signalArguments[0][2], 1)
+    }
+
+    function test_caldav_discovery_waits_for_a_backend_that_has_it() {
+      mailService.backend.ready = true
+      mailService.backend.apiVersion = 6
+      verify(!controller.canDiscoverCaldavServer())
+      verify(!controller.discoverCaldavServer("https://caldav.example", "me@example.org", "first"))
+      compare(mailService.requests.length, 0)
+      compare(controller.caldavServerDiscoveryError, "Update the backend to discover CalDAV calendars")
+    }
+
     function init() {
       // Reset here rather than at the end of each case: a failed compare aborts
       // the function, so a restore on its last line does not run and one real
@@ -207,6 +292,11 @@ Item {
       mailService.backendCanDiscoverCalendars = true
       mailService.backendCanGoogleCalendars = false
       mailService.discoveryCallback = null
+      mailService.caldavCallback = null
+      mailService.backend.apiVersion = 7
+      controller.cancelCaldavServerDiscovery()
+      caldavSpy.clear()
+      caldavAddedSpy.clear()
       mailService.backend.ready = false
       mailService.accountSummaries = [
         { id: "imap:work@example.com", email: "work@example.com",

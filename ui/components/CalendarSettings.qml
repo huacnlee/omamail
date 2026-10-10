@@ -41,6 +41,11 @@ Column {
   }
   property bool caldavOpen: false
   property var caldavChecked: ({})
+  // Read through here so a controller without the wizard draws none of it.
+  readonly property var caldavResults: controller && Array.isArray(controller.caldavServerDiscoveryResults)
+    ? controller.caldavServerDiscoveryResults : []
+  readonly property bool caldavAvailable: !!controller
+    && typeof controller.canDiscoverCaldavServer === "function" && controller.canDiscoverCaldavServer() === true
 
   function discoverableAccounts() {
     if (!root.service || root.service.backendCanDiscoverCalendars !== true) return []
@@ -669,9 +674,10 @@ Column {
   // uses, so nothing below this form needs to know discovery happened.
   IconTextButton {
     visible: !root.adding && !root.caldavOpen
-      && !!root.service && root.service.backendCanDiscoverCaldavServer === true
+      && root.caldavAvailable
     iconName: "plus"
-    text: "Discover calendars"
+    objectName: "calendar-caldav-discover"
+    text: "Discover CalDAV calendars..."
     foreground: root.textColor
     fontFamily: root.panelFontFamily
     enabled: !!root.controller && !root.controller.savingSource
@@ -681,6 +687,8 @@ Column {
       root.passwordEditingId = ""
       caldavResultText.text = ""
       root.caldavChecked = ({})
+      // Nothing a previous visit to this page left behind is offered again.
+      if (root.controller) root.controller.cancelCaldavServerDiscovery()
       root.caldavOpen = true
     }
   }
@@ -692,39 +700,48 @@ Column {
 
     TextField {
       id: caldavServerUrl
+      objectName: "calendar-caldav-url"
       width: parent.width
+      // What is being looked up cannot be retyped while it is looked up.
+      readOnly: !!root.controller && root.controller.caldavServerDiscovering === true
       foreground: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       placeholderText: "CalDAV server address"
-      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+      visible: root.caldavResults.length === 0
     }
     TextField {
       id: caldavServerUsername
+      objectName: "calendar-caldav-username"
       width: parent.width
+      // What is being looked up cannot be retyped while it is looked up.
+      readOnly: !!root.controller && root.controller.caldavServerDiscovering === true
       foreground: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       placeholderText: "Username"
-      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+      visible: root.caldavResults.length === 0
     }
     TextField {
       id: caldavServerPassword
+      objectName: "calendar-caldav-password"
       width: parent.width
+      readOnly: !!root.controller && root.controller.caldavServerDiscovering === true
       password: true
       foreground: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       placeholderText: "Password or app password"
-      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+      visible: root.caldavResults.length === 0
       onAccepted: root.findCaldavCalendars()
     }
 
     Row {
       spacing: Style.space(6)
-      visible: root.controller && root.controller.caldavServerDiscoveryResults.length === 0
+      visible: root.caldavResults.length === 0
       IconTextButton {
-        text: root.controller && root.controller.caldavServerDiscovering ? "Finding..." : "Find calendars"
+        objectName: "calendar-caldav-find"
+        text: root.controller && root.controller.caldavServerDiscovering === true ? "Finding..." : "Find calendars"
         foreground: root.textColor
         accent: root.accentColor
         fontFamily: root.panelFontFamily
@@ -743,9 +760,9 @@ Column {
 
     Text {
       width: parent.width
-      visible: root.controller && root.controller.caldavServerDiscoveryResults.length > 0
-      text: "Found " + (root.controller ? root.controller.caldavServerDiscoveryResults.length : 0)
-        + ((root.controller && root.controller.caldavServerDiscoveryResults.length === 1) ? " calendar" : " calendars")
+      visible: root.caldavResults.length > 0
+      text: "Found " + root.caldavResults.length
+        + (root.caldavResults.length === 1 ? " calendar" : " calendars")
         + ". Choose which to add:"
       color: root.dimColor
       font.family: root.panelFontFamily
@@ -755,7 +772,7 @@ Column {
     }
 
     Repeater {
-      model: root.controller ? root.controller.caldavServerDiscoveryResults : []
+      model: root.caldavResults
 
       Item {
         id: caldavResultRow
@@ -775,7 +792,10 @@ Column {
 
           Text {
             width: parent.width
+            objectName: "calendar-caldav-discovered-name"
             text: String(caldavResultRow.modelData.name || "Calendar")
+            // The server chose this name; it is drawn as the characters it is.
+            textFormat: Text.PlainText
             color: root.textColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -833,21 +853,22 @@ Column {
 
     Row {
       spacing: Style.space(6)
-      visible: root.controller && root.controller.caldavServerDiscoveryResults.length > 0
+      visible: root.caldavResults.length > 0
       IconTextButton {
-        text: root.controller && root.controller.caldavAdding ? "Adding" : "Add selected calendars"
+        objectName: "calendar-caldav-add"
+        text: root.controller && root.controller.caldavAdding === true ? "Adding" : "Add selected calendars"
         foreground: root.textColor
         accent: root.accentColor
         fontFamily: root.panelFontFamily
         enabled: root.controller && !root.controller.caldavAdding && !root.controller.savingSource
         onClicked: {
           var selected = []
-          var results = root.controller.caldavServerDiscoveryResults
+          var results = root.caldavResults
           for (var i = 0; i < results.length; i++) {
-            if (root.caldavChecked[String(results[i].url || "")] !== false) selected.push(results[i])
+            var url = String(results[i].url || "")
+            if (root.caldavChecked[url] !== false) selected.push(url)
           }
-          root.controller.addDiscoveredCaldavCalendars(
-            selected, caldavServerUsername.text, caldavServerPassword.text)
+          root.controller.addDiscoveredCaldavCalendars(selected)
         }
       }
       IconTextButton {
@@ -872,15 +893,20 @@ Column {
     }
   }
 
-  // Closing the wizard forgets what it was given: a reopened wizard starts at
-  // the address form, never at a stale checklist with a remembered password.
+  // Closing the wizard forgets what it was given and stops waiting for an
+  // answer: a reopened wizard starts at the address form, never at a stale
+  // checklist with a remembered password, whenever the server replies.
   function closeCaldavDiscovery() {
     caldavServerPassword.text = ""
+    caldavResultText.text = ""
     root.caldavChecked = ({})
     root.caldavOpen = false
-    if (root.controller && !root.controller.caldavAdding)
-      root.controller.caldavServerDiscoveryResults = []
+    if (root.controller) root.controller.cancelCaldavServerDiscovery()
   }
+
+  // The page going away is a cancel too: the controller outlives it.
+  Component.onDestruction: if (root.caldavOpen && root.controller && !root.controller.caldavAdding)
+    root.controller.cancelCaldavServerDiscovery()
 
   function findCaldavCalendars() {
     caldavResultText.text = ""
@@ -897,13 +923,14 @@ Column {
     }
     function onCaldavCalendarsAdded(ok, error, added, total) {
       caldavResultText.ok = ok
-      caldavResultText.text = ok
-        ? "Added " + added + (added === 1 ? " calendar" : " calendars")
-        : error
+      caldavResultText.text = ok ? "" : error
       if (ok) {
         caldavServerUrl.text = ""
         caldavServerUsername.text = ""
         root.closeCaldavDiscovery()
+        // Said below the wizard, which has just closed.
+        resultText.ok = true
+        resultText.text = "Added " + added + (added === 1 ? " calendar" : " calendars")
       }
     }
   }
