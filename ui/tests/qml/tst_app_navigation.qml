@@ -449,6 +449,23 @@ Item {
       compare(mailService.count("saveDraft"), 0, "an untouched reply leaves without saving")
     }
 
+    function test_a_reply_raised_from_the_list_waits_for_the_body() {
+      app.cursorId = "message-1"
+      app.composeFromCursor("reply")
+      // What selecting a listed row does: the summary at once, the body later.
+      mailService.selectedMessage = ({
+        id: "message-1", subject: "One",
+        from: ({ email: "sender@example.com", display: "Sender" }), to: [], cc: []
+      })
+      wait(50)
+      compare(app.composing, false, "the summary alone does not begin the draft")
+
+      mailService.land()
+      tryCompare(app, "composing", true)
+      app.back()
+      tryCompare(app, "composing", false)
+    }
+
     function test_the_shortcut_sheet_closes_before_the_page_under_it() {
       app.openMessage("message-1")
       app.runShortcut("help", "")

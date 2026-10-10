@@ -671,11 +671,17 @@ Item {
     return currentView === "reader" ? "reader" : "list"
   }
 
+  // A listed row supplies the summary the moment it is selected, before the
+  // body is read; a draft begun on the summary alone quotes nothing.
+  function detailReady() {
+    return !!service.selectedMessage && !service.detailLoading && service.detailPainted
+  }
+
   function startCompose(mode) {
     if (!service) return
     pendingDraftId = ""
     var next = String(mode || "new")
-    if (next !== "new" && !service.selectedMessage) {
+    if (next !== "new" && !detailReady()) {
       pendingComposeMode = next
       return
     }
@@ -702,7 +708,7 @@ Item {
   }
 
   function resumeHeldCompose() {
-    if (pendingComposeMode === "" || !service || !service.selectedMessage) return
+    if (pendingComposeMode === "" || !service || !detailReady()) return
     var mode = pendingComposeMode
     pendingComposeMode = ""
     startCompose(mode)
