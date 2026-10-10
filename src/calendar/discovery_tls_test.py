@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix="omamail-discovery-tls-") as directory:
     # extension file yields exactly these extensions on either toolkit.
     extensions.write_text(
         "basicConstraints=critical,CA:FALSE\n"
-        "subjectAltName=DNS:caldav.icloud.com,DNS:p37-caldav.icloud.com,DNS:graph.microsoft.com,DNS:outside.example.test\n")
+        "subjectAltName=DNS:caldav.icloud.com,DNS:p37-caldav.icloud.com,DNS:graph.microsoft.com,DNS:outside.example.test,DNS:caldav.fastmail.com\n")
     for command in ([
         "openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes",
         "-keyout", str(key), "-out", str(request), "-subj", "/CN=caldav.icloud.com",
