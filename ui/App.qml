@@ -12,6 +12,7 @@ import "account" as Account
 import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
+import "compose" as Compose
 import "keys/Keymap.js" as Keymap
 import "providers/Registry.js" as Provider
 import "agent/Agent.js" as Agent
@@ -674,33 +675,14 @@ Item {
     return currentView === "reader" ? "reader" : "list"
   }
 
-  // A listed row supplies the summary the moment it is selected, before the
-  // body is read; a draft begun on the summary alone quotes nothing.
-  function detailReady() {
-    return !!service.selectedMessage && !service.detailLoading && service.detailPainted
+  Compose.PendingCompose {
+    id: pendingCompose
+    app: root
+    composer: compose
+    assistant: root.agentPrompt
+    composeAssistant: root.composeAgent
   }
-
-  function startCompose(mode) {
-    if (!service) return
-    pendingDraftId = ""
-    var next = String(mode || "new")
-    if (next !== "new" && !detailReady()) {
-      pendingComposeMode = next
-      return
-    }
-    pendingComposeMode = ""
-    var keepAssistant = agentPrompt.opened
-    var conversation = keepAssistant ? agentPrompt.job : null
-    compose.begin(next, service.selectedMessage, service.selectedBody.text,
-      service.selectedAttachments)
-    if (keepAssistant) {
-      if ((next === "reply" || next === "replyAll") && conversation
-          && String(conversation.accountId) === compose.accountId
-          && String(conversation.messageId) === compose.replyMessageId)
-        compose.agentParentJobId = String(conversation.id)
-      composeAgent.open()
-    }
-  }
+  function startCompose(mode) { pendingCompose.start(mode) }
 
   // A mailto: URL, or the blank draft `compose: true` asks for. The window is
   // already open when this runs — summon delivers the payload to open().
@@ -710,12 +692,7 @@ Item {
     compose.beginDraft(draft)
   }
 
-  function resumeHeldCompose() {
-    if (pendingComposeMode === "" || !service || !detailReady()) return
-    var mode = pendingComposeMode
-    pendingComposeMode = ""
-    startCompose(mode)
-  }
+  function resumeHeldCompose() { pendingCompose.resume() }
 
   function resumeHeldDraft() {
     if (pendingDraftId === "" || !service) return
