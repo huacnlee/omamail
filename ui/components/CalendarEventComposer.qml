@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Ui
 import "../calendar/Calendar.js" as Calendar
 import "../compose/Recipients.js" as Recipients
+import "../backend/Plain.js" as Plain
 
 Rectangle {
   id: root
@@ -290,7 +291,12 @@ Rectangle {
     return String(groups[0].calendars[0].id)
   }
 
-  function beginEdit(sourceId, event) {
+  // The event comes through the views' `editRequested` and the controller's
+  // `composeRequested` signals, and on Qt 6.12 its guests arrive as a
+  // sequence the update cannot match against: the guests it kept lost their
+  // answers.
+  function beginEdit(sourceId, crossed) {
+    var event = Plain.plain(crossed)
     advancedOptionsOpen = !!event && (event.transparency === "transparent"
       || event.visibility === "private" || event.visibility === "public")
     changeRecurrence = false

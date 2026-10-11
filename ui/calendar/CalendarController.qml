@@ -5,6 +5,7 @@ import qs.Commons
 import "Calendar.js" as Calendar
 import "Sources.js" as Sources
 import "../providers/MicrosoftOAuth.js" as Microsoft
+import "../backend/Plain.js" as Plain
 
 Item {
   id: root
@@ -448,7 +449,10 @@ Item {
   }
 
   // What the delete confirmation asks: named, with a button per consequence.
-  function deleteRequest(sourceId, event) {
+  // The event comes through the views' `deleteRequested` signal, and on Qt
+  // 6.12 its recurrence arrives as a sequence that reads as no series.
+  function deleteRequest(sourceId, crossed) {
+    var event = Plain.plain(crossed)
     var request = Calendar.deleteRequest(event, findSource(String(sourceId || "")),
       service.backendCanGoogleCalendars === true)
     request.sourceId = String(sourceId || "")

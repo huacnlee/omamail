@@ -16,6 +16,7 @@ import "Aliases.js" as Aliases
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
+import "../backend/Plain.js" as Plain
 
 // One mailbox: its sign-in, its cache, its messages. Service.qml owns a set of
 // these and puts whichever is on screen in front of the views.
@@ -2902,7 +2903,10 @@ Item {
     query: Provider.unreadQuery(root.providerId)
     intervalSec: root.refreshIntervalSec
     pageSize: root.maxMessages
-    onUpdated: function(snapshot) {
+    // Made plain: through the signal Qt 6.12 hands `messages` over as a
+    // sequence, which `summarizeResources` reads as none.
+    onUpdated: function(crossed) {
+      var snapshot = Plain.plain(crossed)
       if (snapshot.error) return
       root.summarizeResources(snapshot.messages || [], function(prepared, preparationError) {
       if (preparationError) return
