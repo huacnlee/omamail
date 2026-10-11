@@ -209,6 +209,20 @@ fn ensure_mode(file: &File, metadata: &std::fs::Metadata, mode: u32) -> Result<(
         .map_err(|_| "cache_unavailable")
 }
 
+/// Validate a newly created private file before writing sensitive bytes. Mode
+/// bits alone do not constrain inherited Darwin allow ACLs.
+pub(crate) fn validate_private_file(file: &File) -> Result<()> {
+    let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err("cache_unsafe_path");
+    }
+    validate_acl(file, true)
+}
+
 pub(crate) fn regular_readonly(dir: &File, name: &str) -> Result<Option<File>> {
     let name = cstr(name.as_ref())?;
     let fd = unsafe {

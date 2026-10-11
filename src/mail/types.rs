@@ -376,3 +376,89 @@ impl TryFrom<&Value> for SendRequest {
         })
     }
 }
+
+pub struct ExportRequest {
+    pub account: Account,
+    pub id: String,
+    pub suggested_name: String,
+    /// A folder the user picked. `None` saves to Downloads.
+    pub directory: Option<PathBuf>,
+}
+
+impl TryFrom<&Value> for ExportRequest {
+    type Error = &'static str;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let object = params_object(value, &["account", "id", "suggestedName", "directory"])?;
+        let wanted = object
+            .get("account")
+            .and_then(Value::as_str)
+            .ok_or("invalid_params")?;
+        let account = resolve_export_account(wanted)?;
+        let id = object
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or("invalid_params")?
+            .to_owned();
+        opaque_id(&id)?;
+        let suggested_name = optional_string(object, "suggestedName", "")?;
+        if suggested_name.chars().any(char::is_control) {
+            return Err("invalid_params");
+        }
+        let directory = export_directory(object.get("directory"))?;
+        Ok(Self {
+            account,
+            id,
+            suggested_name,
+            directory,
+        })
+    }
+}
+
+/// A chosen destination is an absolute, already normalized folder path. The
+/// writer still anchors it by descriptor and refuses a missing or unsafe one;
+/// this only rejects what can never name a folder before any work starts.
+fn export_directory(value: Option<&Value>) -> Result<Option<PathBuf>, &'static str> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let text = value.as_str().ok_or("invalid_params")?;
+    let path = std::path::Path::new(text);
+    // `components()` quietly drops an inner `.`, a doubled or trailing
+    // separator, so the path must also be exactly its own normal form.
+    let normal: PathBuf = path.components().collect();
+    if text.is_empty()
+        || text.len() > 4096
+        || text.chars().any(char::is_control)
+        || !path.is_absolute()
+        || normal.as_os_str() != path.as_os_str()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("invalid_params");
+    }
+    Ok(Some(path.to_path_buf()))
+}
+
+/// Export needs an explicit account. An empty or unknown id is refused and
+/// never falls back to the registry's active account, unlike `resolve_account`.
+fn resolve_export_account(wanted: &str) -> Result<Account, &'static str> {
+    if wanted.len() > MAX_ID || wanted.chars().any(char::is_control) {
+        return Err("mail_account_unknown");
+    }
+    let id = wanted.trim().to_lowercase();
+    if id.is_empty() || id.len() > MAX_ID || id.chars().any(char::is_control) {
+        return Err("mail_account_unknown");
+    }
+    let summary = crate::account::list_readonly()?;
+    let row = summary["accounts"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["id"] == id))
+        .ok_or("mail_account_unknown")?;
+    Ok(Account {
+        id,
+        provider: Provider::try_from(row["provider"].as_str().unwrap_or(""))?,
+    })
+}

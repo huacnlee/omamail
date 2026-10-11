@@ -9,15 +9,54 @@ pub fn serve() -> io::Result<()> {
     #[cfg(target_os = "linux")]
     bind_to_parent()?;
     let failed = Arc::new(AtomicBool::new(false));
-    super::protocol::serve(
-        BufReader::new(Input {
-            failed: failed.clone(),
-        }),
-        Output {
-            inner: io::stdout(),
-            failed,
-        },
-    )
+    let cancellation = Arc::new(super::protocol::Cancellation::default());
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|_scope| {
+        #[cfg(unix)]
+        _scope.spawn(|| {
+            // The input thread can be blocked submitting to a full queue.
+            // Observe output closure independently so cancellation drops that
+            // queue and wakes its sender as well as all running requests.
+            while !finished.load(Ordering::Acquire) {
+                let mut output = output_descriptor(libc::STDOUT_FILENO);
+                let ready = unsafe { libc::poll(&mut output, 1, 100) };
+                if output.revents != 0
+                    || failed.load(Ordering::Acquire)
+                    || (ready < 0
+                        && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted)
+                {
+                    failed.store(true, Ordering::Release);
+                    cancellation.cancel();
+                    break;
+                }
+            }
+        });
+        let result = super::protocol::serve_with_cancel(
+            BufReader::new(Input {
+                failed: failed.clone(),
+            }),
+            Output {
+                inner: io::stdout(),
+                failed: failed.clone(),
+            },
+            cancellation.clone(),
+        );
+        finished.store(true, Ordering::Release);
+        result
+    })
+}
+
+#[cfg(unix)]
+fn output_descriptor(fd: libc::c_int) -> libc::pollfd {
+    // Darwin registers no kqueue filter for events=0. Requesting POLLHUP
+    // registers its read filter, which watches closure on a pipe's write end
+    // without waking for ordinary writable capacity. Linux also reports pipe
+    // errors with this mask. Never request POLLOUT: it would spin while idle.
+    libc::pollfd {
+        fd,
+        events: libc::POLLHUP,
+        revents: 0,
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -65,20 +104,39 @@ impl Read for Input {
             if self.failed.load(Ordering::Acquire) {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, "output closed"));
             }
-            let mut descriptor = libc::pollfd {
-                fd: libc::STDIN_FILENO,
-                events: libc::POLLIN,
-                revents: 0,
-            };
+            // Poll stdin for input and stdout for closure. A peer that closes
+            // its read end of the output pipe is detected here eagerly, not
+            // only on the next write, so a disconnect mid-request stops the
+            // request instead of letting it run to completion.
+            let mut descriptors = [
+                libc::pollfd {
+                    fd: libc::STDIN_FILENO,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                output_descriptor(libc::STDOUT_FILENO),
+            ];
             // The backend is the only stdin reader. Read the descriptor directly:
             // a buffered Stdin reader could contain bytes invisible to poll.
-            let ready = unsafe { libc::poll(&mut descriptor, 1, 100) };
+            let ready = unsafe {
+                libc::poll(
+                    descriptors.as_mut_ptr(),
+                    descriptors.len() as libc::nfds_t,
+                    100,
+                )
+            };
             if ready < 0 {
                 let error = io::Error::last_os_error();
                 if error.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
                 return Err(error);
+            }
+            // Any event on the stdout descriptor is an error (POLLERR, POLLHUP,
+            // or POLLNVAL): the peer can no longer receive a response.
+            if descriptors[1].revents != 0 {
+                self.failed.store(true, Ordering::Release);
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "output closed"));
             }
             if ready == 0 {
                 continue;
@@ -122,5 +180,32 @@ impl Write for Output {
             self.failed.store(true, Ordering::Release);
         }
         result
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::fd::AsRawFd;
+
+    #[test]
+    fn output_observer_waits_until_the_pipe_reader_closes() {
+        // std's pipe is close-on-exec. A bare libc::pipe would let a child
+        // spawned by another test running in parallel inherit the read end
+        // and keep the pipe open after `reader` is dropped.
+        let (reader, writer) = std::io::pipe().unwrap();
+        let mut output = output_descriptor(writer.as_raw_fd());
+        assert_eq!(
+            unsafe { libc::poll(&mut output, 1, 20) },
+            0,
+            "a writable pipe must not wake an idle observer"
+        );
+        drop(reader);
+        assert_eq!(unsafe { libc::poll(&mut output, 1, 200) }, 1);
+        assert_ne!(
+            output.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL),
+            0,
+            "peer closure must wake the observer without writing a response"
+        );
     }
 }

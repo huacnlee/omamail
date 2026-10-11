@@ -4,6 +4,7 @@
 #   attachment.sh read <path>
 #   attachment.sh clipboard <dir>
 #   attachment.sh pick
+#   attachment.sh folder
 #   attachment.sh forget <dir> <path>
 #
 # One JSON object on stdout. Quickshell's Process.write() never closes stdin,
@@ -279,6 +280,26 @@ pick_files() {
   emit_paths "$list"
 }
 
+# One folder, through the same out-of-process chooser, for Save as .eml.
+pick_folder() {
+  list=
+  if command -v omarchy-file-select >/dev/null 2>&1; then
+    list=$(omarchy-file-select --title 'Save .eml to' --directory 2>/dev/null || true)
+  elif command -v zenity >/dev/null 2>&1; then
+    list=$(zenity --file-selection --directory --title='Save .eml to' 2>/dev/null || true)
+  else
+    fail_json "No folder picker is available"
+  fi
+  list=$(printf '%s\n' "$list" | sed -n '1p')
+  # The backend takes a folder only in its plain form, so no trailing slash.
+  while [ "${#list}" -gt 1 ] && [ "${list%/}" != "$list" ]; do list=${list%/}; done
+  case "$list" in
+    /*) ;;
+    *) fail_json "cancelled" ;;
+  esac
+  emit_paths "$list"
+}
+
 command=${1:-}
 case "$command" in
   read)
@@ -292,12 +313,15 @@ case "$command" in
   pick)
     pick_files
     ;;
+  folder)
+    pick_folder
+    ;;
   forget)
     [ -n "${2:-}" ] && [ -n "${3:-}" ] || fail_json "That file is not a draft attachment"
     forget_file "$2" "$3"
     ;;
   *)
-    printf '%s\n' 'usage: attachment.sh read <path> | clipboard <dir> | pick | forget <dir> <path>' >&2
+    printf '%s\n' 'usage: attachment.sh read <path> | clipboard <dir> | pick | folder | forget <dir> <path>' >&2
     exit 2
     ;;
 esac

@@ -1,5 +1,6 @@
 //! Native asynchronous IMAP and SMTP. Credentials never cross a process boundary.
 mod cancel;
+mod export;
 pub(crate) mod idle;
 mod mutation;
 mod read;
@@ -114,8 +115,19 @@ async fn line(w: &mut Wire) -> Result<Vec<u8>> {
     }
 }
 async fn response(w: &mut Wire, tag: &str, continuation: bool) -> Result<Vec<u8>> {
+    response_limited(w, tag, continuation, LIMIT).await
+}
+/// `response` with a smaller per-literal ceiling. The export path passes its
+/// 25 MiB product limit so an over-limit message is refused when the server
+/// announces the literal length, before the octets are read.
+async fn response_limited(
+    w: &mut Wire,
+    tag: &str,
+    continuation: bool,
+    literal_cap: usize,
+) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    response_each(w, tag, continuation, |record| {
+    response_each(w, tag, continuation, literal_cap, |record| {
         out.extend_from_slice(record);
         Ok(())
     })
@@ -124,11 +136,13 @@ async fn response(w: &mut Wire, tag: &str, continuation: bool) -> Result<Vec<u8>
 }
 /// Visit complete IMAP response records, keeping literals attached to their
 /// protocol record. UID inventories can retain only numbers instead of a full
-/// response and a second, much larger parsed syntax tree.
+/// response and a second, much larger parsed syntax tree. `literal_cap` bounds
+/// any single announced literal on top of the whole-response `LIMIT`.
 async fn response_each(
     w: &mut Wire,
     tag: &str,
     continuation: bool,
+    literal_cap: usize,
     mut visit: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
     let mut total = 0;
@@ -163,7 +177,7 @@ async fn response_each(
         let mut record = l;
         while let Some(n) = literal {
             let n = n.map_err(|_| "imap_invalid_response")?;
-            if n > LIMIT - total {
+            if n > LIMIT - total || n > literal_cap {
                 return Err("mail_response_too_large");
             }
             let start = record.len();
@@ -191,8 +205,11 @@ fn literal_length(line: &str) -> Option<std::result::Result<usize, std::num::Par
         .map(|s| s.trim_end_matches('+').parse::<usize>())
 }
 async fn command(w: &mut Wire, cmd: &str) -> Result<Vec<u8>> {
+    command_limited(w, cmd, LIMIT).await
+}
+async fn command_limited(w: &mut Wire, cmd: &str, literal_cap: usize) -> Result<Vec<u8>> {
     write(w, format!("O1 {cmd}\r\n").as_bytes()).await?;
-    response(w, "O1", false).await
+    response_limited(w, "O1", false, literal_cap).await
 }
 async fn tls(w: Wire, host: &str) -> Result<Wire> {
     if !w.buffer().is_empty() {
@@ -469,6 +486,7 @@ pub(crate) async fn execute_planned_action(
 pub async fn call(method: &str, p: &Value) -> Result<Value> {
     read::validate(method, p)?;
     mutation::validate(method, p)?;
+    export::validate(method, p)?;
     if method == "imap.cancel" {
         return cancel::cancel(p).await;
     }
@@ -480,6 +498,7 @@ pub async fn call(method: &str, p: &Value) -> Result<Value> {
             | "imap.messages"
             | "imap.count"
             | "imap.attachment"
+            | "imap.rawMessage"
             | "imap.check"
     ) {
         return cancel::run(p, call_inner(method, p)).await;
@@ -577,6 +596,9 @@ fn unsafe_fetch(command: &str) -> bool {
 }
 async fn execute(method: &str, p: &Value, sent: &std::sync::atomic::AtomicBool) -> Result<Value> {
     credentials(p)?;
+    if method == "imap.rawMessage" {
+        return export::call(p).await;
+    }
     if matches!(
         method,
         "imap.folders"

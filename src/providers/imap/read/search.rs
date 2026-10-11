@@ -361,7 +361,7 @@ async fn inventory(wire: &mut Wire, ceiling: u32) -> Result<Vec<u32>> {
     )
     .await?;
     let mut uids = BTreeSet::new();
-    response_each(wire, "O1", false, |record| {
+    response_each(wire, "O1", false, LIMIT, |record| {
         uids.extend(
             fetched_dates(record)?
                 .into_keys()

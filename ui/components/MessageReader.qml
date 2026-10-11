@@ -117,6 +117,18 @@ Item {
     })
   }
 
+  // Save as .eml from the reader: the message on screen, to Downloads or to a
+  // folder picked first. The owner is captured now, before any chooser opens.
+  readonly property bool canSaveEml: !!service && !!summary && !isDraft
+    && typeof service.canExportEmlFor === "function" && service.canExportEmlFor(selectedId)
+  readonly property bool canSaveEmlToFolder: canSaveEml && service.standalone !== true
+  function saveEml(chooseFolder) {
+    if (!canSaveEml) return false
+    var id = selectedId
+    if (!chooseFolder) return service.exportEml(id)
+    return service.exportEmlToFolder(service.accountForMessage(id), service.sourceIdFor(id))
+  }
+
   function scrollBy(steps) {
     var maximum = Math.max(0, bodyFlick.contentHeight - bodyFlick.height)
     bodyFlick.contentY = Math.max(0, Math.min(maximum,
@@ -748,6 +760,9 @@ Item {
   // The toolbar sits on its own ground rather than on whatever happens to be
   // scrolled behind it. Transparent, the message ran underneath the icons and
   // through the rule, which read as text overlapping the controls.
+  // What the toolbar takes from the bottom, for a card that must sit above it.
+  readonly property real footerHeight: footerBackdrop.visible ? footerBackdrop.height : 0
+
   Rectangle {
     id: footerBackdrop
     anchors.left: parent.left
@@ -1001,6 +1016,7 @@ Item {
         y: actionsRow.stacked ? messageActions.height + Style.space(4) : 0
         implicitWidth: modeTrack.width
           + (openWebButton.visible ? Style.space(6) + openWebButton.width : 0)
+          + (saveEmlButton.visible ? Style.space(6) + saveEmlButton.width : 0)
         implicitHeight: Math.max(modeTrack.height,
           openWebButton.visible ? openWebButton.height : 0)
         width: implicitWidth
@@ -1061,6 +1077,23 @@ Item {
           fontFamily: root.panelFontFamily
           onClicked: if (root.service && root.summary) root.service.openInBrowser(root.selectedId)
         }
+        // Takes the message out of the window as a file, like the browser
+        // button takes it out to the web. A click saves to Downloads; the
+        // body's right-click menu and the list's menu also offer a folder.
+        IconButton {
+          id: saveEmlButton
+          objectName: "reader-save-eml-button"
+          visible: root.canSaveEml
+          x: (openWebButton.visible ? openWebButton.x + openWebButton.width : modeTrack.width)
+            + Style.space(6)
+          y: modeTrack.y
+          height: modeTrack.height
+          iconName: "download"
+          tooltipText: "Save as .eml to Downloads · ctrl+shift+s"
+          foreground: root.dimColor; hoverColor: root.textColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.saveEml(false)
+        }
       }
     }
   }
@@ -1107,6 +1140,9 @@ Item {
       if (root.service && typeof root.service.copyText === "function") root.service.copyText(text)
     }
     onOpenLinkRequested: function(url) { root.openLink(url) }
+    canSaveEml: root.canSaveEml
+    canSaveEmlToFolder: root.canSaveEmlToFolder
+    onSaveEmlRequested: function(chooseFolder) { root.saveEml(chooseFolder) }
   }
 
   ImagePopover {

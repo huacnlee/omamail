@@ -4,8 +4,8 @@ import qs.Commons
 import "../../components" as Omamail
 import "../../message/Html.js" as Html
 
-// A right-click on the message body: Copy for what is selected, and Open and
-// Copy URL when the click lands on a link.
+// A right-click on the message body: Copy for what is selected, Open and Copy
+// URL when the click lands on a link, and the message itself as a .eml file.
 Item {
   width: 900
   height: 600
@@ -55,6 +55,19 @@ Item {
 
     function getMessage() {}
     function showRemoteImages() {}
+    // Save as .eml from the reader: the toolbar button and the body menu.
+    property bool exportable: true
+    property bool folderable: true
+    property var exported: []
+    function canExportEmlFor(id) { return exportable }
+    readonly property bool standalone: !folderable
+    function exportEml(id) { exported = exported.concat([{ id: String(id), folder: false }]); return true }
+    function accountForMessage(id) { return "imap:reader@example.com" }
+    function sourceIdFor(id) { return "native-" + id }
+    function exportEmlToFolder(account, id) {
+      exported = exported.concat([{ account: String(account), id: String(id), folder: true }])
+      return true
+    }
     function copyText(text) { copied = copied.concat([String(text)]); return true }
     function openExternal(url) { opened = opened.concat([String(url)]); return true }
   }
@@ -130,6 +143,9 @@ Item {
       body().deselect()
       mailService.copied = []
       mailService.opened = []
+      mailService.exported = []
+      mailService.exportable = true
+      mailService.folderable = true
     }
 
     function cleanup() { menu().close() }
@@ -166,6 +182,49 @@ Item {
       compare(menu().link, "https://example.com/board")
       menu().copyLinkRow.activated()
       compare(mailService.copied, ["https://example.com/board"])
+    }
+
+    function test_the_body_menu_saves_the_message_as_eml() {
+      var edit = body()
+      var point = pointOf(edit, "Person 1")
+      mouseClick(edit, point.x, point.y, Qt.RightButton)
+      wait(20)
+      compare(menu().saveEmlRow.visible, true)
+      compare(menu().saveEmlFolderRow.visible, true)
+      menu().saveEmlRow.activated()
+      compare(mailService.exported, [{ id: "message-9", folder: false }])
+      compare(menu().opened, false)
+
+      mouseClick(edit, point.x, point.y, Qt.RightButton)
+      wait(20)
+      menu().saveEmlFolderRow.activated()
+      compare(mailService.exported[1], { account: "imap:reader@example.com",
+        id: "native-message-9", folder: true }, "the owner and native id, captured now")
+    }
+
+    function test_the_rows_follow_what_the_service_can_do() {
+      mailService.folderable = false
+      var edit = body()
+      var point = pointOf(edit, "Person 1")
+      mouseClick(edit, point.x, point.y, Qt.RightButton)
+      wait(20)
+      compare(menu().saveEmlRow.visible, true)
+      compare(menu().saveEmlFolderRow.visible, false, "no chooser, no folder row")
+      menu().close()
+      mailService.exportable = false
+      mouseClick(edit, point.x, point.y, Qt.RightButton)
+      wait(20)
+      compare(menu().saveEmlRow.visible, false)
+    }
+
+    function test_the_toolbar_button_saves_to_downloads() {
+      var button = named(reader, "reader-save-eml-button")
+      verify(button, "the reader toolbar has a save button")
+      compare(button.visible, true)
+      button.clicked()
+      compare(mailService.exported, [{ id: "message-9", folder: false }])
+      mailService.exportable = false
+      compare(button.visible, false, "hidden where export is not possible")
     }
 
     function test_open_link_opens_it_outside() {

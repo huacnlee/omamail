@@ -223,6 +223,9 @@ Item {
       compare(web.height, track.height,
         "Open Web has the same toolbar control box, not only the same centre")
 
+      verify(reader.footerHeight >= toolbar.height,
+        "the reader reports the whole toolbar, for cards that must sit above it")
+
       reader.width = 300
       tryCompare(toolbar, "stacked", true)
       verify(track.y >= 0 && web.y >= 0)

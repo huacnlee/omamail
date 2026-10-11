@@ -8,6 +8,7 @@ import qs.Ui
 
 import "account/Model.js" as Model
 import "account/Accounts.js" as Accounts
+import "account/MessageActions.js" as MessageActions
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "keys/Keymap.js" as Keymap
@@ -1033,6 +1034,7 @@ Item {
       if (service && starred !== "") service.toggleStar(starred)
       return
     }
+    if (id === "exportEml") return service ? service.exportFromView(currentView, cursorId) : false
     if (id === "toggleCheck") return toggleCheck(cursorId)
     if (id === "askAgent") {
       if (!service || !service.hasAgent || service.agentAvailable === false) return false
@@ -2424,6 +2426,8 @@ Item {
         panelFontFamily: root.fontFamily
       }
 
+      EmlSavedToast { app: root; clearance: reader.visible ? reader.footerHeight : 0 }
+
       // --------------------------------------------------------- status bar
 
       Item {
@@ -3005,9 +3009,7 @@ Item {
         backgroundColor: root.background
         dimColor: root.dim
         panelFontFamily: root.fontFamily
-        hiddenBindings: root.service && root.service.hasAgent === false
-          ? ["askAgent", "assistantSend", "assistantChooseCommand", "assistantCommandNext", "assistantCommandPrevious"]
-          : []
+        hiddenBindings: MessageActions.hiddenBindings(root.service, root.currentView, root.cursorId)
         onDismissed: root.dismissHelp()
       }
 

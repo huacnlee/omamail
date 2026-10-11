@@ -219,6 +219,40 @@ answer=$(sh "$script" pick)
 check "a cancelled picker is cancelled, not an error" "$(json_field error "$answer")" "cancelled"
 unset OMAMAIL_PICK_OUT OMAMAIL_PICK_EXIT
 
+# A folder for Save as .eml: the chooser is asked for a directory, and only
+# its first absolute answer is returned.
+cat > "$work/bin/omarchy-file-select" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" > "$OMAMAIL_PICK_ARGS"
+printf '%s\n' "$OMAMAIL_PICK_OUT"
+exit "${OMAMAIL_PICK_EXIT:-0}"
+STUB
+chmod +x "$work/bin/omarchy-file-select"
+OMAMAIL_PICK_ARGS=$work/pick-args
+OMAMAIL_PICK_OUT=$(printf '%s\n' "/home/ada/Mail archive" /home/ada/other)
+export OMAMAIL_PICK_ARGS OMAMAIL_PICK_OUT
+answer=$(sh "$script" folder)
+check "folder says ok" "$(json_field ok "$answer")" "True"
+picked=$(printf '%s' "$answer" | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)["paths"]))')
+check "folder returns only the first folder" "$picked" "/home/ada/Mail archive"
+case "$(cat "$OMAMAIL_PICK_ARGS")" in
+  *--directory*) ok "folder asks the chooser for a directory" ;;
+  *) bad "folder asks the chooser for a directory" ;;
+esac
+OMAMAIL_PICK_OUT=/home/ada/Mail/
+answer=$(sh "$script" folder)
+picked=$(printf '%s' "$answer" | python3 -c 'import json,sys; print(json.load(sys.stdin)["paths"][0])')
+check "a trailing slash is dropped" "$picked" "/home/ada/Mail"
+OMAMAIL_PICK_OUT=relative/folder
+answer=$(sh "$script" folder)
+check "a relative folder is refused as cancelled" "$(json_field error "$answer")" "cancelled"
+OMAMAIL_PICK_EXIT=1
+OMAMAIL_PICK_OUT=
+export OMAMAIL_PICK_EXIT OMAMAIL_PICK_OUT
+answer=$(sh "$script" folder)
+check "a cancelled folder chooser is cancelled" "$(json_field error "$answer")" "cancelled"
+unset OMAMAIL_PICK_OUT OMAMAIL_PICK_EXIT OMAMAIL_PICK_ARGS
+
 # forget only deletes files this script wrote into the compose dir.
 printf 'keep\n' > "$work/outside.txt"
 sh "$script" forget "$work/compose" "$work/outside.txt" >/dev/null 2>&1 || true
