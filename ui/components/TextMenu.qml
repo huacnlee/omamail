@@ -45,7 +45,7 @@ Item {
   readonly property bool hasSelection: !!target && String(target.selectedText || "") !== ""
   readonly property var menuRows: [
     suggestion0, suggestion1, suggestion2, suggestion3, suggestion4,
-    ignoreRow, addRow, cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow
+    ignoreRow, cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow
   ]
 
   readonly property alias cutRow: cutRow
@@ -55,7 +55,6 @@ Item {
   readonly property alias openLinkRow: openLinkRow
   readonly property alias copyLinkRow: copyLinkRow
   readonly property alias ignoreWordRow: ignoreRow
-  readonly property alias addToDictionaryRow: addRow
 
   signal copyRequested(string text)
   // Paste is the owner's: a compose form tries the clipboard for an image
@@ -64,7 +63,6 @@ Item {
   signal openLinkRequested(string url)
   signal spellingCorrect(string replacement)
   signal spellingIgnore(string word)
-  signal spellingAddToDictionary(string word)
 
   anchors.fill: parent
   z: 50
@@ -200,12 +198,6 @@ Item {
         visible: root.spellingActionsVisible
         text: "Ignore for this session"
         onActivated: { var word = root.spellingWord; menu.close(); root.spellingIgnore(word) }
-      }
-      MenuRow {
-        id: addRow
-        visible: root.spellingActionsVisible
-        text: "Add to dictionary"
-        onActivated: { var word = root.spellingWord; menu.close(); root.spellingAddToDictionary(word) }
       }
       MenuSeparatorLine {
         visible: root.spellingVisible

@@ -488,7 +488,7 @@ Item {
   }
 
   function writeConfig(name, text, callback) {
-    var allowed = ["credentials.json", "window.json", "calendars.json", "spelling.json"]
+    var allowed = ["credentials.json", "window.json", "calendars.json"]
     if (allowed.indexOf(String(name || "")) < 0) {
       if (typeof callback === "function") callback(false, "Invalid configuration file")
       return false
@@ -696,13 +696,8 @@ Item {
   readonly property alias spellingLanguage: spelling.language
   readonly property alias spellingAvailable: spelling.available
   readonly property alias spellingStatus: spelling.status
-  readonly property alias spellingWordStore: spelling.wordStore
-  readonly property alias spellingPersonalWords: spelling.words
-  readonly property alias spellingPersonalWordsError: spelling.error
   function setSpellingEnabled(value) { persistSetting("spellingEnabled", value !== false) }
   function setSpellingLanguage(value) { persistSetting("spellingLanguage", String(value || "en_US")) }
-  function addPersonalWord(word) { spelling.wordStore.add(word) }
-  function removePersonalWord(word) { spelling.wordStore.remove(word) }
 
   // ---------------------------------------------------------- the accounts
 

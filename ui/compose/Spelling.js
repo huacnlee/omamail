@@ -35,28 +35,6 @@ function isWordChar(character) {
 
 function isApostrophe(character) { return character === "'" || character === "\u2019" }
 
-function normalizePersonalWords(raw) {
-  var parsed = null
-  try { parsed = JSON.parse(String(raw || "")) } catch (e) { parsed = null }
-  var list = (parsed && Array.isArray(parsed.words)) ? parsed.words : []
-  var next = []
-  for (var i = 0; i < list.length; i++) {
-    var word = list[i]
-    if (typeof word !== "string") continue
-    if (word !== "" && next.indexOf(word) < 0) next.push(word)
-  }
-  return next
-}
-
-function mergePersonalWords(current, raw) {
-  var onDisk = normalizePersonalWords(raw)
-  var next = current.slice()
-  for (var i = 0; i < onDisk.length; i++) {
-    if (next.indexOf(onDisk[i]) < 0) next.push(onDisk[i])
-  }
-  return next
-}
-
 function decodeSettings(settings) {
   var values = settings || ({})
   return {

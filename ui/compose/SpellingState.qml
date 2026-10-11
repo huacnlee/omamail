@@ -14,12 +14,6 @@ Item {
     && probe.item !== null && probe.item.available
   readonly property string status: probe.status === Loader.Error
     ? "no-module" : (probe.item ? probe.item.status : "loading")
-  readonly property alias wordStore: personalWords
-  readonly property alias words: personalWords.words
-  readonly property alias error: personalWords.error
-
-  PersonalWords { id: personalWords; service: root.service }
-
   // Sonnet enumerates dictionaries once per process. Installing one requires
   // restarting Omamail; a new adapter alone cannot discover it.
   Loader { id: probe; source: "SpellcheckAdapter.qml" }

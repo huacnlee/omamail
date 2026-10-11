@@ -29,18 +29,6 @@ test("Ranges keep UTF-16 offsets, apostrophes, combining marks and repeated word
   deepEqual(rules.misspelledRanges("'' ’ 😀 ", wrong), [])
 })
 
-test("Personal words reject malformed data and merge late disk reads with session additions", () => {
-  const rules = spelling()
-  for (const raw of ["", "{", "null", "[]", '{"words":{}}']) {
-    deepEqual(rules.normalizePersonalWords(raw), [])
-  }
-  deepEqual(rules.normalizePersonalWords('{"words":["a","b","a","",42,null,{},"café"]}'), ["a", "b", "café"])
-  const current = ["session", "shared"]
-  deepEqual(rules.mergePersonalWords(current, '{"words":["disk","shared","disk"]}'), ["session", "shared", "disk"])
-  assert.deepEqual(current, ["session", "shared"], "a merge does not mutate the session snapshot")
-  deepEqual(rules.mergePersonalWords(current, "invalid"), current)
-})
-
 test("Settings default to enabled en_US and only explicit false disables checking", () => {
   const rules = spelling()
   for (const settings of [null, {}, { spellingEnabled: "no" }, { spellingEnabled: 0 }]) {

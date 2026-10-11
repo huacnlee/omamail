@@ -47,7 +47,7 @@ readonly property string keyContext:
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
 
-`Ctrl+.` opens spelling suggestions for the word at the caret when the composer body has focus. Right-click a word for the same corrections, Ignore for this session, and Add to dictionary. Fcitx5 commonly uses `Ctrl+.` to toggle punctuation width and may consume it before Omamail receives it; use right-click or change the input method binding in that case. There is no application menu-key or `Shift+F10` binding.
+`Ctrl+.` opens spelling suggestions for the word at the caret when the composer body has focus. Right-click a word for the same corrections and Ignore for this session. Fcitx5 commonly uses `Ctrl+.` to toggle punctuation width and may consume it before Omamail receives it; use right-click or change the input method binding in that case. There is no application menu-key or `Shift+F10` binding.
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.

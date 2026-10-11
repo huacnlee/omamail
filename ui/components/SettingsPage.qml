@@ -859,8 +859,8 @@ Column {
 
       Text {
         width: parent.width
-        text: "Underline misspelled words in the message body with corrections, "
-          + "Ignore, and Add to dictionary. Uses the local Hunspell engine; "
+        text: "Underline misspelled words in the message body with corrections "
+          + "and Ignore for this session. Uses the local Hunspell engine; "
           + "nothing is sent anywhere."
         color: root.dimColor
         font.family: root.panelFontFamily
@@ -889,21 +889,6 @@ Column {
         textFormat: Text.PlainText
       }
 
-      // The personal word list is the one spelling write that can be refused
-      // by the host. The word stays in memory for the session, but a failed
-      // save has to say so rather than quietly vanish at restart.
-      Text {
-        objectName: "spellingPersonalWordsError"
-        width: parent.width
-        visible: !!root.service && String(root.service.spellingPersonalWordsError || "") !== ""
-        text: "Personal words could not be saved: "
-          + (root.service ? root.service.spellingPersonalWordsError : "")
-        color: root.accentColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
-      }
     }
 
     Text {

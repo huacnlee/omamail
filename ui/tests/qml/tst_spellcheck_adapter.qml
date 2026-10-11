@@ -117,7 +117,7 @@ Item {
       compare(ranges[0].end, 11)
     }
 
-    function test_personal_words_are_treated_as_correct() {
+    function test_session_ignore_treats_a_word_as_correct() {
       var a = adapter()
       if (!a) return
       // A word unique to this test: ignore is process-global and irreversible,
@@ -125,9 +125,9 @@ Item {
       // order.
       edit.text = "zqxjw zqxjw"
       compare(a.inspect(0).misspelled, true)
-      a.personalWords = ["zqxjw"]
+      a.ignoreForSession("zqxjw")
       compare(a.inspect(0).misspelled, false)
-      // Applying personal words never disables the checker for other words.
+      // Ignoring never disables the checker for other words.
       compare(a.available, true)
       edit.text = root.sample
       compare(a.inspect(edit.text.indexOf("wrod")).misspelled, true)

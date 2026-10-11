@@ -1,7 +1,7 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml ui/compose/PendingCompose.qml \
-	ui/compose/SpellcheckAdapter.qml ui/compose/PersonalWords.qml ui/compose/SpellingState.qml \
+	ui/compose/SpellcheckAdapter.qml ui/compose/SpellingState.qml \
 	ui/tests/compatibility/tst_published_agent.qml \
 	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
 	ui/tests/qml/tst_reader_subject_menu.qml \

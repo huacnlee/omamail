@@ -3,7 +3,7 @@ import QtTest
 import "../../components" as Omamail
 
 // The right-click / Ctrl+. spelling menu on the composer body — the word
-// it targets, the correction/ignore/dictionary actions it offers, and the
+// it targets, the correction/ignore actions it offers, and the
 // guards that keep a stale or destroyed draft from being rewritten. The
 // underlines and the adapter contract are covered by tst_spellcheck_adapter
 // and tst_spellcheck_composer; here the point is the menu wiring.
@@ -24,18 +24,12 @@ Item {
     ]
     property string accountEmail: "me@example.com"
     property string activeAccountId: "me@example.com"
-    property var spellingPersonalWords: []
     function preferredSendAs(_r) { return null }
     function switchTo(_id) { return true }
     function refreshRecipientContacts() {}
     function send(_f) { return true }
     function copyText(_t) { return true }
     function clipboardAttachment(_dir, callback) { callback({ ok: false, error: "no-image" }); return true }
-    function addPersonalWord(word) {
-      if (word && spellingPersonalWords.indexOf(word) < 0) {
-        var words = spellingPersonalWords.slice(); words.push(word); spellingPersonalWords = words
-      }
-    }
   }
 
   Omamail.KeyRouter {
@@ -51,7 +45,6 @@ Item {
     onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
     anchors.fill: parent
     service: mailService
-    spellingPersonalWords: mailService.spellingPersonalWords
     textColor: Qt.rgba(1, 1, 1, 1)
     errorColor: Qt.rgba(1, 1, 1, 1)
     backgroundColor: Qt.rgba(0.06, 0.06, 0.06, 1)
@@ -203,7 +196,7 @@ Item {
       compare(editor.text.indexOf("wrod"), before.indexOf("wrod"))
     }
 
-    function test_no_suggestions_offers_ignore_and_add_but_no_rows() {
+    function test_no_suggestions_offers_ignore_but_no_rows() {
       var editor = body()
       editor.text = "a zxqjklv here "
       wait(250)
@@ -213,7 +206,6 @@ Item {
       compare(m.spellingMisspelled, true)
       compare(m.spellingSuggestions.length, 0)
       verify(m.ignoreWordRow.visible, "Ignore is offered without suggestions")
-      verify(m.addToDictionaryRow.visible, "Add to dictionary is offered without suggestions")
       m.ignoreWordRow.activated()
       wait(250)
       compare(compose.spellingRanges.length, 0)
@@ -233,7 +225,7 @@ Item {
       compare(editor.text, "a " + suggestion + " here")
     }
 
-    function test_keyboard_opens_ignore_and_add_without_suggestions() {
+    function test_keyboard_opens_ignore_without_suggestions() {
       var editor = body()
       editor.text = "the zxqjklv here "
       editor.cursorPosition = 8
@@ -243,7 +235,6 @@ Item {
       tryCompare(menu(), "opened", true)
       compare(menu().spellingMisspelled, true)
       verify(menu().ignoreWordRow.visible)
-      verify(menu().addToDictionaryRow.visible)
       menu().close()
     }
 

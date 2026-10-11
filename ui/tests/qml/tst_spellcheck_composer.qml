@@ -23,18 +23,12 @@ Item {
     ]
     property string accountEmail: "me@example.com"
     property string activeAccountId: "me@example.com"
-    property var spellingPersonalWords: []
     function preferredSendAs(_r) { return null }
     function switchTo(_id) { return true }
     function refreshRecipientContacts() {}
     function send(_f) { return true }
     function copyText(_t) { return true }
     function clipboardAttachment(_dir, callback) { callback({ ok: false, error: "no-image" }); return true }
-    function addPersonalWord(word) {
-      if (word && spellingPersonalWords.indexOf(word) < 0) {
-        var words = spellingPersonalWords.slice(); words.push(word); spellingPersonalWords = words
-      }
-    }
   }
 
   Omamail.KeyRouter {
@@ -50,7 +44,6 @@ Item {
     onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
     anchors.fill: parent
     service: mailService
-    spellingPersonalWords: mailService.spellingPersonalWords
     textColor: Qt.rgba(1, 1, 1, 1)
     errorColor: Qt.rgba(1, 1, 1, 1)
     backgroundColor: Qt.rgba(0.06, 0.06, 0.06, 1)
@@ -125,30 +118,6 @@ Item {
       }
     }
 
-    function test_personal_words_preserve_focused_draft_selection_and_undo() {
-      var body = named(compose, "compose-body-editor")
-      tryVerify(function() { return compose.spellingAdapter !== null || compose.spellingStatus === "no-module" }, 3000)
-      if (!compose.spellingAvailable) { skip("spelling unavailable (" + compose.spellingStatus + ")"); return }
-      body.text = "the zqxjpersonalreviewhere here "
-      body.forceActiveFocus()
-      body.select(4, 9)
-      compose.userModified = false
-      compose.bodyWasEdited = false
-      var before = body.text
-      var selected = body.selectedText
-      var revision = compose.bodyRevision
-      var undoAvailable = body.canUndo
-      mailService.addPersonalWord("zqxjpersonalreviewhere")
-      wait(250)
-      compare(body.text, before)
-      compare(body.selectedText, selected)
-      compare(body.canUndo, undoAvailable)
-      compare(compose.userModified, false)
-      compare(compose.bodyWasEdited, false)
-      compare(compose.bodyRevision, revision)
-      compare(compose.spellingRanges.length, 0)
-    }
-
     function test_a_correction_changes_the_body_and_undo_restores_it() {
       var body = named(compose, "compose-body-editor")
       verify(body)
@@ -212,23 +181,6 @@ Item {
       var menu = named(compose, "compose-text-menu")
       compare(menu.spellingWord, "floobert")
       menu.ignoreWordRow.activated()
-      wait(250)
-      compare(compose.spellingRanges.length, 0)
-    }
-
-    function test_add_to_dictionary_stops_marking_the_word() {
-      var body = named(compose, "compose-body-editor")
-      tryVerify(function() { return compose.spellingAdapter !== null || compose.spellingStatus === "no-module" }, 3000)
-      if (!compose.spellingAvailable) { skip("spelling unavailable"); return }
-      body.text = "the blorptar here "
-      wait(250)
-      compare(compose.spellingRanges.length, 1)
-      var box = body.positionToRectangle(body.text.indexOf("blorptar"))
-      mouseClick(body, box.x + 2, box.y + box.height / 2, Qt.RightButton)
-      wait(20)
-      var menu = named(compose, "compose-text-menu")
-      compare(menu.spellingWord, "blorptar")
-      menu.addToDictionaryRow.activated()
       wait(250)
       compare(compose.spellingRanges.length, 0)
     }
