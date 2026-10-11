@@ -257,6 +257,11 @@ assert.strictEqual(provider.mailboxFor("exchange", "starred").label, "Flagged")
 assert.strictEqual(provider.mailboxFor("exchange", "spam").label, "Junk")
 assert.strictEqual(provider.unreadQuery("exchange"), "role:inbox unseen")
 
+// Only Exchange declares that its listing counts the Flagged view rather than
+// estimating it, so only its Flagged row may carry a number.
+for (const id of provider.ids())
+  assert.strictEqual(provider.countsStarred(id), id === "exchange", id)
+
 // A mutation of the returned list must not reach the provider definition.
 const boxes = provider.mailboxes("gmail")
 boxes.push({ key: "invented" })

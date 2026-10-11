@@ -71,6 +71,7 @@ function define(source) {
     summary: String(raw.SUMMARY || ""),
     auth: String(raw.AUTH || "none"),
     nativeSync: facts.nativeSync === true,
+    countsStarred: raw.COUNTS_STARRED === true,
     mark: String(raw.MARK || ""),
     logo: String(raw.LOGO || raw.MARK || ""),
     unavailable: String(raw.UNAVAILABLE || ""),
@@ -236,4 +237,12 @@ function clientUrl(id) {
 
 function nativeSync(id) {
   return get(id).nativeSync === true
+}
+
+// Whether this provider's listing counts its Flagged view rather than
+// estimating it, so the rail may draw that number beside Flagged. A provider
+// whose listing only estimates its size must not declare it: a number that is
+// usually wrong is noise (docs/DESIGN.md, "The bar: a dot, not a count").
+function countsStarred(id) {
+  return get(id).countsStarred
 }

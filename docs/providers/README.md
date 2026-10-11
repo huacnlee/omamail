@@ -8,6 +8,7 @@ Required when changing provider adapters, account identity, capabilities or prov
 - Detail reads update only fields they carry (`Model.detailSummary`); absence must not erase listing metadata.
 - Provider capabilities are a ceiling. Account refusals can remove capabilities, never add them. Hide unsupported buttons and mailbox roles, filter key hints, and refuse actions in `MailAccount.act` before optimistic updates. Hiding a button does not disable its shortcut.
 - `threads` means server thread identity; `conversations` means a collapsed listing. Do not infer one from the other.
+- `COUNTS_STARRED` (`Registry.countsStarred`) means the provider's listing counts its Flagged view rather than estimating it, and only then does the rail draw a number beside Flagged. An estimate is not a count (see "The bar: a dot, not a count" in [DESIGN.md](../DESIGN.md)). Exchange alone declares it: its `role:inbox flagged` listing gives its rows when one page holds the view, an id-only `FindItem` count up to 1000 otherwise, and the server's total beyond that.
 - Gmail account IDs remain the lower-cased address for compatibility. Other IDs are `<provider>:<lower-cased-address>`; the same address can identify different providers.
 - Resolve web locations through `Registry.webMessageUrl` / `webBoxUrl`.
 - `Registry.mark` supplies the square icon and `logo` the lockup; preserve official artwork colors. Unbranded providers use the themed envelope.

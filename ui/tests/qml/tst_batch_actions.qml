@@ -6,6 +6,7 @@ import "NativeIntentFixture.js" as NativeIntentFixture
 import "ModelFixture.js" as NativeModel
 import "../../account/Accounts.js" as Accounts
 import "../../account/Unified.js" as Unified
+import "../../providers/Registry.js" as Provider
 
 // The batch's two boundaries, driven against a client the test controls.
 //
@@ -33,12 +34,13 @@ Item {
     property var untrashed: []
     property var batches: []
     property int lists: 0
+    property var queries: []
     property string refuse: ""
     property bool refuseBatch: false
     property bool hold: false
     property var pending: []
     function finish() {var callbacks=pending;pending=[];hold=false;for(var i=0;i<callbacks.length;i++)callbacks[i]()}
-    function reset() { trashed = []; untrashed = []; batches = []; lists = 0; refuse = ""; refuseBatch = false; hold=false; pending=[] }
+    function reset() { trashed = []; untrashed = []; batches = []; lists = 0; queries = []; refuse = ""; refuseBatch = false; hold=false; pending=[] }
   }
 
   Component {
@@ -64,7 +66,7 @@ Item {
         return later(function() { callback(null, refused ? "the batch was refused" : "") })
       }
       function modifyMessage(id, add, remove, callback) { return batchModify([id], add, remove, callback) }
-      function listMessages() { record.lists = record.lists + 1; return handle() }
+      function listMessages(query) { record.lists = record.lists + 1; record.queries = record.queries.concat([query]); return handle() }
       function getMessages() { return handle() }
       function getMessage() { return handle() }
       function getLabels(callback) { return later(function() { callback([], "") }) }
@@ -138,6 +140,7 @@ Item {
     function init() {
       record.reset()
       mailService.setUnifiedMailboxes(false)
+      mailService.windowOpen = false
       app.checkedIds = []
       app.checkedAccountId = ""
       app.resetNavigation()
@@ -555,6 +558,25 @@ Item {
       tryVerify(function() { return account.pendingAction === "" }, 1000)
       tryVerify(function() { return record.lists > listsBefore }, 1000)
       compare(account.deferredListLoad, null, "the waiting refresh ran")
+    }
+
+    // The Flagged count is the provider's to turn on: on a mailbox whose provider
+    // does not declare it, shown on its own in an open window, neither a star nor
+    // a direct read asks for the flagged list, so no number ever arrives to draw.
+    function test_a_provider_that_does_not_count_flagged_mail_never_asks_for_it() {
+      seed([entry(ada)], "imap:" + ada)
+      var account = mailService.accountAt(0)
+      mailService.windowOpen = true
+      compare(account.starred.shown, true, "only the provider is left to say no")
+      account.messages = [row("1:INBOX")]
+      verify(account.act("1:INBOX", "star", false, false))
+      tryCompare(record, "batches", ["1:INBOX"])
+      tryCompare(account, "pendingAction", "")
+      account.starred.refresh()
+      wait(50)
+      verify(record.queries.length > 0, "the account does list: " + record.queries)
+      compare(record.queries.indexOf(Provider.mailboxFor("imap", "starred").query), -1,
+        "but never the flagged list: " + record.queries)
     }
 
     // A whole-batch refusal from a client that answers with one word is not

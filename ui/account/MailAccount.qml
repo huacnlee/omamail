@@ -420,6 +420,9 @@ Item {
   // in that gap still has to name somebody.
   readonly property string ownAddress: accountEmail !== "" ? accountEmail : configuredEmail
   property int inboxUnread: 0
+  // The Flagged total, where the listing counts it; StarredCount.qml says when.
+  readonly property StarredCount starred: StarredCount { account: root }
+  readonly property int starredCount: starred.count
   property bool countLoading: false
   property var countHandle: null
   property int countSerial: 0
@@ -590,6 +593,7 @@ Item {
   property var monitoredIds: []
 
   function refreshCounts() {
+    starred.ask()
     if (!ready || countLoading) return
     if (nativePolling) {
       backendSync.check()
@@ -2628,6 +2632,7 @@ Item {
     sendAsLoaded = false
     profile = null
     inboxUnread = 0
+    starred.forget()
     listLoaded = false
     seenIds = ({})
     arrivalFloor = 0
@@ -2999,6 +3004,7 @@ Item {
       root.countPrimed = true
       if ((first || changed || snapshot.estimate > before || (root.active && root.windowOpen)) && !root.listLoading)
         root.loadMessages(false)
+      root.starred.poll()
       })
     }
   }

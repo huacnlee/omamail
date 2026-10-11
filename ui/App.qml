@@ -460,6 +460,10 @@ Item {
   function toggleSidebar() {
     if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
   }
+  // The rail's Flagged total is the mailbox on screen's own; a merged view,
+  // which no one mailbox speaks for, has none.
+  readonly property int starredCount: !!service && !service.unified && !!service.current
+    ? service.current.starredCount : 0
 
   // Entered at the top. The page keeps its scroll for as long as it is in
   // history — Back from a mailbox's form returns to the row that opened it —
@@ -1758,6 +1762,7 @@ Item {
           panelFontFamily: root.fontFamily
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
+          starredCount: root.starredCount
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
             if (root.showCalendar()) calendarView.refresh()
