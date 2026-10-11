@@ -26,6 +26,8 @@ Rectangle {
   property string response: ""
   property bool canRespond: false
   property bool sending: false
+  property bool fallbackAvailable: false
+  property string calendarUrl: ""
 
   required property color textColor
   required property color accentColor
@@ -34,6 +36,7 @@ Rectangle {
   required property string panelFontFamily
 
   signal respondRequested(string answer)
+  signal mailOnlyRequested(string answer)
   signal openRequested(string url)
 
   readonly property bool cancelled: !!invite
@@ -246,7 +249,7 @@ Rectangle {
     Row {
       id: rsvpRow
       spacing: Style.space(6)
-      visible: root.canRespond
+      visible: root.canRespond && !root.fallbackAvailable
 
       Text {
         anchors.verticalCenter: parent.verticalCenter
@@ -277,6 +280,45 @@ Rectangle {
           fontFamily: root.panelFontFamily
           fontSize: Style.font.caption
           onClicked: root.respondRequested(modelData.answer)
+        }
+      }
+    }
+
+    Column {
+      width: parent.width
+      spacing: Style.space(6)
+      visible: root.fallbackAvailable && root.canRespond
+      Text {
+        width: parent.width
+        text: "Calendar attendance cannot be confirmed here. You can open Calendar or send a reply email only; email does not confirm your Calendar attendance."
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+      Flow {
+        width: parent.width
+        spacing: Style.space(6)
+        IconTextButton {
+          visible: root.calendarUrl !== ""
+          text: "Open Calendar..."
+          foreground: root.textColor
+          accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.openRequested(root.calendarUrl)
+        }
+        Repeater {
+          model: [{answer:"accepted",label:"Email Yes"}, {answer:"tentative",label:"Email Maybe"}, {answer:"declined",label:"Email No"}]
+          IconTextButton {
+            required property var modelData
+            text: modelData.label
+            enabled: !root.sending
+            foreground: root.textColor
+            accent: root.accentColor
+            fontFamily: root.panelFontFamily
+            onClicked: root.mailOnlyRequested(modelData.answer)
+          }
         }
       }
     }

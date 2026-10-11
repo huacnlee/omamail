@@ -1,4 +1,5 @@
 import QtQuick
+import "Options.js" as Options
 
 // Presentation state for native background jobs. Rust owns process lifetime,
 // deadlines, persisted output and job validation; the UI owns the open result.
@@ -6,6 +7,55 @@ Item {
   id: root
   required property string pluginDir
   property var backend: null
+  property string selectedAgent: "System default"
+  property string selectedModel: ""
+  property bool providerAvailable: false
+  property string resolvedProvider: ""
+  property string availabilityError: "Checking the selected AI agent..."
+  property int availabilitySerial: 0
+  function refreshAvailability() {
+    var serial = ++availabilitySerial
+    if (!available()) {
+      providerAvailable = false
+      availabilityError = "Mail backend is unavailable."
+      return
+    }
+    if (Number(backend.apiVersion) < 6) {
+      // The published backend still supports Claude through Omarchy's default.
+      // It validates that default at jobStart; providerStatus is API-6 only.
+      resolvedProvider = ""
+      providerAvailable = selectedAgent === "System default" && selectedModel === ""
+      availabilityError = providerAvailable ? ""
+        : "Update the mail backend to choose an AI agent or model (API 6 required)."
+      return
+    }
+    if (!providerAvailable) availabilityError = "Checking the selected AI agent..."
+    request("agent.providerStatus", {provider: Options.provider(selectedAgent)}, function(result, error) {
+      if (serial !== root.availabilitySerial) return
+      root.resolvedProvider = !error && result ? String(result.provider || "") : ""
+      root.providerAvailable = !error && !!result && result.available === true
+      root.availabilityError = root.providerAvailable ? "" : error
+        ? "Could not check the selected AI agent."
+        : "Your system-default agent is not supported. Choose Claude, Codex or OpenCode in Settings → AI."
+    })
+  }
+  property int selectionRevision: 0
+  property double selectionResetAt: 0
+  property var selectionJobs: ({})
+  function resetSelection() { selectionRevision++; selectionJobs = ({}) }
+  onSelectedAgentChanged: { providerAvailable = false; resetSelection(); refreshAvailability() }
+  onResolvedProviderChanged: resetSelection()
+  onSelectedModelChanged: { resetSelection(); refreshAvailability() }
+  onSelectionResetAtChanged: resetSelection()
+  function canContinueSelection(job) {
+    if (!job) return false
+    var provider = Options.provider(selectedAgent) || resolvedProvider
+    if (provider !== "" && provider !== String(job.provider || "claude")) return false
+    if (String(job.model || "") !== selectedModel) return false
+    if (selectionJobs[String(job.id)] === selectionRevision) return true
+    var created = job.createdOrder ? Number(job.createdOrder) / 1000000 : Number(job.created || 0) * 1000
+    return created > selectionResetAt
+  }
   property string accountId: ""
   property var jobs: []
   property var byMessage: ({})
@@ -27,7 +77,7 @@ Item {
   property var pendingJobs: null
   function acknowledge(jobId) {
     var id = String(jobId || "")
-    if (id !== "" && seenIds.indexOf(id) < 0) seenIds = seenIds.concat([id])
+    if (id !== "" && seenIds.indexOf(id) < 0) seenIds = seenIds.concat([id]).slice(-4096)
   }
   signal jobFinished(var job)
   signal failed(string text)
@@ -48,6 +98,15 @@ Item {
   property string shownId: ""
   property string shownOutput: ""
   property var shownTranscript: []
+  property var shownProposals: []
+  property string previousPage: ""
+  property bool loadingEarlier: false
+  property var earlierTranscript: []
+  property var earlierProposals: []
+  property var latestTranscript: []
+  property var latestProposals: []
+  property int listingOffset: 0
+  property bool hasMoreJobs: false
   property int generation: 0
   Component.onDestruction: generation++
 
@@ -65,11 +124,22 @@ Item {
     if (!available()) return
     if (listing) { refreshQueued = true; return }
     listing = true
-    request("agent.jobsList", {}, function(result, error) {
+    var paged = Number(backend.apiVersion) >= 6
+    request("agent.jobsList", paged ? {paged:true,offset:listingOffset,watchIds:activeIds} : {}, function(result, error) {
       root.listing = false
-      if (!error && Array.isArray(result)) root.applyListing(result)
+      if (!error && result) {
+        root.hasMoreJobs = result.hasMore === true
+        if (Array.isArray(result)) root.applyListing(result)
+        else if (Array.isArray(result.jobs)) root.applyListing(result.jobs)
+      }
       if (root.refreshQueued) { root.refreshQueued = false; root.refresh() }
     })
+  }
+
+  function pageChats(older) {
+    if (listing || (older && !hasMoreJobs)) return
+    listingOffset = older ? listingOffset + 32 : Math.max(0, listingOffset - 32)
+    refresh()
   }
 
   function applyListing(next) {
@@ -126,25 +196,53 @@ Item {
   function wantsAttention(job) { return !!job && attentionIds.indexOf(String(job.id)) >= 0 }
   function isActive(job) { return !!job && activeIds.indexOf(String(job.id)) >= 0 }
 
-  function start(payloadLine, quiet) {
+  function selection() { return {agent: selectedAgent, model: selectedModel, revision: selectionRevision} }
+  function start(payloadLine, quiet, capturedSelection) {
     if (!available()) { lastError = "Mail backend is unavailable"; return false }
+    if (!providerAvailable) { lastError = availabilityError; return false }
     if (starting) { lastError = "AI is still starting. Try again shortly."; return false }
     var payload = payloadLine
     if (payload === null || payload === undefined || payload === "") return false
     if (typeof payload !== "string" && (typeof payload !== "object" || Array.isArray(payload))) return false
+    var selected = capturedSelection || selection()
+    if (selected.agent !== selectedAgent || selected.model !== selectedModel
+        || (selected.revision !== undefined && selected.revision !== selectionRevision)) {
+      lastError = "AI selection changed. Start a new chat."
+      return false
+    }
+    var parsed = payload
+    if (typeof parsed === "string") { try { parsed = JSON.parse(parsed) } catch (e) {} }
+    if (parsed && parsed.parent && !canContinueSelection(jobFor2(parsed.parent))) {
+      lastError = "This chat belongs to a previous AI selection. Start a new chat."
+      return false
+    }
+    var revision = selectionRevision
+    var options = Options.startOptions(payload, selected.agent, selected.model, backend.apiVersion)
+    if (options.error) { lastError = options.error; return false }
     lastError = ""
     starting = true
-    request("agent.jobStart", {payload: payload}, function(result, error) {
+    request("agent.jobStart", options.params, function(result, error) {
       root.starting = false
       if (error) {
         if (quiet === true) {
           root.startRefused(String(error && error.message ? error.message : error))
         } else {
-          root.lastError = "Could not confirm AI started. Check the conversation before retrying."
+          var code = String(error && error.message ? error.message : "")
+          root.lastError = code === "agent_choose_claude"
+            ? (Number(root.backend.apiVersion) >= 6
+              ? "Choose OpenCode, Codex or Claude in Settings → AI, or select one as Omarchy's default."
+              : "This backend supports Claude only. Select Claude as Omarchy's default AI agent.")
+            : "Could not confirm AI started. Check the conversation before retrying."
           root.failed(root.lastError)
         }
         root.refresh()
         return
+      }
+      root.listingOffset = 0
+      if (revision === root.selectionRevision && result && result.id) {
+        var owned = Object.assign({}, root.selectionJobs)
+        owned[String(result.id)] = revision
+        root.selectionJobs = owned
       }
       root.refresh()
     })
@@ -170,7 +268,11 @@ Item {
 
   function show(jobId) {
     var id = String(jobId || "")
-    if (id !== shownId) { shownId = id; shownOutput = ""; shownTranscript = [] }
+    if (id !== shownId) {
+      shownId = id; shownOutput = ""; shownTranscript = []; shownProposals = []
+      earlierTranscript = []; earlierProposals = []; latestTranscript = []; latestProposals = []
+      previousPage = ""; loadingEarlier = false
+    }
     if (!available() || id === "") return
     if (showing) { showQueued = true; return }
     showing = true
@@ -178,11 +280,42 @@ Item {
       root.showing = false
       if (!error && result && result.job && String(result.job.id || "") === root.shownId) {
         root.shownOutput = String(result.output || "")
-        var transcript = result.transcript || []
-        if (JSON.stringify(root.shownTranscript) !== JSON.stringify(transcript)) root.shownTranscript = transcript
+        root.latestTranscript = result.transcript || []
+        root.latestProposals = result.proposals || []
+        if (root.earlierTranscript.length === 0) root.previousPage = String(result.previous || "")
+        root.publishHistory()
       }
       if (root.showQueued) { root.showQueued = false; root.show(root.shownId) }
     })
+  }
+
+  function offsetProposals(proposals, offset) {
+    return proposals.map(function(proposal) {
+      return Object.assign({}, proposal, {afterTurn: Number(proposal.afterTurn || 0) + offset})
+    })
+  }
+  function publishHistory() {
+    var transcript = earlierTranscript.concat(latestTranscript)
+    var proposals = earlierProposals.concat(offsetProposals(latestProposals, earlierTranscript.length))
+    if (JSON.stringify(shownTranscript) !== JSON.stringify(transcript)) shownTranscript = transcript
+    if (JSON.stringify(shownProposals) !== JSON.stringify(proposals)) shownProposals = proposals
+  }
+  function loadEarlier() {
+    if (!available() || Number(backend.apiVersion) < 6 || loadingEarlier || previousPage === "") return false
+    var id = shownId
+    var before = previousPage
+    loadingEarlier = true
+    request("agent.jobShow", {id:id,before:before}, function(result, error) {
+      if (id !== root.shownId || before !== root.previousPage) return
+      root.loadingEarlier = false
+      if (error || !result) {root.failed("Could not load earlier messages."); return}
+      var transcript = result.transcript || []
+      root.earlierProposals = (result.proposals || []).concat(root.offsetProposals(root.earlierProposals, transcript.length))
+      root.earlierTranscript = transcript.concat(root.earlierTranscript)
+      root.previousPage = String(result.previous || "")
+      root.publishHistory()
+    })
+    return true
   }
 
   function forget(jobId) {
@@ -216,6 +349,12 @@ Item {
   }
 
   Timer {
+    interval: 15000
+    repeat: true
+    running: root.available() && root.selectedAgent === "System default"
+    onTriggered: root.refreshAvailability()
+  }
+  Timer {
     interval: 500
     repeat: true
     running: root.available() && root.anyActive
@@ -230,12 +369,14 @@ Item {
     starting = false; cancelling = false; listing = false; showing = false; forgetting = false
     refreshQueued = false; showQueued = false
     Qt.callLater(root.refresh)
+    Qt.callLater(root.refreshAvailability)
     Qt.callLater(root.drainForgets)
   }
   Connections {
     target: root.backend
     ignoreUnknownSignals: true
-    function onReadyChanged() { if (root.available()) {root.refresh();root.drainForgets()} }
+    function onReadyChanged() { root.refreshAvailability(); if (root.available()) {root.refresh();root.drainForgets()} }
+    function onApiVersionChanged() { root.refreshAvailability() }
   }
   function jobFor2(jobId) {
     for (var i = 0; i < jobs.length; i++) if (String(jobs[i].id) === String(jobId)) return jobs[i]

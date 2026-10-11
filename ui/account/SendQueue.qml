@@ -14,6 +14,18 @@ QtObject {
   property var handled: ({})
   property var uncertain: ({})
   property var serverEntries: []
+  property var deliveryStates: ({})
+  function rememberDelivery(entries) {
+    var states = Object.assign({}, deliveryStates)
+    for (var i = 0; i < entries.length; i++) states[String(entries[i].id)] = String(entries[i].state)
+    deliveryStates = states
+  }
+  function watchDelivery(id) {
+    request("outbox.snapshot", {sendId: id}, function(result, error) {
+      if (!error && result && String(result.accountId) === String(queue.account.accountId)
+          && Number(result.revision) >= queue.revision) queue.rememberDelivery(result.entries || [])
+    })
+  }
   property bool undoBusy: false
   property var undoPending: null
   property bool retired: false
@@ -35,6 +47,7 @@ QtObject {
     if (Number(snapshot.revision) < revision) return
     revision = Number(snapshot.revision)
     var entries = Array.isArray(snapshot.entries) ? snapshot.entries : []
+    rememberDelivery(entries)
     if (partial) {
       var merged = serverEntries.slice()
       for (var p = 0; p < entries.length; p++) {
@@ -133,6 +146,7 @@ QtObject {
       delete remaining[id]
       queue.submitted = remaining
       queue.parked = queue.parked.filter(function(entry) { return entry.id !== id })
+      queue.rememberDelivery([{id: id, state: "failed"}])
       queue.arm()
       queue.account.reportSendFailure("The message was not queued. Your draft has been kept.", id)
     })
@@ -176,7 +190,10 @@ QtObject {
   }
   function undoLatest(callback) {
     if (undoBusy || !latest) return false
-    var id = String(latest.id)
+    return undo(String(latest.id), callback)
+  }
+  function undo(id, callback) {
+    if (undoBusy || !parked.some(function(entry) { return String(entry.id) === id })) return false
     undoBusy = true
     undoPending = { id: id, callback: callback }
     return request("outbox.undo", { sendId: id }, function(result, error) {

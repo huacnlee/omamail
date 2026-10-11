@@ -56,6 +56,7 @@ function isValidEmail(value) {
 function calendarProvider(raw) {
   var account = raw || {}
   var provider = trimmed(account.provider).toLowerCase()
+  if (provider === "gmail" || provider === "") return "google"
   if (provider === "outlook") return "microsoft"
   if (provider !== "imap") return ""
   var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()

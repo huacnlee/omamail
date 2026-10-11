@@ -35,7 +35,10 @@ UNTRUSTED = re.compile(
     # The address goes in there, so the guard has to follow the value: read
     # from the element, the reference to `.email` is no longer visible and
     # this check would pass a Text that had stopped saying it was plain.
-    r"|primaryText\b|secondaryText\b)")
+    r"|primaryText\b|secondaryText\b"
+    # A discovered calendar's name is chosen by whoever shared it, and its
+    # detail line names a server somebody else configured.
+    r"|modelData\s*\.\s*name\b|sourceDetail\b)")
 
 # Strings and comments, masked in one pass so that neither can hide inside the
 # other. Masking strings alone let an apostrophe in a `//` comment open a

@@ -10,6 +10,7 @@ pub const ALL: &[&str] = &[
     "account.conversation",
     "agent.context",
     "agent.jobsList",
+    "agent.providerStatus",
     "agent.jobsProjection",
     "agent.jobStart",
     "agent.jobShow",
@@ -92,6 +93,8 @@ pub const ALL: &[&str] = &[
     "public.unsubscribe",
     "calendar.request",
     "calendar.discover",
+    "calendar.attendance",
+    "calendar.reminders",
     "auth.form",
     "auth.begin",
     "auth.poll",
@@ -183,8 +186,6 @@ pub const ALL: &[&str] = &[
 pub fn available() -> Vec<&'static str> {
     ALL.iter()
         .copied()
-        .filter(|method| {
-            !method.starts_with("agent.") || cfg!(all(feature = "agent", target_os = "linux"))
-        })
+        .filter(|method| !method.starts_with("agent.") || cfg!(all(feature = "agent", unix)))
         .collect()
 }

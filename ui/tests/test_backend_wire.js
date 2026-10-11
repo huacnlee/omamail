@@ -122,7 +122,7 @@ function receiver() {
   const context = {Chunks:chunks,Wire:wire,responseTransfer:null,ready:true,stopping:false,
     pending:{x:{callback:(result,error)=>replies.push({result,error})}},
     notification:(method,params)=>events.push({method,params}),
-    stopForFailure:error=>failures.push(error),maybeRequestQuit:()=>{}}
+    stopForFailure:error=>failures.push(error),maybeRequestQuit:()=>{},drainRequests:()=>{}}
   vm.createContext(context)
   vm.runInContext(receiveSource,context)
   return {context,events,replies,failures}

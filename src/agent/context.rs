@@ -215,9 +215,72 @@ impl Contexts {
                 session.fetch_resource(&request.account, id)
             })
             .await?;
-            Ok(
-                json!({"payload":build(&rows,text(&owner,"email"),text(&owner,"provider"),&request.folder,&request.prompt,&request.account)?}),
-            )
+            let mut payload = build(
+                &rows,
+                text(&owner, "email"),
+                text(&owner, "provider"),
+                &request.folder,
+                &request.prompt,
+                &request.account,
+            )?;
+            if rows.len() == 1 {
+                let selected = &rows[0];
+                let mut preceding = Vec::new();
+                if text(&owner, "provider") == "gmail" && !text(selected, "threadId").is_empty() {
+                    let resources = session
+                        .gmail
+                        .thread_resources(&request.account, text(selected, "threadId"))
+                        .await?;
+                    let mut found = false;
+                    for resource in resources {
+                        if text(&resource, "id") == request.ids[0] {
+                            found = true;
+                            break;
+                        }
+                        let prepared = crate::message::content::prepare(
+                            &resource,
+                            chrono::Utc::now().timestamp_millis(),
+                        )?;
+                        preceding.push(json!({"messageId":resource["id"],"message":message_text(&prepared["summary"],text(&prepared["body"],"text"))}));
+                    }
+                    if !found {
+                        return Err("agent_context_invalid");
+                    }
+                    payload["threadContext"] = json!(
+                        "Preceding available emails in this Gmail thread are supplied separately."
+                    );
+                } else if let Some(ids) = selected["thread"]["memberIds"].as_array() {
+                    let mut prior = Vec::new();
+                    for id in ids {
+                        let id = id.as_str().ok_or("agent_context_invalid")?;
+                        if id == request.ids[0] {
+                            break;
+                        }
+                        prior.push(id.to_owned());
+                    }
+                    if prior.len() > 100 {
+                        return Err("agent_context_too_large");
+                    }
+                    validate_ids(text(&owner, "provider"), &prior)?;
+                    let summaries: Vec<Value> = prior.iter().map(|id| json!({"id":id})).collect();
+                    let earlier = collect(&prior, &summaries, |id| {
+                        session.fetch_resource(&request.account, id)
+                    })
+                    .await?;
+                    preceding=earlier.iter().map(|row|json!({"messageId":row["id"],"message":message_text(row,text(row,"bodyText"))})).collect();
+                    payload["threadContext"] =
+                        json!("Preceding available conversation members are supplied separately.");
+                } else {
+                    payload["threadContext"] = json!(
+                        "This provider supplied no separate conversation membership. Only the selected email and any history quoted in its body are available; do not claim to have seen other emails."
+                    );
+                }
+                if !preceding.is_empty() {
+                    payload["threadMessages"] = json!(preceding);
+                }
+                super::jobs::validate_payload(&payload)?;
+            }
+            Ok(json!({"payload":payload}))
         };
         let result = bounded_work(&mut cancelled, Duration::from_secs(60), work).await;
         // Completion and acknowledged cancellation linearize under the same
@@ -296,6 +359,7 @@ where
                 )?;
                 row["id"] = json!(id);
                 row["bodyText"] = prepared["body"]["text"].clone();
+                row["attachments"] = prepared["attachments"].clone();
                 Ok::<_, &'static str>(row)
             })
             .await
@@ -370,6 +434,13 @@ pub fn message_text(row: &Value, body: &str) -> String {
         lines.push(format!("Date: {}", text(row, "fullTime")));
     }
     lines.push(format!("Subject: {}", text(row, "subject")));
+    if let Some(attachments) = row["attachments"].as_array().filter(|a| !a.is_empty()) {
+        let names: Vec<&str> = attachments.iter().map(|a| text(a, "filename")).collect();
+        lines.push(format!(
+            "Attachments (contents not supplied): {}",
+            names.join(", ")
+        ));
+    }
     if !text(row, "messageId").is_empty() {
         lines.push(format!("Message-ID: {}", text(row, "messageId")));
     }

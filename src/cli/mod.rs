@@ -37,9 +37,15 @@ enum Command {
     Send(mail::Send),
     /// Serve JSON-RPC 2.0 on persistent stdin/stdout pipes
     Serve,
-    #[cfg(all(feature = "agent", target_os = "linux"))]
+    #[cfg(all(feature = "agent", unix))]
     #[command(hide = true)]
     AgentWorker { id: String },
+    #[cfg(all(feature = "agent", unix))]
+    #[command(hide = true)]
+    AgentMcp { id: String },
+    #[cfg(all(feature = "agent", unix))]
+    #[command(hide = true)]
+    AgentOpencodeServer,
     /// Report backend version and implemented methods
     Info,
     /// Print the executable version
@@ -109,12 +115,30 @@ pub fn run() {
         }
         return;
     }
-    #[cfg(all(feature = "agent", target_os = "linux"))]
+    #[cfg(all(feature = "agent", unix))]
     if let Command::AgentWorker { ref id } = command {
         let result = crate::backend::runtime()
             .map_err(|_| "agent_runtime_failed")
             .and_then(|runtime| runtime.block_on(crate::agent::worker::run(id)));
         if result.is_err() {
+            std::process::exit(1);
+        }
+        return;
+    }
+    #[cfg(all(feature = "agent", unix))]
+    if let Command::AgentMcp { ref id } = command {
+        if crate::agent::mcp::run(id).is_err() {
+            std::process::exit(1);
+        }
+        return;
+    }
+    #[cfg(all(feature = "agent", unix))]
+    if matches!(command, Command::AgentOpencodeServer) {
+        let result = crate::backend::runtime()
+            .map_err(|_| "agent_runtime_failed")
+            .and_then(|runtime| runtime.block_on(crate::agent::opencode::serve()));
+        if let Err(error) = result {
+            eprintln!("omamail: {error}");
             std::process::exit(1);
         }
         return;
@@ -164,8 +188,12 @@ pub fn run() {
         Command::Call { method } => call::read_params(io::stdin())
             .and_then(|params| runtime.block_on(call::dispatch(&session, &method, &params))),
         Command::Serve => unreachable!(),
-        #[cfg(all(feature = "agent", target_os = "linux"))]
+        #[cfg(all(feature = "agent", unix))]
         Command::AgentWorker { .. } => unreachable!(),
+        #[cfg(all(feature = "agent", unix))]
+        Command::AgentMcp { .. } => unreachable!(),
+        #[cfg(all(feature = "agent", unix))]
+        Command::AgentOpencodeServer => unreachable!(),
     };
     output::print_result(result, cli.json, envelope);
 }

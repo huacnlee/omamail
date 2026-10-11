@@ -152,6 +152,7 @@ Rectangle {
 
                   Text {
                     text: group.modelData.name
+                    textFormat: Text.PlainText
                     color: root.dimColor
                     font.family: root.panelFontFamily
                     font.pixelSize: Style.font.caption

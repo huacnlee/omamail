@@ -21,7 +21,15 @@ Rectangle {
   signal closed()
   signal editRequested(string sourceId, var event)
   signal deleteRequested(string sourceId, var event)
-
+  property bool refreshing: false
+  property string refreshError: ""
+  property bool meetingLinkCopied: false
+  onMeetingLinkChanged: { meetingLinkCopied = false; copiedFeedback.stop() }
+  Timer {
+    id: copiedFeedback
+    interval: 2000
+    onTriggered: root.meetingLinkCopied = false
+  }
   readonly property var source: {
     var sources = controller && controller.availableSources
       ? controller.availableSources.sources : []
@@ -38,7 +46,7 @@ Rectangle {
   // carries only a RECURRENCE-ID, but its href is the series' shared file —
   // and an href that resolves outside the source's own origin is refused by
   // the same rule the controller applies before any credential is read.
-  readonly property bool canWrite: !!root.source && !!event
+  readonly property bool canDelete: !!root.source && !!event
     && root.source.readOnly !== true
     && (root.source.kind === "google" ? String(event.googleId || "") !== ""
       : root.source.kind === "microsoft" ? String(event.graphId || "") !== ""
@@ -46,9 +54,13 @@ Rectangle {
         && Number(event.recurrenceIdMs || 0) <= 0
         && String(event.source && event.source.recurrenceId || "") === ""
         && Calendar.caldavEventUrl(root.source.url, event) !== "")
+  readonly property bool canWrite: canDelete && Calendar.writeRefusal(source, event) === ""
   readonly property color eventColor: calendarPalette.colorFor(
     source ? source.colorKey : "accent")
   readonly property string meetingLink: httpLink(event ? event.meetLink : "")
+  readonly property string conferenceStatus: String(event && event.conferenceData
+    && event.conferenceData.createRequest && event.conferenceData.createRequest.status
+    ? event.conferenceData.createRequest.status.statusCode || "" : "")
   readonly property string locationLink: httpLink(event ? event.location : "")
   // The location as written. One that is not a link is a place, and a place
   // is something to copy into a message or to look up on a map.
@@ -120,11 +132,15 @@ Rectangle {
         onActivated: root.closed()
       }
 
-      Rectangle {
+      CalendarReminderPanel {
         width: parent.width
-        height: Style.space(4)
-        radius: height / 2
-        color: root.eventColor
+        service: root.controller ? root.controller.service : null
+        eventKey: root.event ? String(root.event.sourceId || "") + "\n" + String(root.event.googleId || root.event.uid || "") : ""
+        textColor: root.textColor
+        dimColor: root.dimColor
+        accentColor: root.accentColor
+        urgentColor: root.urgentColor
+        panelFontFamily: root.panelFontFamily
       }
 
       Text {
@@ -171,6 +187,29 @@ Rectangle {
         }
       }
 
+      Flow {
+        width: parent.width
+        spacing: Style.space(8)
+        IconTextButton {
+          visible: root.meetingLink !== ""
+          text: "Join meeting..."
+          iconName: "video"
+          foreground: root.textColor
+          accent: root.eventColor
+          fontFamily: root.panelFontFamily
+          onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
+        }
+        IconTextButton {
+          visible: root.canWrite
+          text: "Edit..."
+          iconName: "edit"
+          foreground: root.textColor
+          accent: root.eventColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
+        }
+      }
+
       Row {
         visible: String(root.event && root.event.location || "") !== ""
         width: parent.width
@@ -194,41 +233,182 @@ Rectangle {
         }
       }
 
+      Text {
+        width: parent.width
+        visible: root.refreshing || root.refreshError !== ""
+        text: root.refreshing ? "Refreshing event details..." : root.refreshError
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.refreshError !== "" ? root.urgentColor : root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(6)
+        visible: root.meetingLink !== ""
+        Text {
+          text: "Meeting link"
+          textFormat: Text.PlainText
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Row {
+          width: parent.width
+          spacing: Style.space(10)
+          AbstractButton {
+            objectName: "event-meeting-link"
+            width: Math.max(0, Math.min(contentItem.implicitWidth,
+              parent.width - copyMeetingLink.width - copiedLabel.width - parent.spacing * 2))
+            implicitHeight: Math.max(contentItem.implicitHeight, copyMeetingLink.height)
+            text: root.meetingLink
+            Accessible.role: Accessible.Link
+            Accessible.name: root.meetingLink
+            contentItem: Text {
+              text: root.meetingLink
+              textFormat: Text.PlainText
+              wrapMode: Text.WrapAnywhere
+              verticalAlignment: Text.AlignVCenter
+              color: root.accentColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.body
+              font.underline: true
+            }
+            onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+          }
+          IconButton {
+            id: copyMeetingLink
+            objectName: "event-copy-meeting-link"
+            iconName: root.meetingLinkCopied ? "check" : "copy"
+            tooltipText: root.meetingLinkCopied ? "Copied" : "Copy meeting link"
+            foreground: root.meetingLinkCopied ? root.accentColor : root.dimColor
+            hoverColor: root.textColor
+            fontFamily: root.panelFontFamily
+            onClicked: {
+              if (root.controller && root.controller.copyText(root.meetingLink)) {
+                root.meetingLinkCopied = true
+                copiedFeedback.restart()
+              }
+            }
+          }
+          Text {
+            id: copiedLabel
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Copied"
+            opacity: root.meetingLinkCopied ? 1 : 0
+            textFormat: Text.PlainText
+            color: root.accentColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+      }
+
+      Text {
+        width: parent.width
+        visible: !!root.event && root.event.eventType === "fromGmail"
+        text: "Created automatically from Gmail. Google does not allow apps to change its time or event details."
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
+      }
+
+      Text {
+        visible: String(root.event && root.event.description || "") !== ""
+        width: parent.width
+        text: String(root.event && root.event.description || "")
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
+        lineHeight: 1.35
+        wrapMode: Text.Wrap
+        textFormat: Text.PlainText
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(8)
+        visible: attendeeList.count > 0
+        Text {
+          text: "Guests · " + attendeeList.count
+          textFormat: Text.PlainText
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.bold: true
+          font.pixelSize: Style.font.body
+        }
+        Repeater {
+          id: attendeeList
+          model: Calendar.attendeeRows(root.event)
+          delegate: Rectangle {
+            required property var modelData
+            width: parent.width
+            height: guestInfo.implicitHeight + Style.space(16)
+            radius: Style.cornerRadius
+            color: Qt.alpha(root.textColor, 0.04)
+            Row {
+              id: guestInfo
+              x: Style.space(10)
+              y: Style.space(8)
+              width: parent.width - Style.space(20)
+              spacing: Style.space(10)
+              Text {
+                width: Style.space(20)
+                text: modelData.symbol
+                textFormat: Text.PlainText
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.body
+              }
+              Column {
+                width: parent.width - Style.space(30)
+                spacing: Style.space(3)
+                Text {
+                  width: parent.width
+                  text: modelData.name + (modelData.self ? " (you)" : "")
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.textColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Text {
+                  width: parent.width
+                  text: modelData.label + (modelData.optional ? " · Optional" : "")
+                    + (modelData.email && modelData.email !== modelData.name ? " · " + modelData.email : "")
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.dimColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+          }
+        }
+      }
+
+      Text {
+        width: parent.width
+        visible: root.conferenceStatus === "pending" || root.conferenceStatus === "failure"
+        text: root.conferenceStatus === "pending" ? "Google Meet is being created. Refresh to check its status."
+          : "The event was saved, but Google Meet could not be created."
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+      }
+
       Flow {
         visible: root.meetingLink !== "" || root.locationLink !== ""
-          || root.providerLink !== "" || root.canWrite || root.locationText !== ""
+           || root.providerLink !== "" || root.canDelete || root.locationText !== ""
         width: parent.width
         spacing: Style.space(7)
-
-        IconTextButton {
-          visible: root.canWrite
-          text: "Edit..."
-          iconName: "edit"
-          foreground: root.textColor
-          accent: root.eventColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
-        }
-
-        IconTextButton {
-          visible: root.canWrite
-          text: "Delete..."
-          iconName: "trash"
-          foreground: root.urgentColor
-          accent: root.urgentColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.deleteRequested(String(root.event.sourceId || ""), root.event)
-        }
-
-        IconTextButton {
-          visible: root.meetingLink !== ""
-          text: "Join call"
-          iconName: "video"
-          foreground: root.textColor
-          accent: root.eventColor
-          fontFamily: root.panelFontFamily
-          onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
-        }
 
         IconTextButton {
           visible: root.locationLink !== "" && root.locationLink !== root.meetingLink
@@ -255,7 +435,7 @@ Rectangle {
           objectName: "event-copy-location"
           visible: root.locationText !== ""
           text: "Copy location"
-          iconName: "pin"
+          iconName: "copy"
           foreground: root.textColor
           accent: root.eventColor
           fontFamily: root.panelFontFamily
@@ -272,24 +452,20 @@ Rectangle {
           fontFamily: root.panelFontFamily
           onClicked: if (root.controller) root.controller.openExternal(root.providerLink)
         }
-      }
 
-      PanelSeparator {
-        visible: String(root.event && root.event.description || "") !== ""
-        width: parent.width
-        foreground: root.textColor
-      }
-
-      Text {
-        visible: String(root.event && root.event.description || "") !== ""
-        width: parent.width
-        text: String(root.event && root.event.description || "")
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.body
-        lineHeight: 1.35
-        wrapMode: Text.Wrap
-        textFormat: Text.PlainText
+        // One quiet trigger; which delete — telling guests or not, one
+        // occurrence or the series — is chosen in the confirmation, where the
+        // event is named.
+        IconTextButton {
+          visible: root.canDelete
+          objectName: "event-delete"
+          text: "Delete..."
+          iconName: "trash"
+          foreground: root.textColor
+          accent: root.urgentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.deleteRequested(String(root.event.sourceId || ""), root.event)
+        }
       }
     }
   }

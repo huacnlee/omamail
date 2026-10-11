@@ -39,7 +39,11 @@ ApplicationHost::ApplicationHost(
               QStringLiteral("notification-routes.json"))))
 {
     m_capabilities = {
+#if defined(Q_OS_LINUX) || defined(Q_OS_MACOS)
+        {QStringLiteral("agent"), true},
+#else
         {QStringLiteral("agent"), false},
+#endif
         {QStringLiteral("systemTray"), false},
         {QStringLiteral("notifications"), m_notifications->available()},
         // The Dock keeps a running application reachable after its window is

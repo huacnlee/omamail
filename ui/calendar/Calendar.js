@@ -409,11 +409,22 @@ function eventsFromGoogle(payload, sourceId) {
       // patching or deleting it does exactly what Google Calendar does to one
       // occurrence of a series.
       googleId: String(item.id || ""),
+      etag: String(item.etag || ""),
+      recurringEventId: String(item.recurringEventId || ""),
+      originalStartTime: item.originalStartTime || null,
+      timeZone: String(item.start && item.start.timeZone || payload.timeZone || ""),
+      reminders: item.reminders || { useDefault: true },
+      conferenceData: item.conferenceData || null,
+      eventType: String(item.eventType || "default"),
+      guestsCanModify: item.guestsCanModify === true,
+      transparency: String(item.transparency || "opaque"),
+      visibility: String(item.visibility || "default"),
       sequence: Math.max(0, Math.floor(Number(item.sequence) || 0)),
       summary: String(item.summary || "Untitled event"),
       description: String(item.description || ""), location: String(item.location || ""),
       status: String(item.status || "").toUpperCase(), organizer: item.organizer || null,
       attendees: Array.isArray(item.attendees) ? item.attendees : [],
+      recurrenceLines: Array.isArray(item.recurrence) ? item.recurrence.slice() : [],
       start: start, end: end, recurrence: Array.isArray(item.recurrence)
         ? item.recurrence.join("; ") : "", meetLink: String(item.hangoutLink || ""),
       sourceId: String(sourceId || ""), href: String(item.htmlLink || ""), source: null
@@ -421,6 +432,12 @@ function eventsFromGoogle(payload, sourceId) {
   }
   out.sort(compareEvents)
   return out
+}
+
+function eventKey(event) {
+  if (!event) return ""
+  return String(event.sourceId || "") + "\n" + String(event.googleId || event.graphId
+    || String(event.uid || "") + "\n" + String(event.recurrenceIdMs || event.start && event.start.ms || ""))
 }
 
 // ------------------------------------------------------------- Microsoft
@@ -540,7 +557,7 @@ function nativeRequestError(kind) {
   if (kind === "microsoft")
     return "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again"
   if (kind === "google")
-    return "Google calendar request failed. Sign in again and check Calendar access"
+    return "Google could not complete this calendar request. Refresh the event and try again"
   if (kind === "caldav")
     return "CalDAV calendar request failed. Check its server address and password in Settings"
   // An iCloud calendar signs in with the mailbox's app-specific password, so
@@ -596,6 +613,23 @@ function recurrenceIntervalUnit(frequency, interval) {
   var units = { DAILY: "day", WEEKLY: "week", MONTHLY: "month", YEARLY: "year" }
   var unit = units[String(frequency || "").toUpperCase()] || "interval"
   return Number(interval) === 1 ? unit : unit + "s"
+}
+
+function editorDateRange(firstDate, firstTime, lastDate, lastTime, allDay) {
+  function parse(dateText, timeText) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)) return null
+    var value = new Date(dateText + "T" + timeText + ":00")
+    if (!isFinite(value.getTime()) || isoDate(value) !== dateText
+        || two(value.getHours()) + ":" + two(value.getMinutes()) !== timeText) return null
+    return value
+  }
+  var start = parse(String(firstDate), allDay ? "00:00" : String(firstTime))
+  var end = parse(String(lastDate), allDay ? "00:00" : String(lastTime))
+  if (!start || !end) return {ok:false,error:allDay ? "Enter valid dates (YYYY-MM-DD)" : "Enter valid dates (YYYY-MM-DD) and times (HH:mm)"}
+  if (allDay) end.setDate(end.getDate() + 1)
+  if (end.getTime() <= start.getTime()) return {ok:false,error:allDay
+    ? "Last day must be on or after the first day" : "End date and time must be after the start"}
+  return {ok:true,error:"",startMs:start.getTime(),endMs:end.getTime()}
 }
 
 function validateEventFields(fields) {
@@ -657,6 +691,190 @@ function googleEventBody(fields, allDay) {
   return body
 }
 
+function googleEventPatch(fields, allDay, existingAllDay) {
+  var body = googleEventBody(fields, allDay)
+  if (existingAllDay === allDay) return body
+  // PATCH preserves omitted nested fields. Explicitly remove the other time
+  // representation so a conversion cannot leave both date and dateTime set.
+  if (allDay) {
+    body.start.dateTime = null
+    body.end.dateTime = null
+    body.start.timeZone = null
+    body.end.timeZone = null
+  } else {
+    body.start.date = null
+    body.end.date = null
+  }
+  return body
+}
+
+function googleOptions(body, fields, source, existing) {
+  var next = JSON.parse(JSON.stringify(body))
+  if (existing && fields.changeRecurrence === true) {
+    if (existing.recurringEventId) return { ok: false, error: "Open the entire series to change repetition" }
+    var recurrence = recurrenceRule(fields.recurrence)
+    if (!recurrence.ok) return recurrence
+    var lines = (existing.recurrenceLines || []).filter(function(line) { return String(line).indexOf("RRULE:") !== 0 })
+    if (recurrence.rule !== "") lines.unshift("RRULE:" + recurrence.rule)
+    next.recurrence = lines
+  }
+  var zone = String(fields.timeZone || existing && existing.timeZone || source && source.timeZone || "")
+  if (zone !== "" && next.start && next.start.dateTime) {
+    next.start.timeZone = zone
+    next.end.timeZone = zone
+  }
+  if (fields.guestEmails !== undefined) {
+    var emails = String(fields.guestEmails).split(/[,;\n]/).map(function(email) { return email.trim() }).filter(function(email) { return email !== "" })
+    if (emails.length > 200 || emails.some(function(email) { return !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email) }))
+      return { ok: false, error: "Enter valid guest email addresses separated by commas" }
+    var seen = {}, previous = existing && Array.isArray(existing.attendees) ? existing.attendees : []
+    next.attendees = []
+    for (var i = 0; i < emails.length; i++) {
+      var email = emails[i].toLowerCase()
+      if (seen[email]) continue
+      seen[email] = true
+      var matched = previous.filter(function(attendee) { return String(attendee.email || "").toLowerCase() === email })
+      next.attendees.push(matched.length ? matched[0] : { email: emails[i] })
+    }
+  }
+  if (fields.transparency === "opaque" || fields.transparency === "transparent") next.transparency = fields.transparency
+  if (["default", "public", "private"].indexOf(fields.visibility) >= 0) next.visibility = fields.visibility
+  if (fields.reminderMode === "default") next.reminders = { useDefault: true }
+  else if (fields.reminderMode === "none") next.reminders = { useDefault: false, overrides: [] }
+  else if (fields.reminderMode === "custom") {
+    var minutes = Number(fields.reminderMinutes)
+    if (!isFinite(minutes) || minutes < 0 || minutes > 40320 || Math.floor(minutes) !== minutes)
+      return { ok: false, error: "Reminder minutes must be a whole number from 0 to 40320" }
+    next.reminders = { useDefault: false, overrides: [{ method: "popup", minutes: minutes }] }
+  }
+  if (fields.createMeet === true) {
+    if (!source || source.canCreateMeet !== true)
+      return { ok: false, error: "This calendar cannot create Google Meet meetings" }
+    if (!(existing && existing.conferenceData)) {
+      next.conferenceData = { createRequest: {
+        requestId: String(fields.conferenceRequestId || ""),
+        conferenceSolutionKey: { type: "hangoutsMeet" }
+      } }
+      if (next.conferenceData.createRequest.requestId === "")
+        return { ok: false, error: "The meeting request has no identity" }
+    }
+  }
+  return { ok: true, body: next }
+}
+
+function transferRefusal(source, destination, event) {
+  if (!source || !destination || source.kind !== "google" || destination.kind !== "google")
+    return "Calendar transfers are not available for this provider"
+  if (source.accountId !== destination.accountId) return "Choose a calendar in the same account"
+  if (source.readOnly) return "The original calendar is read-only"
+  if (destination.readOnly) return "The destination calendar is read-only"
+  if (!event || event.eventType !== "default" || !event.organizer || event.organizer.self !== true)
+    return "Only ordinary events you organize can change calendars"
+  if (event.recurringEventId) return "Open the entire series before changing its calendar"
+  return ""
+}
+
+function rescheduleFields(event, startMs, endMs) {
+  return { title: String(event.summary || ""), description: String(event.description || ""),
+    location: String(event.location || ""), startMs: Number(startMs), endMs: Number(endMs),
+    allDay: !!(event.start && event.start.allDay), timeZone: String(event.timeZone || ""), sendUpdates: "none" }
+}
+
+function gestureRange(event, dayOffset, minuteOffset, edge) {
+  if (!event || !event.start || !event.end) return null
+  var start = Number(event.start.ms), end = Number(event.end.ms)
+  var minutes = Math.round(Number(minuteOffset) / 15) * 15
+  if (edge === "start") start = Math.min(end - 900000, Math.round((start + Number(minuteOffset) * 60000) / 900000) * 900000)
+  else if (edge === "end") end = Math.max(start + 900000, Math.round((end + Number(minuteOffset) * 60000) / 900000) * 900000)
+  else {
+    var date = new Date(start)
+    date.setDate(date.getDate() + Number(dayOffset))
+    if (!event.start.allDay) date.setMinutes(date.getMinutes() + minutes)
+    var duration = end - start
+    start = date.getTime()
+    if (event.start.allDay) {
+      // All-day duration counts local dates, including 23/25-hour DST days.
+      var endDate = new Date(end)
+      endDate.setDate(endDate.getDate() + Number(dayOffset))
+      end = endDate.getTime()
+    } else end = start + duration
+  }
+  return isFinite(start) && isFinite(end) && end > start ? { start: start, end: end } : null
+}
+
+// Interval partitioning: every connected overlap group shares its lane count.
+// Equal end/start boundaries do not overlap. Long meetings retain their lane
+// while shorter neighbours come and go, so cards never cover each other.
+function timedLayout(events, day) {
+  var rows = (events || []).filter(function(event) { return event && event.start && !displayInAllDayLane(event) }).map(function(event) {
+    return { event: event, start: Math.max(Number(event.start.ms), day.startMs),
+      end: Math.min(Number(event.end && event.end.ms || event.start.ms + 900000), day.endMs), column: 0, columns: 1 }
+  }).filter(function(row) { return row.end > row.start })
+  rows.sort(function(a, b) { return a.start - b.start || b.end - a.end || eventKey(a.event).localeCompare(eventKey(b.event)) })
+  var group = [], ends = [], groupEnd = 0
+  function finish() {
+    for (var j = 0; j < group.length; j++) group[j].columns = ends.length
+    group = []; ends = []; groupEnd = 0
+  }
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i]
+    if (group.length && row.start >= groupEnd) finish()
+    var lane = 0
+    while (lane < ends.length && ends[lane] > row.start) lane++
+    ends[lane] = row.end
+    row.column = lane
+    group.push(row)
+    groupEnd = Math.max(groupEnd, row.end)
+  }
+  finish()
+  return rows
+}
+
+function attendeeRows(event) {
+  return (event && Array.isArray(event.attendees) ? event.attendees : []).map(function(attendee) {
+    var status = String(attendee.responseStatus || attendee.partstat || attendee.status && attendee.status.response || "needsAction").toLowerCase()
+    var label = status === "accepted" ? "Accepted" : status === "declined" ? "Declined"
+      : status === "tentative" || status === "tentativelyaccepted" ? "Maybe" : "Awaiting reply"
+    var email = String(attendee.email || attendee.emailAddress && attendee.emailAddress.address || "")
+    var name = String(attendee.displayName || attendee.name || attendee.emailAddress && attendee.emailAddress.name || email || "Guest")
+    return { name: name, email: email, label: label,
+      symbol: label === "Accepted" ? "✓" : label === "Declined" ? "×" : "?",
+      optional: attendee.optional === true, self: attendee.self === true }
+  })
+}
+
+function agendaEvents(events, nowMs) {
+  return (events || []).filter(function(event) {
+    if (!event || !event.start) return false
+    var end = event.end ? Number(event.end.ms) : Number(event.start.ms)
+    return end > Number(nowMs)
+  }).sort(compareEvents)
+}
+
+function calendarChoiceRows(groups, editingSource, event) {
+  var rows = []
+  for (var i = 0; i < (groups || []).length; i++) {
+    var group = groups[i]
+    var first = true
+    for (var j = 0; j < (group.calendars || []).length; j++) {
+      var source = group.calendars[j]
+      if (event && (!editingSource || String(source.id) !== String(editingSource.id))
+          && transferRefusal(editingSource, source, event) !== "") continue
+      rows.push({ source: source, firstInGroup: first,
+        groupLabel: String(group.providerLabel || "") + " · " + String(group.accountLabel || "") })
+      first = false
+    }
+  }
+  return rows
+}
+
+function repeatChoice(event) {
+  var rules = (event && event.recurrenceLines || []).filter(function(line) { return String(line).indexOf("RRULE:") === 0 })
+  if (!rules.length) return "none"
+  if (rules.length !== 1 || !/^RRULE:FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;(INTERVAL|COUNT)=\d+)*$/.test(rules[0])) return "custom"
+  return /FREQ=([A-Z]+)/.exec(rules[0])[1]
+}
+
 function createEvent(fields, nowMs) {
   var checked = validateEventFields(fields)
   if (!checked.ok) return checked
@@ -665,9 +883,9 @@ function createEvent(fields, nowMs) {
   var uid = "omamail-" + Math.floor(Number(nowMs) || Date.now())
   var result = {
     ok: true, uid: uid,
-    ics: veventLines(uid, 0, Number(nowMs) || Date.now(), checked, recurrence.rule).join("\r\n"),
-    google: googleEventBody(checked),
-    graph: graphEventBody(checked),
+    ics: veventLines(uid, 0, Number(nowMs) || Date.now(), checked, recurrence.rule, fields.allDay === true).join("\r\n"),
+    google: googleEventBody(checked, fields.allDay === true),
+    graph: graphEventBody(checked, fields.allDay === true),
     // Graph spells a series as a structured rule of its own rather than an
     // RRULE; one is refused there rather than sent wrong.
     recurring: recurrence.rule !== ""
@@ -685,9 +903,51 @@ function createEvent(fields, nowMs) {
 // RECURRENCE-ID, but its href is still the series' shared file, so it answers
 // the same way. Creation asks with no event: only the source's own rules
 // apply.
-function writeRefusal(source, event) {
+// The confirmation a delete asks for: which event, what goes with it, and
+// the answers that differ in consequence. Each choice is one button in the
+// dialog, so a guest notification or a whole series is chosen there rather
+// than on a row of destructive buttons beside the event. The last choice is
+// the default. `value` is the event's `deleteSendUpdates`, or "series".
+function deleteRequest(event, source, canReadSeries) {
+  var value = event || {}
+  var google = !!source && source.kind === "google"
+  var notifies = google && !!value.organizer && value.organizer.self === true
+    && (value.attendees || []).some(function(attendee) { return attendee.self !== true })
+  var occurrence = String(value.recurringEventId || "") !== ""
+  var series = Array.isArray(value.recurrence) && value.recurrence.length > 0
+  var choices = []
+  var message = "This event will be permanently deleted."
+  if (occurrence) {
+    var offerSeries = google && canReadSeries === true
+    message = offerSeries ? "Delete this occurrence, or every occurrence in the series."
+      : "This occurrence will be deleted. The rest of the series stays."
+    if (offerSeries) choices.push({ value: "series", label: "Delete series" })
+    if (notifies) {
+      choices.push({ value: "none", label: "Delete occurrence without email" })
+      choices.push({ value: "all", label: "Delete occurrence and notify guests" })
+    } else choices.push({ value: "all", label: "Delete occurrence" })
+  } else if (notifies) {
+    message = (series ? "Every occurrence of this series will be deleted. " : "")
+      + "Guests get a cancellation email unless you delete without one."
+    choices.push({ value: "none", label: "Delete without email" })
+    choices.push({ value: "all", label: "Delete and notify guests" })
+  } else {
+    if (series) message = "Every occurrence of this series will be deleted."
+    choices.push({ value: "all", label: "Delete" })
+  }
+  return { kind: "event", name: String(value.summary || "Untitled event"), message: message, choices: choices }
+}
+
+function writeRefusal(source, event, operation) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
+  if (operation === "reschedule" && source.kind !== "google")
+    return "Open the event editor to change its time"
+  if (source.kind === "google" && event && event.eventType === "fromGmail" && operation !== "delete")
+    return "Google does not allow changing the time or details of events created from Gmail"
+  if (source.kind === "google" && event && event.organizer && event.organizer.self === false
+      && event.guestsCanModify !== true && operation !== "delete")
+    return "Only the organizer can change this event"
   if (source.kind !== "caldav" && source.kind !== "icloud") return ""
   // A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0, but
   // the event's href still names the series' shared file — the raw line the
@@ -704,9 +964,8 @@ function writeRefusal(source, event) {
 // bumped SEQUENCE tells every copy of it which write is newer. Recurrence is
 // not editable here — the Google patch omits the key so the server keeps the
 // rule, and a recurring CalDAV event is refused by writeRefusal before this
-// runs. Which shape the event has is likewise not a question an edit answers:
-// an all-day event stays VALUE=DATE and a Google date, a timed one stays a
-// date-time, so a title-only change cannot turn one into the other.
+// runs. An explicit allDay field can change its shape; otherwise preserve the
+// original shape so a title-only change cannot turn one into the other.
 function updateEvent(fields, existing, nowMs) {
   var event = existing || {}
   var uid = String(event.uid || "")
@@ -714,7 +973,7 @@ function updateEvent(fields, existing, nowMs) {
   var checked = validateEventFields(fields)
   if (!checked.ok) return checked
   var sequence = Math.max(0, Math.floor(Number(event.sequence) || 0)) + 1
-  var allDay = !!(event.start && event.start.allDay)
+   var allDay = fields.allDay === undefined ? !!(event.start && event.start.allDay) : fields.allDay === true
   var stampMs = Number(nowMs) || Date.now()
   var original = String(event.calendarData || "")
   var rewritten = original === "" ? "" : Ics.rewriteEvent(original, uid,
@@ -725,7 +984,7 @@ function updateEvent(fields, existing, nowMs) {
     ok: true, uid: uid,
     ics: rewritten !== "" ? rewritten
       : veventLines(uid, sequence, stampMs, checked, "", allDay).join("\r\n"),
-    google: googleEventBody(checked, allDay),
+    google: googleEventPatch(checked, allDay, !!(event.start && event.start.allDay)),
     graph: graphEventBody(checked, allDay)
   }
 }
@@ -816,6 +1075,15 @@ function caldavEventUrl(sourceUrl, event) {
   return urlOrigin(resolved) === origin ? resolved : ""
 }
 
+// Whether two event lists would draw the same. A refresh that brings back what
+// is already shown must not hand the views a new array: every Repeater and
+// ListView bound to one rebuilds its delegates and loses its scroll position.
+function sameEvents(left, right) {
+  if (left === right) return true
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 function compareEvents(left, right) {
   var leftMs = left && left.start ? left.start.ms : 0
   var rightMs = right && right.start ? right.start.ms : 0
@@ -843,6 +1111,57 @@ function monthDays(year, monthIndex, weekStart) {
     })
   }
   return out
+}
+
+function monthGridDays(year, monthIndex, weekStart) {
+  var days = monthDays(year, monthIndex, weekStart)
+  return days.slice(0, days.slice(35).some(function(day) { return day.inMonth }) ? 42 : 35)
+}
+
+function monthEventLimit(availableHeight, rowHeight, spacing, overflowHeight, eventCount) {
+  var capacity = Math.max(0, Math.floor((availableHeight + spacing) / (rowHeight + spacing)))
+  if (eventCount <= capacity) return capacity
+  return Math.max(0, Math.floor((availableHeight - overflowHeight) / (rowHeight + spacing)))
+}
+
+function spansMultipleDays(event) {
+  if (!event || !event.start || !event.end) return false
+  var start = Number(event.start.ms), end = Number(event.end.ms)
+  return isFinite(start) && isFinite(end) && end > start
+    && isoDate(new Date(start)) !== isoDate(new Date(end - 1))
+}
+
+// Each original event gets one segment per intersected week. Endpoints are
+// exclusive, including midnight and all-day ends; titles never identify events.
+function monthSpanLayout(events, days) {
+  return spanLayout((events || []).filter(spansMultipleDays), days)
+}
+
+function spanLayout(events, days) {
+  var segments = [], laneCounts = []
+  var values = (events || []).filter(function(event) {
+    return event && event.start && event.end && Number(event.end.ms) > Number(event.start.ms)
+  }).slice().sort(function(a, b) {
+    return Number(a.start.ms) - Number(b.start.ms)
+      || Number(b.end.ms) - Number(a.end.ms) || compareEvents(a, b)
+  })
+  for (var week = 0; week < Math.ceil(days.length / 7); week++) {
+    var first = week * 7, last = Math.min(first + 6, days.length - 1), laneEnds = []
+    for (var i = 0; i < values.length; i++) {
+      var event = values[i], start = Number(event.start.ms), end = Number(event.end.ms)
+      if (start >= days[last].endMs || end <= days[first].startMs) continue
+      var left = 0, right = last - first
+      while (left < last - first && start >= days[first + left].endMs) left++
+      while (right > left && end <= days[first + right].startMs) right--
+      var lane = 0
+      while (lane < laneEnds.length && laneEnds[lane] >= left) lane++
+      laneEnds[lane] = right
+      segments.push({event:event, week:week, startColumn:left, endColumn:right, lane:lane,
+        continuesBefore:start < days[first].startMs, continuesAfter:end > days[last].endMs})
+    }
+    laneCounts.push(laneEnds.length)
+  }
+  return {segments:segments, laneCounts:laneCounts}
 }
 
 function weekDays(anchorMs, weekStart) {
@@ -901,7 +1220,7 @@ function eventHeight(event, day, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))
   var end = event.end ? Math.min(Number(event.end.ms), Number(day.endMs)) : start + 1800000
-  return Math.max(Number(hourHeight) * 0.42,
+  return Math.max(2,
     (dayMinutes(end, day) - dayMinutes(start, day)) / 60 * Number(hourHeight))
 }
 
@@ -953,11 +1272,23 @@ function eventsOnDay(events, day) {
   return out
 }
 
+// Presentation only: retain timed endpoints for details, editing and writes.
+// Compare local calendar days rather than 24 hours across daylight-saving changes.
+function displayInAllDayLane(event) {
+  if (!event || !event.start) return false
+  if (event.start.allDay) return true
+  if (!event.end) return false
+  var start = new Date(Number(event.start.ms))
+  var nextDay = new Date(start.getTime())
+  nextDay.setDate(nextDay.getDate() + 1)
+  return Number(event.end.ms) >= nextDay.getTime()
+}
+
 function allDayEventsOnDay(events, day) {
   var values = eventsOnDay(events, day)
   var out = []
   for (var i = 0; i < values.length; i++) {
-    if (values[i] && values[i].start && values[i].start.allDay) out.push(values[i])
+    if (displayInAllDayLane(values[i])) out.push(values[i])
   }
   return out
 }
@@ -980,7 +1311,7 @@ function weekHourRange(events, days, defaultFirst, defaultLast) {
   var rangeEnd = Number(week[week.length - 1].endMs)
   for (var i = 0; i < values.length; i++) {
     var event = values[i] || {}
-    if (!event.start || event.start.allDay) continue
+    if (!event.start || displayInAllDayLane(event)) continue
     var startMs = Number(event.start.ms)
     var endMs = event.end ? Number(event.end.ms) : startMs + 1800000
     if (startMs >= rangeEnd || endMs <= rangeStart) continue

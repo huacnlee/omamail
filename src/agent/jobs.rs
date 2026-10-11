@@ -1,5 +1,6 @@
 //! Durable background assistant admission and lifecycle. Mail never crosses argv.
 use super::{
+    provider::Provider,
     storage::{Store, check_id},
     stream::ClaudeStream,
 };
@@ -40,6 +41,62 @@ pub fn session(s: &str) -> bool {
             }
         })
 }
+
+fn validate_draft(value: &Value) -> Result<()> {
+    let draft = value.as_object().ok_or("agent_invalid_draft")?;
+    for (key, value) in draft {
+        if !["to", "cc", "bcc", "subject", "body", "from"].contains(&key.as_str()) {
+            return Err("agent_invalid_draft");
+        }
+        text(value)?;
+    }
+    Ok(())
+}
+
+fn validate_messages(value: &Value, limit: usize) -> Result<()> {
+    let entries = value
+        .as_array()
+        .filter(|entries| !entries.is_empty() && entries.len() <= limit)
+        .ok_or("agent_invalid_messages")?;
+    for entry in entries {
+        let entry = entry
+            .as_object()
+            .filter(|entry| {
+                entry.len() == 2 && entry.contains_key("messageId") && entry.contains_key("message")
+            })
+            .ok_or("agent_invalid_messages")?;
+        for value in entry.values() {
+            text(value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_mail_update(value: &Value) -> Result<()> {
+    let update = value.as_object().ok_or("agent_invalid_context")?;
+    if ["accountId", "messageId", "message"]
+        .iter()
+        .any(|key| !update.contains_key(*key))
+    {
+        return Err("agent_invalid_context");
+    }
+    for (key, value) in update {
+        match key.as_str() {
+            "accountId" | "messageId" => {
+                if text(value)?.chars().count() > 4096 {
+                    return Err("agent_identifier_too_large");
+                }
+            }
+            "message" | "threadContext" => {
+                text(value)?;
+            }
+            "threadMessages" => validate_messages(value, 100)?,
+            _ => return Err("agent_invalid_context"),
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_payload(value: &Value) -> Result<Value> {
     let o = value.as_object().ok_or("agent_invalid_context")?;
     if serde_json::to_vec(value)
@@ -49,37 +106,61 @@ pub fn validate_payload(value: &Value) -> Result<Value> {
     {
         return Err("agent_context_too_large");
     }
-    if o.contains_key("parent") && (o.len() != 2 || !o.contains_key("prompt")) {
+    if o.contains_key("parent")
+        && (!o.contains_key("prompt")
+            || o.keys()
+                .any(|k| !["parent", "prompt", "draftUpdate", "mailUpdate"].contains(&k.as_str())))
+    {
         return Err("agent_continuation_override");
     }
     for (k, v) in o {
         match k.as_str() {
-            "messages" => {
-                let entries = v
-                    .as_array()
-                    .filter(|a| !a.is_empty() && a.len() <= 20)
-                    .ok_or("agent_invalid_messages")?;
-                for e in entries {
-                    let e = e
-                        .as_object()
-                        .filter(|a| {
-                            a.len() == 2 && a.contains_key("messageId") && a.contains_key("message")
-                        })
-                        .ok_or("agent_invalid_messages")?;
-                    for v in e.values() {
-                        text(v)?;
-                    }
+            "mailUpdate" => {
+                if !o.contains_key("parent") {
+                    return Err("agent_continuation_override");
                 }
+                validate_mail_update(v)?;
             }
-            "draft" => {
-                let d = v.as_object().ok_or("agent_invalid_draft")?;
-                for (k, v) in d {
-                    if !["to", "subject", "body", "from"].contains(&k.as_str()) {
+            "draftUpdate" => {
+                if !o.contains_key("parent") {
+                    return Err("agent_invalid_draft");
+                }
+                let update = v.as_object().ok_or("agent_invalid_draft")?;
+                if update.keys().any(|k| {
+                    !["accountId", "draftKey", "draft", "messageId", "envelope"]
+                        .contains(&k.as_str())
+                }) || !update.contains_key("draft")
+                {
+                    return Err("agent_invalid_draft");
+                }
+                for key in ["accountId", "draftKey"] {
+                    let id = text(&v[key])?;
+                    if id.is_empty() || id.len() > 4096 {
                         return Err("agent_invalid_draft");
                     }
-                    text(v)?;
+                }
+                if let Some(message) = update.get("messageId") {
+                    if text(message)?.is_empty() {
+                        return Err("agent_invalid_draft");
+                    }
+                }
+                let draft = v["draft"].as_object().ok_or("agent_invalid_draft")?;
+                if draft.len() != 6
+                    || ["from", "to", "cc", "bcc", "subject", "body"]
+                        .iter()
+                        .any(|key| !draft.contains_key(*key))
+                {
+                    return Err("agent_invalid_draft");
+                }
+                validate_draft(&v["draft"])?;
+                if let Some(envelope) = v.get("envelope") {
+                    super::proposals::envelope(envelope, &v["accountId"], &v["draftKey"])?;
                 }
             }
+            "envelope" => super::proposals::envelope(v, &value["accountId"], &value["draftKey"])?,
+            "messages" => validate_messages(v, 20)?,
+            "threadMessages" => validate_messages(v, 100)?,
+            "draft" => validate_draft(v)?,
             // A look for calendar events: one message, the fixed ask, no draft
             // and no continuation — a look answers once and is not talked to.
             "events" => {
@@ -93,7 +174,7 @@ pub fn validate_payload(value: &Value) -> Result<Value> {
                 }
             }
             "accountId" | "account" | "messageId" | "subject" | "prompt" | "message"
-            | "draftKey" | "draftFingerprint" | "parent" | "folder" => {
+            | "threadContext" | "draftKey" | "draftFingerprint" | "parent" | "folder" => {
                 let s = text(v)?;
                 if [
                     "accountId",
@@ -141,20 +222,32 @@ fn draft_payload(value: &Value) -> Result<Value> {
     let to = get("to")?;
     let subject = get("subject")?;
     let body = get("body")?;
-    let serialized =
-        serde_json::to_string(&[&from, &to, &subject, &body]).map_err(|_| "agent_invalid_draft")?;
+    let hash = draft_fingerprint(&json!({"from":from,"to":to,"subject":subject,"body":body}))?;
+    let account = text(&value["account"])?;
+    let owner = text(&value["accountId"])?;
+    let title = subject.trim();
+    let mut payload = validate_payload(
+        &json!({"messageId":"","accountId":owner,"draftKey":get("draftKey")?,"draftFingerprint":hash,"draft":{"from":if from.is_empty(){account}else{&from},"to":to,"cc":get("cc")?,"bcc":get("bcc")?,"subject":subject,"body":body},"account":account,"subject":if title.is_empty(){"Draft".to_owned()}else{format!("Draft: {title}")},"prompt":text(&value["ask"])?.trim(),"message":""}),
+    )?;
+    if let Some(envelope) = fields.get("envelope") {
+        payload["envelope"] = envelope.clone();
+    }
+    validate_payload(&payload)
+}
+
+fn draft_fingerprint(draft: &Value) -> Result<String> {
+    let fields: Vec<&str> = ["from", "to", "subject", "body"]
+        .iter()
+        .map(|key| draft[key].as_str().unwrap_or(""))
+        .collect();
+    let serialized = serde_json::to_string(&fields).map_err(|_| "agent_invalid_draft")?;
     // Match the existing UI-only change indicator, including JavaScript f64 multiplication.
     let mut hash = 2166136261u32;
     for code in serialized.encode_utf16() {
         let signed = (hash ^ code as u32) as i32;
         hash = ((signed as f64 * 16777619f64).rem_euclid(4294967296f64)) as u32;
     }
-    let account = text(&value["account"])?;
-    let owner = text(&value["accountId"])?;
-    let title = subject.trim();
-    validate_payload(
-        &json!({"messageId":"","accountId":owner,"draftKey":get("draftKey")?,"draftFingerprint":hash.to_string(),"draft":{"from":if from.is_empty(){account}else{&from},"to":to,"subject":subject,"body":body},"account":account,"subject":if title.is_empty(){"Draft".to_owned()}else{format!("Draft: {title}")},"prompt":text(&value["ask"])?.trim(),"message":""}),
-    )
+    Ok(hash.to_string())
 }
 pub fn read_job(store: &Store, id: &str) -> Result<Value> {
     check_id(id)?;
@@ -205,13 +298,20 @@ pub fn read_job(store: &Store, id: &str) -> Result<Value> {
     {
         return Err("agent_invalid_process");
     }
-    if v.get("provider").is_some_and(|x| x != "claude") {
-        return Err("agent_invalid_provider");
+    let provider = Provider::of_job(&v)?;
+    if v.get("displayVersion").is_some_and(|version| version != 2)
+        || v.get("stopUnconfirmed")
+            .is_some_and(|value| !value.is_boolean())
+    {
+        return Err("agent_invalid_state");
+    }
+    if let Some(model) = v.get("model") {
+        super::provider::validate_model(model.as_str().ok_or("agent_invalid_model")?)?;
     }
     for k in ["sessionId", "resume"] {
         if let Some(x) = v.get(k) {
             let s = text(x)?;
-            if !s.is_empty() && !session(s) {
+            if !s.is_empty() && !provider.session(s) {
                 return Err("agent_invalid_session");
             }
         }
@@ -250,7 +350,7 @@ pub fn saved_display(store: &Store, id: &str) -> Result<Value> {
         return Err("agent_invalid_display");
     }
     let s = text(&v["sessionId"])?;
-    if !s.is_empty() && !session(s) {
+    if !s.is_empty() && !Provider::of_job(&read_job(store, id)?)?.session(s) {
         return Err("agent_invalid_session");
     }
     Ok(v)
@@ -258,6 +358,13 @@ pub fn saved_display(store: &Store, id: &str) -> Result<Value> {
 fn active(v: &Value) -> bool {
     matches!(v["state"].as_str(), Some("queued" | "running"))
 }
+#[cfg(target_os = "macos")]
+fn process_handle(v: &Value) -> Option<OwnedFd> {
+    std::os::unix::net::UnixStream::connect(super::control::path(v["id"].as_str()?).ok()?)
+        .ok()
+        .map(Into::into)
+}
+#[cfg(target_os = "linux")]
 fn process_handle(v: &Value) -> Option<OwnedFd> {
     let pid = v["pid"].as_i64()?;
     if pid <= 1 || pid > i32::MAX as i64 {
@@ -329,11 +436,17 @@ fn legacy_worker_args(args: &[u8], executable: &std::path::Path, id: &str) -> bo
         .join(&0)
     })
 }
-fn refresh(store: &Store, id: &str) -> Result<Value> {
+pub(super) fn refresh(store: &Store, id: &str) -> Result<Value> {
     let mut job = read_job(store, id)?;
     if (job["state"] == "queued" && now().saturating_sub(job["created"].as_u64().unwrap()) > 30)
         || (job["state"] == "running" && process_handle(&job).is_none())
     {
+        if job["state"] == "running" {
+            // A crashed worker cannot attest that its CLI stopped, and the
+            // OpenCode broker revokes its lease asynchronously. No successor
+            // may race either process in the same native session.
+            job["stopUnconfirmed"] = json!(true);
+        }
         job["state"] = json!("failed");
         job["error"] = json!("The AI worker stopped unexpectedly. Start a new request.");
         job["updated"] = json!(now());
@@ -345,15 +458,59 @@ fn refresh(store: &Store, id: &str) -> Result<Value> {
         && !display["output"].as_str().unwrap_or("").trim().is_empty()
         && display["sessionId"] == job["sessionId"];
     job["resultReady"] = json!(ready);
-    job["canContinue"] = json!(ready && job["sessionId"].as_str().is_some_and(session));
+    job["canContinue"] = json!(
+        !active(&job)
+            && job["stopUnconfirmed"] != true
+            && !display["transcript"].as_array().unwrap().is_empty()
+            && (job["sessionId"].as_str().unwrap_or("").is_empty()
+                || display["sessionId"].as_str().unwrap_or("").is_empty()
+                || display["sessionId"] == job["sessionId"])
+    );
     Ok(job)
 }
+struct HeadIndex {
+    path: std::path::PathBuf,
+    revision: [u64; 6],
+    jobs: Vec<Value>,
+}
+static HEADS: std::sync::Mutex<Option<HeadIndex>> = std::sync::Mutex::new(None);
+
 fn list(store: &Store) -> Result<Vec<Value>> {
-    let mut jobs = store
-        .ids()?
-        .into_iter()
-        .map(|id| refresh(store, &id))
-        .collect::<Result<Vec<_>>>()?;
+    // The store lock serializes index reads with turn creation/deletion. Keep
+    // only metadata in memory; a restart rebuilds it from the durable records.
+    // Active heads are refreshed each poll, terminal displays only when paged.
+    let revision = store.revision()?;
+    let mut cached = HEADS.lock().map_err(|_| "agent_storage_unavailable")?;
+    if cached
+        .as_ref()
+        .is_none_or(|index| index.path != store.path() || index.revision != revision)
+    {
+        *cached = Some(HeadIndex {
+            path: store.path().to_owned(),
+            revision,
+            jobs: scan_heads(store)?,
+        });
+    }
+    let index = cached.as_mut().unwrap();
+    for job in &mut index.jobs {
+        if active(job) {
+            *job = refresh(store, job["id"].as_str().unwrap())?;
+        }
+    }
+    Ok(index.jobs.clone())
+}
+
+fn scan_heads(store: &Store) -> Result<Vec<Value>> {
+    let mut jobs = Vec::new();
+    for id in store.ids()? {
+        if let Some(next) = store.read_json(&id, "next.json", 128)? {
+            let next = next.as_str().ok_or("agent_invalid_record")?;
+            if store.contains(next)? {
+                continue;
+            }
+        }
+        jobs.push(read_job(store, &id)?);
+    }
     jobs.sort_by_key(|j| {
         std::cmp::Reverse(
             j["createdOrder"].as_u64().unwrap_or(
@@ -364,9 +521,19 @@ fn list(store: &Store) -> Result<Vec<Value>> {
             ),
         )
     });
+    let mut conversations = std::collections::HashSet::new();
+    jobs.retain(|job| {
+        let newest = conversations.insert(
+            job["conversationId"]
+                .as_str()
+                .unwrap_or(job["id"].as_str().unwrap())
+                .to_owned(),
+        );
+        newest || active(job)
+    });
     Ok(jobs)
 }
-async fn default_provider() -> Result<()> {
+async fn default_provider() -> Result<Provider> {
     let out = crate::process::async_run::run(
         "omarchy-default-agent",
         &[],
@@ -375,30 +542,74 @@ async fn default_provider() -> Result<()> {
         4096,
     )
     .await?;
-    if !out.success || std::str::from_utf8(&out.stdout).unwrap_or("").trim() != "claude" {
+    // Retain the legacy refusal identifier for older event-suggestion clients.
+    if !out.success {
         return Err("agent_choose_claude");
     }
-    Ok(())
+    Provider::parse(std::str::from_utf8(&out.stdout).unwrap_or("").trim())
+        .ok_or("agent_choose_claude")
 }
-fn new_job(context: Value) -> Result<Value> {
+fn new_job(context: Value, mut provider: Provider, mut model: String) -> Result<Value> {
     let store = Store::open()?;
     let existing = list(&store)?;
     let mut history = vec![];
+    let mut bootstrap = vec![];
     let mut resume = String::new();
     let mut conversation = String::new();
     let mut context = context;
     if let Some(parent) = context["parent"].as_str() {
         let parent = parent.to_owned();
         let job = refresh(&store, &parent)?;
+        let conversation_id = job["conversationId"].as_str().unwrap_or(&parent);
+        if existing.iter().any(|candidate| {
+            active(candidate)
+                && candidate["conversationId"]
+                    .as_str()
+                    .unwrap_or(candidate["id"].as_str().unwrap())
+                    == conversation_id
+        }) {
+            return Err("agent_conversation_busy");
+        }
+        let head = existing.iter().find(|candidate| {
+            candidate["conversationId"]
+                .as_str()
+                .unwrap_or(candidate["id"].as_str().unwrap())
+                == conversation_id
+        });
+        if head.is_some_and(active) {
+            return Err("agent_conversation_busy");
+        }
+        if head.is_some_and(|head| head["id"] != parent) {
+            return Err("agent_parent_not_latest");
+        }
+        provider = Provider::of_job(&job)?;
+        model = job["model"].as_str().unwrap_or("").to_owned();
         if job["canContinue"] != true {
             return Err("agent_parent_not_ready");
         }
-        resume = job["sessionId"].as_str().unwrap_or("").to_owned();
+        let display = saved_display(&store, &parent)?;
+        // A stopped turn can have a native session without a complete answer.
+        // If it stopped before creating one, start with the retained context
+        // and transcript instead of silently dropping the interrupted request.
+        resume = display["sessionId"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .or_else(|| job["sessionId"].as_str())
+            .unwrap_or("")
+            .to_owned();
         conversation = job["conversationId"].as_str().unwrap_or(&parent).to_owned();
-        history = saved_display(&store, &parent)?["transcript"]
-            .as_array()
-            .unwrap()
-            .clone();
+        // A native session owns the history and compaction. Until one exists,
+        // retain earlier attempts as well as the parent's own display turn.
+        if resume.is_empty() {
+            if job["displayVersion"] == 2 {
+                if let Some(previous) = store.read_json(&parent, "bootstrap.json", 512 * 1024)? {
+                    bootstrap = previous.as_array().ok_or("agent_invalid_record")?.clone();
+                }
+            }
+            // Legacy displays already contain their cumulative history.
+            bootstrap.extend(display["transcript"].as_array().unwrap().iter().cloned());
+            super::stream::transcript_check(&bootstrap)?;
+        }
         let mut previous = store
             .read_json(&parent, "context.json", INPUT_LIMIT)?
             .ok_or("agent_context_missing")?;
@@ -408,6 +619,52 @@ fn new_job(context: Value) -> Result<Value> {
             .ok_or("agent_invalid_context")?
             .remove("parent");
         validate_payload(&previous)?;
+        if let Some(update) = context.get("mailUpdate") {
+            if previous["accountId"] != update["accountId"]
+                || previous["messageId"] != update["messageId"]
+                || previous.get("messages").is_some()
+            {
+                return Err("agent_continuation_override");
+            }
+            for key in ["message", "threadMessages", "threadContext"] {
+                previous
+                    .as_object_mut()
+                    .ok_or("agent_invalid_context")?
+                    .remove(key);
+                if let Some(value) = update.get(key) {
+                    previous[key] = value.clone();
+                }
+            }
+        }
+        if let Some(update) = context.get("draftUpdate") {
+            // A follow-up can refresh content, never redirect its ownership.
+            let attaching = previous["messageId"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+                && update["messageId"] == previous["messageId"]
+                && previous.get("messages").is_none()
+                && !previous["draft"].is_object()
+                && previous["draftKey"].as_str().unwrap_or("").is_empty();
+            if update["accountId"] != previous["accountId"]
+                || (!attaching
+                    && (update["draftKey"] != previous["draftKey"]
+                        || !previous["draft"].is_object()))
+            {
+                return Err("agent_continuation_override");
+            }
+            if attaching {
+                previous["draftKey"] = update["draftKey"].clone();
+            }
+            previous["draft"] = update["draft"].clone();
+            previous
+                .as_object_mut()
+                .ok_or("agent_invalid_context")?
+                .remove("envelope");
+            if let Some(envelope) = update.get("envelope") {
+                previous["envelope"] = envelope.clone();
+            }
+            previous["draftFingerprint"] = draft_fingerprint(&previous["draft"])?.into();
+        }
         previous["parent"] = json!(parent);
         previous["prompt"] = context["prompt"].clone();
         context = previous;
@@ -430,27 +687,59 @@ fn new_job(context: Value) -> Result<Value> {
     if existing.iter().filter(|v| active(v)).count() >= 4 {
         return Err("agent_active_limit");
     }
-    let mut retained = existing.len();
-    for old in existing.iter().rev() {
-        if retained < 32 {
-            break;
-        }
-        if !active(old) {
-            store.remove(old["id"].as_str().unwrap())?;
-            retained -= 1;
-        }
-    }
     let mut random = [0u8; 16];
-    let got = unsafe { libc::getrandom(random.as_mut_ptr().cast(), random.len(), 0) };
-    if got != 16 {
-        return Err("agent_random_failed");
-    }
+    std::io::Read::read_exact(
+        &mut std::fs::File::open("/dev/urandom").map_err(|_| "agent_random_failed")?,
+        &mut random,
+    )
+    .map_err(|_| "agent_random_failed")?;
     let id = random
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect::<String>();
     store.create(&id)?;
-    let mut job = json!({"id":id,"conversationId":if conversation.is_empty(){id.clone()}else{conversation},"requestPreview":context["prompt"].as_str().unwrap().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect::<String>().trim_end(),"kind":if context["draft"].is_object(){"draft"}else if super::events::is_look(&context){"events"}else{"message"},"messageIds":[],"state":"queued","created":now(),"createdOrder":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().min(u64::MAX as u128)as u64,"updated":now(),"resultReady":false,"canContinue":false,"provider":"claude","resume":resume,"progress":"Starting..."});
+    let preview = context["prompt"]
+        .as_str()
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(120)
+        .collect::<String>();
+    let kind = if context["draft"].is_object() {
+        "draft"
+    } else if super::events::is_look(&context) {
+        "events"
+    } else {
+        "message"
+    };
+    let order = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .min(u64::MAX as u128) as u64;
+    let mut job = json!({
+        "id": id,
+        "conversationId": if conversation.is_empty() { id.clone() } else { conversation },
+        "requestPreview": preview.trim_end(),
+        "kind": kind,
+        "messageIds": [],
+        "state": "queued",
+        "created": now(),
+        "createdOrder": order,
+        "updated": now(),
+        "resultReady": false,
+        "canContinue": false,
+        "provider": provider.name(),
+        "resume": resume,
+        "progress": "Starting..."
+    });
+    job["model"] = json!(model);
+    job["displayVersion"] = json!(2);
+    if !resume.is_empty() {
+        job["sessionId"] = json!(resume);
+    }
     for k in [
         "accountId",
         "subject",
@@ -469,7 +758,13 @@ fn new_job(context: Value) -> Result<Value> {
     };
     store.write_json(&id, "context.json", &context)?;
     store.write_json(&id, "display.json", &parser.display())?;
+    if !bootstrap.is_empty() {
+        store.write_json(&id, "bootstrap.json", &json!(bootstrap))?;
+    }
     store.write_json(&id, "job.json", &job)?;
+    if let Some(parent) = context["parent"].as_str() {
+        store.write_json(parent, "next.json", &json!(id))?;
+    }
     let exe = std::env::current_exe().map_err(|_| "agent_worker_unavailable")?;
     let mut command = std::process::Command::new(exe);
     command
@@ -501,10 +796,42 @@ fn new_job(context: Value) -> Result<Value> {
     Ok(job)
 }
 pub async fn call(method: &str, params: &Value) -> Result<Value> {
+    if method == "agent.providerStatus" {
+        let selected = params
+            .get("provider")
+            .map(|v| v.as_str().ok_or("agent_invalid_provider"))
+            .transpose()?
+            .unwrap_or("");
+        let provider = if selected.is_empty() {
+            default_provider().await.ok()
+        } else {
+            Some(Provider::parse(selected).ok_or("agent_invalid_provider")?)
+        };
+        return Ok(
+            json!({"available":provider.is_some(),"provider":provider.map(Provider::name).unwrap_or("")}),
+        );
+    }
     if method == "agent.jobsProjection" {
         return projection(params);
     }
     if method == "agent.jobStart" {
+        let selected = params
+            .get("provider")
+            .map(|p| p.as_str().ok_or("agent_invalid_provider"))
+            .transpose()?
+            .unwrap_or("");
+        let selected = if selected.is_empty() {
+            None
+        } else {
+            Some(Provider::parse(selected).ok_or("agent_invalid_provider")?)
+        };
+        let model = params
+            .get("model")
+            .map(|m| m.as_str().ok_or("agent_invalid_model"))
+            .transpose()?
+            .unwrap_or("")
+            .to_owned();
+        super::provider::validate_model(&model)?;
         let raw = params.get("payload").ok_or("agent_context_required")?;
         let v = if let Some(s) = raw.as_str() {
             if s.len() > INPUT_LIMIT {
@@ -519,10 +846,18 @@ pub async fn call(method: &str, params: &Value) -> Result<Value> {
         } else {
             validate_payload(&v)?
         };
-        if context.get("parent").is_none() {
-            default_provider().await?;
-        }
-        return tokio::task::spawn_blocking(move || new_job(context))
+        let provider = if context.get("parent").is_none() {
+            match selected {
+                Some(provider) => provider,
+                None => default_provider().await?,
+            }
+        } else {
+            if selected.is_some() || !model.is_empty() {
+                return Err("agent_continuation_override");
+            }
+            Provider::Claude
+        }; // new_job reads the parent's provider under the store lock.
+        return tokio::task::spawn_blocking(move || new_job(context, provider, model))
             .await
             .map_err(|_| "agent_worker_failed")?;
     }
@@ -531,19 +866,64 @@ pub async fn call(method: &str, params: &Value) -> Result<Value> {
     tokio::task::spawn_blocking(move || {
         let store = Store::open()?;
         if method == "agent.jobsList" {
-            return Ok(json!(list(&store)?));
+            let jobs = list(&store)?;
+            let offset = params
+                .get("offset")
+                .map(|value| value.as_u64().ok_or("invalid_params"))
+                .transpose()?
+                .unwrap_or(0) as usize;
+            let mut page: Vec<_> = jobs.iter().skip(offset).take(32).cloned().collect();
+            return if params["paged"] == true {
+                let more = offset.saturating_add(page.len()) < jobs.len();
+                let watch = params
+                    .get("watchIds")
+                    .map(|value| {
+                        value
+                            .as_array()
+                            .filter(|ids| ids.len() <= 4)
+                            .ok_or("invalid_params")
+                    })
+                    .transpose()?;
+                if let Some(watch) = watch {
+                    for id in watch {
+                        check_id(text(id)?)?;
+                    }
+                }
+                // Paging history must not hide live work or its terminal update
+                // from cancellation controls and pending-message dispatch.
+                for job in &jobs {
+                    if (active(job) || watch.is_some_and(|ids| ids.contains(&job["id"])))
+                        && !page.iter().any(|row| row["id"] == job["id"])
+                    {
+                        page.push(job.clone());
+                    }
+                }
+                let page = refresh_page(&store, page)?;
+                Ok(json!({"jobs":page,"hasMore":more}))
+            } else {
+                Ok(json!(refresh_page(&store, page)?))
+            };
         }
         let id = params["id"].as_str().ok_or("agent_id_required")?;
         check_id(id)?;
         let mut job = refresh(&store, id)?;
         match method.as_str() {
-            "agent.jobShow" => {
-                let d = saved_display(&store, id)?;
-                Ok(json!({"job":job,"output":d["output"],"transcript":d["transcript"]}))
-            }
+            "agent.jobShow" => super::history::page(
+                &store,
+                &job,
+                params.get("before").map(text).transpose()?.unwrap_or(""),
+            ),
             "agent.jobCancel" => {
                 if active(&job) {
+                    // Revoke proposal authority under the same lock used by MCP
+                    // before delivering an asynchronous process signal.
+                    store.write_json(id, "cancel.json", &json!(true))?;
                     if let Some(fd) = process_handle(&job) {
+                        #[cfg(target_os = "macos")]
+                        if unsafe { libc::write(fd.as_raw_fd(), b"stop".as_ptr().cast(), 4) } != 4 {
+                            return Err("agent_cancel_failed");
+                        }
+                        #[cfg(target_os = "linux")]
                         if unsafe {
                             libc::syscall(
                                 libc::SYS_pidfd_send_signal,
@@ -568,7 +948,20 @@ pub async fn call(method: &str, params: &Value) -> Result<Value> {
                 if active(&job) {
                     return Err("agent_job_active");
                 }
-                store.remove(id)?;
+                let conversation = job["conversationId"].as_str().unwrap_or(id);
+                let mut ids = Vec::new();
+                for id in store.ids()? {
+                    let candidate = refresh(&store, &id)?;
+                    if candidate["conversationId"].as_str().unwrap_or(&id) == conversation {
+                        if active(&candidate) {
+                            return Err("agent_job_active");
+                        }
+                        ids.push(id);
+                    }
+                }
+                for id in ids {
+                    store.remove(&id)?;
+                }
                 Ok(json!({}))
             }
             _ => Err("unknown_method"),
@@ -578,8 +971,14 @@ pub async fn call(method: &str, params: &Value) -> Result<Value> {
     .map_err(|_| "agent_worker_failed")?
 }
 
+fn refresh_page(store: &Store, page: Vec<Value>) -> Result<Vec<Value>> {
+    page.into_iter()
+        .map(|job| refresh(store, job["id"].as_str().unwrap()))
+        .collect()
+}
+
 fn bounded_projection_jobs(jobs: &[Value]) -> Result<()> {
-    if jobs.len() > 32 {
+    if jobs.len() > 40 {
         return Err("agent_invalid_jobs");
     }
     let mut budget = 0usize;
@@ -594,11 +993,14 @@ fn bounded_projection_jobs(jobs: &[Value]) -> Result<()> {
                         return Err("agent_invalid_jobs");
                     }
                 }
-                "created" | "createdOrder" | "updated" | "pid" => {
+                "created" | "createdOrder" | "updated" | "pid" | "displayVersion" => {
                     value.as_u64().ok_or("agent_invalid_jobs")?;
                 }
-                "resultReady" | "canContinue" => {
+                "resultReady" | "canContinue" | "stopUnconfirmed" => {
                     value.as_bool().ok_or("agent_invalid_jobs")?;
+                }
+                "model" => {
+                    super::provider::validate_model(value.as_str().ok_or("agent_invalid_jobs")?)?;
                 }
                 "messageIds" => {
                     let ids = value
@@ -645,7 +1047,7 @@ fn bounded_projection_jobs(jobs: &[Value]) -> Result<()> {
 pub fn projection(params: &Value) -> Result<Value> {
     let jobs = params["jobs"]
         .as_array()
-        .filter(|v| v.len() <= 32)
+        .filter(|v| v.len() <= 40)
         .ok_or("agent_invalid_jobs")?;
     bounded_projection_jobs(jobs)?;
     let before = params
@@ -659,7 +1061,7 @@ pub fn projection(params: &Value) -> Result<Value> {
         .map(Vec::as_slice)
         .unwrap_or(&[]);
     bounded_projection_jobs(before)?;
-    if before.len() > 32
+    if before.len() > 40
         || seen.len() > 4096
         || seen
             .iter()
@@ -812,6 +1214,69 @@ pub fn projection(params: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_poll_reads_only_heads_and_invalidates_after_creation_or_removal() {
+        struct Temp(std::path::PathBuf);
+        impl Drop for Temp {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let temp = Temp(std::env::temp_dir().canonicalize().unwrap().join(format!(
+                "omamail-head-index-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            )));
+        std::fs::create_dir(&temp.0).unwrap();
+        let store = Store::open_at(&temp.0).unwrap();
+        let make = |id: &str, conversation: &str, order: u64, state: &str| {
+            store.create(id).unwrap();
+            let job = json!({"id":id,"conversationId":conversation,"accountId":"synthetic",
+                "subject":"Mail","messageId":"m","messageIds":["m"],"draftKey":"","draftFingerprint":"",
+                "kind":"message","state":state,"created":now(),"updated":now(),"createdOrder":order,"resultReady":false});
+            store.write_json(id, "job.json", &job).unwrap();
+            job
+        };
+        let first = format!("{:032x}", 0);
+        for n in 0..320 {
+            let id = format!("{n:032x}");
+            make(&id, &first, n, "done");
+            if n > 0 {
+                store
+                    .write_json(&format!("{:032x}", n - 1), "next.json", &json!(id))
+                    .unwrap();
+            }
+        }
+        assert_eq!(list(&store).unwrap().len(), 1);
+        store.reads.set(0);
+        let page = refresh_page(&store, list(&store).unwrap()).unwrap();
+        assert_eq!(page[0]["id"], format!("{:032x}", 319));
+        assert!(
+            store.reads.get() <= 4,
+            "poll reread {} records",
+            store.reads.get()
+        );
+
+        let independent = format!("{:032x}", 1000);
+        let mut job = make(&independent, &independent, 1000, "queued");
+        assert_eq!(list(&store).unwrap().len(), 2);
+        job["state"] = json!("done");
+        store.write_json(&independent, "job.json", &job).unwrap();
+        assert_eq!(list(&store).unwrap()[0]["state"], "done");
+        store.remove(&independent).unwrap();
+        assert_eq!(list(&store).unwrap().len(), 1);
+
+        // Cached metadata never bypasses validation of the displayed page.
+        let head = format!("{:032x}", 319);
+        store
+            .write_json(&head, "job.json", &json!({"id":"forged"}))
+            .unwrap();
+        assert!(refresh_page(&store, list(&store).unwrap()).is_err());
+    }
     #[test]
     fn context_rejects_overrides_controls_and_injected_ids() {
         let good = json!({"accountId":"hey:a@example.org","messageId":"1:2","message":"Unicode郵件\nquoted \\\" body","prompt":"Summarize"});
@@ -901,7 +1366,10 @@ mod tests {
                 .unwrap();
             let output = child.wait_with_output().unwrap();
             assert!(output.status.success());
-            let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let mut expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+            // The historical oracle predates recipient-complete draft snapshots.
+            expected["draft"]["cc"] = json!("");
+            expected["draft"]["bcc"] = json!("");
             assert_eq!(draft_payload(&input).unwrap(), expected);
         }
     }

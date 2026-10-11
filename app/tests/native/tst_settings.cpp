@@ -2,6 +2,7 @@
 #include "file_store.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QSignalSpy>
@@ -260,9 +261,17 @@ void SettingsTest::watchSettlesAfterDirectoryMutation()
     QVERIFY(QFile::setPermissions(present, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
 #endif
     QTRY_VERIFY_WITH_TIMEOUT(!changed.isEmpty(), 2000);
-    QTest::qWait(500);
-    const int settled = changed.count();
-    QTest::qWait(1000);
+    // FSEvents delivers these three mutations in as many batches as it
+    // likes, and a busy runner can space them well apart. Wait for a quiet
+    // second rather than assuming when the last one lands; the loop never
+    // went quiet.
+    QElapsedTimer settling;
+    settling.start();
+    int settled = -1;
+    while (settled != changed.count() && settling.elapsed() < 10000) {
+        settled = changed.count();
+        QTest::qWait(1000);
+    }
     QCOMPARE(changed.count(), settled);
     // A handful for two coalesced events over two watched paths; the loop
     // produced hundreds and was still going.

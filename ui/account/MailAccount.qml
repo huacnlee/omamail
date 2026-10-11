@@ -2320,8 +2320,9 @@ Item {
     for (var fi = 0; fi < files.length; fi++) {
       if (files[fi] && (files[fi].data || files[fi].path)) hasFiles = true
     }
-    var body = String(values.body || "").trim()
-    if (body === "" && !hasFiles) {
+    var body = String(values.body || "")
+    if (values.exactBody !== true) body = body.trim()
+    if (body.trim() === "" && !hasFiles) {
       fail("Write something before sending")
       return false
     }
@@ -2384,6 +2385,8 @@ Item {
 
   // See `Rsvp.qml`: the account file is at its size ceiling.
   function rsvp(response) { rsvpAction.run(response) }
+  readonly property bool rsvpFallbackAvailable: rsvpAction.fallbackAvailable
+  function rsvpMailOnly(response) { rsvpAction.run(response, true) }
   readonly property alias bodies: bodyCache
 
   Rsvp {

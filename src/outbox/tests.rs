@@ -927,6 +927,85 @@ async fn successful_receipts_are_compact_and_do_not_fill_the_active_queue() {
 }
 
 #[tokio::test]
+async fn acknowledged_proposal_failures_release_capacity_and_keep_restart_deduplication() {
+    for terminal_state in ["cancelled", "failed"] {
+        let dir = Temp::new();
+        let id = "agent-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0";
+        let params = enqueue(id, "a@example.org", 60);
+        let entries: Vec<_> = (0..MAX_RECOVERABLE)
+            .map(|i| {
+                json!({"id":format!("agent-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-{i}"),
+                    "accountId":"a@example.org","provider":"gmail",
+                    "payload":params["payload"],"digest":digest(&params["payload"]),
+                    "state":terminal_state})
+            })
+            .collect();
+        storage::write(&dir.0, &json!(entries)).unwrap();
+        let executor: Executor = Arc::new(|_| Box::pin(async { panic!("must never deliver") }));
+        let outbox = Outbox::with_root(executor.clone(), Some(dir.0.clone()));
+        let fresh = enqueue("fresh", "a@example.org", 60);
+        assert_eq!(
+            outbox.call("outbox.enqueue", &fresh).await,
+            Err("outbox_full")
+        );
+        outbox
+            .call(
+                "outbox.forget",
+                &json!({"accountId":"a@example.org","sendId":id}),
+            )
+            .await
+            .unwrap();
+        let stored = storage::read(&dir.0).unwrap();
+        let stored = stored.as_array().unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .filter(|entry| entry.get("payload").is_some())
+                .count(),
+            MAX_RECOVERABLE - 1
+        );
+        let receipt = stored.iter().find(|entry| entry["id"] == id).unwrap();
+        assert_eq!(receipt["acknowledged"], true);
+        assert_eq!(receipt["digest"], digest(&params["payload"]));
+        outbox.shutdown().await.unwrap();
+        drop(outbox);
+
+        let restarted = Outbox::with_root(executor, Some(dir.0.clone()));
+        let snapshot = restarted
+            .call("outbox.snapshot", &json!({"accountId":"a@example.org"}))
+            .await
+            .unwrap();
+        assert!(
+            snapshot["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|entry| entry["id"] != id),
+            "acknowledged failures must not resurface after restart"
+        );
+        assert_eq!(
+            restarted.call("outbox.enqueue", &params).await.unwrap()["duplicate"],
+            true
+        );
+        let mut conflicting = params;
+        conflicting["payload"]["raw"] = json!("changed proposal");
+        assert_eq!(
+            restarted.call("outbox.enqueue", &conflicting).await,
+            Err("outbox_send_id_conflict")
+        );
+        restarted.call("outbox.enqueue", &fresh).await.unwrap();
+        restarted
+            .call(
+                "outbox.undo",
+                &json!({"accountId":"a@example.org","sendId":"fresh"}),
+            )
+            .await
+            .unwrap();
+        restarted.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn queue_preserves_large_composed_payload_without_the_old_sixteen_megabyte_cutoff() {
     let dir = Temp::new();
     let outbox = Outbox::with_root(

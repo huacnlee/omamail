@@ -113,13 +113,11 @@ Item {
   readonly property color danger: Color.urgent
   readonly property color popupBackground: Color.popups.background
   readonly property color popupBorder: Color.popups.border
-  // Shared structural border used by both the mail surface and the standalone
-  // host window. Keeping this semantic role here makes the native chrome track
-  // the same active Omarchy theme as the dividers inside it.
+  // Shared themed border for mail and standalone window chrome.
   readonly property color borderColor: Style.normalBorderColor
   readonly property int borderWidth: Style.normalBorderWidth
   readonly property color calendarBorder: Style.normalBorderColor
-  readonly property color calendarTodayBackground: Style.selectedAccentFill
+  readonly property color calendarTodayBackground: Qt.alpha(root.accent, 0.035)
   readonly property int calendarBorderWidth: Style.normalBorderWidth
   readonly property color dim: Qt.rgba(
     foreground.r * 0.68 + background.r * 0.32,
@@ -682,8 +680,17 @@ Item {
       return
     }
     pendingComposeMode = ""
+    var keepAssistant = agentPrompt.opened
+    var conversation = keepAssistant ? agentPrompt.job : null
     compose.begin(next, service.selectedMessage, service.selectedBody.text,
       service.selectedAttachments)
+    if (keepAssistant) {
+      if ((next === "reply" || next === "replyAll") && conversation
+          && String(conversation.accountId) === compose.accountId
+          && String(conversation.messageId) === compose.replyMessageId)
+        compose.agentParentJobId = String(conversation.id)
+      composeAgent.open()
+    }
   }
 
   // A mailto: URL, or the blank draft `compose: true` asks for. The window is
@@ -813,25 +820,13 @@ Item {
     onTriggered: root.draftSavedToast = ""
   }
 
-  // Opened on the cursor rather than on the selection, the way every other
-  // acting key works: `v` in the list means the row under the cursor, and in
-  // the reader there is only one message it could mean. Refuse an unavailable
-  // move before asking for a destination, through the same provider guard that
-  // checks the final action before its optimistic update.
   // Opened on a message outside the ticks, the picker moves that one alone.
   property bool labelPickerOnlyCursor: false
 
   function openLabelPicker(onlyCursor) {
     if (!service || (cursorId === "" && !selectionActive)) return false
     labelPickerOnlyCursor = onlyCursor === true
-    // A merged list draws no labels, so there is nothing to offer and the
-    // picker would open empty on a destination list it cannot fill — and a
-    // chosen id would belong to whichever mailbox happened to be active
-    // rather than to the row. Refused where it cannot be honoured, which is
-    // the same rule every other unavailable action follows.
-    // Only the merged-list refusal belongs here. A single mailbox whose
-    // provider has no move verb is the provider guard's answer, and saying
-    // "needs one mailbox on screen" over it would name the wrong reason.
+    // Labels belong to one mailbox. Other refusals use the provider guard.
     if (service.unified) {
       service.fail("Moving to a label needs one mailbox on screen")
       return false
@@ -869,7 +864,7 @@ Item {
 
   // With rows ticked, the ask is about all of them, one job with a count.
   function openAgentAt(id, sceneX, sceneY) {
-    if (!service || !service.hasAgent) return false
+    if (!service || !service.hasAgent || service.agentAvailable === false) return false
     if (selectionActive && checkedIds.indexOf(String(id || "")) >= 0) {
       agentPrompt.openForSelection(checkedIds, sceneX, sceneY)
       return true
@@ -880,7 +875,7 @@ Item {
   }
 
   function openAgentCentered(id) {
-    if (!service || !service.hasAgent) return false
+    if (!service || !service.hasAgent || service.agentAvailable === false) return false
     if (selectionActive) {
       var centre = root.mapToGlobal(Math.max(0, root.width / 2 - Style.space(190)),
         Math.max(0, root.height / 2 - Style.space(90)))
@@ -996,9 +991,9 @@ Item {
   // a row fired, for the rows that bind more than one meaning.
   function runShortcut(id, sequence) {
     if (id === "assistantSend") return activeAssistant ? activeAssistant.submitCurrent() : false
-    if (id === "assistantCommandUp") return activeAssistant ? activeAssistant.moveCommand(-1) : false
-    if (id === "assistantCommandDown") return activeAssistant ? activeAssistant.moveCommand(1) : false
     if (id === "assistantChooseCommand") return activeAssistant ? activeAssistant.chooseCommand() : false
+    if (id === "assistantCommandNext") return activeAssistant ? activeAssistant.moveCommand(1) : false
+    if (id === "assistantCommandPrevious") return activeAssistant ? activeAssistant.moveCommand(-1) : false
     // The sheet is on top, so moving moves it. It is a plain overlay rather
     // than a popup, which is why its keys can come from here at all — the
     // switcher's cannot, and answers them itself.
@@ -1040,6 +1035,7 @@ Item {
     }
     if (id === "toggleCheck") return toggleCheck(cursorId)
     if (id === "askAgent") {
+      if (!service || !service.hasAgent || service.agentAvailable === false) return false
       if (root.composing) { composeAgent.open(); return true }
       var target = currentView === "reader" && service ? service.selectedId : cursorId
       return openAgentCentered(target)
@@ -1063,8 +1059,15 @@ Item {
     if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
     if (id === "calendarToday") return calendarView.goToday()
     if (id === "calendarWeek") return calendarView.setView("week")
+    if (id === "calendarDay") return calendarView.setView("day")
+    if (id === "calendarAgenda") return calendarView.setView("agenda")
+    if (id === "calendarUndo") return root.service.calendarController.undoLastChange()
     if (id === "calendarMonth") return calendarView.setView("month")
     if (id === "send") return compose.submit()
+    if (id === "saveEvent") return eventComposer.submit("all")
+    if (id === "guestNext") return eventComposer.moveGuestSuggestion(1)
+    if (id === "guestPrevious") return eventComposer.moveGuestSuggestion(-1)
+    if (id === "guestChoose") return eventComposer.chooseGuestSuggestion()
     if (id === "undoSend") { undoPendingSend(); return }
     if (id === "search") return searchBar.focusField()
     if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
@@ -1107,8 +1110,10 @@ Item {
   // purpose: a QQC.Popup with CloseOnEscape consumes the key itself, so a
   // branch for them here would never run. Everything else is the history.
   function goBack() {
+    if (eventComposer.guestSuggestionsOpen) { eventComposer.dismissGuestSuggestions(); return }
+    if (calendarView.dismissPreview()) return
     if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
-    if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
+    if (activeAssistant && activeAssistant.historyMode) { activeAssistant.leaveHistory(); return }
     if (activeAssistant && activeAssistant.interrupt()) return
     if (composeAgent.opened) { composeAgent.close(); return }
     if (agentPrompt.opened) { agentPrompt.close(); return }
@@ -1361,24 +1366,15 @@ Item {
     nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
   }
 
-  // A delete asks first, and asks naming the target. Only the confirmation
-  // reaches the controller, with the event the dialog named.
+  // Confirm the named event or series before deleting it.
   function requestEventDelete(sourceId, event) {
-    if (!event) return
-    confirmDeleteDialog.openFor({
-      kind: "event",
-      name: String(event.summary || "Untitled event"),
-      message: "This event will be permanently deleted.",
-      sourceId: String(sourceId || ""),
-      event: event
-    })
+    if (event && service) confirmDeleteDialog.openFor(service.calendarController.deleteRequest(sourceId, event))
   }
-
 
   function confirmDelete(request) {
     if (!service) return
     if (request.kind === "event" && request.event) {
-      service.calendarController.deleteEvent(request.sourceId, request.event)
+      service.calendarController.confirmDelete(request)
       calendarView.closeDetail()
     }
     if (request.kind === "label" && request.labelId) service.deleteLabel(request.labelId, request.accountId)
@@ -1528,20 +1524,15 @@ Item {
         assistantCommands: !!root.activeAssistant && root.activeAssistant.commandsOpen,
         showPage: root.showPage,
         composing: root.composing,
+        eventComposing: eventComposer.opened,
+        guestSuggestions: eventComposer.guestSuggestionsOpen,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
 
-      // The context owns the keyboard. Changing it moves the focus to whatever
-      // that context types into, or parks it when the context types into
-      // nothing — so a field that has been dismissed cannot go on eating keys.
-      //
-      // Keeping these as two things is the bug this replaces: the context came
-      // from the screen while the focus stayed wherever the last click left it,
-      // and a closed compose field kept swallowing j and k. One mechanism now,
-      // and there is nothing to keep in step.
+      // Context changes move or park focus so dismissed fields cannot eat keys.
       onKeyContextChanged: Qt.callLater(applyContextFocus)
       function focusWithin(container) {
         var item = focusScope.Window.activeFocusItem
@@ -1553,6 +1544,9 @@ Item {
         if (keyContext === "assistant" || keyContext === "assistantCommands") {
           if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
           else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
+        }
+        else if (keyContext === "eventCompose" || keyContext === "eventGuests") {
+          if (!focusWithin(eventComposer)) eventComposer.takeFocus()
         }
         else if (keyContext === "compose") {
           if (focusWithin(compose)) return
@@ -1585,46 +1579,23 @@ Item {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Style.space(48)
+        height: calendarHeaderSlot.visible && calendarHeaderSlot.stacked
+          ? Style.space(60) + calendarView.toolbarHeight : Math.max(Style.space(48), calendarHeaderSlot.visible ? calendarView.toolbarHeight + Style.space(12) : 0)
         visible: !root.composing
 
-        // Kept below the header controls so their own pointer handlers win.
-        // Empty title-bar space starts the platform's native move operation.
-        // A DragHandler with no target: a MouseArea keeps the grab and feeds
-        // moves into QML while the compositor is already dragging, which is
-        // the lag of a window that trails the pointer.
-        MouseArea {
-          id: windowMoveArea
-          objectName: "app-title-bar-drag-area"
+        WindowMoveArea {
           anchors.fill: parent
           enabled: root.standaloneWindowChrome
-          acceptedButtons: Qt.NoButton
-          hoverEnabled: false
-          // Exposed for tests: a target would fight the compositor drag.
-          readonly property bool dragsTheWindow: windowMoveHandler.target === null
-
-          DragHandler {
-            id: windowMoveHandler
-            enabled: windowMoveArea.enabled
-            target: null
-            dragThreshold: 0
-            acceptedButtons: Qt.LeftButton
-            onActiveChanged: {
-              if (!active) return
-              var nativeWindow = header.Window.window
-              if (nativeWindow) nativeWindow.startSystemMove()
-            }
-          }
+          nativeWindow: header.Window.window
         }
 
-        // Identity first, controls after, with a rule between them: the mark
-        // and the name say what this window is, and everything to their right
-        // does something.
+        // App identity precedes the current view's controls.
         Row {
           id: headerLeft
           anchors.left: parent.left
           anchors.leftMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
           ActionIcon {
@@ -1712,20 +1683,29 @@ Item {
           }
         }
 
+        Item {
+          id: calendarHeaderSlot
+          objectName: "calendar-header-slot"
+          readonly property bool stacked: header.width < Style.space(1100)
+          visible: root.calendarVisible && !root.showPage && !root.composing && !calendarView.detailOpen
+          x: stacked ? Style.space(14) : headerLeft.x + headerLeft.width + Style.space(20)
+          y: stacked ? Style.space(48) : (header.height - height) / 2
+          width: Math.max(0, (stacked ? header.width - Style.space(14) : headerRight.x - Style.space(20)) - x)
+          height: calendarView.toolbarHeight
+        }
+
         Row {
           id: headerRight
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
-          // Checking for mail and writing one are both things you do to the
-          // mailbox as a whole, so they sit together. The menu is the window's
-          // own, and it stays on the left with the mark.
           IconButton {
             objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing
+            visible: !root.showPage && !root.composing && !root.calendarVisible
             iconName: "refresh"
             tooltipText: root.calendarVisible
               ? (root.service && root.service.calendarController.loading
@@ -1745,21 +1725,6 @@ Item {
               if (root.calendarVisible) calendarView.refresh()
               else if (root.service) root.service.refresh()
             }
-          }
-
-          Button {
-            objectName: "create-event-button"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && root.calendarVisible
-            text: "Create event"
-            tooltipText: "Create event"
-            foreground: root.dim
-            bordered: true
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            enabled: root.ready
-            onClicked: eventComposer.begin()
           }
 
           Button {
@@ -1783,16 +1748,18 @@ Item {
             parent: root.composing ? composeAiSlot : headerRight
             anchors.right: root.composing ? parent.right : undefined
             objectName: "header-ai-button"
+            opacity: enabled ? 1 : 0.4
             anchors.verticalCenter: parent.verticalCenter
             visible: !!root.service && root.service.hasAgent !== false
               && !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
             width: headerComposeButton.implicitHeight
             height: headerComposeButton.implicitHeight
             Accessible.name: "AI"
-            tooltipText: "AI... · alt+g"
+            Accessible.description: tooltipText
+            tooltipText: root.service && root.service.agentAvailable === false ? root.service.agentUnavailableReason : "AI... · alt+g"
             ActionIcon {
               anchors.centerIn: parent
-              // The antenna makes the robot visually bottom-heavy.
+              // Center the robot's body.
               anchors.verticalCenterOffset: -Style.space(1)
               name: "agent"
               iconSize: Style.font.icon
@@ -1806,7 +1773,7 @@ Item {
             accent: root.accent
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
-            enabled: root.ready && (root.assistantOpen || compose.opened || root.selectionActive
+            enabled: root.ready && !!root.service && root.service.agentAvailable !== false && (root.assistantOpen || compose.opened || root.selectionActive
               || root.cursorId !== "" || (!!root.service && root.service.selectedId !== ""))
             onClicked: {
               if (root.assistantOpen) { agentPrompt.close(); composeAgent.close() }
@@ -1824,8 +1791,7 @@ Item {
         }
       }
 
-      // The same global AI control stays at the window's top-right when the
-      // composer's own header replaces the mailbox header.
+      // Reparent the AI control into the composer's header.
       Item {
         id: composeAiSlot
         anchors.top: parent.top
@@ -2157,9 +2123,7 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           contentDirection: root.service ? root.service.contentDirection : ""
-          // The stack follows the view: opening pushes, closing pops — and
-          // the pop is here rather than on `closed`, because a draft parked
-          // for sending closes without saying so.
+          // Parked sends close without emitting `closed`; navigation follows opened.
           onOpenedChanged: {
             if (opened) root.trackComposeOpened()
             else root.leaveCompose()
@@ -2205,6 +2169,7 @@ Item {
           z: 10
 
           CalendarView {
+            toolbarHost: calendarHeaderSlot
             id: calendarView
             anchors.fill: parent
             controller: root.service ? root.service.calendarController : null
@@ -2408,6 +2373,14 @@ Item {
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
               onClientSetupRequested: root.openClientSetup()
+              onCalendarSignInRequested: function(index) {
+                root.editAccount(index)
+                Qt.callLater(function() { if (root.service) root.service.signIn() })
+              }
+              onOpenCalendarRequested: {
+                root.showCalendar()
+                calendarView.refresh()
+              }
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
               onEditRequested: function(index) { root.editAccount(index) }
@@ -2792,6 +2765,11 @@ Item {
           anchors.fill: parent
           sourceComponent: Component {
             AgentPrompt {
+              proposalComposer: compose
+              onApplyProposalRequested: function(envelope, parentId) {
+                compose.beginProposal(envelope, parentId)
+                Qt.callLater(function() { root.composeAgent.open() })
+              }
               onOpenedChanged: if (opened) root.composeAgent.close()
               objectName: "agent-prompt"
               service: root.service
@@ -3028,8 +3006,7 @@ Item {
         dimColor: root.dim
         panelFontFamily: root.fontFamily
         hiddenBindings: root.service && root.service.hasAgent === false
-          ? ["askAgent", "assistantSend", "assistantCommandUp",
-             "assistantCommandDown", "assistantChooseCommand"]
+          ? ["askAgent", "assistantSend", "assistantChooseCommand", "assistantCommandNext", "assistantCommandPrevious"]
           : []
         onDismissed: root.dismissHelp()
       }

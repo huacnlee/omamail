@@ -64,18 +64,108 @@ class Diagnostics(unittest.TestCase):
             self.assertIn(code, data)
         self.assertNotIn('unknown_error', data)
 
-    def test_every_provider_identifier_the_backend_returns_is_allowlisted(self):
+    def test_static_backend_error_vocabulary_does_not_drift(self):
         spec = importlib.util.spec_from_file_location('diagnostics', SCRIPT)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        produced = re.compile(r'(?:Err\(|=> *|or\(|map_err\(\|_\| *)"((?:gmail|calendar|upload|auth)_[a-z_]+|invalid_upload_encoding)"')
+        # Source inspection is only a tripwire for additions to the reviewed,
+        # exact runtime vocabulary. It must never populate MESSAGES at runtime.
+        produced = re.compile(
+            r'(?:\bErr\(\s*|=>\s*|\bok_or\(\s*|\bmap_err\(\|[^|]*\|\s*)'
+            r'"([a-z]+_[a-z_]+)"')
+        # Block-bodied error mappings and persisted outbox failure states also
+        # return fixed identifiers without an adjacent Err()/ok_or() call.
+        returned = re.compile(r'^\s*"([a-z]+_[a-z_]+)"\s*$', re.MULTILINE)
+        stored = re.compile(r'\["error"\]\s*=\s*json!\("([a-z]+_[a-z_]+)"\)')
         codes = set()
         for path in (ROOT / 'src').rglob('*.rs'):
             if path.name == 'tests.rs' or path.stem.endswith(('_tests', '_test')):
                 continue
-            codes |= set(produced.findall(path.read_text()))
-        self.assertGreater(len(codes), 50)
+            source = path.read_text()
+            for pattern in (produced, returned, stored):
+                codes.update(pattern.findall(source))
+        # These are synthetic fixture errors, not production backend errors.
+        codes -= {'unexpected_method', 'test_directories_override_active'}
+        self.assertGreater(len(codes), 350)
         self.assertEqual(sorted(codes - module.MESSAGES), [])
+
+    def test_mail_errors_survive_recording_and_report_regeneration(self):
+        cases = [
+            ('imap.list', 'imap_invalid_response'),
+            ('imap.list', 'mail_auth_failed'),
+            ('jmap.request', 'jmap_invalid_credential'),
+            ('jmap.request', 'jmap_method_failed'),
+            ('outbox.enqueue', 'outbox_full'),
+            ('outbox.enqueue', 'outbox_send_refused'),
+            ('accounts.save', 'accounts_busy'),
+            ('accounts.save', 'accounts_write_failed'),
+            ('attachment.store', 'attachment_open_refused'),
+            ('mail.read', 'mail_account_unknown'),
+            ('reader.render', 'reader_cancelled'),
+            ('message.parse', 'invalid_message_encoding'),
+            ('auth.token', 'credential_store_unavailable'),
+            ('mail.list', 'session_failed'),
+            ('mail.list', 'worker_failed'),
+        ]
+        events = [{'method': method, 'error': {'code': -32000, 'message': code}}
+                  for method, code in cases]
+        self.call('record', events)
+        # Both another record and open sanitize saved entries again.
+        self.call('record', [])
+        self.call('open')
+        entries = json.loads((self.folder / 'errors.json').read_text())
+        report = (self.folder / 'report.txt').read_text()
+        report_entries = [json.loads(line) for line in report.splitlines()
+                          if line.startswith('{')]
+        self.assertEqual(report_entries, entries)
+        self.assertEqual([entry['message'] for entry in entries],
+                         [code for _, code in cases])
+        self.assertEqual([entry['method'] for entry in entries],
+                         [method for method, _ in cases])
+        self.assertNotIn('unknown_error', report)
+
+    def test_error_shaped_private_values_never_reach_disk_report_or_launcher(self):
+        values = [
+            'imap_alice_example_com', 'jmap_refresh_token_synthetic_secret',
+            'mail_subject_private_project', 'outbox_account_alice_example_com',
+            'attachment_invoice_private_pdf', 'reader_message_private_id',
+            'imap_invalid_response: server says alice@example.com',
+            'jmap_method_failed https://mail.example.com/private?token=secret',
+            'mail_auth_failed "password"\\مرحبا',
+        ]
+        values += ['attachment_open_refused' + suffix
+                   for suffix in ['\r', '\n', '\r\n', '\x00', '_private', ' ']]
+        self.call('record', [self.event(value) for value in values])
+        log = self.folder / 'errors.json'
+        entries = json.loads(log.read_text())
+        self.assertEqual([entry['message'] for entry in entries],
+                         ['unknown_error'] * len(values))
+        # A modified old log goes through the same allowlist when opened.
+        entries += [{'method': 'imap.list', 'code': -32000, 'message': value}
+                    for value in values]
+        log.write_text(json.dumps(entries))
+        self.call('open')
+        report = (self.folder / 'report.txt').read_text()
+        launcher = (self.root / 'state/launched').read_text()
+        self.assertEqual(report.count('unknown_error'), 2 * len(values))
+        for value in values:
+            self.assertNotIn(value, report)
+            self.assertNotIn(value, launcher)
+
+    def test_allowlist_matches_whole_values_and_fits_frontend_bound(self):
+        spec = importlib.util.spec_from_file_location('diagnostics', SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for code in module.MESSAGES:
+            with self.subTest(code=code):
+                self.assertLessEqual(len(code), 128)
+                self.assertEqual(module.clean(self.event(code))['message'], code)
+                for value in [code + '_private', 'private_' + code,
+                              code + '\n', code + '\x00']:
+                    self.assertEqual(module.clean(self.event(value))['message'],
+                                     'unknown_error')
+                    self.assertEqual(module.clean({'message': value}, True)['message'],
+                                     'unknown_error')
 
     def test_only_explicit_open_launches_agent_with_report_path(self):
         self.call('record', [self.event()])

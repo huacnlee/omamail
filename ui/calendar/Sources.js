@@ -45,7 +45,14 @@ function makeSource(raw) {
     accountId: trimmed(value.accountId), enabled: value.enabled !== false,
     calendarId: trimmed(value.calendarId),
     readOnly: value.readOnly === true, discovered: value.discovered === true,
-    colorKey: colorKey
+    colorKey: colorKey,
+    accessRole: trimmed(value.accessRole), timeZone: trimmed(value.timeZone),
+    canCreateMeet: value.canCreateMeet === true,
+    defaultReminders: Array.isArray(value.defaultReminders) ? value.defaultReminders.slice() : [],
+    remindersEnabled: value.remindersEnabled === undefined ? value.enabled !== false : value.remindersEnabled === true,
+    reminderMinutes: isFinite(Number(value.reminderMinutes)) && value.reminderMinutes !== undefined
+      ? Math.max(-1, Math.min(40320, Math.floor(Number(value.reminderMinutes)))) : -1,
+    preferred: value.preferred === true
   }
 }
 
@@ -166,6 +173,12 @@ function withGoogleAccounts(list, accountSummaries) {
         break
       }
     }
+    // Discovery's primary entry carries permissions, identity and reminder
+    // defaults. Never replace it with a synthetic writable primary.
+    var hasDiscovery = next.sources.some(function(source) {
+      return source && source.kind === "google" && source.accountId === accountId && source.discovered
+    })
+    if (hasDiscovery) continue
     next = add(next, {
       id: "google:" + accountId,
       kind: "google",
@@ -180,7 +193,10 @@ function withGoogleAccounts(list, accountSummaries) {
       // inherited: keeping the stamp would hide Edit and Delete after an
       // upgrade. Hand-configured CalDAV sources still keep their own flag.
       readOnly: false,
-      colorKey: saved ? saved.colorKey : Palette.defaultKey("google:" + accountId)
+      colorKey: saved ? saved.colorKey : Palette.defaultKey("google:" + accountId),
+      remindersEnabled: saved ? saved.remindersEnabled : true,
+      reminderMinutes: saved ? saved.reminderMinutes : -1,
+      preferred: saved ? saved.preferred : false
     })
   }
   return next
@@ -220,7 +236,10 @@ function withMicrosoftAccounts(list, accountSummaries) {
       calendarId: saved ? trimmed(saved.calendarId) : "",
       readOnly: saved && saved.discovered === true ? saved.readOnly === true : false,
       discovered: saved ? saved.discovered === true : false,
-      colorKey: saved ? saved.colorKey : Palette.defaultKey("microsoft:" + accountId)
+      colorKey: saved ? saved.colorKey : Palette.defaultKey("microsoft:" + accountId),
+      remindersEnabled: saved ? saved.remindersEnabled : true,
+      reminderMinutes: saved ? saved.reminderMinutes : -1,
+      preferred: saved ? saved.preferred : false
     })
   }
   return next
@@ -285,7 +304,7 @@ function applyDiscovery(list, result) {
   var provider = trimmed(value.provider).toLowerCase()
   var accountId = trimmed(value.accountId)
   var kind = provider === "microsoft" ? "microsoft"
-    : (provider === "icloud" ? "icloud" : "")
+    : (provider === "icloud" ? "icloud" : (provider === "google" ? "google" : ""))
   if (kind === "" || accountId === "" || !Array.isArray(value.calendars))
     return copyList(list)
   var current = list && Array.isArray(list.sources) ? list.sources : []
@@ -304,13 +323,19 @@ function applyDiscovery(list, result) {
         break
       }
     }
+    var initial = kind === "google" ? remote.selected !== false && remote.hidden !== true : true
     discovered.push(makeSource({
       id: id, kind: kind, name: remote.name,
       accountId: accountId, calendarId: remote.calendarId,
       url: remote.url, username: remote.username,
-      enabled: saved ? saved.enabled !== false : true,
+      enabled: saved ? saved.enabled !== false : initial,
       readOnly: remote.readOnly === true, discovered: true,
-      colorKey: saved ? saved.colorKey : Palette.defaultKey(id)
+      colorKey: saved ? saved.colorKey : Palette.defaultKey(id),
+      accessRole: remote.accessRole, timeZone: remote.timeZone,
+      canCreateMeet: remote.canCreateMeet, defaultReminders: remote.defaultReminders,
+      remindersEnabled: saved ? saved.remindersEnabled : initial,
+      reminderMinutes: saved ? saved.reminderMinutes : -1,
+      preferred: saved ? saved.preferred : remote.isDefault === true
     }))
   }
   var next = emptyList()
@@ -407,6 +432,12 @@ function groupByAccount(list, accountSummaries) {
 // events; it is not offered as somewhere to put one.
 function writable(source) {
   return !!source && source.readOnly !== true
+}
+
+// The redesigned views are shared; deep integration is currently Google-only.
+// Other providers retain their existing basic create/edit/delete paths.
+function nativeCalendarFeatures(source) {
+  return !!source && source.kind === "google"
 }
 
 // The picker groups with the read-only calendars left out, and a group left
