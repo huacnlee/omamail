@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtTest
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import "../../qml" as Standalone
 import "../../../ui/providers" as Providers
 import "../../../ui/components" as Components
@@ -47,10 +48,10 @@ TestCase {
     Components.CalendarSettings {
       service: calendarFixture
       controller: calendarFixture
-      textColor: Color.foreground
-      dimColor: Style.mutedColorFor(Color.foreground, Color.background)
-      accentColor: Color.accent
-      urgentColor: Color.accent
+      textColor: Commons.Color.foreground
+      dimColor: Style.mutedColorFor(Commons.Color.foreground, Commons.Color.background)
+      accentColor: Commons.Color.accent
+      urgentColor: Commons.Color.accent
       panelFontFamily: Style.font.family
     }
   }
@@ -59,18 +60,18 @@ TestCase {
     id: styledSwitch
     visible: false
     checked: true
-    palette.window: Color.background
-    palette.windowText: Color.foreground
-    palette.highlight: Color.accent
+    palette.window: Commons.Color.background
+    palette.windowText: Commons.Color.foreground
+    palette.highlight: Commons.Color.accent
   }
 
   SpinBox {
     id: styledSpinBox
     visible: false
     editable: true
-    palette.window: Color.background
-    palette.windowText: Color.foreground
-    palette.highlight: Color.accent
+    palette.window: Commons.Color.background
+    palette.windowText: Commons.Color.foreground
+    palette.highlight: Commons.Color.accent
   }
 
   ToolTip {
@@ -206,15 +207,15 @@ TestCase {
     verify(findChild(styledSpinBox, "omamail-spinbox-decrement"))
     verify(findChild(styledSpinBox, "omamail-spinbox-increment"))
     compare(background.radius, Style.cornerRadius)
-    compare(String(styledSpinBox.palette.windowText), String(Color.foreground))
+    compare(String(styledSpinBox.palette.windowText), String(Commons.Color.foreground))
     compare(styledToolTip.delay, Style.tooltipDelay)
     var tooltipLabel = findChild(styledToolTip, "omamail-tooltip-label")
     var tooltipBackground = findChild(styledToolTip, "omamail-tooltip-background")
     verify(tooltipLabel)
     verify(tooltipBackground)
-    compare(String(tooltipLabel.color), String(Color.popups.text))
-    compare(String(tooltipBackground.color), String(Color.popups.background))
-    compare(String(tooltipBackground.border.color), String(Color.popups.border))
+    compare(String(tooltipLabel.color), String(Commons.Color.popups.text))
+    compare(String(tooltipBackground.color), String(Commons.Color.popups.background))
+    compare(String(tooltipBackground.border.color), String(Commons.Color.popups.border))
     compare(tooltipBackground.radius, Style.cornerRadius)
   }
 
@@ -257,8 +258,8 @@ TestCase {
     verify(composition.app.standaloneWindowChrome)
     var windowBorder = findChild(composition, "standalone-window-border")
     verify(windowBorder)
-    compare(String(windowBorder.border.color), String(Color.border))
-    verify(String(Color.border) !== String(composition.app.borderColor))
+    compare(String(windowBorder.border.color), String(Commons.Color.border))
+    verify(String(Commons.Color.border) !== String(composition.app.borderColor))
     compare(windowBorder.border.width,
       composition.app.borderWidth / Math.max(1, Screen.devicePixelRatio))
     verify(windowBorder.visible)
@@ -317,13 +318,13 @@ TestCase {
     findChild(composition, "appearance-dark").clicked()
     compare(host.settings.appearance, "Dark")
     compare(composition.service.appearance, "Dark")
-    compare(Color.dark, true)
-    compare(String(Color.preferredAppearance), "dark")
+    compare(Commons.Color.dark, true)
+    compare(String(Commons.Color.preferredAppearance), "dark")
     findChild(composition, "appearance-light").clicked()
-    compare(Color.dark, false)
-    compare(String(Color.background), "#fffcf0")
+    compare(Commons.Color.dark, false)
+    compare(String(Commons.Color.background), "#fffcf0")
     findChild(composition, "appearance-system").clicked()
-    compare(String(Color.preferredAppearance), "")
+    compare(String(Commons.Color.preferredAppearance), "")
     var appMenu = findChild(composition, "app-menu")
     verify(appMenu)
     compare(appMenu.canQuit, true)
