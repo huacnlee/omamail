@@ -38,10 +38,13 @@ Item {
   // kinds of provider. Spam counts as "its own verb" only where a spam verb
   // exists: an IMAP Junk folder has no report-spam inverse to offer instead,
   // so a Junk message there is the one spam case "Move to Inbox" still means.
+  readonly property var messageHost: !root.service ? null
+    : typeof root.service.hostForId === "function"
+      ? root.service.hostForId(root.messageId) : root.service
   readonly property bool archived: !!root.summary
     && root.summary.inInbox === false
     && root.summary.inTrash !== true
-    && (root.summary.inSpam !== true || (root.service && !root.service.canReportSpam))
+    && (root.summary.inSpam !== true || (root.messageHost && root.messageHost.canReportSpam === false))
     && root.summary.isSent !== true
     && root.summary.isDraft !== true
 

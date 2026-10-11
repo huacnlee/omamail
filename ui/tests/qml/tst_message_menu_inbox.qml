@@ -24,6 +24,8 @@ Item {
     property bool hasLabels: true
     property string rawLabelId: ""
     property var messages: []
+    property var hosts: null
+    function hostForId(id) { return hosts ? hosts[id] || null : fakeService }
   }
 
   Omamail.MessageMenu {
@@ -68,7 +70,11 @@ Item {
       wait(20)
     }
 
-    function cleanup() { menu.close() }
+    function cleanup() {
+      menu.close()
+      fakeService.hosts = null
+      fakeService.canReportSpam = true
+    }
 
     function archivedMessage() {
       return { id: "m1", subject: "filed", unread: false, starred: false,
@@ -147,6 +153,41 @@ Item {
     // Gmail keeps its spam verb, so there the original rule stands.
     function test_junk_with_a_spam_verb_still_hides_it() {
       fakeService.canReportSpam = true
+      var summary = archivedMessage()
+      summary.inSpam = true
+      show(summary)
+      compare(menu.archived, false)
+      compare(unarchiveRow().visible, false)
+    }
+
+    function test_mixed_mailboxes_use_the_messages_own_spam_capability_data() {
+      return [
+        { tag: "gmail", id: "gmail:owner:spam", capability: true, offered: false },
+        { tag: "imap", id: "imap:owner:Junk:42", capability: false, offered: true }
+      ]
+    }
+
+    function test_mixed_mailboxes_use_the_messages_own_spam_capability(row) {
+      fakeService.canReportSpam = false
+      var hosts = ({})
+      hosts[row.id] = { canReportSpam: row.capability }
+      fakeService.hosts = hosts
+      var summary = archivedMessage()
+      summary.id = row.id
+      summary.inSpam = true
+      show(summary)
+      compare(menu.archived, row.offered)
+      compare(unarchiveRow().visible, row.offered)
+      if (row.offered) {
+        unarchiveRow().activated()
+        compare(actionSpy.signalArguments[0][0], "unarchive")
+        compare(actionSpy.signalArguments[0][1], row.id)
+      }
+    }
+
+    function test_missing_owner_does_not_offer_a_spam_recovery_action() {
+      fakeService.canReportSpam = false
+      fakeService.hosts = ({})
       var summary = archivedMessage()
       summary.inSpam = true
       show(summary)
