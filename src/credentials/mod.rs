@@ -25,6 +25,7 @@ use windows as platform;
 pub enum CredentialKind {
     GoogleRefreshToken { client_id: String },
     OutlookRefreshToken { client_id: String },
+    ExchangeRefreshToken { client_id: String },
     ImapPassword,
     JmapSecret,
     CalendarPassword,
@@ -151,6 +152,7 @@ impl CredentialKey {
         let (provider, kind) = match self.kind {
             CredentialKind::GoogleRefreshToken { .. } => ("gmail", "refresh-token"),
             CredentialKind::OutlookRefreshToken { .. } => ("outlook", "outlook-refresh-token"),
+            CredentialKind::ExchangeRefreshToken { .. } => ("exchange", "exchange-refresh-token"),
             CredentialKind::ImapPassword => ("imap", "imap-password"),
             CredentialKind::JmapSecret => ("jmap", "jmap-secret"),
             CredentialKind::CalendarPassword => ("caldav", "calendar-password"),
@@ -177,7 +179,8 @@ impl CredentialKey {
             attrs.insert("account".into(), self.account_id.to_lowercase());
         }
         if let CredentialKind::GoogleRefreshToken { client_id }
-        | CredentialKind::OutlookRefreshToken { client_id } = &self.kind
+        | CredentialKind::OutlookRefreshToken { client_id }
+        | CredentialKind::ExchangeRefreshToken { client_id } = &self.kind
         {
             metadata(client_id)?;
             attrs.insert("client-id".into(), client_id.clone());

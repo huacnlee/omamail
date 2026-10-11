@@ -171,7 +171,7 @@ pub async fn send(
     }
     let mut answer = match provider.as_str() {
         "gmail" => gmail.call("gmail.send", &params).await?,
-        "imap" | "outlook" => crate::providers::imap::call("imap.send", &params).await?,
+        "imap" | "outlook" | "exchange" => crate::providers::imap::call("imap.send", &params).await?,
         "jmap" => jmap.call("jmap.send", &params).await?,
         "hey" => {
             params["program"] = json!(crate::providers::hey_access::program()?);
@@ -201,7 +201,7 @@ pub async fn send(
             let params = json!({"accountId":account,"id":draft});
             match provider.as_str() {
                 "gmail" => gmail.call("gmail.deleteDraft", &params).await.map(|_| ()),
-                "imap" | "outlook" => crate::providers::imap::call("imap.deleteDraft", &params)
+                "imap" | "outlook" | "exchange" => crate::providers::imap::call("imap.deleteDraft", &params)
                     .await
                     .map(|_| ()),
                 "jmap" if answer["draftRemoved"] == true => Ok(()),

@@ -118,7 +118,7 @@ fn matches(row: &Value, terms: &[String]) -> bool {
     terms.iter().all(|term| text.contains(term))
 }
 fn eligible(provider: &str, query: &str, row: &Value) -> bool {
-    if matches!(provider, "imap" | "outlook") {
+    if matches!(provider, "imap" | "outlook" | "exchange") {
         if row["inTrash"] == true
             || row["inSpam"] == true
             || row["labelIds"].as_array().is_some_and(|labels| {

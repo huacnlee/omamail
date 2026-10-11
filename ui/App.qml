@@ -1251,6 +1251,21 @@ Item {
   }
 
   Component {
+    id: exchangeSetupPage
+
+    ExchangeSetupPage {
+      service: root.service
+      textColor: root.foreground
+      dimColor: root.dim
+      dangerColor: root.danger
+      accentColor: root.accent
+      panelFontFamily: root.fontFamily
+      accountCount: root.service ? root.service.accountCount : 1
+      onRemoveRequested: root.removeCurrentAccountFromEditor()
+    }
+  }
+
+  Component {
     id: jmapSetupPage
 
     JmapSetupPage {
@@ -2272,8 +2287,9 @@ Item {
               ? providerPickerPage
               : (setup.kind === "imap" ? imapSetupPage
                 : (setup.kind === "jmap" ? jmapSetupPage
+                : (setup.kind === "exchange" ? exchangeSetupPage
                 : (setup.kind === "outlook" ? outlookSetupPage
-                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))))
+                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage)))))
           }
           }
         }

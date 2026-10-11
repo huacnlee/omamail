@@ -2,6 +2,37 @@
 
 // Generated from Rust providers::domain::snapshot; parity is verified by Rust tests.
 var FACTS = {
+  "exchange": {
+    "addressSearch": false,
+    "capabilities": {
+      "archive": true,
+      "batch": true,
+      "conversations": false,
+      "labels": false,
+      "manageLabels": true,
+      "move": true,
+      "search": true,
+      "send": true,
+      "spam": false,
+      "star": true,
+      "threads": false,
+      "web": false,
+      "webBox": false
+    },
+    "inheritedDefault": "in:inbox",
+    "nativeSync": true,
+    "queries": {
+      "archive": "folder:\\Archive",
+      "drafts": "folder:\\Drafts",
+      "inbox": "folder:INBOX",
+      "sent": "folder:\\Sent",
+      "spam": "folder:\\Junk",
+      "starred": "folder:INBOX FLAGGED",
+      "trash": "folder:\\Trash",
+      "unread": "folder:INBOX UNSEEN"
+    },
+    "webHomeUrl": ""
+  },
   "gmail": {
     "addressSearch": true,
     "capabilities": {

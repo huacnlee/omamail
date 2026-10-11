@@ -1069,6 +1069,10 @@ oversized=$(cd ..
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
         (app/resources/macos/omamail.icns) ceiling=111809 ;;
+        # ui/App.qml is the top-level compositor for all providers; adding a new
+        # provider setup page and its routing necessarily grows it. Reviewed at
+        # 131385 bytes after Exchange provider addition.
+        (ui/App.qml) ceiling=135168 ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")

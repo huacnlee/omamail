@@ -13,7 +13,7 @@ pub fn settings_readonly(provider: &str, account: &str) -> Result<Value, &'stati
 }
 
 fn settings_with(provider: &str, account: &str, raw: Value) -> Result<Value, &'static str> {
-    if !["gmail", "outlook", "imap", "jmap"].contains(&provider)
+    if !["gmail", "outlook", "exchange", "imap", "jmap"].contains(&provider)
         || account.is_empty()
         || account.len() > 1024
         || account.chars().any(char::is_control)
@@ -331,6 +331,84 @@ pub(super) async fn change_outlook(params: &Value, clear: bool) -> Result<Value,
     }
     tokens.clear();
     Ok(json!({"saved":!clear,"cleared":clear}))
+}
+
+/// Store a refresh token for an Exchange account in the keyring.
+pub async fn store_exchange_token(
+    account: &str,
+    client_id: &str,
+    refresh_token: &str,
+) -> Result<(), &'static str> {
+    valid_account("exchange", account)?;
+    let key = exchange_key(client_id, account);
+    store::put(
+        key,
+        Secret::new(refresh_token.as_bytes().to_vec()).map_err(store_error)?,
+    )
+    .await
+    .map_err(store_error)?;
+    Ok(())
+}
+
+fn exchange_key(client: &str, account: &str) -> CredentialKey {
+    CredentialKey {
+        provider: "exchange".into(),
+        account_id: account.to_lowercase(),
+        kind: CredentialKind::ExchangeRefreshToken {
+            client_id: client.into(),
+        },
+    }
+}
+
+/// Exchange-only token path. Completely separate from Outlook.
+/// Reads the ExchangeRefreshToken from keyring, exchanges it for an access token
+/// via Microsoft's token endpoint, and returns the access token.
+pub async fn exchange_access_token(account: &str) -> Result<String, &'static str> {
+    valid_account("exchange", account)?;
+    let owned = account.to_owned();
+    let entry = tokio::task::spawn_blocking(move || settings("exchange", &owned))
+        .await
+        .map_err(|_| "auth_account_invalid")??;
+    let client_id = entry["clientId"].as_str().ok_or("auth_client_missing")?;
+    if client_id.is_empty() || client_id.len() > 1024 || client_id.chars().any(char::is_control) {
+        return Err("auth_client_invalid");
+    }
+    let tenant = entry["imap"]["tenant"].as_str().unwrap_or("organizations");
+    let url = destination(
+        &json!({"provider":"outlook", "endpoint":"token", "tenant":tenant}),
+    )?;
+    let key = exchange_key(client_id, account);
+    let refresh_secret = store::get(key).await.map_err(store_error)?;
+    let refresh = text_secret(&refresh_secret)?;
+    let scope = "openid offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send";
+    let reply = post(
+        client()?,
+        &url,
+        callback::form(&[
+            ("client_id", client_id),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh),
+            ("scope", scope),
+        ]),
+    )
+    .await?;
+    let token: Value = serde_json::from_str(reply["body"].as_str().ok_or("auth_invalid_response")?)
+        .map_err(|_| "auth_invalid_response")?;
+    if reply["status"] != 200 {
+        if token["error"] == "invalid_grant" {
+            return Err("auth_signed_out");
+        }
+        return Err("auth_refresh_failed");
+    }
+    let access = token["access_token"]
+        .as_str()
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 16384
+                && !s.chars().any(|c| c.is_whitespace() || c.is_control())
+        })
+        .ok_or("auth_invalid_response")?;
+    Ok(access.to_owned())
 }
 
 /// Discard cached credentials without opening a second refresh lane.

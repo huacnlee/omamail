@@ -16,3 +16,4 @@ docs/superpowers/
 
 # Python leaves these beside the harvester scripts.
 __pycache__/
+private_notes/

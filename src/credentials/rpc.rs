@@ -45,6 +45,12 @@ fn key(params: &serde_json::Map<String, Value>) -> Result<CredentialKey, &'stati
                 client_id: client_id()?,
             },
         ),
+        "exchange-refresh-token" => (
+            "exchange",
+            CredentialKind::ExchangeRefreshToken {
+                client_id: client_id()?,
+            },
+        ),
         "imap-password" => ("imap", CredentialKind::ImapPassword),
         "jmap-secret" => ("jmap", CredentialKind::JmapSecret),
         "calendar-password" => ("caldav", CredentialKind::CalendarPassword),
@@ -53,7 +59,9 @@ fn key(params: &serde_json::Map<String, Value>) -> Result<CredentialKey, &'stati
     let has_client = params.contains_key("clientId");
     let needs_client = matches!(
         kind,
-        CredentialKind::GoogleRefreshToken { .. } | CredentialKind::OutlookRefreshToken { .. }
+        CredentialKind::GoogleRefreshToken { .. }
+            | CredentialKind::OutlookRefreshToken { .. }
+            | CredentialKind::ExchangeRefreshToken { .. }
     );
     if has_client != needs_client {
         return Err("invalid_params");
@@ -73,13 +81,13 @@ fn parse(method: &str, params: &Value) -> Result<Request, &'static str> {
         "credentials.get" | "credentials.delete" => {
             2 + usize::from(matches!(
                 fields.get("kind").and_then(Value::as_str),
-                Some("google-refresh-token" | "outlook-refresh-token")
+                Some("google-refresh-token" | "outlook-refresh-token" | "exchange-refresh-token")
             ))
         }
         "credentials.put" => {
             3 + usize::from(matches!(
                 fields.get("kind").and_then(Value::as_str),
-                Some("google-refresh-token" | "outlook-refresh-token")
+                Some("google-refresh-token" | "outlook-refresh-token" | "exchange-refresh-token")
             ))
         }
         _ => return Err("unknown_method"),

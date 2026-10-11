@@ -58,7 +58,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 5 : 0
+    bundledApiVersion: root.standalone ? 7 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)

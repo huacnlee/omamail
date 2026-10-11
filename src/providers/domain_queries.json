@@ -19,6 +19,16 @@
     "spam": "folder:\\Junk",
     "trash": "folder:\\Trash"
   },
+  "exchange": {
+    "inbox": "folder:INBOX",
+    "unread": "folder:INBOX UNSEEN",
+    "starred": "folder:INBOX FLAGGED",
+    "sent": "folder:\\Sent",
+    "drafts": "folder:\\Drafts",
+    "archive": "folder:\\Archive",
+    "spam": "folder:\\Junk",
+    "trash": "folder:\\Trash"
+  },
   "hey": {
     "inbox": "box:imbox",
     "unread": "box:imbox unseen",

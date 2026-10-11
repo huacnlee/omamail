@@ -178,7 +178,7 @@ impl Session {
                 .await?;
                 crate::providers::hey::call("hey.read", &params).await?
             }
-            "imap" | "outlook" => {
+            "imap" | "outlook" | "exchange" => {
                 let response = crate::providers::imap::call(
                     "imap.messages",
                     &json!({"accountId":account,"ids":[id],"full":true,"progressive":false,"readOnly":true}),

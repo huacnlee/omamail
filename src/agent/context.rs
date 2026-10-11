@@ -313,7 +313,7 @@ async fn bounded_work<T>(
 fn validate_ids(provider: &str, ids: &[String]) -> Result<()> {
     for id in ids {
         let valid = match provider {
-            "imap" | "outlook" => id.split_once(':').is_some_and(|(uid, folder)| {
+            "imap" | "outlook" | "exchange" => id.split_once(':').is_some_and(|(uid, folder)| {
                 uid.parse::<u32>().is_ok_and(|n| n > 0) && !folder.is_empty()
             }),
             "hey" => id.split_once(':').is_some_and(|(a, b)| {
