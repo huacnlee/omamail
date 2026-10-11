@@ -191,6 +191,13 @@ Item {
       return !!item && typeof item.plannedServer === "function"
     }
 
+    // The Exchange form, told apart from the other three by the function only
+    // it has. Not `currentSettings` or `plannedServer`, which are the IMAP and
+    // JMAP pages' names and would make this one read as theirs.
+    function isExchangeForm(item) {
+      return !!item && typeof item.submit === "function"
+    }
+
     function init() {
       app.opened = true
       mailService.log = []
@@ -321,6 +328,73 @@ Item {
       page().removeRequested.connect(function() { removed += 1 })
       page().removeRequested()
       compare(removed, 1, "and pressing it reaches the window")
+    }
+
+    // An Exchange mailbox is added the same way, and its page keeps the same
+    // two ways out. It is the one form that always shows its server, because
+    // nothing here would find one.
+    function test_exchange_kind_opens_its_own_page_and_keeps_back_and_remove() {
+      mailService.hasSavedAccounts = false
+      fakeAuth.credentialsPresent = false
+      mailService.providerId = "gmail"
+      waitForRendering(app)
+      verify(isPicker(page()), "first run opens on the chooser")
+
+      // The card says in one line that it is for a server without IMAP.
+      var summary = null
+      function find(item) {
+        if (!item || summary) return
+        if (item.text === "On-premises Exchange, for a server that offers no IMAP.") summary = item
+        for (var i = 0; i < (item.children || []).length; i++) find(item.children[i])
+      }
+      find(page())
+      verify(summary, "the Exchange card names what it is for")
+      compare(summary.lineCount, 1)
+
+      page().chosen("exchange")
+      waitForRendering(app)
+      compare(mailService.lastConfigured.provider, "exchange",
+        "the first-run row takes the kind rather than a second row appearing")
+      var loader = named(app, "setup-page")
+      compare(loader.kind, "exchange")
+      verify(isExchangeForm(page()), "the Exchange form opens")
+      verify(!isImapForm(page()) && !isJmapForm(page()), "and not another provider's")
+
+      verify(named(app, "exchange-address-field"), "the page asks for an address")
+      var server = named(app, "exchange-server-field")
+      verify(server && server.visible, "the server is on the page, not behind a disclosure")
+      verify(named(app, "exchange-username-field"), "and a login")
+      verify(named(app, "exchange-secret-field"), "and a password")
+
+      var back = named(app, "page-back")
+      verify(back && back.visible, "Back is shown even though no mailbox is ready")
+      back.activated()
+      waitForRendering(app)
+      verify(isPicker(page()), "Back leads to the provider chooser")
+    }
+
+    function test_every_chooser_entry_opens_a_page_of_its_own() {
+      // Not a fallback: a kind that is listed and opens Gmail's walkthrough is
+      // the failure this catches, and the chooser lists what the registry has.
+      var seen = []
+      var ids = ["gmail", "hey", "outlook", "exchange", "imap", "jmap"]
+      mailService.hasSavedAccounts = false
+      fakeAuth.credentialsPresent = false
+      mailService.providerId = "gmail"
+      for (var i = 0; i < ids.length; i++) {
+        waitForRendering(app)
+        if (!isPicker(page())) named(app, "page-back").activated()
+        waitForRendering(app)
+        verify(isPicker(page()), "the chooser is up before " + ids[i])
+        page().chosen(ids[i])
+        waitForRendering(app)
+        var item = page()
+        seen.push(String(item).split("(")[0])
+        compare(named(app, "setup-page").kind, ids[i])
+      }
+      var distinct = {}
+      for (var j = 0; j < seen.length; j++) distinct[seen[j]] = true
+      compare(Object.keys(distinct).length, ids.length, "six kinds, six different pages: " + seen)
     }
 
     function test_first_run_draft_switches_kind_in_place() {

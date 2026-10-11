@@ -207,6 +207,9 @@ impl Session {
         if method.starts_with("jmap.") {
             return Box::pin(self.jmap.call(method, params)).await;
         }
+        if method.starts_with("exchange.") {
+            return Box::pin(crate::providers::exchange::call(method, params)).await;
+        }
         if method.starts_with("m365.") {
             return Box::pin(crate::providers::m365::call(method, params)).await;
         }
