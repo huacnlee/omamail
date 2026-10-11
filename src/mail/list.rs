@@ -1,4 +1,4 @@
-use super::{ListRequest, Mailbox};
+use super::{Account, ListRequest, Mailbox};
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
 
@@ -23,11 +23,25 @@ fn mailbox_name(mailbox: Mailbox) -> &'static str {
     }
 }
 
-fn provider_mailbox(request: &ListRequest) -> Option<String> {
-    crate::providers::domain::query_mailbox(
-        request.account.provider.id(),
-        mailbox_name(request.mailbox),
-    )
+/// The provider's own query for one of the account's mailboxes, narrowed by a
+/// search, exactly as a listing sends it.
+pub(crate) fn provider_query(
+    account: &Account,
+    mailbox: Mailbox,
+    search: &str,
+) -> Result<String, &'static str> {
+    let provider_mailbox =
+        crate::providers::domain::query_mailbox(account.provider.id(), mailbox_name(mailbox))
+            .ok_or("mail_mailbox_unavailable")?;
+    Ok(crate::providers::domain::resolve(&json!({
+        "operation":"query",
+        "provider":account.provider.id(),
+        "mailbox":provider_mailbox,
+        "search":search,
+    }))?["value"]
+        .as_str()
+        .ok_or("mail_mailbox_unavailable")?
+        .to_owned())
 }
 
 fn complete_page(page: Value) -> Result<Value, &'static str> {
@@ -51,16 +65,7 @@ pub(crate) async fn list_with(
     request: ListRequest,
     adapter: &impl ListAdapter,
 ) -> Result<Value, &'static str> {
-    let provider_mailbox = provider_mailbox(&request).ok_or("mail_mailbox_unavailable")?;
-    let provider_query = crate::providers::domain::resolve(&json!({
-        "operation":"query",
-        "provider":request.account.provider.id(),
-        "mailbox":provider_mailbox,
-        "search":request.query,
-    }))?["value"]
-        .as_str()
-        .ok_or("mail_mailbox_unavailable")?
-        .to_owned();
+    let provider_query = provider_query(&request.account, request.mailbox, &request.query)?;
     let page = complete_page(adapter.list(&request, provider_query).await?)?;
     Ok(json!({
         "accountId":request.account.id,

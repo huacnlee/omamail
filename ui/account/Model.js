@@ -1354,6 +1354,97 @@ function markAllReadNote(rows, expanded) {
     + " marked read"
 }
 
+// Lists read back through a QML `var` property can be array-like rather
+// than an Array, so the clear-unread rules accept either.
+function clearUnreadList(value) {
+  return value && typeof value.length === "number" ? value : []
+}
+
+// What "Mark these read" would change: the loaded rows still unread.
+function loadedUnreadCount(rows) {
+  var list = clearUnreadList(rows)
+  var count = 0
+  for (var i = 0; i < list.length; i++) if (list[i] && list[i].unread === true) count++
+  return count
+}
+
+// One line per mailbox that "Mark all read..." will clear, in the account
+// summaries' order. `counts` maps an account id to its Inbox's unread count,
+// or to null when that count could not be read: the line then says "?"
+// rather than a number the run would not match. A signed-out mailbox cannot
+// be reached, and one with nothing unread has nothing to say.
+function clearUnreadLines(summaries, counts) {
+  var list = clearUnreadList(summaries)
+  var known = counts || {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var summary = list[i] || {}
+    var id = String(summary.id || "")
+    if (summary.signedIn !== true || !(id in known)) continue
+    var value = known[id]
+    if (value === null || value === undefined) {
+      out.push({ label: String(summary.label || ""), count: "?", known: false })
+      continue
+    }
+    var unread = Math.max(0, Math.floor(Number(value)) || 0)
+    if (unread > 0) out.push({ label: String(summary.label || ""), count: String(unread), known: true })
+  }
+  return out
+}
+
+// How many messages the run will mark, or -1 while any line is unknown.
+function clearUnreadTotal(lines) {
+  var list = clearUnreadList(lines)
+  var total = 0
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].known !== true) return -1
+    total += Number(list[i].count) || 0
+  }
+  return total
+}
+
+// The confirmation names what will be cleared, and the button carries the
+// exact number unless a mailbox could not say how many it holds.
+function clearUnreadConfirmation(lines) {
+  var list = Array.prototype.slice.call(clearUnreadList(lines))
+  var total = clearUnreadTotal(list)
+  return {
+    title: list.length === 1 ? "Mark all read in " + list[0].label + "?" : "Mark all read in every account?",
+    message: "Every unread message in the Inbox. They cannot be marked unread again as a group.",
+    action: total > 0 ? "Mark " + total + " read" : "Mark all read",
+    lines: list
+  }
+}
+
+// While a "Mark all read..." run goes. It is the status line's note, renewed
+// after every step, until the run's own ending note replaces it.
+function clearUnreadProgress(cleared) {
+  return "Marking all read: " + Math.max(0, Math.floor(Number(cleared)) || 0) + " so far"
+}
+
+// Why a run stopped, for a mail client with no wording of its own for the
+// backend's codes. Only the codes this path itself causes get a sentence;
+// any other code is shown as it came, which still names the fault.
+function clearUnreadErrorText(code) {
+  var value = String(code || "")
+  if (value === "mail_action_target_limit") return "a conversation has more messages than one step can mark"
+  if (value === "request_timed_out") return "the mail server took too long to answer"
+  return value
+}
+
+// How a "Mark all read..." run ended. A refused message is listed again on
+// every step, so a failure count would count it more than once: the note
+// says that some failed, not how many.
+function clearUnreadNote(result) {
+  var r = result || {}
+  var marked = Math.max(0, Math.floor(Number(r.marked)) || 0)
+  if (r.error) return marked + " marked read, then stopped: " + r.error
+  if (Number(r.failed) > 0 || r.stalled === true) return marked + " marked read, some could not be changed"
+  if (r.limited === true) return marked + " marked read. Run it again to continue."
+  if (marked === 0) return "No unread messages left"
+  return pluralize(marked, "message") + " marked read"
+}
+
 // What the rows on screen are, for the footer that counts them.
 //
 // On the evidence of the rows themselves rather than on the provider's

@@ -119,6 +119,13 @@ pub struct ActRequest {
     pub execute: bool,
 }
 
+/// One step of marking an account's Unread mailbox read. It names no
+/// messages: the step lists them itself, so a caller cannot widen it.
+pub struct ClearUnreadRequest {
+    pub account: Account,
+    pub execute: bool,
+}
+
 pub struct AttachmentInput {
     pub path: PathBuf,
     pub name: String,
@@ -297,6 +304,20 @@ impl TryFrom<&Value> for ActRequest {
             operation: operation.to_owned(),
             ids: ids(object)?,
             execute: execute(object)?,
+        })
+    }
+}
+
+impl TryFrom<&Value> for ClearUnreadRequest {
+    type Error = &'static str;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let object = params_object(value, &["account", "execute"])?;
+        // Malformed params are refused before the account lookup reads disk.
+        let execute = execute(object)?;
+        Ok(Self {
+            account: account(object)?,
+            execute,
         })
     }
 }

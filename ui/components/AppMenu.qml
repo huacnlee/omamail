@@ -26,6 +26,18 @@ Item {
   // Only the standalone host owns the application process. A plugin menu
   // must never offer to terminate the shell that loaded it.
   property bool canQuit: false
+  // The service's ClearUnreadQueue: whether "Mark all read..." can run, its
+  // progress, and how many messages each row would mark. The Inbox is counted
+  // when the menu opens; until it answers the row shows an ellipsis, and a
+  // count no mailbox could give shows no number rather than a wrong one.
+  property var clearUnread: null
+  readonly property bool canClearUnread: !!clearUnread && clearUnread.available === true
+  readonly property bool clearingUnread: !!clearUnread && clearUnread.running === true
+  readonly property bool countingUnread: !!clearUnread && clearUnread.counting === true
+  readonly property string loadedUnreadSuffix: clearUnread && clearUnread.loadedUnread > 0
+    ? String(clearUnread.loadedUnread) : ""
+  readonly property string unreadSuffix: countingUnread ? "\u2026"
+    : clearUnread && clearUnread.unread > 0 ? String(clearUnread.unread) : ""
   readonly property bool opened: menu.opened
 
   // Positioned against the window rather than a button, and flipped when it
@@ -34,7 +46,7 @@ Item {
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
-  readonly property var menuRows: [inboxRow, calendarRow, markRow, webRow,
+  readonly property var menuRows: [inboxRow, calendarRow, markRow, clearRow, webRow,
     switchRow, settingsRow, shortcutsRow, projectRow, authorRow, quitRow]
 
   function openAt(sceneX, sceneY) {
@@ -71,6 +83,7 @@ Item {
   function close() { menu.close() }
 
   signal markAllReadRequested()
+  signal clearUnreadRequested()
   signal openWebRequested()
   signal shortcutsRequested()
   // The two places the window is for, as a pair. The sidebar has both, but
@@ -116,6 +129,7 @@ Item {
       // loses nothing.
       root.cursorIndex = -1
       root.place()
+      if (root.canClearUnread && !root.clearingUnread) root.clearUnread.refreshCounts()
     }
     background: Rectangle {
       radius: Style.cornerRadius
@@ -156,11 +170,29 @@ Item {
 
       MenuRow {
         id: markRow
+        objectName: "app-menu-mark-these-read"
         // "These" and not "all": it marks the messages that are loaded, which
         // is what you are looking at, not every message the mailbox holds.
         text: "Mark these read"
-        enabled: root.signedIn
+        suffix: root.loadedUnreadSuffix
+        // With its count shown, a row that would mark nothing is disabled,
+        // like the one below it.
+        enabled: root.signedIn && (!root.clearUnread || root.clearUnread.loadedUnread > 0)
         onActivated: { menu.close(); root.markAllReadRequested() }
+      }
+      MenuRow {
+        id: clearRow
+        objectName: "app-menu-clear-unread"
+        // Every unread message in the Inbox, in every category, which can be
+        // thousands more than are loaded; it asks first. While a run is going
+        // the row says so and stays locked, so a second press cannot start
+        // another.
+        text: root.clearingUnread ? "Marking all read" : "Mark all read..."
+        suffix: root.clearingUnread ? String(root.clearUnread.cleared) : root.unreadSuffix
+        visible: root.canClearUnread
+        enabled: root.signedIn && !root.clearingUnread && !root.countingUnread
+          && !!root.clearUnread && root.clearUnread.unread !== 0
+        onActivated: { menu.close(); root.clearUnreadRequested() }
       }
       MenuRow {
         id: webRow

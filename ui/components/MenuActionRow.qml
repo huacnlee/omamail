@@ -9,6 +9,9 @@ Rectangle {
   required property color textColor
   required property string panelFontFamily
   property color tone: textColor
+  // A count or key shown at the row's end, such as how many messages the row
+  // would change. Empty draws nothing.
+  property string suffix: ""
   property var collection: []
   property int cursorIndex: -1
   readonly property bool selected: collection.indexOf(root) === cursorIndex
@@ -25,8 +28,8 @@ Rectangle {
   Text {
     anchors.left: parent.left
     anchors.leftMargin: Style.space(9)
-    anchors.right: parent.right
-    anchors.rightMargin: Style.space(9)
+    anchors.right: suffixText.visible ? suffixText.left : parent.right
+    anchors.rightMargin: suffixText.visible ? Style.space(12) : Style.space(9)
     anchors.verticalCenter: parent.verticalCenter
     textFormat: Text.PlainText
     text: root.text
@@ -34,6 +37,19 @@ Rectangle {
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.bodySmall
     elide: Text.ElideRight
+  }
+
+  Text {
+    id: suffixText
+    anchors.right: parent.right
+    anchors.rightMargin: Style.space(9)
+    anchors.verticalCenter: parent.verticalCenter
+    visible: root.suffix !== ""
+    textFormat: Text.PlainText
+    text: root.suffix
+    color: Qt.rgba(root.tone.r, root.tone.g, root.tone.b, 0.6)
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.bodySmall
   }
 
   HoverHandler { id: hover }

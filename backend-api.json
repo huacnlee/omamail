@@ -1,5 +1,5 @@
 {
-  "apiVersion": 6,
+  "apiVersion": 7,
   "releasedApiVersion": 6,
   "protocolVersion": 1,
   "methods": [
@@ -71,6 +71,7 @@
     "mail.list",
     "mail.read",
     "mail.act",
+    "mail.clearUnread",
     "mail.send",
     "mail.watch",
     "mail.unwatch",
@@ -602,6 +603,43 @@
       "errorCode": -32602,
       "equals": {
         "message": "Invalid params"
+      }
+    },
+    {
+      "name": "clear unread rejects fields it does not take",
+      "method": "mail.clearUnread",
+      "params": {
+        "account": "gmail:sender@example.org",
+        "ids": [
+          "x"
+        ]
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "clear unread rejects a non-boolean execute",
+      "method": "mail.clearUnread",
+      "params": {
+        "account": "gmail:sender@example.org",
+        "execute": "yes"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "clear unread names an unknown account",
+      "method": "mail.clearUnread",
+      "params": {
+        "account": "gmail:nobody@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_account_unknown"
       }
     },
     {
@@ -1266,7 +1304,13 @@
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": [
+      "mail.clearUnread"
+    ],
+    "cases": [
+      "clear unread rejects fields it does not take",
+      "clear unread rejects a non-boolean execute",
+      "clear unread names an unknown account"
+    ]
   }
 }

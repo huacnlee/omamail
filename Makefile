@@ -4,7 +4,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/tests/compatibility/tst_published_agent.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
-	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
+	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/ClearUnread.qml ui/account/ClearUnreadQueue.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
 	ui/providers/OutlookAuth.qml \
@@ -69,7 +69,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/CalendarEventComposer.qml \
 	ui/components/CalendarEventDetail.qml ui/components/CalendarReminderPanel.qml \
 	ui/components/CalendarPalette.qml \
-	ui/components/ConfirmDeleteDialog.qml \
+	ui/components/ConfirmDeleteDialog.qml ui/components/ClearUnreadDialog.qml \
 	ui/components/SetupPage.qml \
 	ui/components/ShortcutHelp.qml \
 	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml ui/calendar/CalendarReminders.qml ui/calendar/CalendarReminderInbox.qml \

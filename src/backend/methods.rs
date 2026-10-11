@@ -68,6 +68,7 @@ pub const ALL: &[&str] = &[
     "mail.list",
     "mail.read",
     "mail.act",
+    "mail.clearUnread",
     "mail.send",
     "mail.watch",
     "mail.unwatch",

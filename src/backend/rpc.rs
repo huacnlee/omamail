@@ -29,6 +29,20 @@ fn empty_params() -> Value {
     json!({})
 }
 
+/// Requests whose work may be dropped at the frame deadline, so the UI hears
+/// `request_timed_out` before its own watchdog stops the backend. Gmail calls
+/// leave their queued work running. A clear-unread step only marks messages
+/// read: one dropped mid-way may have completed, and the next step lists
+/// whatever is still unread.
+fn bounded_by_deadline(method: &str, params: &Value) -> bool {
+    method.starts_with("gmail.")
+        || method == "mail.clearUnread"
+        || (method == "request.upload"
+            && params["method"]
+                .as_str()
+                .is_some_and(|method| method.starts_with("gmail.")))
+}
+
 pub fn error(id: Value, code: i32, message: &str) -> Value {
     json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})
 }
@@ -112,12 +126,7 @@ async fn one(
     // its future before checking the clock.
     let result = if tokio::time::Instant::now() >= deadline {
         Err("request_timed_out")
-    } else if request.method.starts_with("gmail.")
-        || (request.method == "request.upload"
-            && request.params["method"]
-                .as_str()
-                .is_some_and(|method| method.starts_with("gmail.")))
-    {
+    } else if bounded_by_deadline(&request.method, &request.params) {
         tokio::time::timeout_at(deadline, session.dispatch(&request.method, &request.params))
             .await
             .unwrap_or(Err("request_timed_out"))
@@ -144,6 +153,25 @@ async fn one(
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn frame_deadline_bounds_gmail_and_clear_unread_steps() {
+        for (method, params) in [
+            ("gmail.batchModify", json!({})),
+            ("request.upload", json!({"method":"gmail.send"})),
+            ("mail.clearUnread", json!({})),
+        ] {
+            assert!(bounded_by_deadline(method, &params), "{method}");
+        }
+        // A send or a legacy process call cannot be cancelled by dropping it.
+        for (method, params) in [
+            ("mail.send", json!({})),
+            ("mail.act", json!({})),
+            ("request.upload", json!({"method":"mail.send"})),
+        ] {
+            assert!(!bounded_by_deadline(method, &params), "{method}");
+        }
+    }
 
     #[tokio::test]
     async fn expired_upload_request_does_not_reserve_capacity() {

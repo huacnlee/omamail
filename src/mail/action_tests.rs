@@ -12,12 +12,12 @@ use std::{
 };
 
 #[derive(Default)]
-struct Effects {
+pub(super) struct Effects {
     refusal_lookup: AtomicUsize,
-    lookup: AtomicUsize,
+    pub(super) lookup: AtomicUsize,
 }
 
-struct RecordingLookup {
+pub(super) struct RecordingLookup {
     availability: ActionAvailability,
     rows: HashMap<String, Value>,
     effects: Arc<Effects>,
@@ -66,7 +66,7 @@ fn request(provider: Provider, operation: &str, ids: &[&str]) -> ActRequest {
     }
 }
 
-fn lookup(refusals: Value, rows: &[Value], effects: Arc<Effects>) -> RecordingLookup {
+pub(super) fn lookup(refusals: Value, rows: &[Value], effects: Arc<Effects>) -> RecordingLookup {
     lookup_with_mailboxes(
         refusals,
         json!({"archive":true,"trash":true,"spam":true}),
@@ -96,7 +96,7 @@ fn lookup_with_mailboxes(
     }
 }
 
-fn row(id: &str) -> Value {
+pub(super) fn row(id: &str) -> Value {
     json!({"id":id})
 }
 

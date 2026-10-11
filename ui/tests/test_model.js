@@ -404,6 +404,52 @@ assert.strictEqual(model.markAllReadNote(3, false), "3 messages marked read")
 assert.strictEqual(model.markAllReadNote(1, true), "1 conversation marked read")
 assert.strictEqual(model.markAllReadNote(1, false), "1 message marked read")
 
+// Each row shows how many messages it will mark: "Mark these read" the loaded
+// rows still unread, "Mark all read..." every unread message in the Inbox, as
+// each mailbox counted it when the menu opened.
+assert.strictEqual(model.loadedUnreadCount([{ unread: true }, { unread: false }, {}, { unread: true }]), 2)
+assert.strictEqual(model.loadedUnreadCount(null), 0)
+var clearMessage = "Every unread message in the Inbox. They cannot be marked unread again as a group."
+var perso = { label: "perso", count: "234", known: true }
+var work = { label: "work", count: "2020", known: true }
+var lost = { label: "lost", count: "?", known: false }
+var summaries = [
+  { id: "p", label: "perso", signedIn: true },
+  { id: "w", label: "work", signedIn: true },
+  { id: "e", label: "empty", signedIn: true },
+  { id: "o", label: "signed out", signedIn: false },
+  { id: "l", label: "lost", signedIn: true }
+]
+deepEqual(model.clearUnreadLines(summaries, { p: 234, w: 2020, e: 0, o: 9, l: null }), [perso, work, lost],
+  "signed-in mailboxes with something to clear, and the ones whose count failed")
+deepEqual(model.clearUnreadLines({ length: 1, 0: summaries[0] }, { p: 234 }), [perso],
+  "summaries read back through a QML property may be array-like")
+assert.strictEqual(model.clearUnreadTotal([perso, work]), 2254)
+assert.strictEqual(model.clearUnreadTotal([perso, lost]), -1, "an unknown count makes the total unknown")
+assert.strictEqual(model.clearUnreadTotal([]), 0)
+deepEqual(model.clearUnreadConfirmation([perso]), {
+  title: "Mark all read in perso?", message: clearMessage, action: "Mark 234 read", lines: [perso]
+})
+deepEqual(model.clearUnreadConfirmation({ length: 2, 0: perso, 1: work }), {
+  title: "Mark all read in every account?", message: clearMessage, action: "Mark 2254 read", lines: [perso, work]
+}, "the button names the exact number, past 500 too")
+assert.strictEqual(model.clearUnreadConfirmation([perso, lost]).action, "Mark all read",
+  "no number on the button when one count is unknown")
+assert.strictEqual(model.clearUnreadProgress(1200), "Marking all read: 1200 so far")
+assert.strictEqual(model.clearUnreadErrorText("mail_action_target_limit"),
+  "a conversation has more messages than one step can mark")
+assert.strictEqual(model.clearUnreadErrorText("request_timed_out"), "the mail server took too long to answer")
+assert.strictEqual(model.clearUnreadErrorText("hey_unexpected"), "hey_unexpected", "an unknown code is still shown")
+assert.strictEqual(model.clearUnreadNote({ marked: 2431 }), "2431 messages marked read")
+assert.strictEqual(model.clearUnreadNote({ marked: 1 }), "1 message marked read")
+assert.strictEqual(model.clearUnreadNote({ marked: 0 }), "No unread messages left")
+assert.strictEqual(model.clearUnreadNote({ marked: 2400, failed: 31 }), "2400 marked read, some could not be changed",
+  "a refused message is listed again on every step, so no exact count")
+assert.strictEqual(model.clearUnreadNote({ marked: 2400, stalled: true }), "2400 marked read, some could not be changed")
+assert.strictEqual(model.clearUnreadNote({ marked: 20000, limited: true }), "20000 marked read. Run it again to continue.")
+assert.strictEqual(model.clearUnreadNote({ marked: 100, stalled: true, error: "Backend stopped" }),
+  "100 marked read, then stopped: Backend stopped", "an error outranks the rest")
+
 // ------------------------------------------------------------ list edits
 
 assert.strictEqual(model.showInitialListSkeleton(true, 0), true,
