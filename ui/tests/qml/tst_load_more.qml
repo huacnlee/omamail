@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../../components" as Mail
 
 // The next page comes as the list is scrolled to its foot: once per foot,
@@ -37,10 +38,10 @@ Item {
       scroller: flick
       width: flick.width
       service: fakeService
-      textColor: Color.foreground
-      accentColor: Color.accent
-      dimColor: Color.foreground
-      urgentColor: Color.accent
+      textColor: Commons.Color.foreground
+      accentColor: Commons.Color.accent
+      dimColor: Commons.Color.foreground
+      urgentColor: Commons.Color.accent
       panelFontFamily: "monospace"
     }
   }

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
@@ -8,10 +9,10 @@ Item {
   property string label: ""
   property string value: ""
   property var options: []
-  property color foreground: Color.foreground
-  property color background: Color.background
-  property color popupBorder: Color.popups.border
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color background: Commons.Color.background
+  property color popupBorder: Commons.Color.popups.border
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   property int rowHeight: Style.spacing.controlHeight
   property int popupRowHeight: Style.spacing.popupRowHeight

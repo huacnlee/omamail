@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../../components" as Omamail
 
 Item {
@@ -74,10 +75,10 @@ Item {
     width: parent.width
     service: mailService
     calendarController: calendarController
-    textColor: Color.foreground
-    dimColor: Color.foreground
-    accentColor: Color.accent
-    urgentColor: Color.accent
+    textColor: Commons.Color.foreground
+    dimColor: Commons.Color.foreground
+    accentColor: Commons.Color.accent
+    urgentColor: Commons.Color.accent
     panelFontFamily: "monospace"
   }
 
