@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import "../.." as Omamail
 import "../../account" as Account
 import "BackendFixture.js" as BackendFixture
@@ -126,18 +127,18 @@ Item {
     function test_new_notifications_follow_theme_without_bar_foreground() {
       var account = service.findAccount(second)
       var firstNotice = notification(account, [{ id: "one" }])
-      compare(firstNotice.command[2], String(Color.foreground))
-      compare(firstNotice.command[3], String(Color.accent))
-      var previous = Color.foreground
+      compare(firstNotice.command[2], String(Commons.Color.foreground))
+      compare(firstNotice.command[3], String(Commons.Color.accent))
+      var previous = Commons.Color.foreground
       try {
-        Color.foreground = Qt.rgba(0.1, 0.2, 0.3, 1)
+        Commons.Color.foreground = Qt.rgba(0.1, 0.2, 0.3, 1)
         var nextNotice = notification(account, [{ id: "two" }])
-        compare(nextNotice.command[2], String(Color.foreground))
+        compare(nextNotice.command[2], String(Commons.Color.foreground))
         verify(firstNotice.command[2] !== nextNotice.command[2])
         finish(firstNotice, "")
         finish(nextNotice, "")
       } finally {
-        Color.foreground = previous
+        Commons.Color.foreground = previous
       }
     }
 
