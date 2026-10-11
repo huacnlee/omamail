@@ -1,6 +1,6 @@
 {
   "apiVersion": 7,
-  "releasedApiVersion": 6,
+  "releasedApiVersion": 7,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -1291,8 +1291,6 @@
   ],
   "unreleased": {
     "methods": [],
-    "cases": [
-      "mail send dry run names the IMAP sender"
-    ]
+    "cases": []
   }
 }
