@@ -59,7 +59,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 6 : 0
+    bundledApiVersion: root.standalone ? 7 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -1018,9 +1018,8 @@ Item {
 
     var entry = {}
     for (var key in accounts[index]) entry[key] = accounts[index][key]
-    var keys = ["provider", "email", "clientId", "clientSecret", "imap", "jmap", "label", "senderName"]
-    for (var k = 0; k < keys.length; k++)
-      if (raw[keys[k]] !== undefined) entry[keys[k]] = raw[keys[k]]
+    // Whatever the form sends: a provider's settings need no line of their own.
+    for (var field in raw) if (raw[field] !== undefined) entry[field] = raw[field]
 
     // Never rebuild through `add`: a colliding id replaces the *other* row
     // and drops this one, which is how re-authing Proton deleted iCloud.
@@ -2665,6 +2664,7 @@ Item {
       imapSettings: entry ? entry.imap : null
       jmapSettings: entry ? entry.jmap : null
       senderName: entry ? String(entry.senderName || "") : ""
+      exchangeSettings: entry ? entry.exchange : null
       // Only a Gmail account has a client-keyed refresh token to inherit, and
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")
@@ -2683,7 +2683,7 @@ Item {
       // What a JMAP sign-in learned about its server, written onto the entry
       // the same way the setup form's own save is: the row keeps everything
       // else it had, and the file follows.
-      onServerSettingsLearned: function(jmap) { root.configureAccount(index, { jmap: jmap }) }
+      onServerSettingsLearned: function(values) { root.configureAccount(index, values) }
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onReplySent: function(sendId) { root.replySent(String(sendId || "")) }

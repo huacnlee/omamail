@@ -1,5 +1,5 @@
 {
-  "apiVersion": 7,
+  "apiVersion": 8,
   "releasedApiVersion": 7,
   "protocolVersion": 1,
   "methods": [
@@ -183,7 +183,21 @@
     "jmap.request",
     "jmap.stream.open",
     "jmap.stream.poll",
-    "jmap.stream.close"
+    "jmap.stream.close",
+    "exchange.verify",
+    "exchange.list",
+    "exchange.messages",
+    "exchange.read",
+    "exchange.attachment",
+    "exchange.modify",
+    "exchange.trash",
+    "exchange.untrash",
+    "exchange.send",
+    "exchange.saveDraft",
+    "exchange.deleteDraft",
+    "exchange.sendAs",
+    "exchange.invalidate",
+    "exchange.cancel"
   ],
   "contractCases": [
     {
@@ -1287,10 +1301,132 @@
       "types": {
         "ticket": "string"
       }
+    },
+    {
+      "name": "Exchange provider rules snapshot",
+      "method": "providers.snapshot",
+      "params": {},
+      "equals": {
+        "exchange.nativeSync": true,
+        "exchange.capabilities.send": true,
+        "exchange.capabilities.star": true,
+        "exchange.capabilities.archive": false,
+        "exchange.capabilities.spam": false
+      },
+      "types": {
+        "exchange.queries": "object"
+      }
+    },
+    {
+      "name": "Exchange methods refuse unknown fields before any lookup",
+      "method": "exchange.list",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "query": "role:inbox",
+        "limit": 5,
+        "pageToken": "",
+        "unexpected": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange draft save refuses a message that is not canonical base64url before any lookup",
+      "method": "exchange.saveDraft",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "raw": "not base64url!",
+        "draftId": ""
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange draft delete refuses an id that is not one before any lookup",
+      "method": "exchange.deleteDraft",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "MFRGG"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange cancel of an unknown request is a no-op",
+      "method": "exchange.cancel",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "requestToken": "contract-nothing"
+      },
+      "equals": {
+        "cancelled": false
+      }
+    },
+    {
+      "name": "Exchange sign-in refuses a server address without TLS",
+      "method": "exchange.verify",
+      "params": {
+        "address": "contract@example.org",
+        "settings": {
+          "ewsUrl": "http://mail.example.invalid/EWS/Exchange.asmx",
+          "username": "contract@example.org",
+          "authScheme": "auto"
+        },
+        "secret": "synthetic"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "exchange_url_invalid"
+      }
+    },
+    {
+      "name": "Exchange restore for an unregistered mailbox names no credential",
+      "method": "exchange.verify",
+      "params": {
+        "accountId": "exchange:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "credential kind exchange-password refuses a client id before native access",
+      "method": "credentials.get",
+      "params": {
+        "kind": "exchange-password",
+        "accountId": "exchange:contract@example.org",
+        "clientId": "forged"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail action refuses archive for Exchange before any server call",
+      "method": "mail.act",
+      "params": {
+        "account": "exchange:sender@example.org",
+        "operation": "archive",
+        "ids": [
+          "mfrggzdfmztwq2lknnwg23tpobyxe43uov3ho6dzpd2mjrg4"
+        ]
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "mail_action_unavailable"
+      }
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": ["exchange.verify", "exchange.list", "exchange.messages", "exchange.read", "exchange.attachment", "exchange.modify", "exchange.trash", "exchange.untrash", "exchange.send", "exchange.saveDraft", "exchange.deleteDraft", "exchange.sendAs", "exchange.invalidate", "exchange.cancel"],
+    "cases": ["Exchange provider rules snapshot", "Exchange methods refuse unknown fields before any lookup", "Exchange draft save refuses a message that is not canonical base64url before any lookup", "Exchange draft delete refuses an id that is not one before any lookup", "Exchange cancel of an unknown request is a no-op", "Exchange sign-in refuses a server address without TLS", "Exchange restore for an unregistered mailbox names no credential", "credential kind exchange-password refuses a client id before native access", "mail action refuses archive for Exchange before any server call"]
   }
 }

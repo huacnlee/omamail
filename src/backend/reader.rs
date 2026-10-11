@@ -190,6 +190,13 @@ impl Session {
                     .cloned()
                     .ok_or("reader_message_missing")?
             }
+            "exchange" => {
+                crate::providers::exchange::call(
+                    "exchange.read",
+                    &json!({"accountId":account,"id":id,"full":true}),
+                )
+                .await?
+            }
             _ => return Err("reader_provider_unknown"),
         };
         if value["id"] != id || !value["payload"].is_object() {

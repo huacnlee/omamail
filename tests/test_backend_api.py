@@ -206,7 +206,8 @@ function storageSnapshot(directory = process.env.HOME) {
 
   await call('message.parse', {raw:17}, -32602);
   const providers = await call('providers.snapshot');
-  for (const id of ['gmail','outlook','hey','jmap','imap']) {
+  // The pinned release has no exchange provider; its rules are unreleased.
+  for (const id of ['gmail','outlook','hey','jmap','imap'].concat(released ? [] : ['exchange'])) {
     assert.ok(providers[id] && providers[id].queries && providers[id].capabilities);
     assert.equal(typeof providers[id].nativeSync, 'boolean');
   }
@@ -327,7 +328,10 @@ def main():
             {'provider': 'imap', 'email': 'named@example.org', 'senderName': 'Jane Example',
              'imap': {'username': 'named@example.org'}},
             {'provider': 'hey', 'email': 'sender@example.org'},
-            {'provider': 'outlook', 'email': 'sender@example.org'}]
+            {'provider': 'outlook', 'email': 'sender@example.org'},
+            {'provider': 'exchange', 'email': 'sender@example.org',
+             'exchange': {'ewsUrl': 'https://mail.example.invalid/EWS/Exchange.asmx',
+                          'username': 'sender@example.org', 'authScheme': 'auto'}}]
         registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org',
                                         'accounts': accounts}))
         registry.chmod(0o600)

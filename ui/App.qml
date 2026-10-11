@@ -1267,6 +1267,9 @@ Item {
     if (!service) return
     var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
+    // A removed mailbox takes its saved sign-in with it, once the removal is confirmed.
+    var host = service.accountAt(index)
+    if (host) host.forgetStoredCredentials()
     service.removeAccountAt(index)
     // The editor's page is gone with its account. Settings is where the rest
     // of them are, over a fresh root: the list underneath may have changed

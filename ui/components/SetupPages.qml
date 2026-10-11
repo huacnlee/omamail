@@ -24,6 +24,7 @@ Item {
   readonly property var pages: ({
     imap: imapSetupPage,
     jmap: jmapSetupPage,
+    exchange: exchangeSetupPage,
     outlook: outlookSetupPage,
     hey: heySetupPage
   })
@@ -96,6 +97,21 @@ Item {
     id: jmapSetupPage
 
     JmapSetupPage {
+      service: root.service
+      textColor: root.textColor
+      dimColor: root.dimColor
+      dangerColor: root.dangerColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
+      accountCount: root.service ? root.service.accountCount : 1
+      onRemoveRequested: root.removeRequested()
+    }
+  }
+
+  Component {
+    id: exchangeSetupPage
+
+    ExchangeSetupPage {
       service: root.service
       textColor: root.textColor
       dimColor: root.dimColor

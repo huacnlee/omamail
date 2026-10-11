@@ -78,7 +78,7 @@ pub fn summarize(bytes: &[u8]) -> Result<Value, &'static str> {
         let declared = text(&entry["provider"]).to_lowercase();
         let provider = match declared.as_str() {
             "" | "gmail" => "gmail",
-            "outlook" | "hey" | "jmap" | "imap" => declared.as_str(),
+            "outlook" | "hey" | "jmap" | "imap" | "exchange" => declared.as_str(),
             _ => continue,
         };
         let mut email = text(&entry["email"]);
