@@ -77,6 +77,7 @@ Item {
     function init() {
       compose.parent.forceActiveFocus()
       compose.begin("new", null, "", [])
+      compose.spellingLanguage = "en_US"
       tryVerify(function() { return compose.spellingAdapter !== null || compose.spellingStatus === "no-module" }, 3000)
       if (!compose.spellingAvailable) skip("spelling unavailable (" + compose.spellingStatus + ")")
     }

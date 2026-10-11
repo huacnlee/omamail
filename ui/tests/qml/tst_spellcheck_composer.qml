@@ -106,7 +106,7 @@ Item {
       var component = Qt.createComponent("../../compose/SpellcheckAdapter.qml")
       compare(component.status, Component.Ready)
       var secondDoc = Qt.createQmlObject('import QtQuick; TextEdit { text: "zqxjremotereviewhere " }', compose)
-      var second = component.createObject(compose, { document: secondDoc.textDocument })
+      var second = component.createObject(compose, { document: secondDoc.textDocument, language: "en_US" })
       try {
         verify(second.available)
         second.ignoreForSession("zqxjremotereviewhere")

@@ -42,9 +42,9 @@ Each installer verifies the release package before replacing an existing version
 
 ### Optional spelling support
 
-Composer body spellchecking uses KDE Sonnet and a local Hunspell dictionary. On Arch, install `sonnet` and `hunspell-en_us`. On Debian and Ubuntu releases that provide Qt 6 Sonnet, install `qml6-module-org-kde-sonnet`, `sonnet6-plugins`, and `hunspell-en-us`. Restart Omamail after installing a dictionary.
+Composer body spellchecking uses KDE Sonnet and a local Hunspell dictionary. On Arch, install `sonnet` and the matching `hunspell-<language>` package, such as `hunspell-en_us` or `hunspell-de`. On Debian and Ubuntu releases that provide Qt 6 Sonnet, install `qml6-module-org-kde-sonnet`, `sonnet6-plugins`, and the matching dictionary, such as `hunspell-en-us`. Restart Omamail after installing a dictionary.
 
-Spelling checks default to US English and can be turned off in Settings. Without the Sonnet QML module or the selected dictionary, composing remains available and Settings explains what is missing. Omamail does not install system packages. Ignore for this session stays in memory; there is no personal dictionary yet.
+Only the message body is checked, not the subject. Spelling uses the system language by default (`Qt.locale().name`, for example `en_US` or `de_DE`) and can be turned off in Settings. The advanced `spellingLanguage` setting is empty for system language, or an installed dictionary code to override it; malformed values are treated as system language and never passed to Sonnet. There is no silent fallback to English: without the Sonnet QML module or the requested dictionary, composing remains available and Settings names what is missing. Omamail does not install system packages. Checks and corrections stay local; nothing leaves the machine. Ignore for this session stays in memory; there is no personal dictionary yet.
 
 ## Run from source
 

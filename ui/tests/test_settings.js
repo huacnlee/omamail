@@ -12,7 +12,7 @@ for (const key of ["spellingEnabled", "spellingLanguage"]) {
 deepEqual(settings.normalize(null), settings.DEFAULTS)
 assert.equal(settings.normalize({ spellingEnabled: false }).spellingEnabled, false)
 assert.equal(settings.normalize({ aiAgent: "Claude", calendarSnoozeMinutes: 10 }).aiAgent, "Claude")
-assert.equal(settings.normalize({ spellingLanguage: null, aiModel: undefined }).spellingLanguage, "en_US")
+assert.equal(settings.normalize({ spellingLanguage: null, aiModel: undefined }).spellingLanguage, "")
 assert.equal(settings.normalize({ aiModel: undefined }).aiModel, "")
 assert.equal(settings.DEFAULTS.aiAgent, "System default", "normalization does not mutate defaults")
 deepEqual(bridge.settings({ spellingEnabled: false, spellingLanguage: "en_GB", secret: "synthetic" }, settings.DEFAULTS), {

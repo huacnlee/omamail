@@ -9,7 +9,8 @@ Item {
   visible: false
   required property var service
   readonly property bool enabledRequest: Spelling.decodeSettings(service.settings).enabled
-  readonly property string language: Spelling.decodeSettings(service.settings).language
+  readonly property string languageOverride: Spelling.decodeSettings(service.settings).language
+  readonly property string language: Spelling.resolveLanguage(languageOverride, Qt.locale().name)
   readonly property bool available: probe.status === Loader.Ready
     && probe.item !== null && probe.item.available
   readonly property string status: probe.status === Loader.Error

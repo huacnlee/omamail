@@ -1,6 +1,6 @@
 .pragma library
 
-// Spelling presentation rules, shared by the optional adapter and its stores.
+// Spelling presentation rules shared by the composer and optional adapter.
 // Positions are UTF-16 offsets, matching Qt's text document API.
 function misspelledRanges(text, isMisspelled) {
   var ranges = []
@@ -35,11 +35,24 @@ function isWordChar(character) {
 
 function isApostrophe(character) { return character === "'" || character === "\u2019" }
 
+// Persisted dictionary names are untrusted. Do not trim: trailing controls
+// and whitespace must be rejected before a value can reach Sonnet.
+function validLanguage(value) {
+  return typeof value === "string" && value.length <= 24
+    && /^[A-Za-z]{2,3}([_-][A-Za-z0-9]{2,8}){0,2}$/.test(value)
+    && !/[\r\n]/.test(value)
+}
+
+function resolveLanguage(setting, systemLocaleName) {
+  if (validLanguage(setting)) return setting
+  return validLanguage(systemLocaleName) ? systemLocaleName : ""
+}
+
 function decodeSettings(settings) {
   var values = settings || ({})
   return {
     enabled: values.spellingEnabled !== false,
-    language: String(values.spellingLanguage || "en_US")
+    language: validLanguage(values.spellingLanguage) ? values.spellingLanguage : ""
   }
 }
 

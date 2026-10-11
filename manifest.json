@@ -51,7 +51,7 @@
       "openOnClick": "Window",
       "showBarIcon": true,
       "spellingEnabled": true,
-      "spellingLanguage": "en_US",
+      "spellingLanguage": "",
       "suggestEvents": false,
       "aiAgent": "System default",
       "aiModel": ""
@@ -206,14 +206,14 @@
         "type": "boolean",
         "label": "Spell-check while composing",
         "defaultValue": true,
-        "description": "Underline misspelled words in the message body with corrections, Ignore, and Add to dictionary. Uses the local Hunspell engine; nothing is sent anywhere."
+        "description": "Underline misspelled body words with corrections and Ignore for this session. Uses local dictionaries; nothing is sent anywhere."
       },
       {
         "key": "spellingLanguage",
         "type": "string",
-        "label": "Spelling dictionary language",
-        "defaultValue": "en_US",
-        "description": "The Hunspell dictionary code used for spell-checking, for example en_US. Requires the matching hunspell dictionary package to be installed."
+        "label": "Spelling dictionary language override",
+        "defaultValue": "",
+        "description": "Empty uses the system language. Advanced override: an installed Hunspell dictionary code such as en_US or de_DE. No fallback dictionary is used."
       }
     ]
   }

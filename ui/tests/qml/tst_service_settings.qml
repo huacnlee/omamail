@@ -164,7 +164,7 @@ Item {
     function test_spelling_defaults_on_and_persists_changes() {
       mailService.applySettings({})
       compare(mailService.spellingEnabled, true)
-      compare(mailService.spellingLanguage, "en_US")
+      compare(mailService.spellingLanguage, Qt.locale().name)
 
       mailService.setSpellingEnabled(false)
       compare(mailService.spellingEnabled, false)
@@ -177,6 +177,17 @@ Item {
       mailService.setSpellingLanguage("en_GB")
       compare(mailService.spellingLanguage, "en_GB")
       compare(shellStore.updatedEntry.spellingLanguage, "en_GB")
+    }
+
+    function test_hostile_spelling_language_is_resolved_before_the_adapter() {
+      for (var i = 0; i < 5; i++) {
+        var values = ["../x", "en_US\n", "en_US\u0000", "éé", "x".repeat(500)]
+        mailService.applySettings({ spellingLanguage: values[i] })
+        compare(mailService.spellingLanguage, Qt.locale().name)
+      }
+      mailService.setSpellingLanguage("")
+      compare(shellStore.updatedEntry.spellingLanguage, "")
+      compare(mailService.spellingLanguage, Qt.locale().name)
     }
 
     // The probe loads Sonnet through the same adapter the composer uses; it

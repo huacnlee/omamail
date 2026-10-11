@@ -26,7 +26,8 @@ Item {
   // non-visual, so this keeps the fixed interface name without shadowing
   // QQuickItem.enabled (which qmllint rejects). The owning Loader is inactive
   // when spelling is off, so this is a runtime toggle within a loaded adapter.
-  property string language: "en_US"
+  property string language: ""
+  readonly property string resolvedLanguage: Spelling.resolveLanguage(language, Qt.locale().name)
   // Availability is about the *requested* language, and it is computed after
   // `setCurrentLanguage` rather than bound to `spellCheckerFound`.
   //
@@ -51,7 +52,7 @@ Item {
   }
   Component.onDestruction: Session.unsubscribe(adapter)
   onEnabledChanged: applySettings()
-  onLanguageChanged: applySettings()
+  onResolvedLanguageChanged: applySettings()
 
   // Returns { word, misspelled, suggestions }. Call this for the position of a
   // click or the caret; it also primes applyCorrection for the same position.
@@ -96,11 +97,11 @@ Item {
     // The request is attempted even when the previous one reverted: a later
     // successful call is the only way back from a missing dictionary, and
     // guarding on the prior result would leave the switch unrecoverable.
-    highlighter.setCurrentLanguage(language)
+    if (resolvedLanguage !== "") highlighter.setCurrentLanguage(resolvedLanguage)
     // Sonnet reports the language it accepted. A request it could not serve
     // leaves the prior one in place, which is the no-dictionary answer.
     requestedLanguageAvailable = highlighter.spellCheckerFound
-      && highlighter.currentLanguage === language
+      && resolvedLanguage !== "" && highlighter.currentLanguage === resolvedLanguage
     Session.changed()
   }
 

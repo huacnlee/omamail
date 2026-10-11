@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
 import "../settings/Appearance.js" as Appearance
+import "../compose/Spelling.js" as Spelling
 import "../message/Html.js" as Html
 import "../account/Accounts.js" as Accounts
 
@@ -869,8 +870,22 @@ Column {
         textFormat: Text.PlainText
       }
 
+      Text {
+        objectName: "spellingLanguagePolicy"
+        width: parent.width
+        text: "Checking spelling in "
+          + Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name)
+          + (root.service && Spelling.decodeSettings(root.service.settings).language !== ""
+            ? " (set in settings)." : " (system language).")
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
       // Availability is a runtime fact, separate from the enabled request:
-      // a machine without Sonnet or the en_US dictionary still composes.
+      // a machine without Sonnet or its language dictionary still composes.
       // Sonnet lists installed dictionaries once per process, so a dictionary
       // installed while Omamail runs is only found after a restart.
       Text {
@@ -879,9 +894,9 @@ Column {
         visible: !!root.service && !root.service.spellingAvailable
         text: root.service && root.service.spellingStatus === "no-module"
           ? "Spell-checking is unavailable: install the Sonnet QML module, then restart Omamail."
-          : "The " + (root.service ? root.service.spellingLanguage : "en_US")
+          : "The " + Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name)
             + " dictionary is not installed. Install the matching Hunspell "
-            + "dictionary package (for example hunspell-en_us), then restart Omamail."
+            + "dictionary package (hunspell-<language>, for example hunspell-de), then restart Omamail."
         color: root.accentColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

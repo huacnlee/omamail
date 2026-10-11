@@ -19,7 +19,7 @@ var DEFAULTS = ({
   showBarIcon: true,
   unifiedMailboxes: false,
   spellingEnabled: true,
-  spellingLanguage: "en_US",
+  spellingLanguage: "",
   suggestEvents: false,
   aiAgent: "System default",
   aiModel: ""

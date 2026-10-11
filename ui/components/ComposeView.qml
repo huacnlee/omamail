@@ -44,7 +44,8 @@ DropArea {
   // one is wired, and falls back to the defaults for the tests
   // that instantiate it bare. A caller may still assign over the binding.
   property bool spellingEnabled: Spelling.decodeSettings(service ? { spellingEnabled: service.spellingEnabled } : null).enabled
-  property string spellingLanguage: Spelling.decodeSettings(service ? { spellingLanguage: service.spellingLanguage } : null).language
+  property string spellingLanguage: Spelling.resolveLanguage(
+    service ? service.spellingLanguage : "", Qt.locale().name)
   // Bumped on every body change so a menu opened before an edit can tell that
   // the text under its saved position moved.
   property int bodyRevision: 0

@@ -697,7 +697,7 @@ Item {
   readonly property alias spellingAvailable: spelling.available
   readonly property alias spellingStatus: spelling.status
   function setSpellingEnabled(value) { persistSetting("spellingEnabled", value !== false) }
-  function setSpellingLanguage(value) { persistSetting("spellingLanguage", String(value || "en_US")) }
+  function setSpellingLanguage(value) { persistSetting("spellingLanguage", String(value || "")) }
 
   // ---------------------------------------------------------- the accounts
 

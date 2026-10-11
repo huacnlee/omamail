@@ -29,13 +29,29 @@ test("Ranges keep UTF-16 offsets, apostrophes, combining marks and repeated word
   deepEqual(rules.misspelledRanges("'' ’ 😀 ", wrong), [])
 })
 
-test("Settings default to enabled en_US and only explicit false disables checking", () => {
+test("Settings default to enabled system language and only explicit false disables checking", () => {
   const rules = spelling()
   for (const settings of [null, {}, { spellingEnabled: "no" }, { spellingEnabled: 0 }]) {
-    deepEqual(rules.decodeSettings(settings), { enabled: true, language: "en_US" })
+    deepEqual(rules.decodeSettings(settings), { enabled: true, language: "" })
   }
   deepEqual(rules.decodeSettings({ spellingEnabled: false, spellingLanguage: "en_GB" }), { enabled: false, language: "en_GB" })
-  deepEqual(rules.decodeSettings({ spellingLanguage: "" }), { enabled: true, language: "en_US" })
+  deepEqual(rules.decodeSettings({ spellingLanguage: "" }), { enabled: true, language: "" })
+})
+
+test("Language uses the system locale unless a short dictionary code overrides it", () => {
+  const rules = spelling()
+  for (const valid of ["en", "en_US", "de-DE", "eng_Latn_US", "sr_Latn", "es_419"]) {
+    assert.equal(rules.validLanguage(valid), true)
+    assert.equal(rules.resolveLanguage(valid, "de_DE"), valid)
+  }
+  for (const hostile of [null, 42, {}, "", "C", " en_US", "en_US ", "en_US\n",
+    "en_US\r\n", "en_US\0", "../x", "en/US", "en\\US", "en..US", "éé", "a".repeat(500)]) {
+    assert.equal(rules.validLanguage(hostile), false, JSON.stringify(hostile))
+    assert.equal(rules.resolveLanguage(hostile, "de_DE"), "de_DE")
+    deepEqual(rules.decodeSettings({ spellingLanguage: hostile }), { enabled: true, language: "" })
+  }
+  assert.equal(rules.resolveLanguage("", "zz_ZZ"), "zz_ZZ", "no silent English fallback")
+  assert.equal(rules.resolveLanguage("", "C"), "", "an unsupported system locale never reaches Sonnet")
 })
 
 test("Underlines cover every visual line of a word and descending caret positions", () => {
