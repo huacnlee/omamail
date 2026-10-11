@@ -14,11 +14,15 @@ QtObject {
   }
 
   function execDetached(command) {
-    if (!nativeHost || !Array.isArray(command) || command.length !== 2) return false
-    if (command[0] === "xdg-open" && typeof nativeHost.openExternal === "function")
+    if (!nativeHost || !Array.isArray(command)) return false
+    if (command.length === 2 && command[0] === "xdg-open" && typeof nativeHost.openExternal === "function")
       return !!nativeHost.openExternal(String(command[1]))
-    if (command[0] === "wl-copy" && typeof nativeHost.setClipboard === "function")
-      return !!nativeHost.setClipboard(String(command[1]))
+    if (command[0] === "wl-copy" && typeof nativeHost.setClipboard === "function") {
+      if (command.length === 3 && command[1] === "--")
+        return !!nativeHost.setClipboard(String(command[2]))
+      if (command.length === 2)
+        return !!nativeHost.setClipboard(String(command[1]))
+    }
     return false
   }
 

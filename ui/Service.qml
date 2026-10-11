@@ -501,7 +501,9 @@ Item {
     var text = String(value === undefined || value === null ? "" : value)
     if (platform && typeof platform.setClipboard === "function")
       return platform.setClipboard(text)
-    return Quickshell.execDetached(["wl-copy", text])
+    // NUL cannot cross argv without truncating the sender's text.
+    if (text.indexOf("\0") >= 0) return false
+    return Quickshell.execDetached(["wl-copy", "--", text])
   }
 
   function configPath(name) {
