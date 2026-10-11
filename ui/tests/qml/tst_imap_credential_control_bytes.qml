@@ -40,28 +40,83 @@ Item {
 
     function init() { credentials.reset() }
 
-    function test_a_pasted_password_loses_its_control_bytes() {
-      var auth = createTemporaryObject(imapFactory, root)
-      verify(auth)
-      var sent = ""
-      auth.verifyRequested.connect(function(settings, value) { sent = value })
-      verify(auth.signIn("app-password\r\nwith\ttabs\u0007and more"))
-      compare(sent, "one@example.org:app-passwordwithtabsand more")
-      auth.completeSignIn(true, "")
-      compare(credentials.writes.length, 1)
-      compare(credentials.writes[0].secret, "app-passwordwithtabsand more")
+    function test_a_pasted_password_loses_only_its_trailing_line_break_data() {
+      return [
+        {tag: "CR", suffix: "\r"},
+        {tag: "LF", suffix: "\n"},
+        {tag: "CRLF", suffix: "\r\n"},
+        {tag: "several line breaks", suffix: "\r\n\n"}
+      ]
     }
 
-    function test_a_clean_password_is_unchanged() {
+    function test_a_pasted_password_loses_only_its_trailing_line_break(data) {
       var auth = createTemporaryObject(imapFactory, root)
       verify(auth)
       var sent = ""
       auth.verifyRequested.connect(function(settings, value) { sent = value })
-      verify(auth.signIn("app-password"))
-      compare(sent, "one@example.org:app-password")
+      verify(auth.signIn("app-password " + data.suffix))
+      compare(sent, "one@example.org:app-password ")
       auth.completeSignIn(true, "")
       compare(credentials.writes.length, 1)
-      compare(credentials.writes[0].secret, "app-password")
+      compare(credentials.writes[0].secret, "app-password ")
+    }
+
+    function test_controls_are_refused_without_verification_or_storage_data() {
+      var cases = []
+      for (var byte = 0; byte < 32; byte++) {
+        cases.push({tag: "embedded-" + byte, value: "before" + String.fromCharCode(byte) + "after"})
+        if (byte !== 10 && byte !== 13)
+          cases.push({tag: "trailing-" + byte, value: "password" + String.fromCharCode(byte)})
+      }
+      cases.push({tag: "embedded-DEL", value: "before\u007fafter"})
+      cases.push({tag: "trailing-DEL", value: "password\u007f"})
+      cases.push({tag: "internal-CRLF", value: "before\r\nafter\r\n"})
+      return cases
+    }
+
+    function test_controls_are_refused_without_verification_or_storage(data) {
+      var auth = createTemporaryObject(imapFactory, root)
+      verify(auth)
+      var verifications = 0
+      auth.verifyRequested.connect(function(settings, value) { verifications++ })
+      verify(!auth.signIn(data.value))
+      compare(auth.lastError, "The password contains a control character. Enter it again")
+      compare(verifications, 0)
+      compare(credentials.writes.length, 0)
+      compare(auth.pendingPassword, "")
+      compare(auth.loginBusy, false)
+      compare(auth.password, "")
+    }
+
+    function test_clean_passwords_are_unchanged_data() {
+      return [
+        {tag: "plain", value: "app-password"},
+        {tag: "spaces", value: " leading and trailing "},
+        {tag: "Unicode", value: "päss密碼🔑"},
+        {tag: "quotes and backslashes", value: "a\"'b\\c:$()"}
+      ]
+    }
+
+    function test_clean_passwords_are_unchanged(data) {
+      var auth = createTemporaryObject(imapFactory, root)
+      verify(auth)
+      var sent = ""
+      auth.verifyRequested.connect(function(settings, value) { sent = value })
+      verify(auth.signIn(data.value))
+      compare(sent, "one@example.org:" + data.value)
+      auth.completeSignIn(true, "")
+      compare(credentials.writes.length, 1)
+      compare(credentials.writes[0].secret, data.value)
+    }
+
+    function test_only_line_breaks_do_not_verify_or_store() {
+      var auth = createTemporaryObject(imapFactory, root)
+      var verifications = 0
+      auth.verifyRequested.connect(function(settings, value) { verifications++ })
+      verify(!auth.signIn("\r\n"))
+      compare(auth.lastError, "Enter the password for this mailbox")
+      compare(verifications, 0)
+      compare(credentials.writes.length, 0)
     }
   }
 }

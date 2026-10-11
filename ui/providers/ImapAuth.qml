@@ -175,10 +175,14 @@ Item {
       lastError = "Missing " + missingTools.join(", ")
       return false
     }
-    // A pasted password can carry control bytes with it, and the backend
-    // refuses them outright. Strip every one here, at the one place the
-    // credential is built: no password contains a control byte.
-    var value = String(secret || "").replace(/[\x00-\x1f\x7f]/g, "")
+    // Pasting from a line can include its trailing line break. Remove only
+    // that suffix; silently changing controls inside a password would verify
+    // and save a different secret from the one the user entered.
+    var value = String(secret || "").replace(/[\r\n]+$/, "")
+    if (/[\x00-\x1f\x7f]/.test(value)) {
+      lastError = "The password contains a control character. Enter it again"
+      return false
+    }
     if (value === "") {
       lastError = "Enter the password for this mailbox"
       return false
