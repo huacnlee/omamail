@@ -770,6 +770,12 @@ console.log("test_calendar_feed.js ok")
   assert.strictEqual(feed.graphResponseError(500, "not json"), "Microsoft Graph answered 500")
   assert.strictEqual(feed.nativeRequestError("microsoft"),
     "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again")
+  // A Microsoft 365 calendar refused for consent says what the administrator does and what follows,
+  // and nothing about the sign-in page, which a calendar refresh never shows.
+  const consent = feed.nativeRequestError("microsoft", "m365:ada@example.org", { message: "auth_consent_required" })
+  assert.strictEqual(consent, "Microsoft calendar request failed. An administrator has to approve this app "
+    + "for your organization. Then sign in to this mailbox again")
+  assert.ok(!/private window|page|browser/.test(consent), consent)
   assert.strictEqual(feed.nativeRequestError("caldav"),
     "CalDAV calendar request failed. Check its server address and password in Settings")
   assert.strictEqual(feed.nativeRequestError("icloud"),

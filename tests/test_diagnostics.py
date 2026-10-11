@@ -79,7 +79,7 @@ class Diagnostics(unittest.TestCase):
         stored = re.compile(r'\["error"\]\s*=\s*json!\("([a-z]+_[a-z_]+)"\)')
         codes = set()
         for path in (ROOT / 'src').rglob('*.rs'):
-            if path.name == 'tests.rs' or path.stem.endswith(('_tests', '_test')):
+            if path.name == 'tests.rs' or path.stem.endswith(('_tests', '_test')) or 'tests' in path.relative_to(ROOT).parts:
                 continue
             source = path.read_text()
             for pattern in (produced, returned, stored):

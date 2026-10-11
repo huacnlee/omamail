@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Palette.js" as Palette
+.import "../account/Accounts.js" as Accounts
 
 var VERSION = 1
 var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
@@ -210,7 +211,7 @@ function withMicrosoftAccounts(list, accountSummaries) {
   var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
   for (var i = 0; i < accounts.length; i++) {
     var account = accounts[i] || {}
-    if (account.provider !== "outlook" || account.signedIn !== true) continue
+    if (Accounts.calendarProvider(account) !== "microsoft" || account.signedIn !== true) continue
     var accountId = trimmed(account.id || account.email)
     if (accountId === "") continue
     var saved = null

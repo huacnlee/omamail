@@ -6,6 +6,7 @@
 .import "NativeDomain.js" as NativeDomain
 .import "Gmail.js" as Gmail
 .import "Outlook.js" as Outlook
+.import "M365.js" as M365
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
 .import "Jmap.js" as Jmap
@@ -82,7 +83,7 @@ function define(source) {
   }
 }
 
-var ALL = [define(Gmail), define(Hey), define(Outlook), define(Imap), define(Jmap)]
+var ALL = [define(Gmail), define(Hey), define(Outlook), define(M365), define(Imap), define(Jmap)]
 
 var DEFAULT_ID = "gmail"
 
@@ -177,6 +178,19 @@ function unreadQuery(id) {
 
 function badge(id) {
   return get(id).name
+}
+
+// The provider shown under a name, for what is handed a name rather than an id.
+function named(name) {
+  for (var i = 0; i < ALL.length; i++) {
+    if (ALL[i].name === String(name)) return ALL[i].id
+  }
+  return ""
+}
+
+// The providers that sign in on Microsoft's own page, with an Application (client) ID.
+function signsInWithMicrosoft(id) {
+  return ["outlook", "m365"].indexOf(String(id)) >= 0
 }
 
 function summary(id) {

@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Conversation.js" as Conversation
+.import "../providers/Registry.js" as Registry
 
 // View models. Anything the panel decides — what the setup card should say,
 // whether a message still belongs in the list after an action, what the badge
@@ -48,6 +49,7 @@ function providerName(provider) {
 
 function setupHeadline(state, provider, authKind) {
   var name = providerName(provider)
+  var microsoft = Registry.signsInWithMicrosoft(Registry.named(name))
   if (state === "unavailable") return name + " integration is coming later"
   // A provider whose sign-in is a program of its own says which program: the
   // generic sentence sends somebody looking through Omarchy for a package this
@@ -59,13 +61,13 @@ function setupHeadline(state, provider, authKind) {
   if (state === "no_credentials") {
     if (authKind === "password") return "Add this mailbox"
     if (authKind === "cli") return "Sign in to " + name
-    if (name === "Outlook") return "Add this Outlook mailbox"
+    if (microsoft) return "Add this " + name + " mailbox"
     return "Connect a Google Cloud project"
   }
   if (state === "signing_in") {
     if (authKind === "password") return "Checking the mailbox…"
     if (authKind === "cli") return "Waiting for " + name + "…"
-    if (name === "Outlook") return "Waiting for Microsoft…"
+    if (microsoft) return "Waiting for Microsoft…"
     return "Waiting for Google…"
   }
   if (state === "reconnecting") return "Reconnecting to " + name + "…"
@@ -95,6 +97,8 @@ function setupDetail(state, missingTools, reason, provider, authKind) {
       return "The HEY CLI is installed. Signing in opens HEY in your browser; the token it comes back with is the CLI's own, and Omamail never sees it."
     if (name === "Outlook")
       return "Add the mailbox and a Microsoft public-client ID. Sign-in happens on Microsoft's page; Omamail never sees the account password."
+    if (Registry.signsInWithMicrosoft(Registry.named(name)))
+      return "Add the mailbox and the Application (client) ID of your Microsoft app. Sign-in happens on Microsoft's page; Omamail never sees the account password."
     return "Gmail has no shared app to sign in through, so this plugin uses an OAuth client you own. It takes about two minutes to create."
   }
   if (state === "signing_in") {

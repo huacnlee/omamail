@@ -25,6 +25,7 @@ Item {
     imap: imapSetupPage,
     jmap: jmapSetupPage,
     outlook: outlookSetupPage,
+    m365: m365SetupPage,
     hey: heySetupPage
   })
 
@@ -88,6 +89,20 @@ Item {
       accentColor: root.accentColor
       panelFontFamily: root.panelFontFamily
       accountCount: root.service ? root.service.accountCount : 1
+      onRemoveRequested: root.removeRequested()
+    }
+  }
+
+  Component {
+    id: m365SetupPage
+
+    M365SetupPage {
+      service: root.service
+      textColor: root.textColor
+      dimColor: root.dimColor
+      dangerColor: root.dangerColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
       onRemoveRequested: root.removeRequested()
     }
   }

@@ -2600,6 +2600,12 @@ Item {
     return auth.signIn(secret)
   }
 
+  // A removed mailbox's password must not wait in the keyring for one added
+  // again under the same address to find.
+  function forgetStoredCredentials() {
+    if (auth && typeof auth.forgetCredential === "function") auth.forgetCredential()
+  }
+
   function signOut() {
     intents.clear()
     cancelActionCompletions()
@@ -2703,7 +2709,8 @@ Item {
     sourceComponent: root.providerId === "imap" ? imapAuthComponent
       : (root.providerId === "jmap" ? jmapAuthComponent
       : (root.providerId === "outlook" ? outlookAuthComponent
-        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)))
+      : (root.providerId === "m365" ? m365AuthComponent
+        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent))))
   }
 
   // The client takes the manager as a required property, so it cannot be built
@@ -2718,7 +2725,8 @@ Item {
       : (root.providerId === "imap" || root.providerId === "outlook"
         ? imapClientComponent
         : (root.providerId === "jmap" ? jmapClientComponent
-          : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)))
+        : (root.providerId === "m365" ? m365ClientComponent
+          : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent))))
   }
 
   Component {
@@ -2838,6 +2846,25 @@ Item {
   }
 
   Component {
+    id: m365AuthComponent
+
+    M365Auth {
+      backend: root.backend
+      platform: root.platform
+      accountId: root.accountId
+      address: root.configuredEmail
+      clientId: root.oauthClientId
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
     id: gmailClientComponent
     GmailApiClient { auth: authLoader.item; backend: root.backend }
   }
@@ -2854,6 +2881,11 @@ Item {
       email: root.configuredEmail
       backend: root.backend
     }
+  }
+
+  Component {
+    id: m365ClientComponent
+    M365Client { auth: authLoader.item; email: root.configuredEmail; backend: root.backend }
   }
 
   Component {

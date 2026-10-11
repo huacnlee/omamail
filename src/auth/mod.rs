@@ -5,7 +5,10 @@ use std::{sync::OnceLock, time::Duration};
 mod callback;
 mod credentials;
 mod graph;
-pub use credentials::{access_token, access_token_readonly, password, settings, settings_readonly};
+pub use credentials::{
+    access_token, access_token_readonly, graph_token, password, settings, settings_readonly,
+};
+pub(crate) use credentials::{invalidate, m365};
 
 #[derive(Default)]
 pub struct Session {
@@ -15,16 +18,20 @@ pub struct Session {
 static CLIENT: OnceLock<Result<reqwest::Client, &'static str>> = OnceLock::new();
 const LIMIT: usize = 256 * 1024;
 
+fn builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .hickory_dns(true)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(20))
+}
+
 fn client() -> Result<&'static reqwest::Client, &'static str> {
     CLIENT
         .get_or_init(|| {
-            reqwest::Client::builder()
+            builder()
                 .https_only(true)
-                .hickory_dns(true)
-                .no_proxy()
-                .redirect(reqwest::redirect::Policy::none())
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(20))
                 .build()
                 .map_err(|_| "auth_transport_failed")
         })

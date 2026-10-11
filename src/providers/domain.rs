@@ -69,7 +69,7 @@ fn search(id: &str, text: &str) -> String {
     match id {
         "imap" | "outlook" => imap_search(text),
         "hey" => format!("search:{text}"),
-        "jmap" => format!("text:{text}"),
+        "jmap" | "m365" => format!("text:{text}"),
         _ => text.into(),
     }
 }
@@ -136,6 +136,7 @@ pub fn resolve(p: &Value) -> Result<Value, &'static str> {
                 match id.as_str() {
                     "imap" | "outlook" => format!("folder:{}", quoted(text)),
                     "jmap" => format!("mailbox:{text}"),
+                    "m365" => String::new(),
                     _ => format!("label:{text}"),
                 }
             }
@@ -183,7 +184,7 @@ mod tests {
     use super::*;
     #[test]
     fn control_bytes_are_rejected_before_any_query_or_url_is_returned() {
-        for id in ["gmail", "outlook", "hey", "jmap", "imap"] {
+        for id in ["gmail", "outlook", "hey", "jmap", "m365", "imap"] {
             for suffix in ["\r", "\n", "\r\n", "\0", "\t", "\u{7f}"] {
                 for operation in ["labelQuery", "addressQuery", "webMessageUrl", "webBoxUrl"] {
                     assert_eq!(
@@ -228,6 +229,28 @@ mod tests {
                 "{}",
                 case["params"]
             );
+        }
+    }
+    #[test]
+    fn m365_speaks_the_role_query_language_and_has_no_labels_or_web_urls() {
+        for (mailbox, expected) in [
+            ("inbox", "role:inbox"),
+            ("unread", "role:inbox unseen"),
+            ("starred", "role:inbox flagged"),
+            ("archive", "role:archive"),
+            ("spam", "role:junk"),
+            ("trash", "role:trash"),
+            ("missing", "role:inbox"),
+        ] {
+            let params = json!({"provider":"m365","operation":"query","mailbox":mailbox});
+            assert_eq!(resolve(&params).unwrap()["value"], expected, "{mailbox}");
+        }
+        let search =
+            json!({"provider":"m365","operation":"query","mailbox":"trash","search":" hi "});
+        assert_eq!(resolve(&search).unwrap()["value"], "text:hi");
+        for operation in ["labelQuery", "addressQuery", "webMessageUrl", "webBoxUrl"] {
+            let params = json!({"provider":"m365","operation":operation,"value":"x"});
+            assert_eq!(resolve(&params).unwrap()["value"], "", "{operation}");
         }
     }
     #[test]

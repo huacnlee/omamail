@@ -39,6 +39,16 @@
     "spam": "role:junk",
     "trash": "role:trash"
   },
+  "m365": {
+    "inbox": "role:inbox",
+    "unread": "role:inbox unseen",
+    "starred": "role:inbox flagged",
+    "sent": "role:sent",
+    "drafts": "role:drafts",
+    "archive": "role:archive",
+    "spam": "role:junk",
+    "trash": "role:trash"
+  },
   "imap": {
     "all": "search:ALL",
     "inbox": "folder:INBOX",
