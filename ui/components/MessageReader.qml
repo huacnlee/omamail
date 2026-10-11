@@ -369,30 +369,42 @@ Item {
       anchors.topMargin: backBar.visible ? Style.space(14) : 0
       spacing: Style.space(4)
 
-      Text {
-        id: subjectLine
-        objectName: "reader-subject"
+      Item {
         width: parent.width
-        // A stranger wrote this. Qt's default AutoText switches a string that
-        // looks like markup into rich text, and rich text with an <img> in it is
-        // a fetch — the same beacon the message body is stripped of.
-        textFormat: Text.PlainText
-        text: root.summary ? root.summary.subject : ""
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-        wrapMode: Text.WordWrap
-        horizontalAlignment: root.subjectAlignment
+        height: subjectLine.implicitHeight
+        Rectangle {
+          objectName: "reader-subject-selection"
+          anchors.fill: parent
+          radius: Style.cornerRadius
+          visible: subjectLine.selected
+          color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.08)
+        }
+        Text {
+          id: subjectLine
+          objectName: "reader-subject"
+          width: parent.width
+          // A stranger wrote this. Qt's default AutoText switches a string that
+          // looks like markup into rich text, and rich text with an <img> in it is
+          // a fetch — the same beacon the message body is stripped of.
+          textFormat: Text.PlainText
+          text: root.summary ? root.summary.subject : ""
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.subtitle
+          font.bold: true
+          wrapMode: Text.WordWrap
+          horizontalAlignment: root.subjectAlignment
 
-        TapHandler {
-          acceptedButtons: Qt.RightButton
-          onTapped: function(eventPoint) {
-            if (!root.summary) return
-            // Anchor to the line's own lower edge, not the pointer, so the menu
-            // lands in the same place however the line was pressed.
-            var scene = subjectLine.mapToGlobal(0, subjectLine.height)
-            subjectMenu.openAt(root.summary.subject, scene.x, scene.y)
+          readonly property bool selected: subjectMenu.opened
+          TapHandler {
+            acceptedButtons: Qt.RightButton
+            onTapped: function(eventPoint) {
+              if (!root.summary) return
+              // Anchor to the line's own lower edge, not the pointer, so the menu
+              // lands in the same place however the line was pressed.
+              var scene = subjectLine.mapToGlobal(0, subjectLine.height)
+              subjectMenu.openAt(root.summary.subject, scene.x, scene.y)
+            }
           }
         }
       }

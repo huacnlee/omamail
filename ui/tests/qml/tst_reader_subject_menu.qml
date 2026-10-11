@@ -151,6 +151,31 @@ Item {
       compare(mailService.copied, [])
     }
 
+    function test_the_subject_stays_selected_until_the_menu_closes() {
+      compare(subjectLine().selected, false)
+      mouseClick(subjectLine(), 30, subjectLine().height / 2, Qt.RightButton)
+      tryVerify(function() { return menu().opened })
+      compare(subjectLine().selected, true)
+      var selection = named(reader, "reader-subject-selection")
+      verify(selection.visible)
+      verify(selection.color.a > 0)
+      compare(selection.height, subjectLine().height)
+      keyClick(Qt.Key_Escape)
+      tryVerify(function() { return !menu().opened })
+      compare(subjectLine().selected, false)
+      compare(selection.visible, false)
+    }
+
+    function test_keyboard_activation_copies_the_snapshot_verbatim() {
+      var subject = "  --version \\ <工单> \"quoted\"\nline two  "
+      mailService.selectedMessage.subject = subject
+      mouseClick(subjectLine(), 30, subjectLine().height / 2, Qt.RightButton)
+      tryVerify(function() { return menu().opened })
+      keyClick(Qt.Key_Return)
+      tryVerify(function() { return !menu().opened })
+      compare(mailService.copied, [subject])
+    }
+
     function test_the_menu_anchors_to_the_line_not_the_pointer() {
       mouseClick(subjectLine(), 120, subjectLine().height / 2, Qt.RightButton)
       tryVerify(function() { return menu().opened }, 1000, "the menu opens")
