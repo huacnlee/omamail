@@ -278,6 +278,20 @@ deepEqual(selectedListHints.map(function (h) { return h.key + " " + h.label }),
 assert.ok(!keymap.hintsFor("list", ["move"], true).some(function (h) {
   return h.key === "v"
 }), "a provider without move does not offer the move hint")
+// Where `e` or `d` is the way back, its hint says so rather than naming a verb
+// the key will not perform (`Model.keyActionFor` decides which).
+deepEqual(keymap.hintsFor("list", [], true, { archive: "archive", trash: "untrash" }).map(function (h) { return h.key + " " + h.label }),
+  ["j / k move", "e archive", "d restore", "v move to", "Space select", "c compose"],
+  "in the trash, d restores")
+deepEqual(keymap.hintsFor("reader", [], true, { archive: "unarchive", trash: "trash" }).filter(function (h) {
+  return h.key === "e" || h.key === "d" }).map(function (h) { return h.key + " " + h.label }),
+  ["e move to inbox", "d trash"], "in Archive, e is the way back")
+deepEqual(keymap.hintsFor("list", ["archive", "star", "move"], true, { archive: "unarchive", trash: "untrash" }).map(function (h) { return h.key }),
+  ["j / k", "d", "Space", "c"], "a provider with no archive still drops e, whatever it would ask for")
+deepEqual(keymap.hintsFor("list", [], true, { archive: "archive", trash: "trash" }), selectedListHints,
+  "the keys' own verbs change nothing")
+deepEqual(keymap.hintsFor("list", [], true, { archive: "untrash", trash: "unarchive" }), selectedListHints,
+  "a key's hint changes only for its own way back")
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],
