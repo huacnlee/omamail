@@ -6,7 +6,8 @@ QtObject {
   required property var account
   required property var intents
 
-  function run(ids, action) {
-    return account.runNativeAction(Array.isArray(ids) ? ids : [], action, false, false, false)
+  function run(ids, action, completion) {
+    return account.runNativeAction(Array.isArray(ids) ? ids : [], action,
+      typeof completion === "function", false, false, completion)
   }
 }

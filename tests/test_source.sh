@@ -61,6 +61,23 @@ for file in "${JS_FILES[@]}"; do
   fi
 done
 
+# Calendar display clocks use the locale's short format. The composer's
+# HH:mm entry convention and its validation error are deliberately separate.
+python3 - <<'PY_CALENDAR_TIME'
+import re
+from pathlib import Path
+files = sorted(Path("calendar").glob("*.qml")) + sorted(Path("calendar").glob("*.js"))
+files += sorted(Path("components").glob("*Calendar*.qml"))
+for path in files:
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if re.match(r"\s*//", line):
+            continue
+        for match in re.finditer(r'"([^"\n]*(?:hh|HH):mm[^"\n]*)"', line):
+            if path == Path("calendar/Calendar.js") and match.group(1) == "Enter valid dates (YYYY-MM-DD) and times (HH:mm)":
+                continue
+            raise SystemExit("test_source.sh: %s:%d hard-codes a calendar clock; use the locale short time format" % (path, number))
+PY_CALENDAR_TIME
+
 # 3. Nothing may name a colour inside a JS library either: colours are passed
 #    in from QML, which is the only place that can read the theme.
 # Html.js is the one exception, and a narrow one: PAPER and INK are the sheet a
@@ -224,7 +241,7 @@ grep -q 'bar ? bar\.barForeground' BarWidget.qml \
   || fail "the bar icon must follow bar.barForeground in transparent mode"
 grep -q 'markColor: root.accent' App.qml \
   || fail "the Omamail header M must use the active theme accent"
-grep -q 'markColor: Color.accent' BarWidget.qml \
+grep -q 'markColor: Commons.Color.accent' BarWidget.qml \
   || fail "the bar M must use the active theme accent"
 
 # IconTextButton has no separate hover glyph colour. Assigning one makes the

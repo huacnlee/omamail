@@ -862,3 +862,38 @@ assert.strictEqual(frozen(accounts.replaceAt(cidActive, -1, account("x@example.c
   assert.strictEqual(accounts.setSignatureHtml(rich, "me@gmail.com", "").accounts[0].signatureHtml, "")
   assert.strictEqual(accounts.load(accounts.serialize(rich)).accounts[0].signatureHtml, "<p>Ada</p>")
 }
+
+// ------------------------------------------------------------ sender name
+
+// The name recipients see beside an IMAP or Outlook mailbox's address. It is
+// stored on the entry, so it has to survive the rebuild every write does.
+{
+  const imap = accounts.add(accounts.emptyList(),
+    { email: "me@example.org", provider: "imap", imap: { username: "me@example.org" } })
+  const id = imap.accounts[0].id
+  assert.strictEqual(imap.accounts[0].senderName, "", "no name until one is given")
+
+  const named = accounts.setSenderName(imap, id, "  Jane   Example ")
+  assert.strictEqual(named.accounts[0].senderName, "Jane Example")
+  assert.strictEqual(frozen(imap), frozen(accounts.add(accounts.emptyList(),
+    { email: "me@example.org", provider: "imap", imap: { username: "me@example.org" } })),
+    "the input list is left alone")
+  assert.strictEqual(accounts.load(accounts.serialize(named)).accounts[0].senderName, "Jane Example",
+    "a saved name comes back from the file")
+  assert.strictEqual(accounts.setLabel(named, id, "Personal").accounts[0].senderName, "Jane Example",
+    "naming the mailbox does not forget the sender name")
+  assert.strictEqual(accounts.setSenderName(named, id, "   ").accounts[0].senderName, "",
+    "empty clears it, so the address goes out alone")
+
+  // One header line: a pasted break or tab becomes a space, never a header
+  // the send would refuse.
+  assert.strictEqual(accounts.senderNameText("Jane\r\nExample\t\u0007"), "Jane Example")
+}
+
+// Only the mailboxes with no server to name the sender take it from here.
+assert.strictEqual(accounts.namesSender("imap"), true)
+assert.strictEqual(accounts.namesSender("outlook"), true)
+assert.strictEqual(accounts.namesSender("gmail"), false)
+assert.strictEqual(accounts.namesSender("jmap"), false)
+assert.strictEqual(accounts.namesSender("hey"), false)
+assert.strictEqual(accounts.namesSender(undefined), false)

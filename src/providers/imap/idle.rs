@@ -5,8 +5,8 @@
 //! INBOX changed, and the check that follows reads what changed through the
 //! ordinary path, so nothing here interprets a mailbox.
 use super::{
-    LIMIT, Result, Wire, advertises, command, connect, literal_length, login, resolve_account,
-    write,
+    COMMAND_BUDGET, LIMIT, Result, Wire, advertises, command, connect, literal_length, login,
+    resolve_account, write,
 };
 use serde_json::{Value, json};
 use std::{
@@ -18,8 +18,9 @@ use std::{
 use tokio::{io::AsyncBufReadExt, sync::Notify, time::Instant};
 
 /// The budget for everything from connecting to examining INBOX, and again for
-/// each later command exchange.
-const STEP: Duration = Duration::from_secs(22);
+/// each later command exchange — the same allowance `command` gives one reply,
+/// because that is what each of these is.
+const STEP: Duration = COMMAND_BUDGET;
 /// How often the wall clock is compared with the monotonic one, which stops
 /// while the machine sleeps; the same check as the JMAP event stream's.
 const RESUME_CHECK: Duration = Duration::from_secs(30);

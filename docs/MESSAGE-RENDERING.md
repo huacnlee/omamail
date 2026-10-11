@@ -12,6 +12,7 @@ Required when touching message HTML, images, direction or outgoing MIME.
 - Hidden-content detection must not treat container `font-size:0`, unclipped `max-height:0`, or `mso-hide:all` as universally hidden. Child font sizes, overflow and Outlook-only semantics matter.
 - Reading-mode links allow `mailto:` and public-host HTTP(S). Refused addresses leave their labels visible.
 - Never let Qt fetch original remote image URLs. With images enabled, fetch through `scripts/image_fetch.py` and `public_http.py`: checked public DNS, pinned connections, no redirects, size/deadline bounds, and supported raster signatures matching the declared type. Return only successful images as data URIs; omit pending/refused sources. Exclude tracking pixels and hidden images.
+- Sanitized and reading documents share the same policy: `maxImages` bounds all rendered inline, CID and remote images, and each document admits at most 16 MiB of embedded data URI bytes. Image data does not count toward the separate 120,000-character markup/layout refusal. Refused images never reach Qt.
 - Remote images default off. “Always show” grants the standing preference; Settings revokes it. See [security boundaries](SECURITY-BOUNDARIES.md).
 
 ## Direction and MIME

@@ -86,3 +86,54 @@ fn inline_images_are_embedded_instead_of_listed_as_attachments() {
         .collect();
     assert_eq!(listed, ["photo.jpg", "document.pdf"]);
 }
+
+// Some senders put the markup itself in the text/plain alternative. Shown as
+// text that is a page of tags, so the HTML part is read instead; text that
+// merely opens with an angle bracket stays the sender's text.
+#[test]
+fn markup_in_the_plain_alternative_is_read_from_the_html_part() {
+    fn message(plain: &str, html: Option<&str>) -> serde_json::Value {
+        let mut parts = vec![serde_json::json!({"mimeType":"text/plain",
+            "body":{"data":URL_SAFE_NO_PAD.encode(plain)}})];
+        if let Some(html) = html {
+            parts.push(serde_json::json!({"mimeType":"text/html",
+                "body":{"data":URL_SAFE_NO_PAD.encode(html)}}));
+        }
+        serde_json::json!({"payload":{"mimeType":"multipart/alternative","parts":parts}})
+    }
+    let html = "<!doctype html><html><body><p>Send money easily</p></body></html>";
+    for markup in [
+        "\n\n<!--[if gte mso 9]><style>.a { display: block; }</style><![endif]-->\n<div><p>Send money easily</p></div>\n",
+        "<html><body><p>Send money easily</p></body></html>",
+        "<DIV class=\"x\"><P>Send money easily</P></DIV>",
+        "<head><style>p { color: red; }</style></head><body><p>Send money easily</p></body>",
+        "<body><p>Send money easily</p></body>",
+        "<style>p { color: red; }</style><div><p>Send money easily</p></div>",
+    ] {
+        let body = &super::content::prepare(&message(markup, Some(html)), 0).unwrap()["body"];
+        assert_eq!(body["source"], "html", "{markup}");
+        assert_eq!(body["text"], "Send money easily", "{markup}");
+    }
+    for text in [
+        "<paul@example.com> wrote:\n> see </p> in the docs",
+        "<div> is a block element, <span> is not.\nRegards",
+        "Send money easily",
+        "<div> is a block element; close it with </div>",
+        "<p>See the docs for </p>",
+        "<html> is the root element; close it with </html>",
+        "<head> contains metadata; close it with </head>",
+        "<body> contains visible content; close it with </body>",
+        "<style> declares CSS </style><body> contains content </body>",
+        "<!-- example --> <div> is closed with </div>",
+        "<div><span>code</span></div> is an example ending with </p>",
+    ] {
+        let body = &super::content::prepare(&message(text, Some(html)), 0).unwrap()["body"];
+        assert_eq!(body["source"], "plain", "{text}");
+        assert_eq!(body["text"], text, "{text}");
+    }
+    // With no HTML part there is nothing better to read.
+    let only = "<div><p>Send money easily</p></div>";
+    let body = &super::content::prepare(&message(only, None), 0).unwrap()["body"];
+    assert_eq!(body["source"], "plain");
+    assert_eq!(body["text"], only);
+}

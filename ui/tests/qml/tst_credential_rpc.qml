@@ -98,11 +98,11 @@ Item {
     function test_store_and_delete_are_data_not_process_arguments() {
       var auth = createTemporaryObject(imapFactory, root)
       verify(auth)
-      verify(auth.signIn("$(touch /tmp/never-credential)\r\n<secret>"))
+      verify(auth.signIn("$(touch /tmp/never-credential)<secret>"))
       auth.completeSignIn(true, "")
       compare(credentials.writes.length, 1)
       compare(credentials.writes[0].kind, "imap-password")
-      compare(credentials.writes[0].secret, "$(touch /tmp/never-credential)\r\n<secret>")
+      compare(credentials.writes[0].secret, "$(touch /tmp/never-credential)<secret>")
       auth.logout()
       compare(credentials.deletes, [{kind:"imap-password",accountId:"imap:one@example.org",clientId:""}])
     }

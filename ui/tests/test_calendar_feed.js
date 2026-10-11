@@ -168,7 +168,15 @@ const springDay = feed.weekDays(new Date(2026, 2, 8, 12).getTime(), 0)[0]
 const springHalfThree = new Date(2026, 2, 8, 3, 30).getTime()
 assert.strictEqual(feed.nowOffset(springDay, 0, 24, 60, springHalfThree), 210,
   "spring-forward now follows the wall-clock hour")
-assert.strictEqual(feed.timeLabel(springHalfThree), "03:30",
+feed.Qt = { locale: function() { return "test-system-locale" }, formatTime: function(date, locale, format) {
+  assert.strictEqual(locale, "test-system-locale")
+  assert.strictEqual(format, "h:mm AP")
+  assert.strictEqual(date.getHours(), 3, "the marker's label uses the same local wall-clock hour")
+  assert.strictEqual(date.getMinutes(), 30)
+  return "3:30 AM"
+} }
+require("vm").runInContext("Date.prototype.toLocaleTimeString = function(locale, format) { return Qt.formatTime(this, locale, format) }", feed)
+assert.strictEqual(feed.timeLabel(springHalfThree, "h:mm AP"), "3:30 AM",
   "the tested marker position and its label use the same local time")
 const springEvent = {
   start: { ms: springHalfThree, allDay: false },

@@ -124,6 +124,12 @@ Item {
         var entry = queued.shift()
         var next = Object.assign({}, pending)
         var timeout = entry.operation === "agent.context" ? 65000 : 30000
+        // An IMAP frame is a whole conversation — connect, login, SELECT, then
+        // one command per 4 096-UID window — on a server that charges about
+        // half a second per command, so it outlives the backend's own call
+        // budget (CALL_BUDGET in src/providers/imap/mod.rs) instead of killing
+        // the process while the server is still answering.
+        if (entry.operation.indexOf("imap.") === 0) timeout = 180000
         entry.deadline = Date.now() + timeout
         next[entry.id] = entry
         pending = next

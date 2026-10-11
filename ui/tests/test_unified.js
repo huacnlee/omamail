@@ -50,6 +50,21 @@ assert.strictEqual(unified.accountOf("me@example.org" + SEP + "42"), "me@example
 assert.strictEqual(unified.sourceIdOf("me@example.org" + SEP + "42"), "42")
 assert.strictEqual(unified.accountOf("42"), "")
 
+// A selection spanning two mailboxes is one batch for each, in each one's own
+// ids — the IMAP folder intact — and an id naming no account is dropped.
+deepEqual(unified.groupByAccount([
+  unified.unifiedId("a@example.org", "1"),
+  unified.unifiedId("b@example.net", "7:INBOX"),
+  "42",
+  unified.unifiedId("a@example.org", "2"),
+  unified.unifiedId("b@example.net", "8:Sent Items")
+]), [
+  { accountId: "a@example.org", ids: ["1", "2"] },
+  { accountId: "b@example.net", ids: ["7:INBOX", "8:Sent Items"] }
+])
+deepEqual(unified.groupByAccount([]), [])
+deepEqual(unified.groupByAccount(null), [])
+
 // ---------------------------------------------------------------- merging
 
 const sources = [

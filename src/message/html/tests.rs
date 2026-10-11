@@ -307,3 +307,86 @@ fn attribute_names_and_nonanchor_urls_cannot_create_resource_markup() {
         assert_eq!(result["remoteImageSources"], json!([]));
     }
 }
+
+// A picture the reader approved arrives as a data URI in the document. Its
+// bytes are not markup Qt has to lay out, so one large picture must not turn a
+// small message into the plain-text refusal the moment its pictures load.
+#[test]
+fn approved_image_bytes_do_not_make_a_small_message_too_heavy() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.resize(300_000, 0);
+    let data = format!("data:image/png;base64,{}", STANDARD.encode(&png));
+    let source = "<p>Hello</p><img src='https://cdn.example.com/hero.png'><p>Bye</p>";
+    let blocked = sanitize(
+        source,
+        &json!({"allowRemoteImages":false,"withReader":true}),
+    )
+    .unwrap();
+    assert_eq!(blocked["tooHeavy"], false);
+    let shown = sanitize(
+        source,
+        &json!({"allowRemoteImages":true,"withReader":true,
+            "remoteImageData":{"https://cdn.example.com/hero.png":data}}),
+    )
+    .unwrap();
+    assert!(shown["html"].as_str().unwrap().contains("<img"));
+    assert_eq!(shown["tooHeavy"], false, "{}", shown["complexity"]);
+    assert_eq!(
+        shown["reader"]["tooHeavy"], false,
+        "{}",
+        shown["reader"]["complexity"]
+    );
+    // The bound on markup itself still holds.
+    let markup = format!("<p>{}</p>", "x".repeat(130_000));
+    assert_eq!(sanitize(&markup, &json!({})).unwrap()["tooHeavy"], true);
+}
+
+#[test]
+fn inline_and_remote_images_share_the_count_budget() {
+    let data = "DATA:image/png;base64,iVBORw0KGgoA";
+    let source = format!(
+        "<p>Body</p>{}<img src='https://cdn.example.com/remote'>",
+        format!("<img src='{data}' alt='inline'>").repeat(1000)
+    );
+    let result = sanitize(
+        &source,
+        &json!({"maxImages":1,"withReader":true,
+        "allowRemoteImages":true,"remoteImageData":{"https://cdn.example.com/remote":data}}),
+    )
+    .unwrap();
+    for value in [&result, &result["reader"]] {
+        let html = value["html"].as_str().unwrap();
+        assert_eq!(html.matches("<img ").count(), 1);
+        assert!(!html.contains("https://"));
+        assert_eq!(value["blockedImages"], 1000);
+    }
+    let refused = sanitize(&source, &json!({"maxImages":0,"withReader":true})).unwrap();
+    assert!(!refused["html"].as_str().unwrap().contains("<img"));
+    assert!(!refused["reader"]["html"].as_str().unwrap().contains("<img"));
+}
+
+#[test]
+fn rendered_remote_image_bytes_have_an_aggregate_budget() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.resize(4 * 1024 * 1024, 0);
+    let data = format!("data:image/png;base64,{}", STANDARD.encode(png));
+    let source = "<p>Body remains visible</p><img src='https://cdn.example.com/hero'>".to_owned()
+        + &"<img src='https://cdn.example.com/hero'>".repeat(3);
+    let result = sanitize(
+        &source,
+        &json!({"withReader":true,"allowRemoteImages":true,
+        "remoteImageData":{"https://cdn.example.com/hero":data}}),
+    )
+    .unwrap();
+    for value in [&result, &result["reader"]] {
+        let html = value["html"].as_str().unwrap();
+        assert_eq!(html.matches("<img ").count(), 2);
+        assert!(html.contains("Body remains visible"));
+        assert!(html.len() < 16 * 1024 * 1024);
+        assert_eq!(value["blockedImages"], 2);
+        assert_eq!(value["tooHeavy"], false);
+        assert!(!html.contains("https://"));
+    }
+}

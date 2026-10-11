@@ -243,6 +243,8 @@ pub(super) struct Images<'a> {
     loadable: usize,
     sources: Vec<String>,
     pub limit: usize,
+    admitted: usize,
+    embedded_bytes: usize,
 }
 impl<'a> Images<'a> {
     pub fn new(options: &'a Value) -> Self {
@@ -253,6 +255,8 @@ impl<'a> Images<'a> {
             loadable: 0,
             sources: vec![],
             limit: bounded_option(options, "maxImages", 24, 256),
+            admitted: 0,
+            embedded_bytes: 0,
         }
     }
     pub fn prepared(&self, source: &str) -> String {
@@ -267,13 +271,35 @@ impl<'a> Images<'a> {
     pub fn allowed(&self) -> bool {
         self.options.get("allowRemoteImages") == Some(&Value::Bool(true))
     }
+    // Count every rendered image, including CID and sender-embedded data. The
+    // markup length budget no longer counts base64, so it must have its own
+    // shared budget before either reader hands those bytes to Qt.
+    fn admit(&mut self, source: &str) -> bool {
+        const MAX_EMBEDDED_BYTES: usize = 16 * 1024 * 1024;
+        let bytes = if source
+            .get(..5)
+            .is_some_and(|head| head.eq_ignore_ascii_case("data:"))
+        {
+            source.len()
+        } else {
+            0
+        };
+        if self.admitted >= self.limit || bytes > MAX_EMBEDDED_BYTES - self.embedded_bytes {
+            self.blocked += 1;
+            return false;
+        }
+        self.admitted += 1;
+        self.embedded_bytes += bytes;
+        true
+    }
     fn keep(&mut self, n: &mut Node) -> bool {
         if !n.has("src") {
             return true;
         }
         let source = n.attr("src").to_owned();
         match image_kind(&source) {
-            "inline" | "none" => true,
+            "inline" => self.admit(&source),
+            "none" => true,
             "remote" => {
                 if tracking(n) {
                     self.blocked += 1;
@@ -283,8 +309,11 @@ impl<'a> Images<'a> {
                     self.loadable += 1
                 }
                 let prepared = self.prepared(&source);
-                if !self.allowed() || self.kept >= self.limit || prepared.is_empty() {
+                if !self.allowed() || prepared.is_empty() {
                     self.blocked += 1;
+                    return false;
+                }
+                if !self.admit(&prepared) {
                     return false;
                 }
                 n.set("src", &prepared);
@@ -390,6 +419,38 @@ pub fn too_heavy(size: &Value) -> bool {
         || size["tables"].as_u64().unwrap_or(0) > 60
         || size["tableDepth"].as_u64().unwrap_or(0) > 4
 }
+// The length bounds the markup Qt has to lay out. The bytes of a picture
+// carried as a data URI are not markup, and counting them turned a small
+// message into the plain-text refusal the moment its pictures loaded.
+pub fn too_heavy_to_draw(n: &Node, size: &Value) -> bool {
+    fn embedded(n: &Node) -> u64 {
+        n.children
+            .iter()
+            .filter(|c| c.kind != "text")
+            .map(|c| {
+                let source = c.attr("src");
+                let own = if c.name == "img"
+                    && source
+                        .get(..5)
+                        .is_some_and(|head| head.eq_ignore_ascii_case("data:"))
+                {
+                    source.encode_utf16().count() as u64
+                } else {
+                    0
+                };
+                own + embedded(c)
+            })
+            .sum()
+    }
+    let mut drawn = size.clone();
+    drawn["length"] = json!(
+        size["length"]
+            .as_u64()
+            .unwrap_or(0)
+            .saturating_sub(embedded(n))
+    );
+    too_heavy(&drawn)
+}
 pub fn read_plain(n: &Node) -> Value {
     fn walk(n: &Node, text: &mut String, images: &mut Vec<String>) {
         for c in &n.children {
@@ -458,7 +519,7 @@ pub fn sanitize(source: &str, options: &Value) -> Result<Value, &'static str> {
     collapse(&mut root);
     let html = serialize(&root)?;
     let size = measure(&root, &html);
-    let heavy = too_heavy(&size);
+    let heavy = too_heavy_to_draw(&root, &size);
     Ok(
         json!({"html":html,"blockedImages":images.blocked,"images":images.kept,"remoteImages":images.loadable,"remoteImageSources":images.sources,"complexity":size,"tooHeavy":heavy,"plainText":plain,"reader":reader,"document":root}),
     )

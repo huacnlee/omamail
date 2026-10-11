@@ -212,6 +212,10 @@ function makeAccount(account) {
     imap: makeImapSettings(raw.imap),
     jmap: makeJmapSettings(raw.jmap),
     label: trimmed(raw.label),
+    // The name recipients see beside this mailbox's own address. Only the
+    // mailboxes `namesSender` admits read it; the others take theirs from
+    // the server.
+    senderName: senderNameText(raw.senderName),
     signature: trimmed(raw.signature),
     // The signature as markup, imported from a file and rebuilt by
     // `Signature.js` before it is stored: never the file's own bytes. Sent as
@@ -549,6 +553,32 @@ function setLabel(list, id, text) {
   // field existed comes out of a write with the same shape as every other.
   var entry = makeAccount(next.accounts[at])
   entry.label = trimmed(text)
+  next.accounts[at] = entry
+  return next
+}
+
+// Whether this mailbox's sender name is ours to set. IMAP and Outlook have no
+// server that names the sender, so the account entry is the only place a name
+// can come from; Gmail, JMAP and HEY report their own identities with names.
+// The backend makes the same distinction when it builds the From header.
+function namesSender(provider) {
+  var id = String(provider || "")
+  return id === "imap" || id === "outlook"
+}
+
+// One header line, so a pasted line break or tab becomes a space instead of a
+// name the send would refuse.
+function senderNameText(value) {
+  return trimmed(String(value === undefined || value === null ? "" : value)
+    .replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/ {2,}/g, " "))
+}
+
+function setSenderName(list, id, text) {
+  var next = copyList(list)
+  var at = indexOfId(next.accounts, id)
+  if (at < 0) return next
+  var entry = makeAccount(next.accounts[at])
+  entry.senderName = senderNameText(text)
   next.accounts[at] = entry
   return next
 }

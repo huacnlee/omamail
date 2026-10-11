@@ -2,9 +2,10 @@ QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
 	ui/tests/compatibility/tst_published_agent.qml \
+	ui/tests/qml/tst_unified_batch.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
-	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
+	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
 	ui/providers/OutlookAuth.qml \
@@ -41,6 +42,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/InviteCard.qml \
 	ui/components/SwitcherSearch.qml \
 	ui/components/AccountNameField.qml \
+	ui/components/SenderNameField.qml \
 	ui/components/ReaderBlankSlate.qml \
 	ui/components/ReaderSkeleton.qml \
 	ui/components/ComposeView.qml \
@@ -140,6 +142,7 @@ test-js:
 	node ui/tests/test_gmail_api.js
 	node ui/tests/test_message.js
 	node ui/tests/test_calendar.js
+	node ui/tests/test_calendar_time.js
 	node ui/tests/test_calendar_cache.js
 	node ui/tests/test_calendar_feed.js
 	node ui/tests/test_calendar_sources.js
