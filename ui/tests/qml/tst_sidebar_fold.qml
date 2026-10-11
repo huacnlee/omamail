@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../../components" as Mail
 
 // The chevron folds; it does not also open. Two tap handlers sit one inside
@@ -25,9 +26,9 @@ Item {
     width: 220
     height: 600
     service: fake
-    textColor: Color.foreground
-    accentColor: Color.accent
-    dimColor: Color.foreground
+    textColor: Commons.Color.foreground
+    accentColor: Commons.Color.accent
+    dimColor: Commons.Color.foreground
     panelFontFamily: "monospace"
     slots: [{ kind: "mailbox", key: "inbox" }]
   }
@@ -101,7 +102,7 @@ Item {
       verify(chip.y < chip.parent.height / 4, "hint stays at the top")
       verify(chip.height < chip.parent.height / 2, "hint is smaller than the row icon")
       verify(named(sidebar, "mailbox-entry-icon", [])[0].visible, "modifier preserves mailbox icon")
-      verify(chip.color.a < Style.selectedFillFor(Color.foreground, Color.accent).a,
+      verify(chip.color.a < Style.selectedFillFor(Commons.Color.foreground, Commons.Color.accent).a,
         "a shortcut hint must not use the much heavier selected-state fill")
     }
   }

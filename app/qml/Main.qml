@@ -4,6 +4,7 @@ import QtQuick.Window
 import Quickshell
 import Omamail.Native
 import qs.Commons
+import qs.Commons as Commons
 import "../../ui" as Omamail
 import "../../ui/settings/Appearance.js" as Appearance
 
@@ -140,7 +141,7 @@ ApplicationWindow {
   Binding { target: Quickshell; property: "nativeHost"; value: root.nativeHost }
   Binding { target: Quickshell; property: "fileStore"; value: root.nativeFileStore }
   Binding {
-    target: Color
+    target: Commons.Color
     property: "preferredAppearance"
     value: Appearance.paletteFor(mailService.appearance)
   }
@@ -211,7 +212,7 @@ ApplicationWindow {
     // The palette's own border role rather than the control border: a
     // control's edge is the foreground at 40%, which on a light palette is a
     // dark line around the whole window.
-    border.color: Color.border
+    border.color: Commons.Color.border
     antialiasing: false
   }
 
