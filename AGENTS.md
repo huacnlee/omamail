@@ -44,6 +44,13 @@ Read the relevant document before changing its area; these contain constraints t
 - Preserve account/draft ownership, human approval of AI proposals, and normal outbox dispatch. Model text must not supply routing or permission to send mail.
 - Every review states **Security: PASS / BLOCK / NOT VERIFIED** for the affected boundaries. Missing evidence or a security failure blocks approval/release. Security regressions must verify the forbidden effect did not happen, not merely that an error was returned; follow `docs/SECURITY-BOUNDARIES.md`.
 
+## Review priorities
+
+- PR review primarily decides whether a new or adjusted capability belongs in Omamail and whether its product and interaction design is appropriate. Begin each PR report by explaining what changes, the problem it aims to solve, and who benefits.
+- Assess necessity, fit with project goals, overlap with existing workflows, simpler alternatives, and interface and maintenance costs. Give a clear recommendation to introduce, defer, or leave out the change, with reasons; the maintainer owns the product decision.
+- Evaluate design independently of implementation quality: workflow, discoverability, defaults, information hierarchy, keyboard and focus behavior, consistency, and loading, empty, error and cancellation states. State when screenshots or hands-on evidence are missing rather than treating tests as design evidence.
+- Functional correctness, tests, performance and security support this product and design assessment and remain approval gates. Passing technical checks alone does not justify adding a capability. Explain the change and purpose for every PR, including passing and skipped PRs.
+
 ## Repository and pull requests
 
 - Keep runtime assets, source, tests and maintained documentation in the tree. Keep planning notes and screenshots outside it. Upload PR screenshots to GitHub attachments; tracked files must stay under 128 KiB.
