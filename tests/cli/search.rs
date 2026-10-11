@@ -23,7 +23,11 @@ async fn search_pages_survive_process_exit_and_deletion_of_the_cursor_message() 
             };
             loop {
                 let mut cmd = String::new();
-                if reader.read_line(&mut cmd).await.unwrap() == 0 {
+                if match reader.read_line(&mut cmd).await {
+                    Ok(n) => n == 0,
+                    Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                    Err(error) => panic!("synthetic IMAP read failed: {error}"),
+                } {
                     break;
                 }
                 let mut data = String::new();

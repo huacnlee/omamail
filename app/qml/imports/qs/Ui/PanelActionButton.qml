@@ -1,13 +1,14 @@
 import QtQuick
 import QtQuick.Controls.Basic as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
 
   property string iconText: ""
   property string tooltipText: ""
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   property color hoverColor: foreground
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.bodySmall

@@ -2,7 +2,7 @@
 use super::*;
 use base64::Engine;
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, io::Read};
+use std::collections::HashMap;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -15,8 +15,9 @@ pub(super) struct Flows(Mutex<HashMap<String, JoinHandle<Result<Value, &'static 
 
 fn random() -> Result<String, &'static str> {
     let mut bytes = [0; 32];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut bytes))
+    rustls::crypto::ring::default_provider()
+        .secure_random
+        .fill(&mut bytes)
         .map_err(|_| "auth_random_failed")?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
@@ -320,7 +321,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         assert!(!listener_closes(address, Duration::from_millis(60)).await);
         drop(listener);
-        assert!(listener_closes(address, Duration::from_secs(1)).await);
+        assert!(listener_closes(address, Duration::from_secs(5)).await);
     }
 
     #[tokio::test]
@@ -343,7 +344,9 @@ mod tests {
         // connection refusal within a bound, not closure at one scheduling
         // instant. The separate live-listener regression prevents this probe
         // from treating a timeout or a successful connection as closure.
-        assert!(listener_closes(address, Duration::from_secs(1)).await);
+        // Windows can take more than a second to report connection refusal;
+        // the probe still requires refusal, never a timeout or a successful connect.
+        assert!(listener_closes(address, Duration::from_secs(5)).await);
     }
 
     #[tokio::test]

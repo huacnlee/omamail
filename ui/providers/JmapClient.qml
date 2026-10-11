@@ -151,7 +151,10 @@ Item {
     }, existingHandle)
   }
   function getMessage(id, full, callback) { return nativeRequest("jmap.read", { id: String(id || ""), full: full === true }, callback) }
-  function getAttachment(messageId, attachmentId, callback) { return nativeRequest("jmap.attachment", { attachmentId: String(attachmentId || "") }, callback) }
+  function getAttachment(messageId, attachmentId, callback) {
+    return nativeRequest("jmap.attachment", { attachmentId: String(attachmentId || "") },
+      function(result, error) { if (typeof callback === "function") callback(error || !result ? "" : String(result.data || ""), error) })
+  }
   function getLabels(callback) { return nativeRequest("jmap.labels", {}, callback) }
   function getLabelCounts(id, callback) { return nativeRequest("jmap.labelCounts", { id: String(id || "") }, callback) }
   function modifyMessage(id, added, removed, callback) { return batchModify([id], added, removed, callback) }

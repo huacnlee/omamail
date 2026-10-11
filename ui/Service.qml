@@ -3,6 +3,7 @@ import "compose/Recipients.js" as AgentRecipients
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import "account"
 import "calendar"
 import "agent"
@@ -60,7 +61,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 5 : 0
+    bundledApiVersion: root.standalone ? 6 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -105,6 +106,8 @@ Item {
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
+  // Older backends send the bare address.
+  readonly property bool backendCanNameSender: backend.ready && backend.apiVersion >= 7
   readonly property bool calendarRemindersEnabled: !settings || settings.calendarRemindersEnabled !== false
   readonly property int calendarSnoozeMinutes: Math.max(1, Math.min(1440,
     Math.floor(Number(settings && settings.calendarSnoozeMinutes) || 5)))
@@ -465,7 +468,9 @@ Item {
     var text = String(value === undefined || value === null ? "" : value)
     if (platform && typeof platform.setClipboard === "function")
       return platform.setClipboard(text)
-    return Quickshell.execDetached(["wl-copy", text])
+    // NUL cannot cross argv without truncating the sender's text.
+    if (text.indexOf("\0") >= 0) return false
+    return Quickshell.execDetached(["wl-copy", "--", text])
   }
 
   function configPath(name) {
@@ -993,13 +998,9 @@ Item {
 
     var entry = {}
     for (var key in accounts[index]) entry[key] = accounts[index][key]
-    if (raw.provider !== undefined) entry.provider = raw.provider
-    if (raw.email !== undefined) entry.email = raw.email
-    if (raw.clientId !== undefined) entry.clientId = raw.clientId
-    if (raw.clientSecret !== undefined) entry.clientSecret = raw.clientSecret
-    if (raw.imap !== undefined) entry.imap = raw.imap
-    if (raw.jmap !== undefined) entry.jmap = raw.jmap
-    if (raw.label !== undefined) entry.label = raw.label
+    var keys = ["provider", "email", "clientId", "clientSecret", "imap", "jmap", "label", "senderName"]
+    for (var k = 0; k < keys.length; k++)
+      if (raw[keys[k]] !== undefined) entry[keys[k]] = raw[keys[k]]
 
     // Never rebuild through `add`: a colliding id replaces the *other* row
     // and drops this one, which is how re-authing Proton deleted iCloud.
@@ -1058,11 +1059,8 @@ Item {
   function toggleMonitored(labelId, accountId) {
     var owner = labelOwner(accountId)
     if (!owner) return
-    var next = Accounts.toggleMonitored(accountList, owner.accountId, labelId)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
-    owner.labelActions.refreshMonitored()
+    if (commitAccounts(Accounts.toggleMonitored(accountList, owner.accountId, labelId)))
+      owner.labelActions.refreshMonitored()
   }
 
   // The watched ids an account's rename or move left behind, written to its
@@ -1070,32 +1068,21 @@ Item {
   function setMonitoredIds(index, ids) {
     var account = accountAt(index)
     if (!account) return
-    var next = Accounts.setMonitored(accountList, account.accountId, ids)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
+    commitAccounts(Accounts.setMonitored(accountList, account.accountId, ids))
   }
 
-  function setAccountLabel(id, text) {
-    var next = Accounts.setLabel(accountList, id, text)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
+  // Writes only when the edit changed something.
+  function commitAccounts(next) {
+    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return false
     accountList = next
     saveAccounts()
+    return true
   }
 
-  function setAccountSignatureHtml(id, html) {
-    var next = Accounts.setSignatureHtml(accountList, id, html)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
-  }
-
-  function setAccountSignature(id, text) {
-    var next = Accounts.setSignature(accountList, id, text)
-    if (Accounts.serialize(next) === Accounts.serialize(accountList)) return
-    accountList = next
-    saveAccounts()
-  }
+  function setAccountLabel(id, text) { commitAccounts(Accounts.setLabel(accountList, id, text)) }
+  function setAccountSenderName(id, text) { commitAccounts(Accounts.setSenderName(accountList, id, text)) }
+  function setAccountSignatureHtml(id, html) { commitAccounts(Accounts.setSignatureHtml(accountList, id, html)) }
+  function setAccountSignature(id, text) { commitAccounts(Accounts.setSignature(accountList, id, text)) }
 
   function saveAccounts(opts) {
     if (!accountsLoaded) return
@@ -1424,6 +1411,8 @@ Item {
         // The name as it was typed, empty when none was, so a field editing
         // it shows what is there rather than the address standing in for it.
         label: String(accounts[i].label || ""),
+        provider: String(accounts[i].provider || ""),
+        senderName: String(accounts[i].senderName || ""),
         signature: String(accounts[i].signature || ""),
         signatureHtml: String(accounts[i].signatureHtml || "")
       })
@@ -1731,20 +1720,17 @@ Item {
       root.sendIdentities = result.identities || []
     })
   }
-  // The name the entry being edited was given, or "" for none: what the
-  // setup page's name field shows. `accountLabel` cannot say, because it
-  // falls through to the address's local part.
-  readonly property string accountName: {
+  // The name the entry being edited was given, and the rest the setup page
+  // shows for it, "" for none. `accountLabel` cannot say, because it falls
+  // through to the address's local part.
+  function editingEntry() {
     var accounts = accountList ? accountList.accounts : []
     var index = editingIndex()
-    return index >= 0 && index < accounts.length ? String(accounts[index].label || "") : ""
+    return index >= 0 && index < accounts.length ? accounts[index] : ({})
   }
-
-  readonly property string accountAddress: {
-    var accounts = accountList ? accountList.accounts : []
-    var index = editingIndex()
-    return index >= 0 && index < accounts.length ? String(accounts[index].email || "") : ""
-  }
+  readonly property string accountName: String(editingEntry().label || "")
+  readonly property string accountSenderName: String(editingEntry().senderName || "")
+  readonly property string accountAddress: String(editingEntry().email || "")
   readonly property int inboxUnread: unified
     ? Number(unifiedSnapshot.totalUnread || 0) : (current ? current.inboxUnread : 0)
   readonly property var messages: unified
@@ -2018,13 +2004,14 @@ Item {
   readonly property int sendSecondsRemaining: pendingSendHost
     ? pendingSendHost.sendSecondsRemaining : 0
   readonly property string lastError: unified
-    ? (unifiedSnapshotError || unifiedSnapshot.error || "") : (current ? current.lastError : "")
+    ? (unifiedBatchAction.error || unifiedSnapshotError || unifiedSnapshot.error || "") : (current ? current.lastError : "")
   // The last thing a mailbox said it did, and the undo that goes with it. Read
   // from `current` alone, archiving a row from a non-active mailbox in a merged
   // list produced no confirmation and no undo affordance at all — so the most
   // recent of them wins, which is the one the press just produced.
   readonly property string actionStatus: {
     if (!unified) return current ? current.actionStatus : ""
+    if (unifiedBatchAction.status !== "") return unifiedBatchAction.status
     var _epoch = listEpoch
     var newest = ""
     var at = -1
@@ -2231,10 +2218,12 @@ Item {
     return host ? host.refuseUnavailableAction(action) : true
   }
   function act(id, action, quiet, memberOnly) {
+    unifiedBatchAction.clear()
     var host = hostForId(id)
     return host ? host.act(sourceIdFor(id), action, quiet, memberOnly) : false
   }
   function toggleStar(id) {
+    unifiedBatchAction.clear()
     var host = hostForId(id)
     if (host) host.toggleStar(sourceIdFor(id))
   }
@@ -2245,15 +2234,10 @@ Item {
     }
     eachHost(function(host) { host.markAllRead() })
   }
-  // Several ticked rows at once. A merged list draws rows from several
-  // mailboxes, and a batch is one mailbox's request, so it is refused there
-  // the way a move is: the rule every unavailable action follows.
-  function actMany(ids, action) {
-    if (unified) {
-      fail("Acting on several messages needs one mailbox on screen")
-      return false
-    }
-    return current ? current.actMany(ids, action) : false
+  UnifiedBatchAction { id: unifiedBatchAction; service: root }
+  function actMany(ids, action, completion) {
+    if (!unified) return current ? current.actMany(ids, action, completion) : false
+    return unifiedBatchAction.run(ids, action, completion)
   }
   // The mailbox the From address belongs to, which compose already names:
   // `sendIdentities` spans every account and carries the id, so a unified
@@ -2616,8 +2600,8 @@ Item {
       CalendarReminders {
         service: root
         pluginDir: root.pluginDir
-        notificationForeground: Color.foreground
-        notificationAccent: Color.accent
+        notificationForeground: Commons.Color.foreground
+        notificationAccent: Commons.Color.accent
       }
     }
   }
@@ -2647,8 +2631,8 @@ Item {
         return index < accounts.length ? accounts[index] : null
       }
 
-      notificationForeground: Color.foreground
-      notificationAccent: Color.accent
+      notificationForeground: Commons.Color.foreground
+      notificationAccent: Commons.Color.accent
       pluginDir: root.pluginDir
       accountId: entry ? entry.id : ""
       backend: root.backend
@@ -2660,6 +2644,7 @@ Item {
       providerId: entry ? entry.provider : Provider.DEFAULT_ID
       imapSettings: entry ? entry.imap : null
       jmapSettings: entry ? entry.jmap : null
+      senderName: entry ? String(entry.senderName || "") : ""
       // Only a Gmail account has a client-keyed refresh token to inherit, and
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../.." as Omamail
 import "../../components" as Mail
 import "../../account/Accounts.js" as Accounts
@@ -66,10 +67,10 @@ Item {
   Mail.EventSuggestionCard {
     id: card
     width: 500
-    textColor: Color.foreground
-    accentColor: Color.accent
-    dimColor: Color.foreground
-    dimmerColor: Color.foreground
+    textColor: Commons.Color.foreground
+    accentColor: Commons.Color.accent
+    dimColor: Commons.Color.foreground
+    dimmerColor: Commons.Color.foreground
     panelFontFamily: "monospace"
   }
   SignalSpy { id: added; target: card; signalName: "addRequested" }

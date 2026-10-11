@@ -1,9 +1,11 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import "../calendar/Calendar.js" as Calendar
 
 Column {
   id: root
+  readonly property string timeFormat: Qt.locale().timeFormat(Locale.ShortFormat)
   required property var service
   required property color textColor
   required property color dimColor
@@ -59,7 +61,7 @@ Column {
             Text {
               width: parent.width
               text: String(entry.modelData.title || "Event") + " · "
-                + Qt.formatDateTime(new Date(entry.modelData.start), "ddd HH:mm")
+                + Calendar.dateTimeLabel(entry.modelData.start, "ddd", root.timeFormat)
               textFormat: Text.PlainText
               wrapMode: Text.Wrap
               color: root.textColor

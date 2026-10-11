@@ -65,6 +65,13 @@ impl AppDirs {
         {
             return Ok(override_dirs.dirs);
         }
+        #[cfg(all(windows, feature = "integration-test-credentials"))]
+        if let Some(root) = integration_root()? {
+            return Self::from_roots(
+                root.join("config"), root.join("cache"), root.join("state"),
+                root.join("runtime"), root.join("downloads"),
+            );
+        }
         Self::discover_with(|name| std::env::var_os(name), &std::env::temp_dir())
     }
     pub fn home() -> Result<PathBuf, &'static str> {
@@ -75,6 +82,10 @@ impl AppDirs {
             .clone()
         {
             return Ok(override_dirs.home);
+        }
+        #[cfg(all(windows, feature = "integration-test-credentials"))]
+        if let Some(root) = integration_root()? {
+            return absolute(root.join("home"));
         }
         #[cfg(windows)]
         {
@@ -173,6 +184,16 @@ impl AppDirs {
         self.config.join(APP_DIRECTORY)
     }
 }
+// CLI integration children cannot use the unit-test in-memory override. This
+// is compiled only with the test credential feature, which is forbidden in
+// release builds by credentials/mod.rs. Production keeps native Known Folders.
+#[cfg(all(windows, feature = "integration-test-credentials"))]
+fn integration_root() -> Result<Option<PathBuf>, &'static str> {
+    std::env::var_os("OMAMAIL_INTEGRATION_HOME")
+        .map(|root| absolute(PathBuf::from(root)))
+        .transpose()
+}
+
 fn absolute(path: PathBuf) -> Result<PathBuf, &'static str> {
     if !path.is_absolute()
         || path

@@ -4,12 +4,15 @@ import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 import "account/Model.js" as Model
+import "account" as Account
 import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
+import "compose" as Compose
 import "keys/Keymap.js" as Keymap
 import "providers/Registry.js" as Provider
 import "agent/Agent.js" as Agent
@@ -106,13 +109,13 @@ Item {
     onTriggered: root.saveComposeRecovery()
   }
 
-  readonly property color foreground: Color.foreground
-  readonly property color background: Color.background
-  readonly property color accent: Color.accent
-  readonly property color urgent: Color.urgent
-  readonly property color danger: Color.urgent
-  readonly property color popupBackground: Color.popups.background
-  readonly property color popupBorder: Color.popups.border
+  readonly property color foreground: Commons.Color.foreground
+  readonly property color background: Commons.Color.background
+  readonly property color accent: Commons.Color.accent
+  readonly property color urgent: Commons.Color.urgent
+  readonly property color danger: Commons.Color.urgent
+  readonly property color popupBackground: Commons.Color.popups.background
+  readonly property color popupBorder: Commons.Color.popups.border
   // Shared themed border for mail and standalone window chrome.
   readonly property color borderColor: Style.normalBorderColor
   readonly property int borderWidth: Style.normalBorderWidth
@@ -239,9 +242,7 @@ Item {
     return true
   }
 
-  // Acting on the selection acts on every ticked row at once, then drops the
-  // selection: the rows it named have moved or changed, and a selection that
-  // outlived the action would be one keystroke from repeating it.
+  Account.UnifiedBatchSelection { id: batchSelection; app: root; service: root.service }
   function actOnChecked(action) {
     if (!service || checkedIds.length === 0) return false
     // Never through another mailbox: a switch that reached the service by
@@ -257,7 +258,11 @@ Item {
     // The open message going with the selection closes the reader, the way
     // acting on it alone does: it is about to leave this list.
     var wasOpen = currentView === "reader" && ids.indexOf(service.selectedId) >= 0
-    if (!service.actMany(ids, action)) return false
+    var scope = batchSelection.scope
+    var completion = service.unified ? function(result) {
+      Qt.callLater(function() { batchSelection.restore(result.failedIds, scope) })
+    } : undefined
+    if (!service.actMany(ids, action, completion)) return false
     checkedIds = []
     if (!leaves) return true
     if (wasOpen) {
@@ -527,8 +532,7 @@ Item {
     else close()
   }
 
-  // How a message is read is a preference and survives; the heavy-document
-  // override is a per-message decision about one specific message and does not.
+  // The rich-document override belongs to one message.
   function openMessage(id) {
     if (!service) return
     pendingComposeMode = ""
@@ -671,27 +675,14 @@ Item {
     return currentView === "reader" ? "reader" : "list"
   }
 
-  function startCompose(mode) {
-    if (!service) return
-    pendingDraftId = ""
-    var next = String(mode || "new")
-    if (next !== "new" && !service.selectedMessage) {
-      pendingComposeMode = next
-      return
-    }
-    pendingComposeMode = ""
-    var keepAssistant = agentPrompt.opened
-    var conversation = keepAssistant ? agentPrompt.job : null
-    compose.begin(next, service.selectedMessage, service.selectedBody.text,
-      service.selectedAttachments)
-    if (keepAssistant) {
-      if ((next === "reply" || next === "replyAll") && conversation
-          && String(conversation.accountId) === compose.accountId
-          && String(conversation.messageId) === compose.replyMessageId)
-        compose.agentParentJobId = String(conversation.id)
-      composeAgent.open()
-    }
+  Compose.PendingCompose {
+    id: pendingCompose
+    app: root
+    composer: compose
+    assistant: root.agentPrompt
+    composeAssistant: root.composeAgent
   }
+  function startCompose(mode) { pendingCompose.start(mode) }
 
   // A mailto: URL, or the blank draft `compose: true` asks for. The window is
   // already open when this runs — summon delivers the payload to open().
@@ -701,12 +692,7 @@ Item {
     compose.beginDraft(draft)
   }
 
-  function resumeHeldCompose() {
-    if (pendingComposeMode === "" || !service || !service.selectedMessage) return
-    var mode = pendingComposeMode
-    pendingComposeMode = ""
-    startCompose(mode)
-  }
+  function resumeHeldCompose() { pendingCompose.resume() }
 
   function resumeHeldDraft() {
     if (pendingDraftId === "" || !service) return
@@ -2592,9 +2578,6 @@ Item {
           }
         }
 
-        // The right of the status line carries one of two things: what the
-        // window most needs to say, or — when it has nothing to report — what
-        // the keyboard can do from where you are standing.
         readonly property bool hasNotice: root.notice !== ""
           || (!!root.service
             && (root.service.actionStatus !== "" || root.service.lastError !== ""))
@@ -2642,6 +2625,21 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
+          HoverHandler { id: noticeHover }
+          ToolTip {
+            visible: notice.visible && noticeHover.hovered && notice.truncated
+            delay: 500
+            width: Math.min(Style.space(600), window.width - Style.space(32))
+            contentItem: Text {
+              text: notice.text
+              textFormat: Text.PlainText
+              wrapMode: Text.Wrap
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            background: Rectangle { color: root.popupBackground; border.color: root.popupBorder }
+          }
         }
 
         KeyHints {

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
@@ -11,7 +12,7 @@ Item {
   property real slotSize: Style.space(24)
   property real opticalSize: Style.space(20)
   property bool active: false
-  property color foreground: Color.foreground
+  property color foreground: Commons.Color.foreground
   signal pressed(int button)
   signal wheelMoved(int delta)
 

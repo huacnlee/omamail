@@ -67,5 +67,24 @@ Item {
       compare(f.api.mailboxList.length, 0)
       compare(f.api.inFlight, 0)
     }
+    function test_attachment_callback_receives_the_base64_string_not_the_wire_object() {
+      var f = setup()
+      var got = []
+      var before = Transports.transports(f.api)
+      f.api.getAttachment("m1", "blob1", function(data, error) { got.push([data, error]) })
+      var request = Transports.newSince(f.api, before)[0]
+      compare(request.method, "jmap.attachment")
+      Transports.complete(request, {data: "aGk", size: 2})
+      compare(got.length, 1)
+      compare(got[0][0], "aGk")
+      compare(got[0][1], "")
+
+      before = Transports.transports(f.api)
+      f.api.getAttachment("m1", "blob2", function(data, error) { got.push([data, error]) })
+      Transports.reply(Transports.newSince(f.api, before)[0], null, {message: "attachment_data_invalid"})
+      compare(got.length, 2)
+      compare(got[1][0], "")
+      verify(got[1][1] !== "")
+    }
   }
 }

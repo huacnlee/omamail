@@ -24,6 +24,7 @@ impl reqwest::dns::Resolve for LoopbackDns {
 impl Peer {
     fn new() -> Self {
         let mut process = Command::new("python3")
+            .env("PYTHONUTF8", "1")
             .arg(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/calendar/discovery_tls_test.py"

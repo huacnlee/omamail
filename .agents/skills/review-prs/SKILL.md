@@ -1,11 +1,21 @@
 ---
 name: review-prs
-description: Review GitHub PRs sequentially in dedicated worktrees, assess completeness, tests, performance and security, fix small issues, and prepare or publish maintainer reviews and release-note descriptions when authorized.
+description: Review GitHub PRs to judge whether their new or adjusted capabilities belong in the product and assess their design, with technical and security validation, dedicated worktrees, and authorized maintainer reviews.
 ---
 
 # Review PRs
 
 Accept optional PR numbers, URLs, or a repository/queue filter. Examples: `$review-prs 42 57`, `$review-prs https://github.com/owner/repo/pull/42`, or `$review-prs review all open non-draft PRs in this repository`.
+
+## Primary purpose: product necessity and design
+
+The maintainer primarily reviews PRs to decide whether their new or adjusted capabilities are necessary to introduce and whether the design is appropriate. Lead every PR report with what it changes and the problem it aims to solve, including passing PRs and PRs skipped as already reviewed, superseded or closed. Do not reduce the report to a technical verdict.
+
+For each change, assess fit with established project goals, who benefits, overlap with existing behavior, simpler alternatives, and interface and maintenance cost. Recommend introducing it, deferring it, or leaving it out, with a concrete reason. Evaluate adjusted workflows as well as entirely new features; restoring an established behavior may be a necessary fix, but its design still needs review. The maintainer owns the product decision.
+
+Assess product and interaction design separately from implementation quality: workflow and scope, discoverability, defaults, information hierarchy, consistency, keyboard and focus behavior, and loading, empty, error and cancellation states. For non-UI changes, assess the affected command, configuration or integration workflow. Explain material tradeoffs and distinguish observed design evidence from inference; missing screenshots or hands-on evidence limit the design verdict.
+
+Technical completeness, tests, performance and security support the product and design decision and remain required approval gates. Passing checks does not by itself justify introducing a capability. Keep product recommendations, design findings and technical blockers distinct.
 
 ## Scope and authority
 
@@ -36,6 +46,7 @@ Continue useful technical investigation while the product decision is pending, b
 
 | Area | Evidence to seek |
 | --- | --- |
+| Product necessity and design | Explain the change and purpose, assess fit and alternatives, recommend introduce/defer/leave out, and evaluate the affected workflow and interaction states with actual evidence. |
 | Functional completeness | Map promised behavior and acceptance criteria to implementation. Check integration, error/empty/loading states, compatibility and affected providers/platforms. Flag missing pieces and regressions. |
 | Tests | Verify meaningful assertions for new behavior, failure paths and boundaries. Run repository-required checks and proportionate targeted regressions. Distinguish tests run locally, CI-only evidence and untested environments. Passing tests do not prove completeness. |
 | Performance | Check algorithmic cost, realistic input size, UI blocking, request amplification, pagination, cache behavior, resource growth, cancellation and timeouts. Measure plausible hot-path regressions; distinguish measured results from inference. |
@@ -104,6 +115,7 @@ Make every progress update and final review easy to scan. Do not mix product dec
 - Put key names, action ids, commands, SHAs and short identifiers in inline code.
 - Use fenced code blocks only for multiline commands, logs, patches or exact text the user may copy; never use a code block merely as decoration.
 - Lead with the outcome. State blockers and required user choices separately at the end.
+- For every PR, explain what changes and why before the verdict; include the product recommendation and design assessment, even when technical checks pass. Keep skipped PR explanations proportionate.
 - Preserve the brief one-sentence style for a published passing review, but use the structured format in the user-facing batch report.
 
 Passing review or publishing APPROVE is not merge authorization. Wait for explicit user confirmation of the selected PRs; silence is not approval. If the user already explicitly authorized merging these specific PRs in this session, honor that authorization without asking again. Resolve the merge method from the user's instructions or repository conventions/allowed methods, and include it in the concrete proposal when confirmation is needed.

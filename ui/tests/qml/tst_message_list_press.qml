@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../../components" as Mail
 
 // A press on a row survives the list being told its messages again.
@@ -33,10 +34,10 @@ Item {
     id: list
     width: parent.width
     service: fakeService
-    textColor: Color.foreground
-    accentColor: Color.accent
-    dimColor: Color.foreground
-    urgentColor: Color.accent
+    textColor: Commons.Color.foreground
+    accentColor: Commons.Color.accent
+    dimColor: Commons.Color.foreground
+    urgentColor: Commons.Color.accent
     panelFontFamily: "monospace"
     property var activated: []
     onMessageActivated: function(id) { activated.push(id) }

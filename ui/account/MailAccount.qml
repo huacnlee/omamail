@@ -12,6 +12,7 @@ import "../message/Unsubscribe.js" as Unsub
 import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
 import "Accounts.js" as Accounts
+import "Aliases.js" as Aliases
 import "../providers/Registry.js" as Provider
 import "../providers/ImapProtocol.js" as Imap
 import "../providers/OAuth.js" as OAuth
@@ -52,6 +53,8 @@ Item {
   // Server settings for an IMAP account, straight off the account entry. Unused
   // by the others, and normalised before anything can dial one.
   property var imapSettings: null
+  // The account's sender name, for the providers whose From name it sets.
+  property string senderName: ""
   // The same for a JMAP account, and the same rule: what is on the entry is
   // what a hand edit could have written, so it is normalised before anything
   // sends a credential to it.
@@ -397,9 +400,15 @@ Item {
   property var profile: null
   readonly property string accountEmail: profile ? String(profile.email || "") : ""
   readonly property var availableSendAsAliases: {
-    if (sendAsAliases.length > 0) return sendAsAliases
-    if (accountEmail === "") return []
-    return [{ email: accountEmail, displayName: "", isPrimary: true, isDefault: true }]
+    var rows = sendAsAliases.length > 0 ? sendAsAliases
+      : (accountEmail === "" ? []
+        : [{ email: accountEmail, displayName: "", isPrimary: true, isDefault: true }])
+    // Named here rather than in the provider's own list so that a rename
+    // shows in the composer at once, without reloading the send-as list.
+    // Only on a backend that names agent sends too (API 7), so the composer
+    // and `mail.send` never disagree about who a message is from.
+    var named = Accounts.namesSender(providerId) && !!backend && backend.ready && backend.apiVersion >= 7
+    return named ? Aliases.withSenderName(rows, senderName) : rows
   }
   // The address this mailbox answers as when nothing more specific applies.
   // The profile is authoritative once it has loaded; until then the address the
@@ -430,6 +439,7 @@ Item {
   property string pendingActionQuery: ""
   property var deferredListLoad: null
   property var queuedActions: []
+  property var actionCompletions: []
   property bool sending: false
   readonly property alias sendQueue: sendQueue
   readonly property int sendPendingCount: sendQueue.parked.length
@@ -1727,12 +1737,12 @@ Item {
 
   // Network sends keep their order; native intent preparation proceeds while
   // a previous send is in flight, so a slow server never blocks the next edit.
-  function queueAction(messageId, action, actionQuery, quiet, memberOnly, dispatch, discard, token, sourceLabelId) {
+  function queueAction(messageId, action, actionQuery, quiet, memberOnly, dispatch, discard, token, sourceLabelId, independent) {
     var queued = queuedActions.slice()
     for (var i = queued.length - 1; i >= 0; i--) {
       var previous = queued[i]
       if (previous.id !== messageId) continue
-      if (previous.action === action && previous.cacheKey === actionQuery
+      if (!independent && previous.action === action && previous.cacheKey === actionQuery
           && previous.quiet === quiet && previous.memberOnly === memberOnly
           && previous.sourceLabelId === sourceLabelId) {
         discard(previous.token)
@@ -1789,9 +1799,18 @@ Item {
     return runNativeAction([String(id || "")], action, quiet === true, memberOnly === true, false)
   }
 
-  function runNativeAction(ids, action, quiet, memberOnly, allRead) {
+  function runNativeAction(ids, action, quiet, memberOnly, allRead, completion) {
     if (!ready || !backend || (!allRead && ids.length === 0) || (allRead && messages.length === 0)) return false
     if (refuseUnavailableAction(action)) return false
+    var reported = false
+    var cancel = function() { finish(ids, "Account signed out") }
+    function finish(failedIds, error) {
+      if (reported) return
+      reported = true
+      root.actionCompletions = root.actionCompletions.filter(function(callback) { return callback !== cancel })
+      if (typeof completion === "function") completion({failedIds: failedIds || [], error: String(error || "")})
+    }
+    if (typeof completion === "function") actionCompletions = actionCompletions.concat([cancel])
     var account = accountId
     var actionQuery = cacheKey
     var estimate = resultEstimate
@@ -1821,6 +1840,7 @@ Item {
       if (root.accountId === account && preparationEpoch === intents.epoch)
         root.actionPreparations = Math.max(0, root.actionPreparations - 1)
       if (error || !prepared) {
+        finish(ids, error || "Could not prepare the action")
         if (root.accountId === account && preparationEpoch === intents.epoch) {
           root.fail(error || "Could not prepare the action")
           if (root.actionPreparations === 0 && root.pendingAction === "") {
@@ -1832,6 +1852,7 @@ Item {
         return
       }
       if (prepared.refused) {
+        finish(ids, "This mailbox cannot perform that action")
         if (root.accountId === account && preparationEpoch === intents.epoch) {
           root.refuseUnavailableAction(action)
           if (root.actionPreparations === 0 && root.pendingAction === "") {
@@ -1843,8 +1864,9 @@ Item {
       }
       var targets = prepared.targets || []
       var rows = prepared.rows || []
-      if (targets.length === 0) return
+      if (targets.length === 0) { finish(ids, "Those messages are no longer available"); return }
       if (root.accountId !== account || !root.ready || intents.generation !== prepared.generation) {
+        finish(ids, "Account changed")
         intents.settle(account, actionQuery, prepared.token, rows, function() {}, prepared.generation)
         return
       }
@@ -1856,7 +1878,10 @@ Item {
       function done(payload, failure, failedIds) {
         var failed = failure ? (Array.isArray(failedIds) ? failedIds : rows) : []
         intents.settle(account, actionQuery, prepared.token, failed, function(settled, settleError) {
-          if (root.accountId !== account || intents.generation !== prepared.generation) return
+          if (root.accountId !== account || intents.generation !== prepared.generation) {
+            finish(ids, "Account changed")
+            return
+          }
           root.pendingAction = ""
           root.pendingActionQuery = ""
           var message = failure && Array.isArray(failedIds) && rows.length > 1
@@ -1878,6 +1903,7 @@ Item {
             else root.note(rows.length > 1 ? Model.batchNote(rows.length, root.actionLabel(action)) : root.actionLabel(action))
           }
           root.refreshCounts()
+          finish(settleError ? ids : failed, message)
           root.runQueuedAction()
           if (root.resumeDeferredListLoad(actionQuery, message)) return
           if (root.cacheKey === actionQuery && (interrupted || invalidates || message !== ""))
@@ -1915,7 +1941,7 @@ Item {
       }
       if (root.pendingAction !== "") root.queueAction(ids.join(","), action, actionQuery, quiet, memberOnly, dispatch, function(intoToken) {
         intents.coalesce(account, actionQuery, prepared.token, intoToken, prepared.generation)
-      }, prepared.token, parameters.sourceLabelId)
+      }, prepared.token, parameters.sourceLabelId, typeof completion === "function")
       else dispatch()
     })
     return true
@@ -1994,7 +2020,7 @@ Item {
     return runNativeAction([], "markRead", false, false, true)
   }
 
-  function actMany(ids, action) { return batchAction.run(ids, action) }
+  function actMany(ids, action, completion) { return batchAction.run(ids, action, completion) }
 
   BatchAction {
     id: batchAction
@@ -2576,6 +2602,7 @@ Item {
 
   function signOut() {
     intents.clear()
+    cancelActionCompletions()
     queuedActions = []
     actionPreparations = 0
     pendingAction = ""
@@ -2598,6 +2625,13 @@ Item {
     bodyCache.clear()
     clearSelection()
   }
+
+  function cancelActionCompletions() {
+    var callbacks = actionCompletions
+    actionCompletions = []
+    for (var i = 0; i < callbacks.length; i++) callbacks[i]()
+  }
+  Component.onDestruction: cancelActionCompletions()
 
   // ------------------------------------------------------------- lifecycle
 

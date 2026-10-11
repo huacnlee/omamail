@@ -8,7 +8,6 @@ use base64::{
 };
 use chrono::{DateTime, Datelike, Local};
 use serde_json::{Value, json};
-use std::io::Read;
 type Result<T> = std::result::Result<T, &'static str>;
 fn field<'a>(v: &'a Value, key: &str) -> &'a str {
     v[key].as_str().unwrap_or("")
@@ -136,8 +135,9 @@ fn boundary(value: &str) -> Result<String> {
         return Ok(stated);
     }
     let mut random = [0; 16];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut random))
+    rustls::crypto::ring::default_provider()
+        .secure_random
+        .fill(&mut random)
         .map_err(|_| "random_unavailable")?;
     Ok(format!("=_Omamail_{}", URL_SAFE_NO_PAD.encode(random)))
 }

@@ -8,6 +8,7 @@ import "../message/Html.js" as Html
 
 Rectangle {
   id: root
+  readonly property string timeFormat: Qt.locale().timeFormat(Locale.ShortFormat)
 
   required property var controller
   required property var event
@@ -89,10 +90,9 @@ Rectangle {
     }
     var startDay = Qt.formatDate(start, "dddd, d MMMM yyyy")
     if (start.toDateString() === end.toDateString())
-      return startDay + " · " + Qt.formatTime(start, "HH:mm") + "–"
-        + Qt.formatTime(end, "HH:mm")
-    return startDay + " · " + Qt.formatTime(start, "HH:mm") + " – "
-      + Qt.formatDate(end, "dddd, d MMMM yyyy") + " · " + Qt.formatTime(end, "HH:mm")
+      return startDay + " · " + Calendar.timeRangeLabel(start.getTime(), end.getTime(), root.timeFormat)
+    return startDay + " · " + Calendar.timeLabel(start.getTime(), root.timeFormat) + " – "
+      + Calendar.dateTimeLabel(end.getTime(), "dddd, d MMMM yyyy", root.timeFormat, " · ")
   }
 
   CalendarPalette {

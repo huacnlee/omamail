@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import qs.Commons as Commons
 
 QtObject {
   id: root
@@ -30,8 +31,8 @@ QtObject {
   // standalone tooltip the same pause, including controls that use the
   // platform style directly.
   readonly property int tooltipDelay: 400
-  readonly property color normalBorderColor: normalBorderFor(Color.foreground, Color.accent)
-  readonly property color selectedAccentFill: selectedFillFor(Color.foreground, Color.accent)
+  readonly property color normalBorderColor: normalBorderFor(Commons.Color.foreground, Commons.Color.accent)
+  readonly property color selectedAccentFill: selectedFillFor(Commons.Color.foreground, Commons.Color.accent)
   readonly property var font: ({
     family: metrics.font.family,
     iconFamily: iconFont.status === FontLoader.Ready ? iconFont.name : metrics.font.family,
@@ -88,8 +89,8 @@ QtObject {
     var role = token.toLowerCase()
     if (role === "foreground" || role === "text") return foreground
     if (role === "accent") return accent
-    if (role === "urgent") return Color.urgent
-    if (role === "background") return Color.background
+    if (role === "urgent") return Commons.Color.urgent
+    if (role === "background") return Commons.Color.background
     if (role === "transparent") return Qt.rgba(0, 0, 0, 0)
     if (role === "hover" || role === "hover-cursor" || role === "inherit") return fallback
     return token.charAt(0) === "#" ? token : fallback

@@ -263,7 +263,8 @@ fn attachment_metadata_never_opens_paths_and_invalid_paths_write_nothing() {
 }
 #[test]
 fn js_oracle_parity_for_normalized_drafts() {
-    let fixtures = json!([saved("hello"),saved(" "),{"version":1,"active":true,"returnView":"calendar","draft":{"to":"a@example.org","draftAttachments":[{"path":"/tmp/synthetic","data":"discard","filename":"a","size":12}],"replyRecipients":[{"email":"a@example.org"}]},"parked":[{"subject":"parked","accountId":"other"},{}]}, {"version":1,"active":false}, {"version":2,"active":true}]);
+    let path = std::env::temp_dir().join("synthetic");
+    let fixtures = json!([saved("hello"),saved(" "),{"version":1,"active":true,"returnView":"calendar","draft":{"to":"a@example.org","draftAttachments":[{"path":path,"data":"discard","filename":"a","size":12}],"replyRecipients":[{"email":"a@example.org"}]},"parked":[{"subject":"parked","accountId":"other"},{}]}, {"version":1,"active":false}, {"version":2,"active":true}]);
     let script = r#"const fs=require('fs'),vm=require('vm');const ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync('ui/tests/oracles/Recovery.js','utf8').replace(/^\.pragma library\s*/,''),ctx);const fixtures=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(fixtures.map(v=>ctx.parse(JSON.stringify(v)))));"#;
     use std::process::{Command, Stdio};
     let mut child = Command::new("node")

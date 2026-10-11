@@ -219,8 +219,8 @@ fn image(n: &Node, s: &mut State, ctx: &mut Images<'_>) {
     } else {
         source.into()
     };
-    if kind == "inline"
-        || (kind == "remote" && ctx.allowed() && ctx.kept < ctx.limit && !rendered.is_empty())
+    if (kind == "inline" || (kind == "remote" && ctx.allowed() && !rendered.is_empty()))
+        && ctx.admit(&rendered)
     {
         if kind == "remote" {
             ctx.kept += 1
@@ -240,7 +240,7 @@ fn image(n: &Node, s: &mut State, ctx: &mut Images<'_>) {
         s.pending = false;
         return;
     }
-    if kind == "remote" {
+    if kind == "remote" && (!ctx.allowed() || rendered.is_empty()) {
         ctx.blocked += 1
     }
     let alt = source_space(&tree::escape_text(&decode(n.attr("alt"))));
@@ -702,6 +702,6 @@ pub fn render(n: &Node, options: &Value) -> Result<Value, &'static str> {
     let html = serialize(&document)?;
     let size = measure(&document, &html);
     Ok(
-        json!({"html":html,"empty":document.children.is_empty(),"document":document,"images":ctx.kept,"blockedImages":ctx.blocked,"tooHeavy":too_heavy(&size),"complexity":size}),
+        json!({"html":html,"empty":document.children.is_empty(),"document":document,"images":ctx.kept,"blockedImages":ctx.blocked,"tooHeavy":too_heavy_to_draw(&document, &size),"complexity":size}),
     )
 }

@@ -102,6 +102,18 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     self.assertIn("package-release.sh", block)
                     self.assertIn('--host "$PWD/build/app/omamail-app"', block)
 
+    def test_every_native_release_runs_the_complete_standalone_rust_suite(self):
+        command = "cargo test --locked --no-default-features --features standalone,integration-test-credentials"
+        for job in APP_JOBS:
+            with self.subTest(job=job):
+                block = job_block(self.workflow, job)
+                self.assertIn(command, block)
+                self.assertLess(block.index(command), block.index("cargo build --release"))
+                if "windows" in job:
+                    # A failed cargo invocation must stop PowerShell before it
+                    # can build or publish an archive.
+                    self.assertIn(command + '\n          if ($LASTEXITCODE -ne 0) { throw "standalone Rust tests failed" }', block)
+
     def test_pull_requests_build_and_exercise_each_production_standalone_archive(self):
         forbidden = ("gh release create", "gh release edit", "publish-backend.sh")
         for job, (runner, target, archive) in CI_APP_JOBS.items():

@@ -1,14 +1,15 @@
 import QtQuick
 import QtQuick.Controls.Basic as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 Rectangle {
   id: root
 
   property string text: ""
   property string tooltipText: ""
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property color background: Style.normalFillFor(foreground, accent)
   property bool bordered: false
   property bool selected: false

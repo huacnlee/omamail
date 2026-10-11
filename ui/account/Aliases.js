@@ -224,3 +224,26 @@ function sendAsList(address, aliases) {
   }
   return list
 }
+
+// The same list with the mailbox's own address under the account's sender
+// name, which is what the backend writes into the From header for it. Only
+// the primary row: an alias was given its own name, or none, where it was
+// typed. A copy, so a list a provider handed over is not edited in place.
+function withSenderName(rows, name) {
+  var list = Array.isArray(rows) ? rows : []
+  var wanted = trimmed(name)
+  if (wanted === "") return list
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i]
+    if (row && row.isPrimary === true) {
+      var named = {}
+      for (var key in row) named[key] = row[key]
+      named.displayName = wanted
+      out.push(named)
+    } else {
+      out.push(row)
+    }
+  }
+  return out
+}
