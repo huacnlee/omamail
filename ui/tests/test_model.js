@@ -1763,3 +1763,39 @@ assert.strictEqual(model.monitoredNote([]), "")
 // A provider with no move verb is told so in the hints, the way archive is.
 deepEqual(model.unavailableActions({ archive: true, star: true, move: true }), [])
 deepEqual(model.unavailableActions({ archive: true, star: true }), ["move"])
+
+// An opened unread row survives the read and refresh, only in its own view.
+const heldUnread = {scope: "account/unread", row: listBefore[1], order: listBefore, index: 1}
+const readSelected = {id: "b", unread: false, subject: "Opened", inInbox: true}
+const unreadResults = [listBefore[0], listBefore[2], listBefore[3]]
+const keptUnread = model.withOpenUnreadRow(unreadResults, heldUnread,
+  "account/unread", "unread", "b", readSelected)
+deepEqual(keptUnread.map(row => row.id), ["a", "b", "c", "d"])
+assert.strictEqual(keptUnread[1].unread, false)
+assert.strictEqual(keptUnread[1].subject, "Opened")
+deepEqual(unreadResults.map(row => row.id), ["a", "c", "d"])
+for (const [scope, mailbox, id, selected] of [
+  ["other/unread", "unread", "b", readSelected],
+  ["account/unread", "inbox", "b", readSelected],
+  ["account/unread", "unread", "c", {id: "c", unread: false}],
+  ["account/unread", "unread", "b", null],
+  ["account/unread", "unread", "b", {...readSelected, inInbox: false}],
+  ["account/unread", "unread", "b", {...readSelected, unread: true}]
+]) assert.strictEqual(model.withOpenUnreadRow(unreadResults, heldUnread,
+  scope, mailbox, id, selected), unreadResults)
+assert.strictEqual(model.withOpenUnreadRow(listBefore, heldUnread,
+  "account/unread", "unread", "b", readSelected), listBefore)
+deepEqual(model.withOpenUnreadRow([], heldUnread,
+  "account/unread", "unread", "b", readSelected).map(row => row.id), ["b"])
+
+const unifiedRow = {id: "account\u001fb", sourceId: "b", accountId: "account", unread: true}
+const heldUnified = {scope: "all/unread", row: unifiedRow, order: [unifiedRow], index: 0}
+const retainedUnified = model.withOpenUnreadRow([], heldUnified,
+  "all/unread", "unread", unifiedRow.id, readSelected)
+assert.strictEqual(retainedUnified.length, 1)
+assert.strictEqual(retainedUnified[0].id, unifiedRow.id)
+assert.strictEqual(retainedUnified[0].sourceId, "b")
+assert.strictEqual(retainedUnified[0].accountId, "account")
+assert.strictEqual(retainedUnified[0].unread, false)
+assert.strictEqual(model.withOpenUnreadRow([], heldUnified,
+  "all/unread", "unread", unifiedRow.id, {id: "other", unread: false}).length, 0)

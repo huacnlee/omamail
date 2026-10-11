@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Conversation.js" as Conversation
+.import "Unified.js" as Unified
 
 // View models. Anything the panel decides — what the setup card should say,
 // whether a message still belongs in the list after an action, what the badge
@@ -2201,4 +2202,28 @@ function filterRows(rows, query) {
   }
   if (typed !== "") out.sort(function(a, b) { return b.score - a.score || a.sourceIndex - b.sourceIndex })
   return out
+}
+
+// Preserve the opened row in an Unread view without changing backend results.
+// The held order anchors it through refreshes; mailbox and selection changes
+// immediately discard the exception. Read flags come from the live summary.
+function withOpenUnreadRow(rows, held, scope, mailbox, selectedId, selected) {
+  var source = Array.isArray(rows) ? rows : []
+  if (!held || held.scope !== scope || mailbox !== "unread"
+      || !held.row || held.row.id !== selectedId || !selected
+      || (selected.id !== selectedId && (!held.row.sourceId
+        || held.row.sourceId !== selected.id)) || selected.unread !== false
+      || selected.inInbox === false || indexById(source, selectedId) >= 0) return source
+  var row = {}
+  for (var key in held.row) row[key] = held.row[key]
+  for (var field in selected) row[field] = selected[field]
+  // The reader exposes the account-local summary even in a merged list.
+  // Keep the row's qualified identity so selection and actions still route.
+  row.id = held.row.id
+  if (held.row.sourceId) {
+    row.sourceId = held.row.sourceId
+    row.accountId = held.row.accountId
+    if (selected.thread) row.thread = Unified.composeThread(held.row.accountId, selected.thread)
+  }
+  return restoreRow(source, row, held.order, held.index)
 }

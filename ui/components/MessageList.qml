@@ -18,6 +18,7 @@ import "../agent/Agent.js" as Agent
 Column {
   id: root
 
+  property var messages: service ? service.messages : []
   required property var service
   required property color textColor
   required property color accentColor
@@ -47,7 +48,7 @@ Column {
   // one holds the cursor: the answer must not wait on a binding to propagate.
   function boundsFor(id) {
     if (!root.service) return null
-    var index = Model.indexById(root.service.messages, id)
+    var index = Model.indexById(root.messages, id)
     if (index < 0) return null
     var item = rows.itemAt(index)
     if (!item) return null
@@ -62,14 +63,14 @@ Column {
   // With the count, a row stays while its summary is read again by index.
   Repeater {
     id: rows
-    model: root.service.messages.length
+    model: root.messages.length
 
     MessageRow {
       required property int index
       // The array and its count change together, but a row's binding can be
       // asked between the two; an empty summary for that instant draws an
       // empty row rather than throwing on every field.
-      readonly property var modelData: root.service.messages[index] || ({})
+      readonly property var modelData: root.messages[index] || ({})
 
       summary: modelData
       textColor: root.textColor
@@ -104,7 +105,7 @@ Column {
   ListSkeleton {
     width: parent.width
     visible: Model.showInitialListSkeleton(root.service.listLoading,
-      root.service.messages.length)
+      root.messages.length)
     textColor: root.textColor
   }
 
@@ -112,7 +113,7 @@ Column {
   // loading, loaded and empty, or nothing loaded yet.
   Item {
     width: parent.width
-    visible: root.service.messages.length === 0
+    visible: root.messages.length === 0
       && !Model.showInitialListSkeleton(root.service.listLoading, 0)
     implicitHeight: Style.space(70)
 
@@ -184,7 +185,7 @@ Column {
     // MailAccount ends the loading state before it applies the summaries.
     // Judge growth after that callback has finished, when the page is visible.
     Qt.callLater(function() {
-      if (!root.service || root.service.messages.length <= startCount) return
+      if (!root.service || root.messages.length <= startCount) return
       root.loadMoreIfAtFoot()
     })
   }
@@ -198,7 +199,7 @@ Column {
     target: root.service
     function onListLoadingChanged() {
       if (root.service.listLoading) {
-        root.loadStartCount = root.service.messages.length
+        root.loadStartCount = root.messages.length
         return
       }
       var startCount = root.loadStartCount
