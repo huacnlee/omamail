@@ -1,6 +1,7 @@
 QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml \
+	ui/tests/compatibility/tst_published_agent.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
 	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
@@ -62,7 +63,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/AccountRemovalDialog.qml \
 	ui/components/ComposeExitDialog.qml \
 	ui/components/BackBar.qml \
-	ui/components/SettingsPage.qml \
+	ui/components/SettingsPage.qml ui/components/AiSettings.qml \
 	ui/components/SettingsSidebar.qml \
 	ui/components/CalendarSettings.qml \
 	ui/components/CalendarEventComposer.qml \
@@ -99,6 +100,7 @@ test-local: test test-backend-process
 
 test-backend-process:
 	cargo build --locked --target-dir "$(CURDIR)/target" --bin omamail
+	node ui/tests/test_backend_queue.js target/debug/omamail
 	python3 tests/test_backend_process.py
 	python3 tests/test_agent_native_bridge.py
 
@@ -116,6 +118,7 @@ test-js:
 	node app/tests/test_shell_theme.js
 	node ui/tests/test_bar_bridge.js
 	node ui/tests/test_backend_wire.js
+	node ui/tests/test_backend_queue.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js
 	node ui/tests/test_backend_chunks.js
@@ -124,6 +127,7 @@ test-js:
 	node tests/test_gmail_backend.js
 	node ui/tests/test_compose_recovery.js
 	node ui/tests/test_agent.js
+	node ui/tests/test_agent_options.js
 	node ui/tests/test_chat_text.js
 	node ui/tests/test_signature.js
 	node ui/tests/test_outbox.js
@@ -230,6 +234,12 @@ test-shell-libcurl:
 QMLTESTRUNNER := $(shell command -v qmltestrunner6 2>/dev/null \
 	|| ls /usr/lib/qt6/bin/qmltestrunner 2>/dev/null \
 	|| command -v qmltestrunner 2>/dev/null)
+
+# Use the verified release download, not a build from this checkout.
+.PHONY: test-agent-published
+test-agent-published:
+	@test -n "$(PUBLISHED_BACKEND)" || { echo "Set PUBLISHED_BACKEND to the verified pinned executable" >&2; exit 1; }
+	python3 tests/test_agent_published_qml.py --binary "$(PUBLISHED_BACKEND)" --runner "$(QMLTESTRUNNER)"
 
 test-qml:
 	@test -n "$(QMLTESTRUNNER)" || { \

@@ -35,7 +35,7 @@ The standalone executable under `app/` is a host rather than a second implementa
 - `app/qml/imports/` implements only the Quickshell and `qs.*` contracts used by the shared UI. It does not copy mail, calendar, provider, or navigation behavior.
 - `app/src/` owns native process containment, bounded line transport, private settings writes, file watching, external URL dispatch, clipboard access, and notifications. These capabilities are exposed through `Omamail.Native`; QML does not branch by operating system.
 
-The standalone capability object is the product boundary for this release: mail, calendar, and native notifications are enabled; AI, the system tray, and operating-system `mailto:` registration are disabled. Shared views hide or avoid unsupported operations by capability rather than by host identity.
+The standalone capability object is the product boundary: mail, calendar, and native notifications are enabled, as is native AI on Linux and macOS. Windows AI, the system tray, and operating-system `mailto:` registration remain disabled. Shared views hide or avoid unsupported operations by capability rather than by host identity.
 
 This composition boundary is shaped by the shell entry-point contract and Qt's focus and popup behavior. `App.qml` coordinates:
 

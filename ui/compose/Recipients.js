@@ -1,5 +1,42 @@
 .pragma library
 
+// A follow-up to our own message addresses its To list, not its author.
+// Only the draft owner's identities count as self; another mailbox on a
+// merged view can still be a real recipient. Never carry Bcc into a reply.
+function replyFields(summary, mode, ownAddresses) {
+  var source = summary || ({})
+  var own = normalize(ownAddresses)
+  var self = ({})
+  var seen = ({})
+  var to = []
+  var cc = []
+  var i
+  for (i = 0; i < own.length; i++) self[own[i].email.toLowerCase()] = true
+  var sender = cleanContact(source.from)
+  var outgoing = !!(sender && self[sender.email.toLowerCase()])
+  function keep(values, target) {
+    var contacts = normalize(values)
+    for (var j = 0; j < contacts.length; j++) {
+      var email = contacts[j].email
+      var key = email.toLowerCase()
+      if (self[key] || seen[key]) continue
+      seen[key] = true
+      target.push(email)
+    }
+  }
+  if (outgoing) {
+    keep(source.to, to)
+  } else {
+    var replyTo = cleanContact(source.replyTo) || sender
+    keep(replyTo ? [replyTo] : [], to)
+  }
+  if (mode === "replyAll") {
+    if (!outgoing) keep(source.to, cc)
+    keep(source.cc, cc)
+  }
+  return {to: to.join(", "), cc: cc.join(", "), outgoing: outgoing}
+}
+
 function cleanContact(value) {
   var contact = value || ({})
   var name = String(contact.name || "").replace(/[\r\n]+/g, " ").trim()
@@ -122,4 +159,3 @@ function filter(values, query, limit) {
   }
   return out
 }
-

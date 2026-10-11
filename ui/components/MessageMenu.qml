@@ -250,6 +250,7 @@ Item {
       MenuRow {
         id: aiRow
         objectName: "message-menu-ai"
+        enabled: !!root.service && root.service.agentAvailable !== false
         visible: !!root.service && root.service.hasAgent !== false
         text: "Ask AI..."
         onActivated: {

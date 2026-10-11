@@ -11,7 +11,7 @@ use crate::{account, message};
 pub struct Session {
     uploads: std::sync::Mutex<upload::Uploads>,
     reader: std::sync::Arc<std::sync::Mutex<reader::ReaderStore>>,
-    #[cfg(all(feature = "agent", target_os = "linux"))]
+    #[cfg(all(feature = "agent", unix))]
     agent_context: crate::agent::context::Contexts,
     upload_jobs: tokio::sync::Semaphore,
     pub(crate) gmail: std::sync::Arc<crate::providers::gmail::Session>,
@@ -39,7 +39,7 @@ impl Default for Session {
         Self {
             uploads: Default::default(),
             reader: Default::default(),
-            #[cfg(all(feature = "agent", target_os = "linux"))]
+            #[cfg(all(feature = "agent", unix))]
             agent_context: Default::default(),
             upload_jobs: tokio::sync::Semaphore::new(2),
             mail: crate::sync::Sync::new(gmail.clone(), jmap.clone(), queries.clone()),
@@ -59,7 +59,7 @@ impl Session {
     // re-enter this dispatcher; embedding every provider future here overflowed
     // the worker stack in the real Quickshell large-request integration test.
     pub async fn dispatch(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
-        #[cfg(not(all(feature = "agent", target_os = "linux")))]
+        #[cfg(not(all(feature = "agent", unix)))]
         if method.starts_with("agent.") {
             return Err("unknown_method");
         }
@@ -75,7 +75,7 @@ impl Session {
         if matches!(method, "reader.open" | "reader.render" | "reader.cancel") {
             return Box::pin(self.reader_call(method, params)).await;
         }
-        #[cfg(all(feature = "agent", target_os = "linux"))]
+        #[cfg(all(feature = "agent", unix))]
         if matches!(method, "agent.context" | "agent.contextCancel") {
             return Box::pin(self.agent_context.call(method, params, self)).await;
         }
@@ -101,10 +101,11 @@ impl Session {
             }
             return Ok(crate::providers::domain::snapshot());
         }
-        #[cfg(all(feature = "agent", target_os = "linux"))]
+        #[cfg(all(feature = "agent", unix))]
         if matches!(
             method,
             "agent.jobsList"
+                | "agent.providerStatus"
                 | "agent.jobsProjection"
                 | "agent.jobStart"
                 | "agent.jobShow"
@@ -479,7 +480,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
             "protocol": 1, "apiVersion": 6, "methods": methods::available(),
-            "capabilities": {"agent": cfg!(all(feature = "agent", target_os = "linux"))}
+            "capabilities": {"agent": cfg!(all(feature = "agent", unix))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
         "accounts.list" => account::list(),
@@ -503,7 +504,7 @@ mod api_contract_tests {
             .unwrap()
             .iter()
             .filter(|method| {
-                cfg!(all(feature = "agent", target_os = "linux"))
+                cfg!(all(feature = "agent", unix))
                     || !method.as_str().unwrap().starts_with("agent.")
             })
             .collect();

@@ -35,6 +35,11 @@ Item {
   property bool connected: false
   property var protocolInfo: null
   property var pending: ({})
+  property var queued: []
+  property bool draining: false
+  property var uploadQueue: Upload.makeQueue(function() {
+    root.stopForFailure("Backend upload cleanup failed")
+  })
   property int sequence: 0
   property string failure: ""
   property var responseTransfer: null
@@ -50,37 +55,25 @@ Item {
   signal requestFailed(string method, var error)
 
   function parseMessage(raw, callback) {
-    Upload.parse(raw, function(method, params, done) {
-      root.call(method, params, done)
-    }, function() { return root.ready }, callback)
+    return Upload.parse(raw, function(method, params, done) {
+      return root.call(method, params, done)
+    }, function() { return root.ready }, callback, uploadQueue)
   }
 
   function putBodyCache(accountId, id, body, callback) {
-    Upload.putBody(accountId, id, body, function(method, params, done) {
-      root.call(method, params, done)
-    }, function() { return root.ready }, callback)
+    return Upload.putBody(accountId, id, body, function(method, params, done) {
+      return root.call(method, params, done)
+    }, function() { return root.ready }, callback, uploadQueue)
   }
 
   function call(method, params, callback) {
     // Keep each physical frame small even for Unicode-heavy MIME/JSON data.
     if (JSON.stringify(params).length > 200000) {
-      var alive = true
-      Upload.request(method, params, function(nextMethod, nextParams, done) {
-        // A cancelled upload must never reach its eventual domain operation.
-        // Permit cleanup of bytes already staged by the backend.
-        if (!alive && nextMethod !== "upload.discard") {
-          done(null, {code:-32010,message:"Request cancelled"})
-          return
-        }
-        root.request(nextMethod, nextParams, done, false)
-      }, function() { return root.ready }, function(result, error) {
-        if (!alive) return
-        alive = false
-        if (typeof callback === "function") callback(result, error)
-      })
-      return {cancel:function() { alive = false }}
+      return Upload.request(method, params, function(nextMethod, nextParams, done) {
+        return root.request(nextMethod, nextParams, done, false)
+      }, function() { return root.ready }, callback, uploadQueue)
     }
-    request(method, params, callback, false)
+    return request(method, params, callback, false)
   }
 
   function request(method, params, callback, internal) {
@@ -95,22 +88,49 @@ Item {
       done(null, { code: -32010, message: message })
       return
     }
-    if (Object.keys(pending).length >= 64) {
-      done(null, { code: -32011, message: "Too many pending requests" })
-      return
-    }
-    var operation = method === "request.upload" && params ? params.method : method
     var refusal = Compatibility.unreleasedRefusal(operation, unreleasedMethods, needsUpdate)
     if (refusal !== null) {
       done(null, refusal)
       return
     }
     var id = "qml-" + (++sequence)
-    var next = Object.assign({}, pending)
-    var timeout = operation === "agent.context" ? 65000 : 30000
-    next[id] = { callback: done, deadline: Date.now() + timeout }
-    pending = next
-    child.write(Wire.request(id, method, params))
+    // Snapshot the payload now, just as an immediately written request did.
+    // The caller may reuse or mutate its model while this frame is waiting.
+    var entry = { id: id, frame: Wire.request(id, method, params),
+      callback: done, operation: operation, cancelled: false }
+    queued.push(entry)
+    drainRequests()
+    var handle = { withdraw: function() {
+      var index = root.queued.indexOf(entry)
+      if (index < 0) return false
+      entry.cancelled = true
+      root.queued.splice(index, 1)
+      entry.frame = null
+      root.maybeRequestQuit()
+      return true
+    } }
+    handle.cancel = function() { handle.withdraw(); entry.cancelled = true }
+    return handle
+  }
+
+  // Only sent frames occupy a slot or start their request deadline. New work
+  // joins the tail even from a response callback, so a busy account cannot
+  // repeatedly jump ahead of the other accounts already waiting.
+  function drainRequests() {
+    if (draining || !connected) return
+    draining = true
+    try {
+      while (queued.length > 0 && Object.keys(pending).length < 64 && connected) {
+        var entry = queued.shift()
+        var next = Object.assign({}, pending)
+        var timeout = entry.operation === "agent.context" ? 65000 : 30000
+        entry.deadline = Date.now() + timeout
+        next[entry.id] = entry
+        pending = next
+        child.write(entry.frame)
+        entry.frame = null
+      }
+    } finally { draining = false }
   }
 
   function shutdown(callback) {
@@ -126,6 +146,7 @@ Item {
     if (shutdownStarted) return
     shutdownStarted = true
     shutdownDeadline.restart()
+    uploadQueue.fail({ code: -32010, message: "Backend is shutting down" })
     if (!connected) {
       // A configured process may be between construction and onStarted. Let
       // that signal enter the internal quit path; the deadline still bounds it.
@@ -137,7 +158,7 @@ Item {
   }
 
   function maybeRequestQuit() {
-    var count = Object.keys(pending).length
+    var count = Object.keys(pending).length + queued.length
     if (!Compatibility.shouldRequestQuit(stopping, count, quitRequested)) return
     // A failure may have disconnected the process while the response callback
     // was running. onExited (or the confirmation deadline) owns that result;
@@ -179,12 +200,26 @@ Item {
   function failPending(message) {
     responseTransfer = null
     var previous = pending
+    var waiting = queued
     pending = ({})
+    queued = []
     connected = false
     protocolInfo = null
     failure = message
+    var error = { code: -32010, message: message }
+    uploadQueue.fail(error)
     for (var id in previous)
-      previous[id].callback(null, { code: -32010, message: message })
+      failEntry(previous[id], error)
+    for (var i = 0; i < waiting.length; i++)
+      failEntry(waiting[i], error)
+  }
+
+  // A receiver may have disappeared while its request was waiting. One
+  // callback must not strand the remaining queue or interrupt process stop.
+  function failEntry(entry, error) {
+    if (entry.cancelled) return
+    try { entry.callback(null, error) }
+    catch (failure) { console.warn("Backend request callback failed") }
   }
 
   function receive(line) {
@@ -207,8 +242,12 @@ Item {
     var next = Object.assign({}, pending)
     delete next[reply.id]
     pending = next
-    entry.callback(reply.result, reply.error || null)
-    maybeRequestQuit()
+    try {
+      if (!entry.cancelled) entry.callback(reply.result, reply.error || null)
+    } finally {
+      drainRequests()
+      maybeRequestQuit()
+    }
   }
 
   Timer {
@@ -272,7 +311,7 @@ Item {
     }
     onExited: function(exitCode) {
       var clean = Compatibility.isCleanShutdown(
-        root.stopping, root.quitRequested, Object.keys(root.pending).length,
+        root.stopping, root.quitRequested, Object.keys(root.pending).length + root.queued.length,
         root.shutdownFailure !== null, exitCode)
       child.running = false
       if (clean) {

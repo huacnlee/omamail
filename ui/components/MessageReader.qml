@@ -134,6 +134,18 @@ Item {
   // is what the list and the compose view already hand back.
   readonly property string selectedId: service ? String(service.selectedId || "") : ""
 
+  readonly property var attachments: service ? service.selectedAttachments || [] : []
+  property bool attachmentsExpanded: false
+  onSelectedIdChanged: resetAttachments()
+  onServiceChanged: resetAttachments()
+  onAttachmentsChanged: if (attachments.length === 0) resetAttachments()
+
+  function resetAttachments() {
+    attachmentsExpanded = false
+    attachmentFlick.cancelFlick()
+    attachmentFlick.contentY = 0
+  }
+
   // Which way this message runs.
   //
   // The subject is asked separately from the body, and not as an optimisation:
@@ -774,32 +786,76 @@ Item {
     spacing: Style.space(4)
     visible: !!root.summary
 
-    Repeater {
-      model: root.service ? root.service.selectedAttachments : []
+    // The count is always one row. Expanding files must not let their number
+    // take the body away again: they scroll separately and use at most 40% of
+    // the space left below the header, capped at a short list on tall windows.
+    Button {
+      id: attachmentToggle
+      objectName: "attachment-toggle"
+      visible: root.attachments.length > 0
+      text: root.attachments.length + (root.attachments.length === 1
+        ? " attachment" : " attachments") + (root.attachmentsExpanded ? " · Hide" : " · Show")
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      fontSize: Style.font.caption
+      horizontalPadding: Style.space(6)
+      verticalPadding: Style.space(3)
+      selected: root.attachmentsExpanded
+      onClicked: root.attachmentsExpanded = !root.attachmentsExpanded
+    }
 
-      AttachmentRow {
-        required property var modelData
-        width: parent.width
-        attachment: modelData
-        // Asked of the service by message and attachment rather than looked up
-        // by attachment alone: in a merged list the key is the mailbox's as
-        // well, and a bare id found nothing, so the row never went busy.
-        saving: !!root.service && root.service.attachmentIsSaving(root.selectedId,
-          modelData && modelData.attachmentId ? modelData.attachmentId : "")
-        textColor: root.textColor
-        dimColor: root.dimColor
-        dimmerColor: root.dimmerColor
-        panelFontFamily: root.panelFontFamily
-        onOpenRequested: function(attachment) {
-          if (root.service && root.summary)
-            root.service.openAttachment(root.selectedId, attachment)
-        }
-        onSaveRequested: function(attachment) {
-          // `selectedId`, like every other action on this message: `summary.id`
-          // is the id the owning account issued, which reaches no mailbox in a
-          // merged list and so saved from whichever one was active.
-          if (root.service && root.summary)
-            root.service.saveAttachment(root.selectedId, attachment)
+    Flickable {
+      id: attachmentFlick
+      objectName: "attachment-scroller"
+      width: parent.width
+      visible: attachmentToggle.visible && root.attachmentsExpanded
+      height: visible ? Math.min(contentHeight, Style.space(160), Math.max(0,
+        root.height - bodyFlick.y - actionsRow.implicitHeight
+          - attachmentToggle.height - Style.space(18)) * 0.4) : 0
+      contentWidth: width
+      contentHeight: attachmentRows.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+      flickableDirection: Flickable.VerticalFlick
+      WheelScroller { view: attachmentFlick }
+      ScrollBar.vertical: ScrollBar { id: attachmentScrollBar; policy: ScrollBar.AsNeeded }
+
+      Column {
+        id: attachmentRows
+        // Keep the last action clear of the scrollbar's pointer target.
+        width: parent.width - (attachmentScrollBar.visible
+          ? attachmentScrollBar.width + Style.space(4) : 0)
+        spacing: Style.space(4)
+
+        Repeater {
+          model: root.attachments
+
+          AttachmentRow {
+            required property var modelData
+            width: attachmentRows.width
+            attachment: modelData
+            // Asked of the service by message and attachment rather than looked up
+            // by attachment alone: in a merged list the key is the mailbox's as
+            // well, and a bare id found nothing, so the row never went busy.
+            saving: !!root.service && root.service.attachmentIsSaving(root.selectedId,
+              modelData && modelData.attachmentId ? modelData.attachmentId : "")
+            textColor: root.textColor
+            dimColor: root.dimColor
+            dimmerColor: root.dimmerColor
+            panelFontFamily: root.panelFontFamily
+            onOpenRequested: function(attachment) {
+              if (root.service && root.summary)
+                root.service.openAttachment(root.selectedId, attachment)
+            }
+            onSaveRequested: function(attachment) {
+              // `selectedId`, like every other action on this message: `summary.id`
+              // is the id the owning account issued, which reaches no mailbox in a
+              // merged list and so saved from whichever one was active.
+              if (root.service && root.summary)
+                root.service.saveAttachment(root.selectedId, attachment)
+            }
+          }
         }
       }
     }
