@@ -377,6 +377,33 @@ assert.strictEqual(calendar.formatWhen(twoDays),
   assert.strictEqual(at("20291231T120000").ms, Date.UTC(2029, 11, 31, 12, 0, 0))
 }
 
+// Sparse RDATE histories must keep the nearest past transition even when a
+// later listed date lies ahead of the reading and the previous year is empty.
+{
+  const sparse = [
+    "BEGIN:VTIMEZONE", "TZID:Custom/Sparse",
+    "BEGIN:STANDARD", "DTSTART:19900101T030000",
+    "RDATE:20180101T030000",
+    "TZOFFSETFROM:+0200", "TZOFFSETTO:+0100", "END:STANDARD",
+    "BEGIN:DAYLIGHT", "DTSTART:20000101T020000",
+    "RDATE:20400101T020000,20200101T020000",
+    "TZOFFSETFROM:+0100", "TZOFFSETTO:+0200", "END:DAYLIGHT",
+    "END:VTIMEZONE"
+  ]
+  const at = (local) => calendar.invitationFrom([
+    "BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:REQUEST"].concat(sparse, [
+    "BEGIN:VEVENT", "UID:sparse", "SUMMARY:Appointment",
+    "DTSTART;TZID=Custom/Sparse:" + local,
+    "END:VEVENT", "END:VCALENDAR"]).join("\r\n")).start
+  assert.strictEqual(at("20150115T120000").ms, Date.UTC(2015, 0, 15, 10),
+    "a future RDATE must not hide the component's earlier DTSTART")
+  assert.strictEqual(at("20260115T120000").ms, Date.UTC(2026, 0, 15, 10),
+    "the nearest past RDATE remains in force across empty years")
+  assert.strictEqual(at("20200101T015959").ms, Date.UTC(2020, 0, 1, 0, 59, 59))
+  assert.strictEqual(at("20200101T020000").ms, Date.UTC(2020, 0, 1, 0),
+    "the current year's transition still takes effect at its wall-clock boundary")
+}
+
 // ------------------------------------------------------------- formatting
 
 assert.strictEqual(calendar.formatWhen(invite),

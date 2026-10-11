@@ -426,7 +426,7 @@ function zoneRule(component, offset) {
     offset: offset,
     from: parseOffsetMinutes(textOf(component, "TZOFFSETFROM")),
     start: parseDateValue(textOf(component, "DTSTART")),
-    parts: null, until: null, dates: {}, listed: false, lastYear: null
+    parts: null, until: null, dates: {}, dateYears: [], listed: false, lastYear: null
   }
   if (!rule.start) return rule
   var recurrence = property(component, "RRULE")
@@ -448,10 +448,14 @@ function zoneRule(component, offset) {
   }
   for (var d = 0; d < dates.length; d++) {
     var year = dates[d].year
-    if (!rule.dates[year]) rule.dates[year] = []
+    if (!rule.dates[year]) {
+      rule.dates[year] = []
+      rule.dateYears.push(year)
+    }
     rule.dates[year].push(naiveKey(dates[d]))
     if (rule.lastYear === null || year > rule.lastYear) rule.lastYear = year
   }
+  rule.dateYears.sort(function(a, b) { return a - b })
   return rule
 }
 
@@ -508,8 +512,9 @@ function recurringTransition(rule, year) {
 
 // The transitions a reading in `year` has to choose between. Every one from
 // an earlier year is behind the reading, so of those only the latest is kept;
-// the year's own follow it. A rule is asked about the year before and, for a
-// zone with a history, about its final year and the ones either side — UNTIL
+// the year's own follow it. Listed histories use the nearest occupied past
+// year. Recurring rules use the year before and, for a zone with a history,
+// their final year and the ones either side — UNTIL
 // is UTC, so the last transition can sit in the year before or after the one
 // UNTIL names. Later years cannot be behind a reading in this one.
 function transitionsAround(plan, year) {
@@ -519,8 +524,22 @@ function transitionsAround(plan, year) {
   for (var r = 0; r < plan.rules.length; r++) {
     var rule = plan.rules[r]
     var years = [year - 1]
+    // Listed histories can have decades between dates and more dates still
+    // ahead. Find the latest occupied year before this one, not merely the
+    // previous year or the final year in the list. The parsed year index is
+    // sorted once; repeated recurrence lookups need only a binary search.
+    if (plan.history && !rule.parts) {
+      var low = 0
+      var high = rule.dateYears.length
+      while (low < high) {
+        var middle = Math.floor((low + high) / 2)
+        if (rule.dateYears[middle] < year) low = middle + 1
+        else high = middle
+      }
+      years = low > 0 ? [rule.dateYears[low - 1]] : []
+    }
     var last = plan.history ? rule.lastYear : null
-    if (last !== null && last < year - 1) years.push(last - 1, last, last + 1)
+    if (rule.parts && last !== null && last < year - 1) years.push(last - 1, last, last + 1)
     for (var y = 0; y < years.length; y++) {
       var earlier = transitionsIn(rule, years[y])
       for (var e = 0; e < earlier.length; e++) {
