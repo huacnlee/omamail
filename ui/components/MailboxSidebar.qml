@@ -35,6 +35,8 @@ Item {
   // opens the row it sits on cannot disagree.
   property var slots: []
   property bool numbersVisible: false
+  // The Flagged total to draw beside Flagged; 0 draws none.
+  property int starredCount: 0
 
   // The labels as a tree: a child indented under its parent, a parent that
   // folds. Model.labelTree decides the shape; this draws it.
@@ -82,12 +84,13 @@ Item {
           required property var modelData
           label: modelData.label
           icon: modelData.icon
-          // No count on the mailboxes. An inbox that is thousands of messages
-          // deep reports "999+" forever, which is a number that never changes
-          // and therefore says nothing. The bar's dot carries whether anything
-          // is waiting; the labels below still count, because those are lists
-          // the user built and their sizes mean something.
-          count: 0
+          // No count on the mailboxes: an inbox thousands deep reads "999+" forever,
+          // which says nothing, and the bar's dot carries whether anything is
+          // waiting. Flagged is the exception where the listing counts that view:
+          // a flagged list is short and the user's own, like the labels below.
+          // It is a size, not mail waiting, so it is drawn as a tally.
+          count: modelData.key === "starred" ? root.starredCount : 0
+          tally: true
           selected: !root.calendarSelected && !!root.service
             && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === "" && root.service.rawQuery === ""
@@ -184,6 +187,9 @@ Item {
     required property string label
     property string icon: ""
     property int count: 0
+    // A count that is a size rather than mail waiting: secondary text in the
+    // regular weight, and no dot on a collapsed rail, where the tooltip says it.
+    property bool tally: false
     property bool selected: false
     property int slotNumber: 0
     // A label under another is stepped in one indent per level; a parent
@@ -305,14 +311,15 @@ Item {
       anchors.rightMargin: fold.visible ? Style.space(2) : Style.space(8)
       anchors.verticalCenter: parent.verticalCenter
       text: Model.badgeText(entry.count, 999)
-      color: root.accentColor
+      color: entry.tally ? root.dimColor : root.accentColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption
-      font.bold: true
+      font.bold: !entry.tally
     }
 
     Rectangle {
-      visible: entry.count > 0 && root.collapsed && !entry.showsNumber
+      objectName: "mailbox-entry-dot"
+      visible: entry.count > 0 && root.collapsed && !entry.showsNumber && !entry.tally
       anchors.right: parent.right
       anchors.rightMargin: Style.space(3)
       anchors.top: parent.top
@@ -349,7 +356,7 @@ Item {
       objectName: "label-tooltip"
       visible: hover.hovered
       text: (entry.fullPath !== "" ? entry.fullPath : entry.label)
-        + (entry.count > 0 ? " · " + entry.count : "")
+        + (entry.count > 0 ? " · " + entry.count + (entry.tally ? " in all" : "") : "")
       fontFamily: root.panelFontFamily
     }
   }

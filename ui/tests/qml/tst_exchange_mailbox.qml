@@ -1,14 +1,13 @@
 import QtQuick 2.15
 import QtTest 1.3
-import qs.Commons
 import "../.." as Omamail
-import "../../components" as Mail
 import "../../account/Unified.js" as Unified
+import "transports.js" as Transports
 
 // Reading and changing an Exchange mailbox: what each action sends, what it does
-// with a partial failure, and how a row in a merged list finds its own mailbox.
-// A request names the account and what was asked, and nothing that could
-// authenticate or redirect it. The rail draws no count on a mailbox row.
+// with a partial failure, how the Flagged count follows, and how a row in a merged
+// list finds its own mailbox. A request names the account and what was asked, and
+// nothing that could authenticate or redirect it.
 Item {
   width: 900
   height: 600
@@ -30,17 +29,6 @@ Item {
     shell: fakeShell
   }
 
-  Mail.MailboxSidebar {
-    id: rail
-    width: 220
-    height: 600
-    service: mailService
-    textColor: Color.foreground
-    accentColor: Color.accent
-    dimColor: Color.foreground
-    panelFontFamily: "monospace"
-  }
-
   // Another mailbox, signed in, for a client to find in place of its own.
   QtObject {
     id: otherMailbox
@@ -53,6 +41,8 @@ Item {
     name: "ExchangeMailbox"
     service: mailService
     app: app
+    // The sequence of the last `mail.updated` a test sent; each must be newer.
+    property int polls: 1
 
     function row(id, starred) {
       return { id: id, threadId: "", from: { email: "x@corp.example.test", display: "X" }, subject: id,
@@ -69,14 +59,15 @@ Item {
       return account
     }
 
-    // The visible numbers drawn on the rail, as the rows they sit on name them.
+    // The visible numbers drawn on the window's own rail, as the rows they sit on
+    // name them.
     function badges() {
       var out = []
       function walk(item) {
         if (item.objectName === "mailbox-entry-badge" && item.visible) out.push(item.parent.label + " " + item.text)
         for (var i = 0; i < (item.children || []).length; i++) walk(item.children[i])
       }
-      walk(rail)
+      walk(app)
       return out
     }
 
@@ -308,31 +299,249 @@ Item {
       compare(said[1], "", "another request is no search")
     }
 
-    // No mailbox row carries a count, Flagged included when its own listing
-    // says how many there are, and nothing asks the server for one just to draw
-    // the rail.
-    function test_the_rail_draws_no_count_on_a_mailbox() {
-      server.flagged = 5
-      var account = ready()
-      account.refreshCounts()
-      wait(150)
-      compare(sent("exchange.list").filter(function(r) {
-        return r.params.query === "role:inbox flagged"
-      }).length, 0)
-      mailService.selectMailbox("starred")
-      tryVerify(function() {
-        return sent("exchange.list").some(function(r) { return r.params.query === "role:inbox flagged" })
-      }, 2000, "the Flagged listing is read, and says five")
-      tryCompare(account, "listLoaded", true, 2000)
-      wait(50)
-      compare(badges(), [])
+    // The Flagged count's requests, oldest first.
+    function flaggedAsks() {
+      return sent("exchange.list").filter(function(r) { return r.params.query === "role:inbox flagged" })
     }
 
-    // A row in a merged list is acted on by the mailbox it came from, under that
-    // mailbox's own id, and the rail still draws no count.
+    // Rust polls an Exchange mailbox on its own timer and says so with
+    // `mail.updated`, window open or not.
+    function native() {
+      mailService.backend.protocolInfo = { apiVersion: 8, protocol: 1, version: "0.0.0",
+        methods: ["mail.watch", "mail.unwatch", "mail.check"] }
+      fixture.answers["mail.watch"] = function(params) {
+        return { accountId: params.accountId, sequence: 1, estimate: 0, messages: [], error: "synthetic" }
+      }
+      fixture.answers["mail.check"] = {}
+    }
+
+    function poll() {
+      t.polls = t.polls + 1
+      mailService.backend.notification("mail.updated", { accountId: accountId, sequence: t.polls, estimate: 0,
+        messages: [], error: "", fingerprint: "poll" + t.polls })
+    }
+
+    // Flagged count reads wait here, to be answered in whatever order a test says.
+    function hold(account) {
+      var backend = account.api.backend
+      var through = backend.call
+      var held = []
+      backend.call = function(method, params, callback) {
+        if (method !== "exchange.list" || params.query !== "role:inbox flagged") return through(method, params, callback)
+        var request = { method: method, params: params, callback: callback, answered: false }
+        server.calls.push(request)
+        held.push(request)
+        return server.calls.length
+      }
+      return held
+    }
+
+    function answer(request, estimate) {
+      Transports.reply(request, { page: { ids: [], threadIds: [], nextPageToken: "", estimate: estimate },
+        rows: [], warning: null }, "")
+    }
+
+    // Only Exchange shows a count, and only beside Flagged; the account asks the
+    // server, so the guess is never ahead of what it says.
+    function test_the_flagged_row_counts_what_the_server_says_is_flagged() {
+      server.flagged = 7
+      var account = ready()
+      mailService.windowOpen = true
+      tryCompare(account, "starredCount", 7, 2000)
+      compare(app.starredCount, 7, "the window hands it to the rail")
+      tryVerify(function() { return badges().length === 1 }, 1000)
+      compare(badges(), ["Flagged 7"], "on the Flagged row and no other")
+      compare(flaggedAsks()[0].params.limit, 1, "a page of one row: only its estimate is wanted")
+
+      // An action reads it again once it is done.
+      wait(150)
+      account.messages = [row("one")]
+      server.flagged = 8
+      verify(account.act("one", "star", false, false))
+      tryCompare(account, "starredCount", 8, 2000)
+
+      // A read that fails leaves the last number.
+      server.script["exchange.list"] = function() { return { error: "exchange_network_failed" } }
+      server.flagged = 0
+      account.refreshCounts()
+      wait(100)
+      compare(account.starredCount, 8)
+      server.script = ({})
+      account.refreshCounts()
+      tryCompare(account, "starredCount", 0, 2000)
+      compare(badges(), [], "an empty list draws nothing")
+    }
+
+    // Each mailbox has its own total, and the window's rail draws the one on
+    // screen: switching mailboxes switches the number, and a mailbox that is not
+    // shown is not asked.
+    function test_the_flagged_number_follows_the_mailbox_on_screen() {
+      var ada = "exchange:ada@corp.example.test"
+      keyring.entries[accountId] = secret
+      keyring.entries[ada] = "ada-synthetic-passw0rd"
+      server.script["exchange.list"] = function(request) {
+        if (request.params.query !== "role:inbox flagged") return null
+        return { result: { page: { ids: [], threadIds: [], nextPageToken: "",
+          estimate: request.params.accountId === ada ? 2 : 9 }, rows: [], warning: null } }
+      }
+      var jane = seed(null, [entryFor("ada@corp.example.test")])
+      var other = mailService.accountAt(0)
+      compare(other.accountId, ada)
+      install(other)
+      tryVerify(function() { return jane.ready && other.ready }, 2000)
+      mailService.windowOpen = true
+      tryVerify(function() { return badges().join() === "Flagged 9" }, 2000, "Jane's: " + badges())
+      compare(other.starredCount, 0, "Ada's mailbox is not on screen and is not asked")
+      compare(flaggedAsks().filter(function(r) { return r.params.accountId === ada }).length, 0)
+
+      verify(mailService.switchTo(ada))
+      tryVerify(function() { return badges().join() === "Flagged 2" }, 2000, "Ada's: " + badges())
+      compare(app.starredCount, 2)
+      verify(mailService.switchTo(accountId))
+      tryVerify(function() { return badges().join() === "Flagged 9" }, 2000, "Jane's again: " + badges())
+    }
+
+    // Nothing draws the count with the window shut, so a poll asks nothing of it.
+    function test_a_poll_with_the_window_closed_asks_for_no_flagged_count() {
+      native()
+      server.flagged = 3
+      var account = ready()
+      compare(account.nativePolling, true)
+      compare(mailService.windowOpen, false)
+      wait(150)
+      poll()
+      account.refreshCounts()
+      wait(150)
+      compare(flaggedAsks().length, 0)
+      compare(account.starredCount, 0)
+    }
+
+    // With the window open on the mailbox a poll reads the total again, so it
+    // follows what was flagged elsewhere as the list does.
+    function test_a_poll_with_the_window_open_reads_the_flagged_count_again() {
+      native()
+      server.flagged = 3
+      var account = ready()
+      mailService.windowOpen = true
+      tryCompare(account, "starredCount", 3, 2000)
+      server.flagged = 5
+      account.starred.readAt = 0
+      poll()
+      tryCompare(account, "starredCount", 5, 2000)
+    }
+
+    // Opening the window on the mailbox asks once, behind the listing it opens with.
+    function test_opening_the_window_on_the_mailbox_reads_the_flagged_count_once() {
+      native()
+      server.flagged = 4
+      var account = ready()
+      wait(150)
+      compare(flaggedAsks().length, 0, "not while the window is shut")
+      var before = server.calls.length
+      mailService.windowOpen = true
+      tryCompare(account, "starredCount", 4, 2000)
+      wait(150)
+      compare(flaggedAsks().length, 1)
+      var lists = server.calls.slice(before).filter(function(r) { return r.method === "exchange.list" })
+      verify(lists.length > 1 && lists[0].params.query !== "role:inbox flagged",
+        "the mailbox's own listing goes first: " + JSON.stringify(lists.map(function(r) { return r.params.query })))
+    }
+
+    // A refresh checks for new mail and reads the count once; the check's answer
+    // is a poll like any other and asks nothing more.
+    function test_a_refresh_reads_the_flagged_count_once() {
+      native()
+      fixture.answers["mail.check"] = function() { Qt.callLater(poll); return {} }
+      server.flagged = 2
+      var account = ready()
+      mailService.windowOpen = true
+      tryCompare(account, "starredCount", 2, 2000)
+      wait(200)
+      var asked = flaggedAsks().length
+      var updates = t.polls
+      account.refreshCounts()
+      tryVerify(function() { return t.polls === updates + 1 }, 2000, "the check was answered with a poll")
+      wait(200)
+      compare(flaggedAsks().length, asked + 1)
+    }
+
+    // Without Rust's poll the refresh lists new mail itself, and that goes first.
+    function test_the_flagged_count_is_asked_after_the_new_mail_listing() {
+      var account = ready()
+      mailService.windowOpen = true
+      wait(200)
+      var before = server.calls.length
+      account.refreshCounts()
+      wait(200)
+      var queries = server.calls.slice(before).filter(function(r) { return r.method === "exchange.list" })
+        .map(function(r) { return r.params.query })
+      verify(queries.indexOf("role:inbox unseen") >= 0, JSON.stringify(queries))
+      verify(queries.indexOf("role:inbox unseen") < queries.indexOf("role:inbox flagged"), JSON.stringify(queries))
+    }
+
+    // An answer overtaken by a newer question is dropped.
+    function test_a_late_answer_does_not_overwrite_a_newer_flagged_count() {
+      var account = ready()
+      mailService.windowOpen = true
+      wait(200)
+      var held = hold(account)
+      account.starred.refresh()
+      account.starred.refresh()
+      compare(held.length, 2)
+      answer(held[1], 4)
+      compare(account.starredCount, 4)
+      answer(held[0], 9)
+      compare(account.starredCount, 4, "the older answer came last and changed nothing")
+    }
+
+    function test_a_mailbox_signed_out_keeps_no_count() {
+      server.flagged = 3
+      var account = ready()
+      mailService.windowOpen = true
+      tryCompare(account, "starredCount", 3, 2000)
+      account.signOut()
+      compare(account.starredCount, 0)
+    }
+
+    // A refused password leaves the mailbox ready but its count unknown, and a
+    // read sent before the refusal cannot bring the old number back.
+    function test_a_refused_password_clears_the_flagged_count() {
+      server.flagged = 3
+      var account = ready()
+      mailService.windowOpen = true
+      tryCompare(account, "starredCount", 3, 2000)
+      var held = hold(account)
+      account.starred.refresh()
+      compare(held.length, 1)
+      server.script["exchange.list"] = function() { return { error: "exchange_unauthorized" } }
+      account.api.listMessages("role:inbox", 25, "", function() {})
+      tryCompare(account, "credentialsRejected", true, 2000)
+      compare(account.ready, true)
+      compare(account.starredCount, 0)
+      answer(held[0], 3)
+      compare(account.starredCount, 0)
+    }
+
+    function test_a_mailbox_that_stops_being_ready_keeps_no_count() {
+      server.flagged = 3
+      var account = ready()
+      mailService.windowOpen = true
+      tryCompare(account, "starredCount", 3, 2000)
+      mailService.backend.connected = false
+      tryCompare(account, "ready", false, 1000)
+      compare(account.starredCount, 0)
+      mailService.backend.connected = true
+      tryCompare(account, "ready", true, 1000)
+      tryCompare(account, "starredCount", 3, 2000, "read again once it is back")
+    }
+
+    // A merged list has no one mailbox to ask, so it reads and draws no count; and
+    // a row in it is acted on by the mailbox it came from, under that mailbox's own id.
     function test_a_row_in_a_merged_list_goes_to_the_exchange_mailbox_and_the_list_has_no_count() {
+      server.flagged = 5
       keyring.entries[accountId] = secret
       mailService.applySettings({ unifiedMailboxes: true })
+      mailService.windowOpen = true
       var list = ({ version: 1, activeId: accountId, accounts: [
         { id: accountId, email: "jane@corp.example.test", provider: "exchange", clientId: "", clientSecret: "",
           exchange: { ewsUrl: ewsUrl, username: "", authScheme: "auto" }, label: "", signature: "" },
@@ -350,11 +559,16 @@ Item {
       tryVerify(function() {
         return server.calls.some(function(request) { return request.answered })
       }, 2000)
+      wait(150)
+      compare(mailService.unified, true)
+      compare(account.windowOpen, true)
+      compare(flaggedAsks().length, 0, "nothing asks for a count the merged rail cannot draw")
+      account.starred.count = 5
+      compare(app.starredCount, 0, "and a number the mailbox holds is not drawn")
       account.messages = [row("abcd2345")]
       account.listLoaded = true
       mailService.bumpListEpoch()
       wait(50)
-      compare(mailService.unified, true)
       var merged = Unified.unifiedId(accountId, "abcd2345")
       compare(mailService.hostForId(merged), account)
       compare(mailService.sourceIdFor(merged), "abcd2345")
@@ -363,6 +577,17 @@ Item {
       verify(mailService.act(merged, "star", false, false))
       tryVerify(function() { return sent("exchange.modify").length === 1 }, 2000)
       compare(sent("exchange.modify")[0].params.ids, ["abcd2345"], "under the mailbox's own id")
+
+      // Back to one mailbox on screen, and its count is read: once, with no refresh to ask.
+      tryCompare(account, "pendingAction", "")
+      wait(150)
+      server.flagged = 6
+      var asked = flaggedAsks().length
+      mailService.applySettings({ unifiedMailboxes: false })
+      tryCompare(account, "starredCount", 6, 2000)
+      compare(app.starredCount, 6)
+      wait(150)
+      compare(flaggedAsks().length, asked + 1)
     }
   }
 }

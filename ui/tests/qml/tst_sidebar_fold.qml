@@ -9,7 +9,7 @@ import "../../components" as Mail
 // both, so without the row asking where the tap landed, folding a parent
 // navigated to it. Driven with real pointer events on the real sidebar.
 Item {
-  width: 400
+  width: 460
   height: 600
 
   property var labels: [
@@ -31,6 +31,27 @@ Item {
     dimColor: Commons.Color.foreground
     panelFontFamily: "monospace"
     slots: [{ kind: "mailbox", key: "inbox" }]
+  }
+
+  // A mailbox whose listing counts its Flagged view. The window hands the rail the
+  // number: nothing on the service, no account behind it to reach for.
+  property var counted: ({
+    labels: labels, collapsedFolders: [], rawQuery: "", mailboxKey: "inbox", searchQuery: "",
+    providerId: "exchange",
+    mailboxes: [{ key: "inbox", label: "Inbox", icon: "inbox" }, { key: "starred", label: "Flagged", icon: "star" }]
+  })
+
+  Mail.MailboxSidebar {
+    id: tallied
+    x: 230
+    width: 220
+    height: 600
+    service: counted
+    starredCount: 7
+    textColor: Commons.Color.foreground
+    accentColor: Commons.Color.accent
+    dimColor: Qt.alpha(Commons.Color.foreground, 0.6)
+    panelFontFamily: "monospace"
   }
 
   SignalSpy { id: folded; target: sidebar; signalName: "folderToggled" }
@@ -62,6 +83,47 @@ Item {
       folded.clear(); opened.clear(); mailbox.clear()
       sidebar.numbersVisible = false
       sidebar.collapsed = false
+      tallied.collapsed = false
+    }
+
+    // The row a sidebar draws for a name, and a part of it.
+    function rowOf(item, label) {
+      if (item.label === label && item.count !== undefined) return item
+      var children = item.children || []
+      for (var i = 0; i < children.length; i++) {
+        var found = rowOf(children[i], label)
+        if (found) return found
+      }
+      return null
+    }
+
+    function part(row, name) {
+      var children = row.children || []
+      for (var i = 0; i < children.length; i++) if (children[i].objectName === name) return children[i]
+      return null
+    }
+
+    // Flagged's number is a size, not mail waiting: the sidebar draws the number it
+    // is given as secondary text, and drops it from a collapsed rail where a label's
+    // unread count becomes a dot. The tooltip still says it.
+    function test_the_flagged_total_is_secondary_text_and_no_dot() {
+      var flagged = rowOf(tallied, "Flagged")
+      var label = rowOf(tallied, "2026")
+      verify(flagged && label)
+      var number = part(flagged, "mailbox-entry-badge")
+      verify(number.visible, "the given count is drawn with no account behind it")
+      compare(number.text, "7")
+      compare(String(number.color), String(tallied.dimColor), "secondary text")
+      verify(String(number.color) !== String(tallied.accentColor), "not the accent")
+      compare(number.font.bold, false)
+      var unread = part(label, "mailbox-entry-badge")
+      compare(String(unread.color), String(tallied.accentColor), "a label's unread count keeps the accent")
+      compare(unread.font.bold, true)
+
+      tallied.collapsed = true
+      verify(part(label, "mailbox-entry-dot").visible, "unread mail is a dot on a collapsed rail")
+      verify(!part(flagged, "mailbox-entry-dot").visible, "a size is not")
+      compare(part(flagged, "label-tooltip").text, "Flagged · 7 in all")
     }
 
     function test_the_chevron_folds_without_opening() {

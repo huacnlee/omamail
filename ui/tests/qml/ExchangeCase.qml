@@ -89,6 +89,14 @@ TestCase {
 
   function cleanup() {
     server.closed = true
+    service.windowOpen = false
+    service.applySettings({})
+    // Rust's polling, where a test turned it on, is turned off while the mailbox
+    // is still there to hear its unwatch answered.
+    if (service.backend.protocolInfo && service.backend.protocolInfo.methods) {
+      BackendFixture.markReady(service, 8)
+      wait(50)
+    }
     service.accountList = ({ version: 1, accounts: [], activeId: "" })
     wait(0)
     service.recount()
