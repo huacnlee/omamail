@@ -188,7 +188,7 @@ Item {
       mailService.applySettings({ spellingEnabled: "no" })
       compare(mailService.spellingEnabled, true)
 
-      mailService.setSpellingLanguage("en_GB")
+      mailService.persistSetting("spellingLanguage", "en_GB")
       compare(mailService.spellingLanguage, "en_GB")
       compare(shellStore.updatedEntry.spellingLanguage, "en_GB")
     }
@@ -199,7 +199,7 @@ Item {
         mailService.applySettings({ spellingLanguage: values[i] })
         compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
       }
-      mailService.setSpellingLanguage("")
+      mailService.persistSetting("spellingLanguage", "")
       compare(shellStore.updatedEntry.spellingLanguage, "")
       compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
     }
@@ -269,15 +269,15 @@ Item {
         return status === "ready" || status === "no-dictionary" || status === "no-module"
       }, 3000)
       if (mailService.spellingStatus === "no-module") { skip("Sonnet is not installed"); return }
-      mailService.setSpellingLanguage("en_US")
+      mailService.persistSetting("spellingLanguage", "en_US")
       tryVerify(function() {
         return mailService.spellingStatus === "ready" || mailService.spellingStatus === "no-dictionary"
       }, 3000)
       if (!mailService.spellingAvailable) { skip("en_US dictionary is not installed"); return }
-      mailService.setSpellingLanguage("zz_ZZ")
+      mailService.persistSetting("spellingLanguage", "zz_ZZ")
       tryVerify(function() { return mailService.spellingStatus === "no-dictionary" }, 3000)
       compare(mailService.spellingAvailable, false)
-      mailService.setSpellingLanguage("en_US")
+      mailService.persistSetting("spellingLanguage", "en_US")
       tryVerify(function() { return mailService.spellingStatus === "ready" }, 3000)
     }
   }

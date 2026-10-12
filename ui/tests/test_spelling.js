@@ -4,29 +4,35 @@ const { load, deepEqual } = require("./load")
 
 // Load inside each test so the baseline demonstrates all four missing rules.
 function spelling() { return load("compose/Spelling.js") }
+function collectRanges(rules, text, checker) {
+  const window = rules.wordWindow(text, 0, text.length)
+  const pass = rules.createPass(text, window, window.start, window.end, 0)
+  while (!pass.done) rules.advancePass(pass, checker, () => 0)
+  return pass.ranges
+}
 
 test("Only completed body words are checked", () => {
   const rules = spelling()
   const seen = []
   const checker = word => { seen.push(word); return true }
-  deepEqual(rules.misspelledRanges("mispelled", checker), [])
+  deepEqual(collectRanges(rules, "mispelled", checker), [])
   assert.equal(seen.length, 0, "the unfinished word never reaches the checker")
   for (const delimiter of [" ", ".", ",", "\n", "\t"]) {
-    deepEqual(rules.misspelledRanges("mispelled" + delimiter, checker), [{ start: 0, end: 9 }])
+    deepEqual(collectRanges(rules, "mispelled" + delimiter, checker), [{ start: 0, end: 9 }])
   }
-  deepEqual(rules.misspelledRanges("mispelled wrod", checker), [{ start: 0, end: 9 }])
-  deepEqual(rules.misspelledRanges("", checker), [])
+  deepEqual(collectRanges(rules, "mispelled wrod", checker), [{ start: 0, end: 9 }])
+  deepEqual(collectRanges(rules, "", checker), [])
 })
 
 test("Ranges keep UTF-16 offsets, apostrophes, combining marks and repeated words", () => {
   const rules = spelling()
   const wrong = word => word !== "correct"
   const text = "📨 'wrod', correct wrod.\n"
-  deepEqual(rules.misspelledRanges(text, wrong), [{ start: 4, end: 8 }, { start: 19, end: 23 }])
-  deepEqual(rules.misspelledRanges("‘can’t’ cafe\u0301 Ελληνικά русский ", wrong), [
+  deepEqual(collectRanges(rules, text, wrong), [{ start: 4, end: 8 }, { start: 19, end: 23 }])
+  deepEqual(collectRanges(rules, "‘can’t’ cafe\u0301 Ελληνικά русский ", wrong), [
     { start: 1, end: 6 }, { start: 8, end: 13 }, { start: 14, end: 22 }, { start: 23, end: 30 }
   ])
-  deepEqual(rules.misspelledRanges("'' ’ 😀 ", wrong), [])
+  deepEqual(collectRanges(rules, "'' ’ 😀 ", wrong), [])
 })
 
 test("Email chunks skip every token without dictionary calls", () => {
@@ -35,7 +41,7 @@ test("Email chunks skip every token without dictionary calls", () => {
     for (const wrap of [["", ""], ["<", ">"], ["(", ")"], ["[", "]"], ['"', '"'], ["'", "'"], [",", ";"]]) {
       const text = "shedule " + wrap[0] + address + wrap[1] + " recieve "
       const seen = []
-      const ranges = r.misspelledRanges(text, word => { seen.push(word); return true })
+      const ranges = collectRanges(r, text, word => { seen.push(word); return true })
       assert.deepEqual(seen, ["shedule", "recieve"])
       deepEqual(ranges, [{ start: 0, end: 7 }, { start: text.indexOf("recieve"), end: text.indexOf("recieve") + 7 }])
       assert.equal(r.nonProseAt(text, text.indexOf(address)), true)
@@ -47,28 +53,28 @@ test("Link chunks skip schemes, mailto, www and misspelled paths/query/fragment"
   const r = spelling()
   for (const link of ["http://x.y/recieve", "https://x.y/recieve?teh=wrod#shedule",
     "ftp://x.y/wrod", "file:///recieve", "a+b.c-d://wrod", "HTTPS://x.y/wrod",
-    "www.x.y/recieve", "mailto:sam", "mailto:sam@example.com"]) {
+    "www.x.y/recieve", "mailto:sam", "mailto:sam@example.com", "Re:http://x.y/recieve", "see:https://x.y/wrod", "1http://wrod"]) {
     for (const suffix of [" ", ". ", ", ", "; "]) {
       const text = "shedule (" + link + ")" + suffix + "recieve "
       const seen = []
-      r.misspelledRanges(text, word => { seen.push(word); return true })
+      collectRanges(r, text, word => { seen.push(word); return true })
       assert.deepEqual(seen, ["shedule", "recieve"], text)
       assert.equal(r.nonProseAt(text, text.indexOf(link)), true)
     }
   }
-  deepEqual(r.misspelledRanges("see https://x.y/recieve. ", w => w !== "see"), [])
+  deepEqual(collectRanges(r, "see https://x.y/recieve. ", w => w !== "see"), [])
 })
 
 test("Incomplete @ and non-link prefixes do not suppress prose", () => {
   const r = spelling()
-  for (const text of ["@ noon ", "me@ ", "@me ", "me@.noon ", "1http://wrod ", "http:wrod "]) {
+  for (const text of ["@ noon ", "me@ ", "@me ", "me@.noon ", "http:wrod "]) {
     assert.equal(r.nonProseAt(text, text.indexOf(" ") - 1), false, text)
     const seen = []
-    r.misspelledRanges(text, word => { seen.push(word); return true })
+    collectRanges(r, text, word => { seen.push(word); return true })
     assert.ok(seen.length > 0, text)
   }
   const seen = []
-  r.misspelledRanges("Thanks shedule, sam@example.com ", word => { seen.push(word); return true })
+  collectRanges(r, "Thanks shedule, sam@example.com ", word => { seen.push(word); return true })
   assert.deepEqual(seen, ["Thanks", "shedule"])
 })
 
@@ -133,7 +139,10 @@ test("Language uses the system locale unless a short dictionary code overrides i
     deepEqual(rules.decodeSettings({ spellingLanguage: hostile }), { enabled: true, language: "" })
   }
   assert.equal(rules.resolveLanguage("", "zz_ZZ"), "zz_ZZ", "no silent English fallback")
-  assert.equal(rules.resolveLanguage("", "C"), "", "an unsupported system locale never reaches Sonnet")
+  for (const locale of ["C", "POSIX", ""]) {
+    assert.equal(rules.resolveLanguage("", locale), "", "an unset system locale never reaches Sonnet")
+    assert.equal(rules.resolveLanguage("de_DE", locale), "de_DE")
+  }
 })
 
 test("Windows expand whole words, preserve offsets and cap hostile tokens", () => {
@@ -145,18 +154,18 @@ test("Windows expand whole words, preserve offsets and cap hostile tokens", () =
   assert.equal(text[window.end - 1], " ")
   const hostile = "a".repeat(100000) + " wrod "
   const seen = []
-  r.misspelledRanges(hostile, w => { seen.push(w); return true })
+  collectRanges(r, hostile, w => { seen.push(w); return true })
   assert.equal(seen.length, 0, "a huge token never reaches the native checker")
-  r.misspelledRanges("a".repeat(129) + " wrod ", w => { seen.push(w); return true })
+  collectRanges(r, "a".repeat(129) + " wrod ", w => { seen.push(w); return true })
   assert.deepEqual(seen, ["wrod"], "an over-budget token is skipped, not split")
-  deepEqual(r.misspelledRanges("a".repeat(129) + "\nwrod ", () => true), [{ start: 130, end: 134 }])
+  deepEqual(collectRanges(r, "a".repeat(129) + "\nwrod ", () => true), [{ start: 130, end: 134 }])
 })
 
 test("Quoted lines skip lookup including an initial window in the middle of a quote", () => {
   const r = spelling()
   const text = "wrod \n  > mispelled wrod \n\t> more wrod \nunquoted "
   const seen = []
-  const ranges = r.misspelledRanges(text, w => { seen.push(w); return true })
+  const ranges = collectRanges(r, text, w => { seen.push(w); return true })
   assert.deepEqual(seen, ["wrod", "unquoted"])
   assert.equal(ranges.length, 2)
   assert.equal(r.quotedAt(text, text.indexOf("mispelled")), true)

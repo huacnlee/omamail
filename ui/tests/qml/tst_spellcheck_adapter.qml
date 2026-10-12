@@ -88,7 +88,8 @@ Item {
       var a = adapter()
       if (!a) return
       var chunks = ["sam@example.com", "first.last+tag@sub.example.co.uk",
-        "https://x.y/recieve?teh=wrod#shedule", "www.x.y/wrod", "mailto:sam", "wrod-".repeat(10000)]
+        "https://x.y/recieve?teh=wrod#shedule", "Re:http://x.y/recieve", "see:https://x.y/wrod",
+        "www.x.y/wrod", "mailto:sam", "wrod-".repeat(10000)]
       for (var i = 0; i < chunks.length; i++) {
         edit.text = "<" + chunks[i] + "> mispelled "
         var at = edit.text.indexOf("@")
@@ -116,6 +117,9 @@ Item {
       // A correct word is not reported as misspelled.
       var ok = a.inspect(edit.text.indexOf("sentence"))
       compare(ok.misspelled, false)
+      compare(ok.suggestions.length, 0)
+      compare(a.isMisspelled("don't"), false)
+      verify(a.inspect(edit.text.indexOf("mispelled")).suggestions.length > 0)
     }
 
     function test_correction_is_undo_safe_and_does_not_touch_other_words() {
@@ -137,31 +141,6 @@ Item {
       a.enabled = true
       compare(a.status, "ready")
       compare(edit.text, root.sample)
-    }
-
-    function test_misspelled_ranges_are_only_finished_words() {
-      var a = adapter()
-      if (!a) return
-      // Nothing follows the word: still being typed, so not marked yet.
-      compare(a.misspelledRanges("wrod").length, 0)
-      // A delimiter finished it.
-      compare(a.misspelledRanges("wrod ").length, 1)
-      // The trailing word is skipped; the finished one before it is not.
-      var one = a.misspelledRanges("a wrod and mispelled")
-      compare(one.length, 1)
-      compare(one[0].start, 2)
-      compare(one[0].end, 6)
-      compare(a.misspelledRanges("a wrod and mispelled ").length, 2)
-    }
-
-    function test_misspelled_ranges_use_utf16_offsets() {
-      var a = adapter()
-      if (!a) return
-      // "the " is four units, the emoji is two more, so wrod starts at 7.
-      var ranges = a.misspelledRanges("the \uD83D\uDCE8 wrod ")
-      compare(ranges.length, 1)
-      compare(ranges[0].start, 7)
-      compare(ranges[0].end, 11)
     }
 
     function test_session_ignore_treats_a_word_as_correct() {

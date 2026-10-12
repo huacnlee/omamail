@@ -93,15 +93,6 @@ Item {
     Session.changed()
   }
 
-  // Only completed words receive underlines; Sonnet supplies the decision,
-  // while the shared rule keeps positions and completeness testable without Qt.
-  function misspelledRanges(text) {
-    if (!available || !enabled) return []
-    return Spelling.misspelledRanges(text, function(word) {
-      return adapter.isMisspelled(word)
-    })
-  }
-
   function applySettings() {
     resetCache()
     // The request is attempted even when the previous one reverted: a later

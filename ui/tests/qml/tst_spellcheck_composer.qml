@@ -553,9 +553,7 @@ Item {
 
       compose.spellingLanguage = "en_GB"
       wait(250)
-      var live = JSON.stringify(compose.spellingRanges)
-      var actual = JSON.stringify(compose.spellingAdapter.misspelledRanges(body.text))
-      compare(live, actual, "ranges recheck after a valid-to-valid switch")
+      compare(compose.spellingRanges.length, 0, "en_GB accepts all the British spellings")
       verify(compose.spellingRanges.length < usRanges, "en_GB accepts the British spellings")
     }
   }

@@ -63,7 +63,7 @@ function nonProseAt(text, position) {
     to += 1
   }
   var chunk = text.substring(from, to)
-  if (/^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|mailto:|www\.)/i.test(chunk)) return true
+  if (chunk.indexOf("://") >= 0 || /^(?:mailto:|www\.)/i.test(chunk)) return true
   var email = chunk.indexOf("@")
   while (email >= 0) {
     if (isWordChar(chunk.charAt(email - 1)) && isWordChar(chunk.charAt(email + 1))) return true
@@ -143,14 +143,6 @@ function cachedVerdict(cache, word, check) {
   var verdict = check(word)
   cache.words[key] = verdict; cache.size += 1
   return verdict
-}
-
-// Small-text helper for non-visual callers; production uses incremental passes.
-function misspelledRanges(text, isMisspelled) {
-  var window = wordWindow(text, 0, text.length)
-  var pass = createPass(text, window, window.start, window.end, 0)
-  while (!pass.done) advancePass(pass, isMisspelled, function() { return 0 }, null)
-  return pass.ranges
 }
 
 function isWordChar(character) {
