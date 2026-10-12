@@ -1,5 +1,6 @@
 //! The wire layer against a scripted TLS server and fixed documents.
 
+pub mod calendar;
 mod conn;
 pub mod fake;
 mod ops;

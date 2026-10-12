@@ -51,6 +51,9 @@ Rectangle {
     && root.source.readOnly !== true
     && (root.source.kind === "google" ? String(event.googleId || "") !== ""
       : root.source.kind === "microsoft" ? String(event.graphId || "") !== ""
+      // An Exchange event is deleted only when the backend said it is a plain appointment.
+      : root.source.kind === "exchange" ? String(event.exchangeId || "") !== ""
+        && String(event.lockReason || "") === ""
       : String(event.href || "") !== "" && String(event.recurrenceRule || "") === ""
         && Number(event.recurrenceIdMs || 0) <= 0
         && String(event.source && event.source.recurrenceId || "") === ""
@@ -305,6 +308,18 @@ Rectangle {
             font.pixelSize: Style.font.caption
           }
         }
+      }
+
+      Text {
+        objectName: "event-lock-reason"
+        width: parent.width
+        visible: !!root.event && String(root.event.lockReason || "") !== ""
+        text: String(root.event && root.event.lockReason || "")
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
       }
 
       Text {

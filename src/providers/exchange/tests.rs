@@ -15,6 +15,8 @@ use crate::credentials::tests::{SingleCredential, StoreOverride, isolated_store}
 use crate::credentials::{CredentialKey, CredentialKind, Secret};
 use crate::mail::tests::{AccountFixture, account_fixture, isolated};
 
+mod calendar;
+
 const ACCOUNT: &str = "exchange:ada@example.org";
 
 struct World {
@@ -30,7 +32,8 @@ async fn world(
     script: impl Fn(&Soap) -> Out + Send + Sync + 'static,
 ) -> World {
     let fake = Fake::start(offer, move |soap| {
-        if soap.op == "GetFolder" {
+        // The mail folders; the calendar's own is the script's to answer.
+        if soap.op == "GetFolder" && !soap.body.contains(r#"Id="calendar""#) {
             Out::Xml(fake::folders())
         } else {
             script(soap)
@@ -718,6 +721,23 @@ fn every_method() -> Vec<(&'static str, Value)> {
             json!({"accountId": ACCOUNT, "raw": raw, "draftId": id(2)}),
         ),
         ("deleteDraft", json!({"accountId": ACCOUNT, "id": id(1)})),
+        (
+            "calendarEvents",
+            json!({"accountId": ACCOUNT, "startMs": 0, "endMs": 86_400_000}),
+        ),
+        check.clone(),
+        (
+            "calendarCreate",
+            json!({"accountId": ACCOUNT, "title": "x", "allDay": false, "startMs": 0, "endMs": 60_000}),
+        ),
+        (
+            "calendarUpdate",
+            json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K", "title": "x"}),
+        ),
+        (
+            "calendarDelete",
+            json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K"}),
+        ),
     ]
 }
 
@@ -762,6 +782,7 @@ async fn every_method_answers_inside_the_window_when_the_server_stops_answering(
             // Written, and never cut once written: what became of them is not known.
             "send" => Some("exchange_send_failed"),
             "saveDraft" => Some("exchange_draft_unconfirmed"),
+            "calendarCreate" => Some("exchange_calendar_unconfirmed"),
             // The folder lookup is all a check of a signed-in mailbox asks.
             "verify" => None,
             _ => Some("exchange_timeout"),
@@ -813,7 +834,18 @@ async fn a_mailbox_another_call_holds_makes_no_call_wait_past_its_deadline() {
             // (20 seconds of 25) still ends inside the call.
             assert_eq!(answer.err(), Some("exchange_send_not_attempted"));
             assert!(took <= total / 5 + SLACK, "{took:?}");
-        } else if ["modify", "trash", "untrash", "saveDraft", "deleteDraft"].contains(&method) {
+        } else if [
+            "modify",
+            "trash",
+            "untrash",
+            "saveDraft",
+            "deleteDraft",
+            "calendarCreate",
+            "calendarUpdate",
+            "calendarDelete",
+        ]
+        .contains(&method)
+        {
             // A change could write nothing after the same fifth, so it waits no longer.
             assert_eq!(answer.err(), Some("exchange_timeout"), "{method}");
             assert!(took <= total / 5 + SLACK, "{method} took {took:?}");

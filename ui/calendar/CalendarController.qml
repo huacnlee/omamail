@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import "Calendar.js" as Calendar
+import "ExchangeEvents.js" as ExchangeEvents
 import "Sources.js" as Sources
 import "../providers/MicrosoftOAuth.js" as Microsoft
 import "../backend/Plain.js" as Plain
@@ -73,8 +74,8 @@ Item {
   // is touched and carried to the writer that runs after it.
   property string writeUrl: ""
   property bool eventWriting: false
-  readonly property var availableSources: Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-    sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+  readonly property var availableSources: Sources.withAccounts(
+    sourceList, service ? service.accountSummaries : [])
   // Every account's calendars, not just this mailbox's: the entry hides only
   // when no account has one and nothing was added in Settings.
   readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
@@ -190,8 +191,7 @@ Item {
   }
 
   function sourcesForAccount(wantedAccountId) {
-    var available = Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+    var available = Sources.withAccounts(sourceList, service ? service.accountSummaries : [])
     return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
@@ -364,15 +364,17 @@ Item {
     eventSource = source
     eventDraft = built
     creatingEvent = true
-    if (source.kind === "microsoft" && built.recurring) {
+    if ((source.kind === "microsoft" || source.kind === "exchange") && built.recurring) {
       creatingEvent = false
       eventSource = null
       eventDraft = null
-      eventCreated(false, "A repeating event on a Microsoft calendar is made in Outlook")
+      eventCreated(false, "A repeating event on " + (source.kind === "exchange" ? "an Exchange" : "a Microsoft")
+        + " calendar is made in Outlook")
       return false
     }
     if (source.kind === "google") createGoogleEvent()
     else if (source.kind === "microsoft") createGraphEvent()
+    else if (source.kind === "exchange") createExchangeEvent()
     else createNativeEvent()
     return true
   }
@@ -400,9 +402,12 @@ Item {
   // Dragging writes without opening the editor, so it needs the revision
   // check only the API 6 backend sends.
   function rescheduleRefusal(event) {
-    var refusal = Calendar.writeRefusal(findSource(event && event.sourceId), event, "reschedule")
-    if (refusal === "" && service.backendCanGoogleCalendars !== true)
-      refusal = "Update the backend to move events by dragging"
+    var source = findSource(event && event.sourceId)
+    var refusal = Calendar.writeRefusal(source, event, "reschedule")
+    // An Exchange event names its version in the backend's own method, which comes with API 9.
+    var capable = !!source && source.kind === "exchange" ? ExchangeEvents.backendReady(service)
+      : service.backendCanGoogleCalendars === true
+    if (refusal === "" && !capable) refusal = "Update the backend to move events by dragging"
     return refusal
   }
 
@@ -447,6 +452,7 @@ Item {
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
     else if (source.kind === "microsoft") startGraphWrite()
+    else if (source.kind === "exchange") startExchangeWrite()
     else startCaldavWrite()
     return true
   }
@@ -506,6 +512,7 @@ Item {
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
     else if (source.kind === "microsoft") startGraphWrite()
+    else if (source.kind === "exchange") startExchangeWrite()
     else startCaldavWrite()
     return true
   }
@@ -562,6 +569,32 @@ Item {
 
   function createGoogleEvent() { createNativeEvent() }
 
+  // An appointment is written by the backend over the mailbox's own sign-in, like the read. The backend
+  // refuses what is not a plain appointment and what changed since it was drawn, and says
+  // "unconfirmed" when it cannot know; nothing is mailed, so there are no guests to ask about.
+  function exchangeRequest(method, params, callback) {
+    if (!ExchangeEvents.backendReady(service)) {
+      callback(null, ExchangeEvents.errorText("backend_needs_update"))
+      return
+    }
+    service.backend.call(method, params, function(result, error) {
+      callback(result, error ? ExchangeEvents.writeError(error) : "")
+    })
+  }
+
+  function createExchangeEvent() {
+    exchangeRequest("exchange.calendarCreate", ExchangeEvents.createParams(eventSource.accountId, eventDraft),
+      function(result, error) { root.finishEvent(!error, error) })
+  }
+
+  function startExchangeWrite() {
+    var account = writeSource.accountId
+    var del = writeOp === "delete"
+    exchangeRequest(del ? "exchange.calendarDelete" : "exchange.calendarUpdate",
+      del ? ExchangeEvents.deleteParams(account, writeEvent) : ExchangeEvents.updateParams(account, writeEvent, writeDraft),
+      function(result, error) { root.finishWrite(!error, error) })
+  }
+
   // The account's primary Microsoft calendar, which is the one calendar a
   // backend from before discovery reaches: it ignores the identity and asks
   // for /me/calendarView, and that is this calendar. Discovery stores its
@@ -601,7 +634,7 @@ Item {
       var reason = ""
       if (error) {
         reason = notifyConsent(error) ? Microsoft.graphConsentMessage()
-          : error.message === "calendar_conflict" ? "This event changed elsewhere. Refresh and try again."
+          : error.message === "calendar_conflict" ? Calendar.CONFLICT
           : Calendar.nativeRequestError(String(source && source.kind || ""), source && source.accountId, error)
       }
       callback(result, reason)
@@ -988,6 +1021,7 @@ Item {
     queue = pending
     if (activeSource.kind === "google") startGoogle()
     else if (activeSource.kind === "microsoft") startGraph()
+    else if (activeSource.kind === "exchange") startExchange()
     else if (activeSource.kind === "caldav" || activeSource.kind === "icloud") startPasswordLookup()
     else failSource("The HEY CLI does not expose calendar events")
   }
@@ -1013,6 +1047,23 @@ Item {
           : Calendar.eventsFromGraph(payload, root.activeSource.id)
       }
       root.replaceActiveSourceEvents(values)
+      root.processNext()
+    })
+  }
+
+  // The mailbox's own sign-in is the backend's: it reads the saved password for this one request, so
+  // nothing here holds a credential. Writes are `exchangeRequest`.
+  function startExchange() {
+    var source = activeSource
+    if (!ExchangeEvents.backendReady(service)) {
+      failSource(ExchangeEvents.errorText("backend_needs_update"))
+      return
+    }
+    service.backend.call("exchange.calendarEvents", { accountId: String(source.accountId || ""),
+      startMs: Math.floor(rangeStart), endMs: Math.ceil(rangeEnd) }, function(result, error) {
+      if (error) { root.failSource(ExchangeEvents.errorText(error)); return }
+      root.replaceActiveSourceEvents(ExchangeEvents.eventsFromExchange(result, source.id))
+      if (result && result.truncated === true) { root.failSource(ExchangeEvents.TRUNCATED); return }
       root.processNext()
     })
   }
