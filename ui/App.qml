@@ -1001,8 +1001,7 @@ Item {
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
-    if (id === "archive") return actOnCursor("archive")
-    if (id === "trash") return actOnCursor("trash")
+    if (id === "archive" || id === "trash") return actOnCursor(list.keyActions[id])
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     //
@@ -1946,6 +1945,7 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               checkedIds: root.checkedIds
+              selectionActive: root.selectionActive
               ctrlHeld: focusScope.ctrlHeld
               urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
@@ -1953,9 +1953,9 @@ Item {
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
-              onMenuRequested: function(id, sceneX, sceneY) {
+              onMenuRequested: function(id, sceneX, sceneY, ids) {
                 root.cursorId = id
-                rowMenu.openAt(id, sceneX, sceneY)
+                rowMenu.openAt(id, sceneX, sceneY, ids)
               }
             }
           }
@@ -2033,6 +2033,8 @@ Item {
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
           contentDirection: root.service ? root.service.contentDirection : ""
+          actions: list.readerActions
+          keyActions: list.keyActions
           onBodyModeRequested: function(mode) {
             if (root.service) root.service.setBodyMode(mode)
           }
@@ -2080,9 +2082,7 @@ Item {
                 root.service.toggleStar(root.service.selectedId)
               return
             }
-            if (((root.service.conversationProjection || ({})).memberIds || []).indexOf(root.service.selectedId) < 0
-                || root.cursorId === "")
-              root.cursorId = root.service.selectedId
+            root.cursorId = Model.readerTarget(root.service.conversationProjection, root.service.selectedId, root.cursorId)
             if (action === "moveToLabel") return root.openLabelPicker(outside)
             root.actOnCursor(action, outside)
           }
@@ -2660,7 +2660,7 @@ Item {
           panelFontFamily: root.fontFamily
           hints: Keymap.hintsFor(focusScope.keyContext,
             root.service ? root.service.unavailableActions : [],
-            root.cursorId !== "")
+            root.cursorId !== "", list.keyActions)
         }
       }
 
@@ -2981,8 +2981,6 @@ Item {
           var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
           if (action === "moveToLabel") return root.openLabelPicker(outside)
-          if ((action === "star" || action === "unstar") && root.selectionActive && !outside)
-            return root.actOnChecked(Model.starActionFor(Model.summariesById(root.service.messages, root.checkedIds)))
           root.actOnCursor(action, outside)
         }
         // From a stop on the rail. A member is not a row, so the cursor stays
