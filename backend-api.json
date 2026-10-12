@@ -1936,6 +1936,353 @@
       }
     },
     {
+      "name": "Exchange calendar create refuses a repeat that cannot be said before any lookup",
+      "method": "exchange.calendarCreate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "title": "x",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000,
+        "recurrence": {
+          "frequency": "yearly",
+          "interval": 2,
+          "firstDate": "2026-10-13"
+        }
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar create refuses a repeat with no first day before any lookup",
+      "method": "exchange.calendarCreate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "title": "x",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000,
+        "recurrence": {
+          "frequency": "weekly"
+        }
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar update refuses an unknown scope before any lookup",
+      "method": "exchange.calendarUpdate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "all"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar update refuses a time of day for one event before any lookup",
+      "method": "exchange.calendarUpdate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "occurrence",
+        "startClock": "10:15",
+        "durationMinutes": 45
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar update refuses instants for every event before any lookup",
+      "method": "exchange.calendarUpdate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "series",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar delete refuses an unknown scope before any lookup",
+      "method": "exchange.calendarDelete",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "all"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar respond refuses a scope that is one event before any lookup",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "accept",
+        "send": true,
+        "scope": "occurrence"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting create of a repeating meeting requires sendInvitations before any lookup",
+      "method": "exchange.meetingCreate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "title": "x",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000,
+        "requiredAttendees": [
+          "ada@example.org"
+        ],
+        "recurrence": {
+          "frequency": "weekly",
+          "firstDate": "2026-10-13"
+        }
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting update of every event still requires sendUpdates before any lookup",
+      "method": "exchange.meetingUpdate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "series",
+        "startClock": "10:15",
+        "durationMinutes": 45
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting update refuses people for one event before any lookup",
+      "method": "exchange.meetingUpdate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "occurrence",
+        "sendUpdates": true,
+        "requiredAttendees": [
+          "ada@example.org"
+        ]
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting cancel of every event still requires sendCancellations before any lookup",
+      "method": "exchange.meetingCancel",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "series"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting update of every event requires the people it tells before any lookup",
+      "method": "exchange.meetingUpdate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "series",
+        "sendUpdates": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting cancel of every event requires the people it tells before any lookup",
+      "method": "exchange.meetingCancel",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "series",
+        "sendCancellations": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting cancel refuses the people of every event for one event before any lookup",
+      "method": "exchange.meetingCancel",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "occurrence",
+        "sendCancellations": true,
+        "seriesAttendees": [
+          "ada@example.org"
+        ]
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting cancel of every event naming its people for an unregistered mailbox names no credential",
+      "method": "exchange.meetingCancel",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "series",
+        "sendCancellations": true,
+        "seriesAttendees": [
+          "ada@example.org"
+        ]
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange calendar update of every event for an unregistered mailbox names no credential",
+      "method": "exchange.calendarUpdate",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "series",
+        "startClock": "10:15",
+        "durationMinutes": 45
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange calendar respond for every event of a series for an unregistered mailbox names no credential",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "accept",
+        "send": true,
+        "scope": "series"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange meeting remove refuses an unknown scope before any lookup",
+      "method": "exchange.meetingRemove",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "all"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting remove of every event takes no word that people are mailed before any lookup",
+      "method": "exchange.meetingRemove",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "series",
+        "sendCancellations": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting remove of every event for an unregistered mailbox names no credential",
+      "method": "exchange.meetingRemove",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "series"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange meeting remove of one event for an unregistered mailbox names no credential",
+      "method": "exchange.meetingRemove",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "scope": "occurrence"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
       "name": "credential kind exchange-password refuses a client id before native access",
       "method": "credentials.get",
       "params": {
@@ -2200,7 +2547,28 @@
       "Exchange meeting cancel for an unregistered mailbox names no credential",
       "Exchange meeting remove for an unregistered mailbox names no credential",
       "credential kind exchange-password refuses a client id before native access",
-      "mail action refuses archive for Exchange before any server call"
+      "mail action refuses archive for Exchange before any server call",
+      "Exchange calendar create refuses a repeat that cannot be said before any lookup",
+      "Exchange calendar create refuses a repeat with no first day before any lookup",
+      "Exchange calendar update refuses an unknown scope before any lookup",
+      "Exchange calendar update refuses a time of day for one event before any lookup",
+      "Exchange calendar update refuses instants for every event before any lookup",
+      "Exchange calendar delete refuses an unknown scope before any lookup",
+      "Exchange calendar respond refuses a scope that is one event before any lookup",
+      "Exchange meeting create of a repeating meeting requires sendInvitations before any lookup",
+      "Exchange meeting update of every event still requires sendUpdates before any lookup",
+      "Exchange meeting update refuses people for one event before any lookup",
+      "Exchange meeting cancel of every event still requires sendCancellations before any lookup",
+      "Exchange meeting update of every event requires the people it tells before any lookup",
+      "Exchange meeting cancel of every event requires the people it tells before any lookup",
+      "Exchange meeting cancel refuses the people of every event for one event before any lookup",
+      "Exchange meeting cancel of every event naming its people for an unregistered mailbox names no credential",
+      "Exchange calendar update of every event for an unregistered mailbox names no credential",
+      "Exchange calendar respond for every event of a series for an unregistered mailbox names no credential",
+      "Exchange meeting remove refuses an unknown scope before any lookup",
+      "Exchange meeting remove of every event takes no word that people are mailed before any lookup",
+      "Exchange meeting remove of every event for an unregistered mailbox names no credential",
+      "Exchange meeting remove of one event for an unregistered mailbox names no credential"
     ]
   }
 }

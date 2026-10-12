@@ -26,7 +26,9 @@ async fn answer(
     send: bool,
     remove: bool,
 ) -> Result<Option<bool>, &'static str> {
-    let done = client.respond(&cal_id(n), key, reply, send, remove).await?;
+    let done = client
+        .respond(&cal_id(n), key, reply, send, remove, false)
+        .await?;
     Ok(done.removed)
 }
 
@@ -54,7 +56,7 @@ async fn an_invitation_is_read_whole_and_answered_on_a_fresh_read_naming_the_ver
     assert_eq!(who, Some("bob@example.org"));
     assert_eq!(found.attendees[0].who.address, "ada@example.org");
     let done = client
-        .respond(&cal_id(1), "CK1v1", Answer::Accept, true, false)
+        .respond(&cal_id(1), "CK1v1", Answer::Accept, true, false, false)
         .await
         .unwrap();
     // The server re-created the item; the answer names it.
@@ -66,7 +68,7 @@ async fn an_invitation_is_read_whole_and_answered_on_a_fresh_read_naming_the_ver
         [&read[..], &read[..], &["CreateItem"]].concat()
     );
     let saved = client
-        .respond(&cal_id(2), "CK2v1", Answer::Tentative, false, false)
+        .respond(&cal_id(2), "CK2v1", Answer::Tentative, false, false, false)
         .await;
     assert!(saved.is_ok());
     let store = store.lock().unwrap();
@@ -348,6 +350,7 @@ async fn a_reminder_is_written_when_it_is_asked_for_and_only_when_it_changes() {
         end_ms: secs("2026-10-05T07:30:00Z") * 1000,
     };
     let item = Appointment {
+        recurrence: None,
         title: "Dentist".into(),
         location: String::new(),
         notes: None,
@@ -372,7 +375,7 @@ async fn a_reminder_is_written_when_it_is_asked_for_and_only_when_it_changes() {
             when: None,
         };
         key = client
-            .change_appointment(&made.id, &key, &edit, "UTC")
+            .change_appointment(&made.id, &key, &edit, "UTC", None)
             .await
             .unwrap()
             .change_key;

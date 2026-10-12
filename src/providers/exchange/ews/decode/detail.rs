@@ -16,11 +16,14 @@
 //! - What may be shown and answered is decided elsewhere: the provider masks a private item, and
 //!   `EventDetail::invitation` says whether the owner may answer, every signal agreeing.
 
+use std::collections::BTreeSet;
+
 use super::super::soap::calendar::is_change_key;
 use super::calendar::{self, MAX_ELEMENTS, MAX_NAME_BYTES, MAX_UID_BYTES, cap, instant};
 use super::calendar::{CalendarItem, Lock};
 use super::{Party, Rej, check, each, first_item, id_attr, messages, party};
 use crate::providers::exchange::ews::xml::Node;
+use crate::providers::exchange::recurrence::Repeat;
 
 /// A page and a half of notes is what a detail view shows; the rest is cut and said to be.
 const MAX_NOTES_BYTES: usize = 16 * 1024;
@@ -34,6 +37,12 @@ const MAX_PEOPLE: usize = 200;
 const PEOPLE_EXAMINED: usize = 1000;
 /// `AppointmentState`: "the appointment was received, which means that someone sent it to the user".
 const RECEIVED: u32 = 0x2;
+/// Exceptions of a series whose people are read before all of it is changed or cancelled; past this
+/// the series is locked rather than guessed.
+pub const MAX_EXCEPTIONS: usize = 50;
+
+/// The people on one item, and whether more were listed than were kept (`people`).
+pub type People = (Vec<Attendee>, bool);
 
 /// One person on an item, as a `GetItem` lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,6 +85,50 @@ pub struct EventDetail {
     /// Read without the Exchange 2013 properties, which an answer's read cannot go without: an answer
     /// from this screen would always fail, so none is offered. Not part of a `GetItem`.
     pub reduced: bool,
+    /// For a member of a series, what a read of its master said; `None` when it could not be read.
+    /// Not part of a `GetItem`.
+    pub series: Option<Series>,
+    /// For a master read with its `ModifiedOccurrences`, the ids of its exceptions, at most one past
+    /// `MAX_EXCEPTIONS` (an exception listed with no id is an empty one).
+    pub modified: Vec<String>,
+}
+
+/// What a read of a series' master shows a screen that has one of its events.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Series {
+    /// The master as it was read, which all of the series is judged on.
+    pub master: Box<EventDetail>,
+    /// The master's change key, which a write to all of the series names.
+    pub key: String,
+    pub repeat: Repeat,
+    /// All of it may be answered (`EventDetail::series_invitation`).
+    pub can_respond: bool,
+    /// `EventDetail::series_removal`: its organizer cancelled it.
+    pub removal: Option<u32>,
+    /// The people on each of its exceptions, for a meeting the owner may organise; `None` when they
+    /// were not all read.
+    pub exceptions: Option<Vec<People>>,
+}
+
+impl Series {
+    /// Why `owner` may not change all of it from here: `EventDetail::screen_lock` of the master, and
+    /// for a meeting, an exception whose people are not the master's (`exceptions_agree`).
+    pub fn lock(&self, owner: &str) -> Option<Lock> {
+        let master = &self.master;
+        master.screen_lock(owner).or_else(|| {
+            let agree = master.exceptions_agree(self.exceptions.as_deref(), owner);
+            (master.item.meeting && !agree).then_some(Lock::ExceptionGuests)
+        })
+    }
+
+    /// Whether the time of day of every event may be changed on a computer in `zone`: a series of
+    /// timed events whose rule and first day were read, recurring in that very zone (a time typed on
+    /// this clock is another time on another zone's wall).
+    pub fn time_editable(&self, zone: Option<&str>) -> bool {
+        let (item, repeat) = (&self.master.item, &self.repeat);
+        let here = zone.is_some_and(|zone| !item.zone.is_empty() && item.zone == zone);
+        here && !item.all_day && repeat.start.is_some() && repeat.rule.is_some()
+    }
 }
 
 /// What the Inbox's cancellations say of an item, the strongest of them deciding.
@@ -91,13 +144,21 @@ pub enum Cancelled {
 }
 
 impl EventDetail {
-    /// Whether this is a meeting somebody else sent the owner: a single item or one event of a series,
-    /// shown with its real title, on which the owner is an attendee. Every signal the server gave must
-    /// agree, and one that says otherwise vetoes.
+    /// Whether this is a meeting somebody else sent the owner: a single item or one event of a series
+    /// (the master is `series_incoming`'s), shown with its real title, on which the owner is an
+    /// attendee. Every signal the server gave must agree, and one that says otherwise vetoes.
     pub fn incoming(&self) -> bool {
+        matches!(self.item.kind, "single" | "occurrence" | "exception") && self.received()
+    }
+
+    /// `incoming` for the master of a series, which an answer to all of it is made to.
+    pub fn series_incoming(&self) -> bool {
+        self.item.kind == "master" && self.received()
+    }
+
+    fn received(&self) -> bool {
         let item = &self.item;
-        matches!(item.kind, "single" | "occurrence" | "exception")
-            && item.meeting
+        item.meeting
             && !item.private
             && matches!(item.response, "none" | "accept" | "tentative" | "decline")
             && self.is_organizer != Some(true)
@@ -109,25 +170,49 @@ impl EventDetail {
     /// answer would tell the organizer the owner is coming to something that is over), and not an
     /// item whose listed response objects leave out `AcceptItem`.
     pub fn invitation(&self) -> bool {
+        self.incoming() && self.answerable()
+    }
+
+    /// `invitation` for the master of a series: all of it may be answered at once.
+    pub fn series_invitation(&self) -> bool {
+        self.series_incoming() && self.answerable()
+    }
+
+    fn answerable(&self) -> bool {
         !self.elsewhere
             && !self.reduced
-            && self.incoming()
             && !self.item.cancelled
             && self.cancellation == Cancelled::No
             && self.can_accept != Some(false)
     }
 
+    /// What a screen is told: `None` when the owner may change the item as it is (a plain appointment,
+    /// an event or the master of a plain series, or a meeting they organise, single or repeating), else
+    /// why not. `CalendarItem::screen_lock` with what only a read of the item adds: the people.
+    pub fn screen_lock(&self, owner: &str) -> Option<Lock> {
+        let (item, series) = (&self.item, self.item.is_series());
+        if self.elsewhere {
+            Some(Lock::Unknown)
+        } else if item.meeting {
+            self.organiser_lock(owner, series)
+        } else if series {
+            item.series_lock()
+        } else {
+            item.lock()
+        }
+    }
+
     /// Why the owner may not change or cancel this meeting as its organizer from here, `None` when
     /// they may; decided again on a fresh read before anybody is told. `CalendarItem::meeting_lock`
-    /// first (a single meeting the owner sent, no room, not private or cancelled), then the read itself
-    /// (in the default calendar, with the Exchange 2013 properties), then the people: every one of them
-    /// read with an address, since a change or a cancellation mails them all and the question names
-    /// them (`Guests`), and somebody on it besides `owner`, the mailbox's own address. Last
-    /// `IsOrganizer` not false, `AppointmentState` without the received bit and `CancelCalendarItem`
-    /// among the response objects when they are listed. Every signal must agree and one that says
-    /// otherwise vetoes, as for an invitation.
-    pub fn organiser_lock(&self, owner: &str) -> Option<Lock> {
-        if let Some(lock) = self.item.meeting_lock() {
+    /// first (a single meeting the owner sent, or with `series` a member of a series of them, no room,
+    /// not private or cancelled), then the read itself (in the default calendar, with the Exchange 2013
+    /// properties), then the people: every one of them read with an address, since a change or a
+    /// cancellation mails them all and the question names them (`Guests`), and somebody on it besides
+    /// `owner`, the mailbox's own address. Last `IsOrganizer` not false, `AppointmentState` without the
+    /// received bit and `CancelCalendarItem` among the response objects when they are listed. Every
+    /// signal must agree and one that says otherwise vetoes, as for an invitation.
+    pub fn organiser_lock(&self, owner: &str, series: bool) -> Option<Lock> {
+        if let Some(lock) = self.item.meeting_lock(series) {
             return Some(lock);
         }
         if self.elsewhere || self.reduced {
@@ -148,32 +233,93 @@ impl EventDetail {
 
     /// Whether the owner organises this meeting and may change or cancel it: `organiser_lock` clear.
     pub fn organised(&self, owner: &str) -> bool {
-        self.organiser_lock(owner).is_none()
+        self.organiser_lock(owner, false).is_none()
     }
 
-    /// What taking this received single meeting off the calendar is, `None` when it may not be:
-    /// `cancelled` (the server's flag, or a cancellation in the Inbox that is certainly this meeting's)
-    /// or `declined` (the owner answered No). An invitation nobody cancelled or declined is answered first: deleting it would
-    /// leave its organizer waiting. A meeting the server flags cancelled may have lost the owner's
-    /// answer, so for that flag any answer but the organizer's own will do, the received signals still
-    /// agreeing.
+    /// `organised` for a member of a series of meetings: an occurrence, an exception or the master.
+    pub fn series_organised(&self, owner: &str) -> bool {
+        self.organiser_lock(owner, true).is_none()
+    }
+
+    /// What taking this received meeting off the calendar is, `None` when it may not be: `cancelled`
+    /// (the server's flag, or a cancellation in the Inbox that is certainly this meeting's) or
+    /// `declined` (the owner answered No), for a single meeting; an event of a series only when it is
+    /// cancelled (a declined one stays, declined). An invitation nobody cancelled or declined is
+    /// answered first: deleting it would leave its organizer waiting.
     pub fn removal(&self) -> Option<&'static str> {
         let item = &self.item;
-        let flagged = item.cancelled
+        let cancelled = item.cancelled || self.cancellation == Cancelled::Yes;
+        let single = item.kind == "single" && !item.recurring;
+        let member = matches!(item.kind, "occurrence" | "exception") && cancelled;
+        if self.elsewhere || self.reduced || !(single || member) {
+            return None;
+        }
+        if !(self.incoming() || self.flagged()) {
+            return None;
+        }
+        match cancelled {
+            true => Some("cancelled"),
+            false => (item.response == "decline").then_some("declined"),
+        }
+    }
+
+    /// A meeting somebody else sent that the server flags cancelled. It may have lost the owner's
+    /// answer, so any answer but the organizer's own will do, the received signals still agreeing.
+    fn flagged(&self) -> bool {
+        let item = &self.item;
+        item.cancelled
             && item.meeting
             && !item.private
             && item.response != "organizer"
             && self.is_organizer != Some(true)
-            && self.state.is_none_or(|bits| bits & RECEIVED != 0);
-        let single = item.kind == "single" && !item.recurring;
-        if self.elsewhere || self.reduced || !single || !(self.incoming() || flagged) {
+            && self.state.is_none_or(|bits| bits & RECEIVED != 0)
+    }
+
+    /// The master, with a `UID`, of a series somebody else sent the owner: an invitation to all of
+    /// it, or one the server flags cancelled.
+    /// Whether every exception (`exceptions`, `None` when they were not all read) lists the people this
+    /// master does: the same addresses, ignoring case, the owner and rooms left out, every one read.
+    /// What else an exception changed (its time, its place) does not count.
+    pub fn exceptions_agree(&self, exceptions: Option<&[People]>, owner: &str) -> bool {
+        let Some(exceptions) = exceptions else {
+            return false;
+        };
+        let set = |people: &[Attendee]| -> BTreeSet<String> {
+            let mailed = people.iter().filter(|who| who.kind != "resource");
+            let others = mailed.filter(|who| !who.who.address.eq_ignore_ascii_case(owner));
+            others
+                .map(|who| who.who.address.to_ascii_lowercase())
+                .collect()
+        };
+        let read = |people: &[Attendee]| people.iter().all(|who| !who.who.address.is_empty());
+        let mine = set(&self.attendees);
+        exceptions
+            .iter()
+            .all(|(people, cut)| !cut && read(people) && set(people) == mine)
+    }
+
+    pub fn received_master(&self) -> bool {
+        self.item.kind == "master"
+            && !self.item.uid.is_empty()
+            && !self.elsewhere
+            && (self.received() || self.flagged())
+    }
+
+    /// For a `received_master`, whether its organizer cancelled it: `Some(0)` for the series as a whole
+    /// (the server flags the master, or a cancellation of its `UID` names no event), `Some(n)` when they
+    /// cancelled n of its events one by one, n at least two (one cancelled event is that event's own
+    /// removal, and the rest of the series goes on), else `None`. `messages` are the Inbox's
+    /// cancellations, matched by `UID` alone (`Cancellation::is_for_series`).
+    pub fn series_removal(&self, messages: &[Cancellation]) -> Option<u32> {
+        if !self.received_master() {
             return None;
         }
-        if item.cancelled || self.cancellation == Cancelled::Yes {
-            Some("cancelled")
-        } else {
-            (item.response == "decline").then_some("declined")
+        let mine = || messages.iter().filter(|m| m.is_for_series(&self.item));
+        if self.item.cancelled || mine().any(|message| message.occurrence.is_none()) {
+            return Some(0);
         }
+        let events: BTreeSet<i64> = mine().filter_map(|message| message.occurrence).collect();
+        u32::try_from(events.len()).ok().filter(|count| *count >= 2)
     }
 }
 
@@ -196,6 +342,13 @@ pub struct Cancellation {
 }
 
 impl Cancellation {
+    /// Whether this cancels some or all of the series whose master is `master`: the same `UID` and
+    /// nothing else (never the title, never the item it names as its own), unless the server says it
+    /// is out of date.
+    pub fn is_for_series(&self, master: &CalendarItem) -> bool {
+        !self.out_of_date && !self.uid.is_empty() && self.uid == master.uid
+    }
+
     /// Whether this cancels the item of `detail`: the same `UID` when both have one (two different
     /// ones are two meetings, whatever else points at them), else the calendar item the message names
     /// as its own (`AssociatedCalendarItemId`). One that names no event is for the whole meeting. One
@@ -264,12 +417,41 @@ pub fn detail(body: &Node) -> Result<Option<EventDetail>, Rej> {
                     cancellation: Cancelled::No,
                     elsewhere: false,
                     reduced: false,
+                    series: None,
+                    modified: modified(node),
                 }
             })),
             _ => Ok(None),
         },
     )?;
     found.into_iter().next().unwrap_or(Err(Rej::INVALID))
+}
+
+/// The people on each exception a `GetItem` of `soap::calendar::exception_people` read, in the order
+/// asked; an answer that is no calendar item is a failed read.
+pub fn exception_people(body: &Node, expected: usize) -> Result<Vec<Result<People, Rej>>, Rej> {
+    each(
+        body,
+        "GetItemResponse",
+        "GetItemResponseMessage",
+        expected,
+        |message| match first_item(message)? {
+            node if node.name == "CalendarItem" => Ok(people(node)),
+            _ => Err(Rej::INVALID),
+        },
+    )
+}
+
+/// The ids of a master's `ModifiedOccurrences`, at most one past `MAX_EXCEPTIONS`.
+fn modified(node: &Node) -> Vec<String> {
+    let Some(list) = node.child("ModifiedOccurrences") else {
+        return Vec::new();
+    };
+    let listed = list.children.iter().filter(|o| o.name == "Occurrence");
+    listed
+        .take(MAX_EXCEPTIONS + 1)
+        .map(|o| id_attr(o.child("ItemId"), "Id").unwrap_or_default())
+        .collect()
 }
 
 /// The cancellations a `FindItem` of the Inbox listed, in the order the server gave them.

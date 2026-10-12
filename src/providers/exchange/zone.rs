@@ -13,18 +13,22 @@
 //! An id is all the header needs ("Create appointments in a specific time zone" writes the bare
 //! `Id`), and a definition of our own would be what Microsoft's `Id (TimeZone)` page advises
 //! against: use "time zone definitions that are supported by the Exchange server". So the one thing
-//! needed is the id of the zone the computer is in. Neither the standard library nor the crates
-//! here know Windows ids, so this lists the IANA names a Unix system names its zone by (`TZ`, or the
-//! link `/etc/localtime`) for the common zones, one Windows id each. The ids are Microsoft's: most
-//! are on its "Default Time Zones" page, the rest (the United States, Canada and Australia beyond
-//! the default ones) are the long-standing names of those zones. A zone that is not listed is not
-//! guessed: the event is made in UTC (`UTC`, which every Exchange knows), where this client reads it
-//! back on the day it was made for and an Outlook elsewhere may draw it a few hours off midnight.
-//! Zones with the same rules share an id on purpose (Paris is `Romance Standard Time` and Vienna
-//! `W. Europe Standard Time`, which differ only in a name): the id only has to give the same
-//! midnights. Istanbul is left out: Windows renamed that id (`Turkey` to `Türkiye Standard Time`), so
-//! which one a server has depends on its operating system.
+//! needed is the id of the zone the computer is in. Windows names its zone by that very id (the key
+//! `GetDynamicTimeZoneInformation` answers with), taken when it is one listed below and not while
+//! automatic daylight saving is off for a zone that has it. Elsewhere neither the standard library
+//! nor the crates here know Windows ids, so this lists the IANA names a Unix system names its zone
+//! by (`TZ`, or the link `/etc/localtime`, which macOS has too) for the common zones, one Windows
+//! id each. The ids are Microsoft's: most are on its "Default Time Zones" page, the rest (the
+//! United States, Canada and Australia beyond the default ones) are the long-standing names of
+//! those zones. A zone that is not listed is not guessed: the event is made in UTC (`UTC`, which
+//! every Exchange knows), where this client reads it back on the day it was made for and an Outlook
+//! elsewhere may draw it a few hours off midnight. Zones with the same rules share an id on purpose
+//! (Paris is `Romance Standard Time` and Vienna `W. Europe Standard Time`, which differ only in a
+//! name): the id only has to give the same midnights. Istanbul is left out: Windows renamed that id
+//! (`Turkey` to `Türkiye Standard Time`), so which one a server has depends on its operating
+//! system.
 
+#[cfg(any(not(windows), test))]
 use std::path::Path;
 
 /// What an unknown zone, or none, is made in.
@@ -38,21 +42,88 @@ tokio::task_local! {
 
 /// The Windows id of the zone this computer is in, or `UTC` when it is not one this knows.
 pub(super) fn local() -> &'static str {
+    known().unwrap_or(UTC)
+}
+
+/// The Windows id of the zone this computer is in, `None` when it is not one this knows (an empty
+/// test zone says that too). A single event can do without it; a repeating one cannot, because the
+/// server repeats it on the wall of the zone it was made in, and one made in UTC would move an hour
+/// when the clocks change: a computer whose zone is not known makes no series.
+pub(super) fn known() -> Option<&'static str> {
     #[cfg(test)]
     if let Ok(zone) = TEST_ZONE.try_with(|zone| *zone) {
-        return zone;
+        return Some(zone).filter(|zone| !zone.is_empty());
     }
+    system()
+}
+
+/// The zone this Unix computer names by `TZ` or `/etc/localtime`, as its Windows id.
+#[cfg(not(windows))]
+fn system() -> Option<&'static str> {
     iana_name(
         std::env::var("TZ").ok().as_deref(),
         std::fs::read_link("/etc/localtime").ok().as_deref(),
     )
     .and_then(|name| windows(&name))
-    .unwrap_or(UTC)
+}
+
+/// The zone this Windows computer is in, by the id Windows itself keeps it under.
+#[cfg(windows)]
+fn system() -> Option<&'static str> {
+    use windows_sys::Win32::System::Time::{
+        DYNAMIC_TIME_ZONE_INFORMATION, GetDynamicTimeZoneInformation, TIME_ZONE_ID_INVALID,
+    };
+    let mut info = DYNAMIC_TIME_ZONE_INFORMATION::default();
+    // SAFETY: `info` is a valid, writable structure of the size the call fills in.
+    if unsafe { GetDynamicTimeZoneInformation(&mut info) } == TIME_ZONE_ID_INVALID {
+        return None;
+    }
+    chosen(
+        &key_name(&info.TimeZoneKeyName),
+        info.DynamicDaylightTimeDisabled,
+        info.DaylightDate.wMonth != 0,
+    )
+}
+
+/// The id of a Windows zone this can write, `None` for one it does not list, and for a zone that
+/// has daylight saving while the computer's automatic daylight saving is off: its clock then keeps
+/// standard time all year, which no zone of that id does, so a series made in it would be an hour
+/// off for half the year.
+#[cfg(any(windows, test))]
+fn chosen(
+    key: &str,
+    automatic_daylight_saving_off: bool,
+    has_daylight_saving: bool,
+) -> Option<&'static str> {
+    if automatic_daylight_saving_off && has_daylight_saving {
+        return None;
+    }
+    listed(key)
+}
+
+/// A zone key name as Windows hands it over: UTF-16 up to the first NUL.
+#[cfg(any(windows, test))]
+fn key_name(units: &[u16]) -> String {
+    let end = units
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(units.len());
+    String::from_utf16_lossy(&units[..end])
+}
+
+/// A Windows id that is one of those below, as written there; any other is not known here.
+#[cfg(any(windows, test))]
+fn listed(id: &str) -> Option<&'static str> {
+    ZONES
+        .iter()
+        .find(|(_, windows)| *windows == id)
+        .map(|(_, windows)| *windows)
 }
 
 /// The IANA name of a zone from the `TZ` variable (`Europe/Vienna`, or `:Europe/Vienna`, or a path
 /// into a zoneinfo directory) or else the target of the `/etc/localtime` link. A `TZ` that is a
 /// POSIX rule (`CET-1CEST`) names no zone and is not looked behind.
+#[cfg(any(not(windows), test))]
 fn iana_name(tz: Option<&str>, link: Option<&Path>) -> Option<String> {
     let after_zoneinfo = |text: &str| {
         text.split_once("zoneinfo/")
@@ -74,6 +145,7 @@ fn iana_name(tz: Option<&str>, link: Option<&Path>) -> Option<String> {
 }
 
 /// The Windows id for an IANA zone name, if it is one of those below.
+#[cfg(any(not(windows), test))]
 fn windows(iana: &str) -> Option<&'static str> {
     ZONES
         .iter()

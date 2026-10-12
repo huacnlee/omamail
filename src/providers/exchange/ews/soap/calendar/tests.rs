@@ -1,5 +1,6 @@
 use super::*;
 use crate::providers::exchange::ews::xml::{self, Node};
+use chrono::Weekday;
 
 const VIENNA: &str = "W. Europe Standard Time";
 
@@ -50,6 +51,7 @@ fn days(first: &str, after: &str) -> When {
 fn plain(title: &str, when: When) -> Appointment {
     let (title, location) = (title.into(), String::new());
     Appointment {
+        recurrence: None,
         title,
         location,
         notes: None,
@@ -312,6 +314,7 @@ fn nothing_is_repaired_a_field_or_a_time_that_cannot_be_written_is_a_refusal() {
     ] {
         let (title, location, notes) = (title.into(), location.into(), notes.map(str::to_owned));
         let item = Appointment {
+            recurrence: None,
             title,
             location,
             notes,
@@ -713,4 +716,223 @@ fn a_cancellation_is_sent_to_everybody_and_a_removal_is_saved_and_sent_to_nobody
     let item = remove.at(&["Items", "RemoveItem"]).unwrap();
     assert_eq!(names(item), ["ReferenceItemId"], "no body, no recipient");
     assert_eq!(remove_cancellation("AAMk", ""), Err(INVALID));
+}
+
+fn weekly(first: &str, interval: u32, end: End) -> Recurrence {
+    let start: NaiveDate = first.parse().unwrap();
+    let pattern = Pattern::Weekly(interval, vec![start.weekday()]);
+    Recurrence {
+        pattern,
+        end,
+        start,
+    }
+}
+
+fn series(when: When, rule: Recurrence) -> Appointment {
+    Appointment {
+        recurrence: Some(rule),
+        ..plain("Backup", when)
+    }
+}
+
+/// What follows the people (or the place) in a new item: the rule and the zones, as written.
+fn tail(request: &str) -> &str {
+    let at = request.find("<t:Recurrence>").expect("a rule");
+    &request[at..request.find("</t:CalendarItem>").unwrap()]
+}
+
+const ZONES: &str = r#"<t:StartTimeZone Id="W. Europe Standard Time"/><t:EndTimeZone Id="W. Europe Standard Time"/>"#;
+
+#[test]
+fn a_series_is_utc_instants_a_rule_and_the_zone_it_recurs_in_named_twice() {
+    // 03:00 in Vienna, a week before the clocks change: the instants stay UTC, the zone says the wall.
+    let when = timed("2026-10-19T01:00:00Z", "2026-10-19T02:00:00Z");
+    let backup = series(when, weekly("2026-10-19", 1, End::Count(3)));
+    let request = create_appointment(&backup, VIENNA).unwrap();
+    let (create, zone) = parsed(&request);
+    assert_eq!(zone.as_deref(), Some(VIENNA));
+    assert_eq!(create.attr("SendMeetingInvitations"), Some("SendToNone"));
+    assert!(request.contains("<t:Start>2026-10-19T01:00:00Z</t:Start>"));
+    let rule = concat!(
+        "<t:Recurrence><t:WeeklyRecurrence><t:Interval>1</t:Interval><t:DaysOfWeek>Monday</t:DaysOfWeek>",
+        "</t:WeeklyRecurrence><t:NumberedRecurrence><t:StartDate>2026-10-19</t:StartDate>",
+        "<t:NumberOfOccurrences>3</t:NumberOfOccurrences></t:NumberedRecurrence></t:Recurrence>"
+    );
+    assert_eq!(tail(&request), format!("{rule}{ZONES}"));
+    // A meeting that repeats carries its people before the rule, and is still sent to them.
+    let guests = Guests {
+        required: who(&["bob@example.org"]),
+        optional: Vec::new(),
+    };
+    let request = create_meeting(&backup, &guests, VIENNA).unwrap();
+    assert!(request.contains("</t:RequiredAttendees><t:Recurrence>"));
+    assert!(request.contains(r#"SendMeetingInvitations="SendToAllAndSaveCopy""#));
+    // Whole days are days in the zone of the series; a single event names no zone and no rule.
+    let days = series(
+        days("2026-10-19", "2026-10-20"),
+        weekly("2026-10-19", 1, End::Never),
+    );
+    let (create, zone) = parsed(&create_appointment(&days, VIENNA).unwrap());
+    let start = create
+        .at(&["Items", "CalendarItem"])
+        .unwrap()
+        .text_at(&["Start"]);
+    assert_eq!(
+        (zone.as_deref(), start),
+        (Some(VIENNA), Some("2026-10-19T00:00:00"))
+    );
+    let single = create_appointment(&plain("Once", when), VIENNA).unwrap();
+    assert!(!single.contains("TimeZone") && !single.contains("Recurrence"));
+}
+
+#[test]
+fn every_pattern_and_end_is_written_in_the_order_of_its_page() {
+    use Weekday::{Thu, Tue};
+    let first: NaiveDate = "2026-10-29".parse().unwrap();
+    let cases = [
+        (
+            Pattern::Daily(3),
+            End::Never,
+            "<t:DailyRecurrence><t:Interval>3</t:Interval>",
+        ),
+        (
+            Pattern::Weekly(2, vec![Tue, Thu]),
+            End::Count(4),
+            concat!(
+                "<t:WeeklyRecurrence><t:Interval>2</t:Interval><t:DaysOfWeek>Tuesday Thursday</t:DaysOfWeek>",
+                "<t:FirstDayOfWeek>Monday</t:FirstDayOfWeek>"
+            ),
+        ),
+        (
+            Pattern::Monthly(1, 29),
+            End::Never,
+            "<t:AbsoluteMonthlyRecurrence><t:Interval>1</t:Interval><t:DayOfMonth>29</t:DayOfMonth>",
+        ),
+        (
+            Pattern::MonthlyBy(1, Thu, 4),
+            End::Never,
+            concat!(
+                "<t:RelativeMonthlyRecurrence><t:Interval>1</t:Interval><t:DaysOfWeek>Thursday</t:DaysOfWeek>",
+                "<t:DayOfWeekIndex>Last</t:DayOfWeekIndex>"
+            ),
+        ),
+        (
+            Pattern::Yearly(10, 29),
+            End::Never,
+            "<t:AbsoluteYearlyRecurrence><t:DayOfMonth>29</t:DayOfMonth><t:Month>October</t:Month>",
+        ),
+        (
+            Pattern::YearlyBy(10, Thu, 4),
+            End::Until("2027-03-04".parse().unwrap()),
+            concat!(
+                "<t:RelativeYearlyRecurrence><t:DaysOfWeek>Thursday</t:DaysOfWeek>",
+                "<t:DayOfWeekIndex>Last</t:DayOfWeekIndex><t:Month>October</t:Month>"
+            ),
+        ),
+    ];
+    let when = timed("2026-10-29T08:00:00Z", "2026-10-29T09:00:00Z");
+    for (pattern, end, written) in cases {
+        let rule = Recurrence {
+            pattern,
+            end,
+            start: first,
+        };
+        let request = create_appointment(&series(when, rule), VIENNA).unwrap();
+        assert!(
+            tail(&request).starts_with(&format!("<t:Recurrence>{written}</")),
+            "{written}"
+        );
+        let range = match end {
+            End::Never => {
+                "<t:NoEndRecurrence><t:StartDate>2026-10-29</t:StartDate></t:NoEndRecurrence>"
+            }
+            End::Count(_) => {
+                "<t:NumberedRecurrence><t:StartDate>2026-10-29</t:StartDate><t:NumberOfOccurrences>4</t:NumberOfOccurrences></t:NumberedRecurrence>"
+            }
+            End::Until(_) => {
+                "<t:EndDateRecurrence><t:StartDate>2026-10-29</t:StartDate><t:EndDate>2027-03-04</t:EndDate></t:EndDateRecurrence>"
+            }
+        };
+        assert!(
+            tail(&request).ends_with(&format!("{range}</t:Recurrence>{ZONES}")),
+            "{range}"
+        );
+    }
+    // FirstDayOfWeek only where it decides which days go together.
+    let every = series(when, weekly("2026-10-29", 1, End::Never));
+    assert!(
+        !create_appointment(&every, VIENNA)
+            .unwrap()
+            .contains("FirstDayOfWeek")
+    );
+}
+
+#[test]
+fn a_series_that_cannot_be_kept_or_said_is_refused_before_anything_is_written() {
+    let when = timed("2026-10-19T01:00:00Z", "2026-10-19T02:00:00Z");
+    let on = |pattern| Recurrence {
+        pattern,
+        ..weekly("2026-10-19", 1, End::Never)
+    };
+    for (when, rule, zone) in [
+        // Not on its first day (no zone puts this instant on Wednesday), or not on its rule.
+        (when, weekly("2026-10-21", 1, End::Never), VIENNA),
+        (when, on(Pattern::Weekly(1, vec![Weekday::Tue])), VIENNA),
+        // Longer than a day for a daily rule; past the bounds; made in a zone the server is not told.
+        (
+            timed("2026-10-19T01:00:00Z", "2026-10-20T01:01:00Z"),
+            on(Pattern::Daily(1)),
+            VIENNA,
+        ),
+        (when, weekly("2026-10-19", 100, End::Never), VIENNA),
+        (when, weekly("2026-10-19", 1, End::Count(1000)), VIENNA),
+        (when, weekly("2026-10-19", 1, End::Never), "Vienna\"/>"),
+        (
+            days("2026-10-20", "2026-10-21"),
+            weekly("2026-10-19", 1, End::Never),
+            VIENNA,
+        ),
+    ] {
+        assert_eq!(create_appointment(&series(when, rule), zone), Err(INVALID));
+    }
+}
+
+#[test]
+fn every_events_time_of_day_is_a_clock_time_in_the_series_own_zone_and_never_an_instant() {
+    let start = NaiveTime::from_hms_opt(10, 15, 0).unwrap();
+    let ten = When::Clock { start, minutes: 45 };
+    let on_day = Some(ten.on("2026-10-05".parse().unwrap()));
+    let change = Change {
+        when: on_day,
+        ..Change::default()
+    };
+    let request = update_appointment("A", "CK", &change, VIENNA).unwrap();
+    let (update, zone) = parsed(&request);
+    let quiet = update.attr("SendMeetingInvitationsOrCancellations");
+    assert_eq!((zone.as_deref(), quiet), (Some(VIENNA), Some("SendToNone")));
+    let written = concat!(
+        r#"<t:StartTimeZone Id="W. Europe Standard Time"/></t:CalendarItem></t:SetItemField>"#,
+        r#"<t:SetItemField><t:FieldURI FieldURI="calendar:EndTimeZone"/><t:CalendarItem>"#,
+        r#"<t:EndTimeZone Id="W. Europe Standard Time"/></t:CalendarItem></t:SetItemField>"#,
+        r#"<t:SetItemField><t:FieldURI FieldURI="calendar:Start"/><t:CalendarItem>"#,
+        "<t:Start>2026-10-05T10:15:00</t:Start></t:CalendarItem></t:SetItemField>",
+        r#"<t:SetItemField><t:FieldURI FieldURI="calendar:End"/><t:CalendarItem>"#,
+        "<t:End>2026-10-05T11:00:00</t:End>"
+    );
+    assert!(request.contains(written) && !request.contains("IsAllDayEvent"));
+    // A time of day not yet put on a day is no time at all.
+    let unplaced = Change {
+        when: Some(ten),
+        ..Change::default()
+    };
+    assert_eq!(
+        update_appointment("A", "CK", &unplaced, VIENNA),
+        Err(INVALID)
+    );
+    // The master is read through one of its events, with its rule and its zone.
+    let read = master_detail("EV", true);
+    assert!(
+        read.contains(r#"<m:ItemIds><t:RecurringMasterItemId OccurrenceId="EV"/></m:ItemIds>"#)
+    );
+    assert!(read.contains("calendar:Recurrence") && read.contains("calendar:StartTimeZone"));
 }

@@ -81,11 +81,20 @@ Rectangle {
     ? String(event.organizer.displayName || event.organizer.email || "") : ""
   readonly property string reminderText: isExchange && event ? ExchangeEvents.reminderText(event.reminderMinutes) : ""
   readonly property bool canAnswer: isExchange && !!event && event.canRespond === true
+  // How an event of a series repeats, and whether its answer may be for all of it: the backend says
+  // (`seriesCanRespond`), and an answer is for this event until the person says all of them.
+  readonly property string repeatText: isExchange ? ExchangeEvents.repeatLine(event) : ""
+  readonly property bool seriesAnswer: canAnswer && event.isSeries === true && event.seriesCanRespond === true
+  property string answerScope: "occurrence"
+  readonly property string eventIdentity: isExchange && !!event ? ExchangeEvents.stableKey(event) : ""
+  onEventIdentityChanged: answerScope = "occurrence"
   // An answer, a decline or any other change on its way: the controller sends no answer beside one.
   readonly property bool answering: !!root.controller && (root.controller.responding === true
     || root.controller.eventWriting === true || root.controller.creatingEvent === true)
   // Said only when it is certain; a doubt is said as one (`ExchangeEvents.withDetail`).
   readonly property string cancelledText: !isExchange || !event ? ""
+    : event.cancelledByOrganizer === true && event.canRemoveSeries === true ? (event.cancelledEvents > 0
+      ? "The organizer cancelled " + event.cancelledEvents + " events of this series." : "The organizer cancelled the whole series.")
     : event.cancelledByOrganizer === true ? "The organizer cancelled this meeting."
     : event.cancellationUnplaced === true ? "An event of this meeting was cancelled; answer it in Outlook." : ""
   readonly property bool answerSent: isExchange && !!event && !!root.controller
@@ -239,6 +248,41 @@ Rectangle {
         }
       }
 
+      Text {
+        objectName: "event-repeat"
+        width: parent.width
+        visible: root.repeatText !== ""
+        text: root.repeatText
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      // An invitation to a series is answered for this event or for all of them, as the person chooses.
+      Flow {
+        objectName: "event-answer-scope"
+        visible: root.seriesAnswer
+        width: parent.width
+        spacing: Style.space(6)
+        Repeater {
+          model: ["occurrence", "series"]
+          IconTextButton {
+            required property string modelData
+            objectName: "event-answer-" + modelData
+            text: modelData === "series" ? "Answer all events" : "Answer this event"
+            selected: root.answerScope === modelData
+            iconName: selected ? "check" : ""
+            foreground: root.textColor
+            accent: root.accentColor
+            fontFamily: root.panelFontFamily
+            enabled: !root.answering
+            onClicked: root.answerScope = modelData
+          }
+        }
+      }
+
       RsvpRow {
         objectName: "event-rsvp"
         visible: root.canAnswer
@@ -253,7 +297,8 @@ Rectangle {
           if (!root.controller) return
           // No also takes the meeting off the calendar and tells the organizer: it asks first.
           if (answer === "declined") root.deleteRequested(String(root.event.sourceId || ""), root.event)
-          else root.controller.respondToInvitation(String(root.event.sourceId || ""), root.event, answer)
+          else root.controller.respondToInvitation(String(root.event.sourceId || ""), root.event, answer,
+            root.seriesAnswer && root.answerScope === "series" ? "series" : "")
         }
       }
 

@@ -1,7 +1,9 @@
 //! The calendar operations against a scripted calendar that keeps its items, pages a view by start
 //! the way the server does and writes what it is asked to, refusing a stale version. It answers an
 //! invitation the way Microsoft describes, re-creating the item under another id, and lists the
-//! Inbox's meeting cancellations.
+//! Inbox's meeting cancellations. A series is its master and its events (`series`), which share one
+//! version as Microsoft says they do; a view lists the events and never the master, which is read
+//! through one of them (`RecurringMasterItemId`) and takes all of them with it when it goes.
 
 use std::sync::{Arc, Mutex};
 
@@ -36,6 +38,8 @@ pub struct Cal {
     pub answer: Option<&'static str>,
     /// The item `UID` is the one of this number (an answer re-creates an item, never its `UID`).
     pub uid: Option<u16>,
+    /// The number of the master of the series this is a member of, its own for the master.
+    pub series: Option<u16>,
 }
 
 pub fn secs(text: &str) -> i64 {
@@ -88,7 +92,15 @@ impl Cal {
     }
 
     pub fn key(&self) -> String {
-        format!("CK{}v{}", self.n, self.version)
+        format!("CK{}v{}", self.series.unwrap_or(self.n), self.version)
+    }
+
+    pub fn is_master(&self) -> bool {
+        self.extra.contains(">RecurringMaster<")
+    }
+
+    pub fn is_exception(&self) -> bool {
+        self.extra.contains(">Exception<")
     }
 
     pub fn xml(&self, optional: bool, people: bool) -> String {
@@ -156,6 +168,9 @@ pub struct Store {
     pub stale: Vec<String>,
     /// A declined meeting stays on the calendar (else the server takes it off).
     pub keeps_declined: bool,
+    /// A cancellation processed leaves the series' master, at a new version, with these elements ahead
+    /// of its own (else it takes the master with its events).
+    pub keeps_master: Option<String>,
     /// Every request but the folder lookup, as sent.
     pub requests: Vec<String>,
 }
@@ -207,6 +222,31 @@ fn written_time(text: &str, zone: Option<&str>) -> i64 {
     )
 }
 
+/// A new version of item `at`, and of every other member of its series, which shares it.
+fn touch(store: &mut Store, at: usize) {
+    let series = store.items[at].series;
+    for (n, cal) in store.items.iter_mut().enumerate() {
+        if n == at || series.is_some() && cal.series == series {
+            cal.version += 1;
+        }
+    }
+}
+
+/// Item `at` leaves the calendar: a master with all of its series, an event alone (the rest moving
+/// on to a new version).
+fn gone(store: &mut Store, at: usize) {
+    let cal = store.items.remove(at);
+    if cal.is_master() {
+        store.items.retain(|other| other.series != cal.series);
+    } else if let Some(left) = store
+        .items
+        .iter()
+        .position(|o| o.series.is_some() && o.series == cal.series)
+    {
+        touch(store, left);
+    }
+}
+
 /// The calendar's answers. The folder lookup is answered by whoever wraps this.
 pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
     move |soap| {
@@ -227,6 +267,16 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                 .iter()
                 .position(|cal| Some(ews(cal.n).as_str()) == id.attr("Id"))
         });
+        // A master is read through one of its events.
+        let at = at.or_else(|| {
+            let event = request.at(&["ItemIds", "RecurringMasterItemId"])?;
+            let event = event.attr("OccurrenceId")?;
+            let items = &store.items;
+            let series = items.iter().find(|cal| ews(cal.n) == event)?.series?;
+            items
+                .iter()
+                .position(|cal| cal.n == series && cal.is_master())
+        });
         let key = asked.and_then(|id| id.attr("ChangeKey"));
         match soap.op.as_str() {
             "GetFolder" => {
@@ -245,7 +295,12 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                         ews(900 + at as u16)
                     )
                 };
-                let found: Vec<String> = store.cancelled.iter().enumerate().map(one).collect();
+                // A processed one is gone (its place is kept, so every message keeps its id).
+                let listed = store.cancelled.iter().enumerate();
+                let found: Vec<String> = listed
+                    .filter(|(_, (uid, _))| !uid.is_empty())
+                    .map(one)
+                    .collect();
                 Out::Xml(fake::find(&found, true, found.len()))
             }
             // A cancellation's message processed: its meeting leaves the calendar, and so does it.
@@ -256,14 +311,27 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                 let at = (0..store.cancelled.len()).find(|at| {
                     id.attr("Id") == Some(ews(900 + *at as u16).as_str())
                         && id.attr("ChangeKey") == Some(format!("CKm{at}").as_str())
+                        && !store.cancelled[*at].0.is_empty()
                 });
                 let Some(at) = at else {
                     return refused("CreateItem", "ErrorItemNotFound");
                 };
-                let (uid, _) = store.cancelled.remove(at);
+                let (uid, event) = std::mem::take(&mut store.cancelled[at]);
+                // One that names an event takes that event; one that names none takes them all.
+                let named = |cal: &Cal| {
+                    let at = event.as_ref().map(|at| format!("<t:RecurrenceId>{at}<"));
+                    at.is_none_or(|at| cal.extra.contains(&at))
+                };
+                let of = |cal: &Cal| format!("uid-{}@example.org", cal.uid.unwrap_or(cal.n)) == uid;
+                let keeps = store.keeps_master.clone();
+                let kept = |cal: &Cal| keeps.is_some() && cal.is_master();
                 store
                     .items
-                    .retain(|cal| format!("uid-{}@example.org", cal.uid.unwrap_or(cal.n)) != uid);
+                    .retain(|cal| !of(cal) || !named(cal) || kept(cal));
+                for cal in store.items.iter_mut().filter(|cal| of(cal) && kept(cal)) {
+                    cal.extra = format!("{}{}", keeps.as_deref().unwrap_or(""), cal.extra);
+                    cal.version += 1;
+                }
                 Out::Xml(response("CreateItem", &[ok("CreateItem", "<m:Items/>")]))
             }
             // The organizer's cancellation: the meeting leaves the organizer's calendar.
@@ -281,7 +349,7 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                 if id.attr("ChangeKey") != Some(store.items[at].key().as_str()) {
                     return refused("CreateItem", "ErrorIrresolvableConflict");
                 }
-                store.items.remove(at);
+                gone(&mut store, at);
                 Out::Xml(response("CreateItem", &[ok("CreateItem", "<m:Items/>")]))
             }
             "FindItem" => {
@@ -298,7 +366,7 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                 let mut found: Vec<&Cal> = store
                     .items
                     .iter()
-                    .filter(|c| c.end >= from && c.start < to)
+                    .filter(|c| c.end >= from && c.start < to && !c.is_master())
                     .collect();
                 found.sort_by_key(|cal| (cal.start, cal.n));
                 let page: Vec<String> = found
@@ -308,9 +376,54 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                     .collect();
                 Out::Xml(fake::find(&page, found.len() <= max, found.len()))
             }
+            // Several items at once: an answer for each, in the order asked.
+            "GetItem"
+                if request
+                    .child("ItemIds")
+                    .is_some_and(|ids| ids.children.len() > 1) =>
+            {
+                let ids = &request.child("ItemIds").unwrap().children;
+                let one = |id: &xml::Node| {
+                    let found = store
+                        .items
+                        .iter()
+                        .find(|cal| Some(ews(cal.n).as_str()) == id.attr("Id"));
+                    match found {
+                        Some(cal) => ok(
+                            "GetItem",
+                            &format!("<m:Items>{}</m:Items>", cal.xml(true, true)),
+                        ),
+                        None => message("GetItem", "Error", "ErrorItemNotFound", ""),
+                    }
+                };
+                let answers: Vec<String> = ids.iter().map(one).collect();
+                Out::Xml(response("GetItem", &answers))
+            }
             "GetItem" => match at {
                 Some(at) => {
-                    let item = format!("<m:Items>{}</m:Items>", store.items[at].xml(true, true));
+                    let mut item = store.items[at].xml(true, true);
+                    // A master asked for its exceptions lists them.
+                    let cal = &store.items[at];
+                    if cal.is_master() && soap.body.contains("calendar:ModifiedOccurrences") {
+                        let listed: String = store
+                            .items
+                            .iter()
+                            .filter(|other| other.series == cal.series && other.is_exception())
+                            .map(|other| {
+                                format!(
+                                    r#"<t:Occurrence><t:ItemId Id="{}" ChangeKey="{}"/></t:Occurrence>"#,
+                                    ews(other.n),
+                                    other.key()
+                                )
+                            })
+                            .collect();
+                        let end = item.len() - "</t:CalendarItem>".len();
+                        item.insert_str(
+                            end,
+                            &format!("<t:ModifiedOccurrences>{listed}</t:ModifiedOccurrences>"),
+                        );
+                    }
+                    let item = format!("<m:Items>{item}</m:Items>");
                     Out::Xml(response("GetItem", &[ok("GetItem", &item)]))
                 }
                 None => refused("GetItem", "ErrorItemNotFound"),
@@ -347,6 +460,8 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                 let answer = written("CreateItem", &cal);
                 if cal.answer != Some("Decline") || store.keeps_declined {
                     store.items.push(cal);
+                } else if cal.is_master() {
+                    store.items.retain(|other| other.series != cal.series);
                 }
                 answer
             }
@@ -418,11 +533,19 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                         _ => {}
                     }
                 }
-                cal.version += 1;
-                written("UpdateItem", cal)
+                // An event of a series that is changed becomes an exception.
+                if cal.extra.contains(">Occurrence<") {
+                    cal.extra = format!(
+                        "<t:CalendarItemType>Exception</t:CalendarItemType>{}",
+                        cal.extra
+                    );
+                }
+                let at = at.unwrap();
+                touch(&mut store, at);
+                written("UpdateItem", &store.items[at])
             }
             "DeleteItem" => {
-                store.items.remove(at.unwrap());
+                gone(&mut store, at.unwrap());
                 Out::Xml(fake::done("DeleteItem", 1))
             }
             _ => Out::Drop,
@@ -586,6 +709,7 @@ fn timed(start: &str, end: &str) -> When {
 
 fn appointment(title: &str, when: When) -> Appointment {
     Appointment {
+        recurrence: None,
         title: title.into(),
         location: "Room 4".into(),
         notes: None,
@@ -619,20 +743,23 @@ async fn an_appointment_is_made_changed_by_what_differs_and_deleted_and_nobody_i
     let other = client.create_appointment(&dentist, zone).await.unwrap();
     // An unchanged form sends nothing; a title sends the title alone.
     let same = client
-        .change_appointment(&made.id, "CK1v1", &edit("Dentist", None), zone)
+        .change_appointment(&made.id, "CK1v1", &edit("Dentist", None), zone, None)
         .await;
     assert_eq!(same.unwrap().change_key, "CK1v1");
     assert_eq!(fake.log.count("UpdateItem"), 0);
     let renamed = client
-        .change_appointment(&made.id, "CK1v1", &edit("Renamed", None), zone)
+        .change_appointment(&made.id, "CK1v1", &edit("Renamed", None), zone, None)
         .await;
     assert_eq!(renamed.unwrap().change_key, "CK1v2");
     let later = Some(timed("2026-10-05T08:00:00Z", "2026-10-05T08:30:00Z"));
     client
-        .change_appointment(&made.id, "CK1v2", &edit("Renamed", later), zone)
+        .change_appointment(&made.id, "CK1v2", &edit("Renamed", later), zone, None)
         .await
         .unwrap();
-    client.delete_appointment(&other.id, "CK2v1").await.unwrap();
+    client
+        .delete_appointment(&other.id, "CK2v1", None)
+        .await
+        .unwrap();
     let store = store.lock().unwrap();
     let left: Vec<(&str, i64)> = store
         .items
@@ -678,11 +805,14 @@ async fn a_version_other_than_the_one_drawn_is_a_conflict_and_nothing_is_written
     let (fake, mut client, _) = calendar(vec![october(1, 5)], |_| None).await;
     // Changed since the screen was drawn: refused on the read, before anything is written.
     let stale = client
-        .change_appointment(&cal_id(1), "CK1v0", &edit("New", None), "UTC")
+        .change_appointment(&cal_id(1), "CK1v0", &edit("New", None), "UTC", None)
         .await;
     assert_eq!(stale.err(), conflict);
     assert_eq!(
-        client.delete_appointment(&cal_id(1), "CK1v0").await.err(),
+        client
+            .delete_appointment(&cal_id(1), "CK1v0", None)
+            .await
+            .err(),
         conflict
     );
     assert_eq!(
@@ -695,7 +825,7 @@ async fn a_version_other_than_the_one_drawn_is_a_conflict_and_nothing_is_written
     };
     let (fake, mut client, _) = calendar(vec![october(1, 5)], race).await;
     let lost = client
-        .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC")
+        .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC", None)
         .await;
     assert_eq!(lost.err(), conflict);
     assert_eq!(
@@ -734,10 +864,10 @@ async fn nothing_but_a_plain_appointment_of_ones_own_is_written() {
     for n in (1..=9).chain([99]) {
         let key = format!("CK{n}v1");
         let changed = client
-            .change_appointment(&cal_id(n), &key, &edit("x", None), "UTC")
+            .change_appointment(&cal_id(n), &key, &edit("x", None), "UTC", None)
             .await;
         assert_eq!(changed.err(), Some("exchange_calendar_locked"), "{n}");
-        let deleted = client.delete_appointment(&cal_id(n), &key).await;
+        let deleted = client.delete_appointment(&cal_id(n), &key, None).await;
         assert_eq!(deleted.err(), Some("exchange_calendar_locked"), "{n}");
     }
     assert_eq!(
@@ -775,7 +905,7 @@ async fn a_failed_write_says_what_it_proves_and_is_never_sent_twice() {
         })
         .await;
         let changed = client
-            .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC")
+            .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC", None)
             .await;
         assert_eq!(changed.err(), Some(code));
         assert_eq!(fake.log.count("UpdateItem"), 1, "{code}");
@@ -815,7 +945,7 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
         when: Some(timed("2026-10-05T10:00:00Z", "2026-10-05T10:30:00Z")),
     };
     client
-        .change_appointment(&cal_id(1), "CK1v1", &moved, "UTC")
+        .change_appointment(&cal_id(1), "CK1v1", &moved, "UTC", None)
         .await
         .unwrap();
     let cal = store.lock().unwrap().items[0].clone();
@@ -831,7 +961,7 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
         when: None,
     };
     let same = client
-        .change_appointment(&cal_id(1), "CK1v2", &nothing, "UTC")
+        .change_appointment(&cal_id(1), "CK1v2", &nothing, "UTC", None)
         .await;
     assert_eq!(same.unwrap().change_key, "CK1v2");
     assert_eq!(fake.log.count("UpdateItem"), 1);
@@ -850,7 +980,7 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
         .expect("confirmed, never a failure");
     assert_eq!((made.id.as_str(), made.change_key.as_str()), ("", "K"));
     let changed = client
-        .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC")
+        .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC", None)
         .await;
     assert_eq!(changed.unwrap().id, cal_id(1));
 }

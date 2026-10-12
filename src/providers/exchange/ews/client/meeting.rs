@@ -30,16 +30,25 @@
 //! object; a refusal of it is said, and the calendar item is never deleted instead. Only a meeting the
 //! server itself flags cancelled, and one the owner declined, are moved to Deleted Items with
 //! `SendToNone` ("a calendar item is deleted without sending a cancellation message"). An invitation nobody cancelled or declined is
-//! `exchange_calendar_not_removable`: deleting it would leave its organizer waiting.
+//! `exchange_calendar_not_removable`: deleting it would leave its organizer waiting. One event of a
+//! series is taken off by a cancellation that names that event, else by deleting it alone: a
+//! cancellation of the whole series would take all of it, which is `series::remove_series`'s.
+//!
+//! **A meeting that repeats is changed and cancelled through a scope**, as a plain series is
+//! (`calendar`): one event by its own id, or all of it through the master, judged on the master
+//! (`EventDetail::series_organised`). The people of one event are the series': a change of one event
+//! names none.
 
 use std::collections::HashSet;
 
 use super::super::decode::calendar as view;
-use super::super::decode::detail::{self as answer, Cancellation, Cancelled, EventDetail};
+use super::super::decode::detail::{Cancellation, Cancelled, EventDetail};
 use super::super::decode::{self, Rej};
-use super::super::soap::calendar::{self as soap, Appointment, Change};
+use super::super::soap::calendar::{self as soap, Appointment, Change, Scope};
 use super::Client;
-use super::calendar::{CONFLICT, Edit, LOCKED, Written, changes, failure, refusal, written};
+use super::calendar::{
+    CONFLICT, Edit, LOCKED, Written, changes, failure, fits, refusal, series_day, written,
+};
 use crate::providers::exchange::guests::{self, Guests};
 use crate::providers::exchange::ids;
 
@@ -126,16 +135,36 @@ impl Client {
         Ok(written(&id, key, None))
     }
 
-    /// The meeting `wire` names as the server holds it now, if the owner organises it and it is still
-    /// at `change_key`. Nothing has been sent when this fails.
+    /// The meeting `wire` names (for all of a series, its master) as the server holds it now, if the
+    /// owner organises it and it is still at `change_key`, and the id a write to it goes to. A write to
+    /// all of a series mails the master's people, so it names them as the question named them (`told`):
+    /// people on the master but not named, or named but not on it, are `exchange_calendar_conflict`.
+    /// Nothing has been sent when this fails.
     async fn organised_meeting(
         &mut self,
         wire: &str,
         change_key: &str,
         owner: &str,
-    ) -> Result<EventDetail, &'static str> {
-        let current = self.detail(wire, false).await?;
-        if !current.organised(owner) {
+        scope: Option<Scope>,
+        told: Option<&[String]>,
+    ) -> Result<(EventDetail, String), &'static str> {
+        // The people named go with all of a series and with nothing else.
+        if told.is_some() != (scope == Some(Scope::Series)) {
+            return Err("invalid_params");
+        }
+        let current = match scope {
+            Some(Scope::Series) => self.master(wire, false).await?,
+            _ => self.detail(wire, false).await?,
+        };
+        // Another kind than the one the caller named is the item having changed since it was drawn.
+        if !Scope::names(scope, current.item.kind) {
+            return Err(CONFLICT);
+        }
+        let organised = match scope {
+            Some(_) => current.series_organised(owner),
+            None => current.organised(owner),
+        };
+        if !organised {
             return Err(LOCKED);
         }
         if current.item.change_key.is_empty() {
@@ -144,7 +173,33 @@ impl Client {
         if current.item.change_key != change_key {
             return Err(CONFLICT);
         }
-        Ok(current)
+        if let Some(told) = told {
+            let named = lower(told);
+            let on_it = current
+                .attendees
+                .iter()
+                .filter(|who| who.kind != "resource" && !is_owner(&who.who.address, owner));
+            if on_it
+                .map(|who| who.who.address.to_ascii_lowercase())
+                .collect::<HashSet<_>>()
+                != named
+            {
+                return Err(CONFLICT);
+            }
+        }
+        // What the master mails to somebody on one event alone is not documented: a series with an
+        // exception of other people is changed one event at a time.
+        if scope == Some(Scope::Series) {
+            let exceptions = self.exception_people(&current).await;
+            if !current.exceptions_agree(exceptions.as_deref(), owner) {
+                return Err(LOCKED);
+            }
+        }
+        let target = match scope {
+            Some(Scope::Series) => current.item.id.clone(),
+            _ => wire.to_owned(),
+        };
+        Ok((current, target))
     }
 
     /// Changes a meeting the owner organises to what `wanted` says, if it is still at `change_key`,
@@ -156,9 +211,16 @@ impl Client {
         wanted: &MeetingEdit,
         owner: &str,
         zone: &str,
+        scope: Option<Scope>,
+        told: Option<&[String]>,
     ) -> Result<Changed, &'static str> {
         let wire = ids::decode(id)?;
         let (required, optional) = (wanted.required.as_deref(), wanted.optional.as_deref());
+        // The people of a series are the series': one event of it names none.
+        let people = required.is_some() || optional.is_some();
+        if !fits(wanted.edit.when, scope) || scope == Some(Scope::Occurrence) && people {
+            return Err("invalid_params");
+        }
         guests::check(
             required.unwrap_or_default(),
             optional.unwrap_or_default(),
@@ -170,14 +232,16 @@ impl Client {
             title: edit.title.as_deref(),
             location: edit.location.as_deref(),
             reminder: edit.reminder,
-            when: edit.when,
+            when: edit.when.map(soap::When::judged),
             required,
             optional,
         };
         if whole != Change::default() {
             soap::update_meeting(&wire, change_key, &whole, zone)?;
         }
-        let current = self.organised_meeting(&wire, change_key, owner).await?;
+        let (current, target) = self
+            .organised_meeting(&wire, change_key, owner, scope, told)
+            .await?;
         let new_required = list_to_write(&current, "required", wanted.required.as_ref(), owner)?;
         let new_optional = list_to_write(&current, "optional", wanted.optional.as_ref(), owner)?;
         // The people as they will be: nobody left is an appointment (cancelled, not changed), and a
@@ -205,14 +269,18 @@ impl Client {
             optional_after.unwrap_or_default(),
         );
         guests::check(&both_required, &both_optional, "")?;
-        let change = Change {
+        let mut change = Change {
             required: new_required.as_deref(),
             optional: new_optional.as_deref(),
             ..changes(&current.item, edit)
         };
+        if let Some(when @ soap::When::Clock { minutes, .. }) = change.when {
+            change.when = Some(when.on(series_day(&current.item, zone, minutes)?));
+        }
+        let asked = ids::encode(&target)?;
         if change == Change::default() {
             let written = Written {
-                id: id.to_owned(),
+                id: asked,
                 change_key: current.item.change_key,
             };
             return Ok(Changed {
@@ -220,31 +288,37 @@ impl Client {
                 sent: false,
             });
         }
-        let request = soap::update_meeting(&wire, change_key, &change, zone)?;
+        let request = soap::update_meeting(&target, change_key, &change, zone)?;
         let (new_id, key) = self
             .exchange(&request, false, |node| view::written(node, "UpdateItem"))
             .await
             .map_err(failure)?
             .map_err(refusal)?;
         Ok(Changed {
-            written: written(&new_id, key, Some(id)),
+            written: written(&new_id, key, Some(&asked)),
             sent: !change.reminder_only(),
         })
     }
 
-    /// Cancels a meeting the owner organises, if it is still at `change_key`: everybody on it is told,
-    /// with `note` as the organizer's words, and it leaves the owner's calendar. The answer is how many
-    /// people were on it besides the owner.
+    /// Cancels a meeting the owner organises (one event of a series, or with `Series` all of it), if it
+    /// is still at `change_key`: everybody on it is told, with `note` as the organizer's words, and it
+    /// leaves the owner's calendar. The answer is how many people were on it besides the owner.
     pub async fn cancel_meeting(
         &mut self,
         id: &str,
         change_key: &str,
         note: Option<&str>,
         owner: &str,
+        scope: Option<Scope>,
+        told: Option<&[String]>,
     ) -> Result<usize, &'static str> {
         let wire = ids::decode(id)?;
-        let request = soap::cancel_meeting(&wire, change_key, note)?;
-        let current = self.organised_meeting(&wire, change_key, owner).await?;
+        soap::cancel_meeting(&wire, change_key, note)?;
+        let (current, target) = self
+            .organised_meeting(&wire, change_key, owner, scope, told)
+            .await?;
+        // The cancellation names the item that was read: for a series, its master.
+        let request = soap::cancel_meeting(&target, change_key, note)?;
         let others = current.attendees.iter();
         let told = others
             .filter(|who| !is_owner(&who.who.address, owner))
@@ -257,23 +331,35 @@ impl Client {
     }
 
     /// Takes a meeting somebody else organised off the calendar, if they cancelled it or the owner
-    /// declined it, and it is still at `change_key`. Nobody is mailed. The answer is why it could go:
+    /// declined it, and it is still at `change_key` (one event of a series with `scope` `Occurrence`).
+    /// Nobody is mailed. The answer is why it could go:
     /// `cancelled` or `declined`.
     pub async fn remove_meeting(
         &mut self,
         id: &str,
         change_key: &str,
+        scope: Option<Scope>,
     ) -> Result<&'static str, &'static str> {
         let wire = ids::decode(id)?;
         let delete = soap::delete_appointment(&wire, change_key)?;
+        if scope == Some(Scope::Series) {
+            return Err("invalid_params");
+        }
         let mut current = self.detail(&wire, false).await?;
         if current.elsewhere {
             return Err(LOCKED);
         }
+        // One event of a series is taken off through its scope, never without one; a single meeting
+        // named as one event is the item having changed since it was drawn.
+        if !Scope::names(scope, current.item.kind) {
+            return Err(CONFLICT);
+        }
+        if scope.is_none() && current.item.is_series() {
+            return Err(LOCKED);
+        }
         let message = match current.incoming() && !current.item.cancelled {
             true => {
-                let request = soap::find_cancellations();
-                let found = self.call(&request, true, answer::cancellations).await?;
+                let found = self.cancellations().await?;
                 // Only a cancellation certainly this meeting's: a doubt removes nothing.
                 let certain = |message: &Cancellation| message.is_for(&current) == Cancelled::Yes;
                 found.into_iter().find(certain)
@@ -284,6 +370,9 @@ impl Client {
             Some(_) => Cancelled::Yes,
             None => Cancelled::No,
         };
+        // One event of a series is taken off alone: by its own cancellation, else by its delete.
+        let member = current.item.kind != "single";
+        let message = message.filter(|message| !member || message.occurrence.is_some());
         let why = current.removal().ok_or(NOT_REMOVABLE)?;
         if current.item.change_key.is_empty() {
             return Err("exchange_invalid_response");
@@ -295,17 +384,10 @@ impl Client {
             self.remove_message(&message).await?;
             return Ok(why);
         }
-        // A meeting the server itself flags cancelled, or one the owner declined: Microsoft's
-        // `DeleteItem` with `SendToNone`, "a calendar item is deleted without sending a cancellation
-        // message".
-        self.exchange(&delete, false, |node| {
-            decode::outcomes(node, "DeleteItem", 1)
-        })
-        .await
-        .map_err(failure)?
-        .pop()
-        .unwrap_or(Err(Rej::INVALID))
-        .map_err(refusal)?;
+        // A meeting the server itself flags cancelled, or one the owner declined, or one event of a
+        // series whose cancellation was of all of it: Microsoft's `DeleteItem` with `SendToNone`, "a
+        // calendar item is deleted without sending a cancellation message".
+        self.delete_item(&delete).await?;
         Ok(why)
     }
 
@@ -313,7 +395,10 @@ impl Client {
     /// remove a meeting item when a MeetingCancellation message is received"). A refusal is said and
     /// nothing else is tried: deleting the calendar item instead would take off a meeting the server
     /// may know is still on. A message with no version to name is a damaged answer.
-    async fn remove_message(&mut self, message: &Cancellation) -> Result<(), &'static str> {
+    pub(super) async fn remove_message(
+        &mut self,
+        message: &Cancellation,
+    ) -> Result<(), &'static str> {
         let request = soap::remove_cancellation(&message.id, &message.change_key)
             .map_err(|_| "exchange_invalid_response")?;
         self.exchange(&request, false, |node| {

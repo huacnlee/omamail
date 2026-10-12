@@ -209,11 +209,12 @@ Item {
       compare(controller.eventWriting, false)
     }
 
-    function test_a_repeating_event_is_refused_and_a_dragged_appointment_moves_through_the_same_update() {
+    function test_a_repeat_the_server_cannot_be_told_is_refused_and_a_dragged_appointment_moves_through_the_same_update() {
       loaded([])
-      compare(controller.createEvent(sourceId, { title: "Weekly", startMs: 1000, endMs: 2000,
-        recurrence: { enabled: true, frequency: "WEEKLY", interval: "1", count: "" } }), false)
-      compare(createdSpy.signalArguments[0][1], "A repeating event on an Exchange calendar is made in Outlook")
+      compare(controller.createEvent(sourceId, { title: "Yearly", startMs: 1000, endMs: 2000,
+        recurrence: { enabled: true, frequency: "YEARLY", interval: "2", count: "" } }), false)
+      compare(createdSpy.signalArguments[0][1], "A yearly repeat is every year")
+      compare(mailService.requests.length, 0)
       var events = loaded([row()])
       compare(controller.rescheduleRefusal(events[0]), "")
       mailService.answers["exchange.calendarUpdate"] = { error: null, result: { id: "a1", changeKey: "k2" } }

@@ -17,6 +17,7 @@ use crate::mail::tests::{AccountFixture, account_fixture, isolated};
 
 mod calendar;
 mod meeting;
+mod series;
 
 const ACCOUNT: &str = "exchange:ada@example.org";
 

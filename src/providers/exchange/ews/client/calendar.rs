@@ -23,6 +23,15 @@
 //! has nothing to read; like every write it goes on a stream that the folder lookup has signed in,
 //! so it is never the request that finds a wrong password.
 //!
+//! **A member of a series is written through a scope, never without one.** `Occurrence` is the event
+//! the caller names (an update makes it an exception: "you use the item ID of the occurrence");
+//! `Series` is the master, read through that event (`RecurringMasterItemId`) and written by its own
+//! id, at the version the caller drew, which Microsoft says every event of a series shares. An item
+//! that is not what the scope says (one event named for a single appointment, a master that is none)
+//! is the item having changed since the screen was drawn: `exchange_calendar_conflict`. The time of
+//! day of every event is a clock time, put on the master's first day in the zone it recurs in; a
+//! master that says neither has no time of day to change from here (`exchange_calendar_locked`).
+//!
 //! What a write's failure proves: the codes that say the server did nothing keep their names (a
 //! stale version, an item not found, access denied, a folder not found, throttling, an unsupported
 //! server, a refused login, a request never written); anything else after the request was written
@@ -33,13 +42,17 @@ use std::collections::HashSet;
 
 use super::super::decode::calendar::{self as answer, CalendarItem};
 use super::super::decode::{self, Rej};
-use super::super::soap::calendar::{self as soap, Appointment, Change, Reminder, When};
+use chrono::NaiveDate;
+
+use super::super::soap::calendar::{self as soap, Appointment, Change, Reminder, Scope, When};
 use super::{Client, Failed};
 use crate::providers::exchange::ids;
 
 pub const CONFLICT: &str = "exchange_calendar_conflict";
 pub const LOCKED: &str = "exchange_calendar_locked";
 pub const UNCONFIRMED: &str = "exchange_calendar_unconfirmed";
+/// The series repeats in another zone than this computer's: a time of day typed here is not its own.
+pub const ZONE_DIFFERS: &str = "exchange_calendar_zone_differs";
 pub(super) const SERVER: &str = "exchange_server_error";
 /// Most answers one read asks for.
 const MAX_ANSWERS: usize = 12;
@@ -112,7 +125,8 @@ pub(super) fn changes<'a>(current: &CalendarItem, wanted: &'a Edit) -> Change<'a
                 && current.start_ms.div_euclid(1000) == start_ms.div_euclid(1000)
                 && current.end_ms.div_euclid(1000) == end_ms.div_euclid(1000)
         }
-        Some(When::AllDay { .. }) => false,
+        // A day, and a time of day of a series, are compared with nothing: the read has neither.
+        Some(When::AllDay { .. } | When::Clock { .. } | When::Wall { .. }) => false,
         None => true,
     };
     let title = wanted.title.as_deref();
@@ -129,6 +143,47 @@ pub(super) fn changes<'a>(current: &CalendarItem, wanted: &'a Edit) -> Change<'a
         reminder,
         when: if same_time { None } else { wanted.when },
         ..Change::default()
+    }
+}
+
+/// Whether a time can be for the part of a series a write names: the time of day of every event and
+/// nothing else for all of them, and never a time of day for one event or one that does not repeat.
+pub(super) fn fits(when: Option<When>, scope: Option<Scope>) -> bool {
+    match when {
+        None => true,
+        Some(When::Clock { .. }) => scope == Some(Scope::Series),
+        Some(When::Wall { .. }) => false,
+        Some(_) => scope != Some(Scope::Series),
+    }
+}
+
+/// The day the time of day of every event of a series is put on: the master's first day, read in the
+/// zone it says it recurs in, which must be `zone`, the computer's: the time was typed on this clock,
+/// and on another zone's wall it would be another time. Converting a clock time to instants would need
+/// zone rules this client does not have, so a master that says no first day, rule or zone is locked,
+/// and so is a series of whole days; an event of `minutes` that would outlast the gap of its rule is
+/// refused, as it is when a series is made.
+pub(super) fn series_day(
+    master: &CalendarItem,
+    zone: &str,
+    minutes: u32,
+) -> Result<NaiveDate, &'static str> {
+    let repeat = master.repeat.as_ref();
+    let (Some(first), Some(rule)) = (
+        repeat.and_then(|r| r.start),
+        repeat.and_then(|r| r.rule.as_ref()),
+    ) else {
+        return Err(LOCKED);
+    };
+    if master.all_day || master.zone.is_empty() {
+        return Err(LOCKED);
+    }
+    if master.zone != zone {
+        return Err(ZONE_DIFFERS);
+    }
+    match rule.holds(i64::from(minutes)) {
+        true => Ok(first),
+        false => Err("invalid_params"),
     }
 }
 
@@ -208,58 +263,72 @@ impl Client {
         Ok(written(&id, key, None))
     }
 
-    /// Changes one appointment to what `wanted` says, if it is a plain appointment still at
-    /// `change_key`. What the server already has is not sent again; when that is everything, nothing
-    /// is sent and the answer is the item as it is.
+    /// Changes one appointment, or the part of a series `scope` names, to what `wanted` says, if it is
+    /// a plain appointment still at `change_key`. What the server already has is not sent again; when
+    /// that is everything, nothing is sent and the answer is the item as it is.
     pub async fn change_appointment(
         &mut self,
         id: &str,
         change_key: &str,
         wanted: &Edit,
         zone: &str,
+        scope: Option<Scope>,
     ) -> Result<Written, &'static str> {
         let wire = ids::decode(id)?;
         let whole = Change {
             title: wanted.title.as_deref(),
             location: wanted.location.as_deref(),
             reminder: wanted.reminder,
-            when: wanted.when,
+            when: wanted.when.map(When::judged),
             ..Change::default()
         };
         // Judged before the connection is touched: what was named, as it would go at the most.
-        if !soap::is_change_key(change_key) {
+        if !soap::is_change_key(change_key) || !fits(wanted.when, scope) {
             return Err("invalid_params");
         }
         if whole != Change::default() {
             soap::update_appointment(&wire, change_key, &whole, zone)?;
         }
-        let current = self.plain_appointment(&wire, change_key).await?;
-        let change = changes(&current, wanted);
+        let (current, target) = self.plain_appointment(&wire, change_key, scope).await?;
+        let mut change = changes(&current, wanted);
+        if let Some(when @ When::Clock { minutes, .. }) = change.when {
+            change.when = Some(when.on(series_day(&current, zone, minutes)?));
+        }
+        let asked = ids::encode(&target)?;
         if change == Change::default() {
             return Ok(Written {
-                id: id.to_owned(),
+                id: asked,
                 change_key: current.change_key,
             });
         }
-        let request = soap::update_appointment(&wire, change_key, &change, zone)?;
+        let request = soap::update_appointment(&target, change_key, &change, zone)?;
         let (new_id, key) = self
             .exchange(&request, false, |node| answer::written(node, "UpdateItem"))
             .await
             .map_err(failure)?
             .map_err(refusal)?;
-        Ok(written(&new_id, key, Some(id)))
+        Ok(written(&new_id, key, Some(&asked)))
     }
 
-    /// Moves one appointment to Deleted Items, if it is a plain appointment still at `change_key`.
+    /// Moves one appointment to Deleted Items, if it is a plain appointment still at `change_key`: for
+    /// a series, the one event (`Occurrence`: "only that occurrence will be deleted") or all of it
+    /// (`Series`, the master: "the entire series will be deleted").
     pub async fn delete_appointment(
         &mut self,
         id: &str,
         change_key: &str,
+        scope: Option<Scope>,
     ) -> Result<(), &'static str> {
         let wire = ids::decode(id)?;
-        let request = soap::delete_appointment(&wire, change_key)?;
-        self.plain_appointment(&wire, change_key).await?;
-        self.exchange(&request, false, |node| {
+        soap::delete_appointment(&wire, change_key)?;
+        let (_, target) = self.plain_appointment(&wire, change_key, scope).await?;
+        self.delete_item(&soap::delete_appointment(&target, change_key)?)
+            .await
+    }
+
+    /// One `DeleteItem` into Deleted Items, nobody told; what its failure proves is a write's.
+    pub(super) async fn delete_item(&mut self, request: &str) -> Result<(), &'static str> {
+        self.exchange(request, false, |node| {
             decode::outcomes(node, "DeleteItem", 1)
         })
         .await
@@ -269,27 +338,50 @@ impl Client {
         .map_err(refusal)
     }
 
-    /// The item as the server holds it, if it is a plain appointment of the default calendar folder
-    /// (resolved by its distinguished name, as the view reads it) at `change_key`. A delete names no
-    /// `ConflictResolution`, so this read is its version check. Nothing has been written when this
-    /// fails.
+    /// The item a write is for as the server holds it, and the id the write goes to: a plain
+    /// appointment of the default calendar folder (resolved by its distinguished name, as the view
+    /// reads it), one event of a plain series, or the master of one (read through the event the caller
+    /// names and written by its own id), at `change_key`. A delete names no `ConflictResolution`, so
+    /// this read is its version check. Nothing has been written when this fails.
     async fn plain_appointment(
         &mut self,
         wire: &str,
         change_key: &str,
-    ) -> Result<CalendarItem, &'static str> {
-        let calendar = soap::get_calendar_folder();
-        let calendar = self.call(&calendar, true, answer::folder_id).await?;
-        let request = soap::get_appointment(wire);
-        let item = self.call(&request, true, answer::appointment).await?;
-        let mine = |item: &CalendarItem| item.lock().is_none() && item.folder == calendar;
-        let item = item.filter(mine).ok_or(LOCKED)?;
+        scope: Option<Scope>,
+    ) -> Result<(CalendarItem, String), &'static str> {
+        let (item, elsewhere) = if scope == Some(Scope::Series) {
+            let master = self.master(wire, false).await?;
+            (Some(master.item), master.elsewhere)
+        } else {
+            let calendar = soap::get_calendar_folder();
+            let calendar = self.call(&calendar, true, answer::folder_id).await?;
+            let request = soap::get_appointment(wire);
+            let item = self.call(&request, true, answer::appointment).await?;
+            let elsewhere = item.as_ref().is_some_and(|item| item.folder != calendar);
+            (item, elsewhere)
+        };
+        let item = item.ok_or(LOCKED)?;
+        // Another kind than the one the caller named is the item having changed since it was drawn.
+        if !Scope::names(scope, item.kind) {
+            return Err(CONFLICT);
+        }
+        let lock = match scope {
+            Some(_) => item.series_lock(),
+            None => item.lock(),
+        };
+        if lock.is_some() || elsewhere {
+            return Err(LOCKED);
+        }
         if item.change_key.is_empty() {
             return Err("exchange_invalid_response");
         }
         if item.change_key != change_key {
             return Err(CONFLICT);
         }
-        Ok(item)
+        let target = match scope {
+            Some(Scope::Series) => item.id.clone(),
+            _ => wire.to_owned(),
+        };
+        Ok((item, target))
     }
 }

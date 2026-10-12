@@ -31,6 +31,17 @@
 //! - **A private item is masked here**, before the answer leaves: Private, Confidential and any
 //!   sensitivity not known is "Private" with its time and nothing else, so no cache file, bar widget
 //!   or agent holds the real title. A cancelled item is left out, as Google's and Graph's are.
+//! - **A repeating event is made, changed and deleted through a scope, never without one.**
+//!   `recurrence` on a create makes a series (`recurrence::Recurrence::from_request` holds every
+//!   bound Microsoft gives and refuses what the schema cannot say); its first day is the event's
+//!   own for a whole day and the caller's local day (`firstDate`) for an instant. The server
+//!   repeats a series in the zone it was made in, so a computer whose zone this does not know makes
+//!   none (`exchange_calendar_zone_unknown`, once the account is found and before anything is
+//!   sent), rather than one in UTC that would move an hour when the clocks change. `scope` on an
+//!   update or a delete is `occurrence` (this event, which an update makes an exception) or
+//!   `series` (every event, through the master); every event's time of day is `startClock` and
+//!   `durationMinutes`, never instants or days. A member of a series is `editable` in a range by
+//!   the rule of its own kind, and named with no scope it is `exchange_calendar_locked`.
 //! - A timed event is its UTC instants. An all-day event is the days of its wall clock (midnight in
 //!   the zone it was made in), because a screen in another zone cannot recover them from instants;
 //!   where a server gave no wall clock they are the UTC dates of the instants plus twelve hours,
@@ -42,10 +53,15 @@ use futures_util::FutureExt;
 use serde_json::{Map, Value, json};
 
 use super::ews::{
-    Appointment, CalendarChange, CalendarItem, Edit, Lock, MAX_CURSOR_MS, MAX_ENTRIES, Reminder,
-    When, Written, create_appointment, is_change_key, update_appointment,
+    Appointment, CalendarChange, CalendarItem, Edit, Lock, MAX_CURSOR_MS, MAX_ENTRIES,
+    MAX_SPAN_MINUTES, Reminder, Scope, When, Written, create_appointment, is_change_key,
+    update_appointment,
 };
+use super::recurrence::{self, Recurrence};
 use super::{INVALID, account, fields, ids, text, token, write::turn, zone};
+
+/// This computer's zone is not one a series could be made in, so none is made.
+const ZONE_UNKNOWN: &str = "exchange_calendar_zone_unknown";
 
 /// The widest range one request may ask for (a month grid is 42 days).
 const MAX_RANGE_MS: i64 = 100 * 86_400_000;
@@ -84,15 +100,15 @@ pub async fn create(params: &Value) -> Result<Value, &'static str> {
             "endMs",
             "startDate",
             "endDate",
+            "recurrence",
         ],
     )?;
     let item = appointment(map)?;
     create_appointment(&item, zone::UTC)?;
+    // An unregistered mailbox is answered before this computer's zone is judged.
     let mut lease = turn(&account(map)?).await?;
-    let written = lease
-        .client()
-        .create_appointment(&item, zone::local())
-        .await?;
+    let zone = zone_of(&item)?;
+    let written = lease.client().create_appointment(&item, zone).await?;
     Ok(reply(&written))
 }
 
@@ -111,34 +127,39 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
             "endMs",
             "startDate",
             "endDate",
+            "scope",
+            "startClock",
+            "durationMinutes",
         ],
     )?;
     let (id, key) = target(map)?;
-    let edit = edit(map)?;
+    let (edit, scope) = edit(map)?;
     // Only what is named is judged and sent: a drag names the time alone.
     let whole = CalendarChange {
         title: edit.title.as_deref(),
         location: edit.location.as_deref(),
         reminder: edit.reminder,
-        when: edit.when,
+        when: edit.when.map(When::judged),
         ..CalendarChange::default()
     };
     if whole != CalendarChange::default() {
         update_appointment("A", &key, &whole, zone::UTC)?;
     }
     let mut lease = turn(&account(map)?).await?;
+    let zone = zone_of_change(&edit)?;
     let client = lease.client();
     let written = client
-        .change_appointment(&id, &key, &edit, zone::local())
+        .change_appointment(&id, &key, &edit, zone, scope)
         .await?;
     Ok(reply(&written))
 }
 
 pub async fn delete(params: &Value) -> Result<Value, &'static str> {
-    let map = fields(params, &["accountId", "id", "changeKey"])?;
+    let map = fields(params, &["accountId", "id", "changeKey", "scope"])?;
     let (id, key) = target(map)?;
+    let scope = scope(map)?;
     let mut lease = turn(&account(map)?).await?;
-    lease.client().delete_appointment(&id, &key).await?;
+    lease.client().delete_appointment(&id, &key, scope).await?;
     Ok(json!({"deleted": true}))
 }
 
@@ -148,6 +169,7 @@ pub(super) fn reply(written: &Written) -> Value {
 
 /// A new event as a request names it: the members `calendarCreate` and `meetingCreate` share.
 pub(super) fn appointment(map: &Map<String, Value>) -> Result<Appointment, &'static str> {
+    let when = when(map)?.ok_or(INVALID)?;
     Ok(Appointment {
         title: text(map, "title")?.to_owned(),
         location: optional(map, "location")?.unwrap_or_default(),
@@ -156,18 +178,91 @@ pub(super) fn appointment(map: &Map<String, Value>) -> Result<Appointment, &'sta
             Reminder::Minutes(minutes) => Some(minutes),
             _ => None,
         },
-        when: when(map)?.ok_or(INVALID)?,
+        recurrence: map
+            .get("recurrence")
+            .map(|value| rule(value, &when))
+            .transpose()?,
+        when,
     })
 }
 
-/// A change as a request names it: the members `calendarUpdate` and `meetingUpdate` share.
-pub(super) fn edit(map: &Map<String, Value>) -> Result<Edit, &'static str> {
-    Ok(Edit {
+/// The zone a change is made in: the computer's. A time of day of every event of a series was typed on
+/// this computer's clock, so it cannot do without it, and the client writes it only to a series that
+/// recurs in this same zone.
+pub(super) fn zone_of_change(edit: &Edit) -> Result<&'static str, &'static str> {
+    match edit.when {
+        Some(When::Clock { .. }) => zone::known().ok_or(ZONE_UNKNOWN),
+        _ => Ok(zone::local()),
+    }
+}
+
+/// The zone a new event is made in: the computer's, which a series cannot do without.
+pub(super) fn zone_of(item: &Appointment) -> Result<&'static str, &'static str> {
+    match item.recurrence {
+        Some(_) => zone::known().ok_or(ZONE_UNKNOWN),
+        None => Ok(zone::local()),
+    }
+}
+
+/// A repeat as a request names it, from the day of the first event: its own for a whole day, and for
+/// an instant the local day the caller names (`firstDate`), which this side has no zone rules to find.
+fn rule(value: &Value, when: &When) -> Result<Recurrence, &'static str> {
+    let first = match (when, value.get("firstDate")) {
+        (When::AllDay { first, .. }, None) => *first,
+        (When::Timed { .. }, Some(Value::String(text))) => recurrence::day(text)?,
+        _ => return Err(INVALID),
+    };
+    Recurrence::from_request(value, first)
+}
+
+/// A change as a request names it, and the part of a series it is for: the members `calendarUpdate`
+/// and `meetingUpdate` share. Every event of a series is given a time of day and no instant or day;
+/// one event, or one that does not repeat, never a time of day.
+pub(super) fn edit(map: &Map<String, Value>) -> Result<(Edit, Option<Scope>), &'static str> {
+    let scope = scope(map)?;
+    let (clock, instants) = (clock(map)?, when(map)?);
+    match (scope, &clock, &instants) {
+        (Some(Scope::Series), _, Some(_)) | (Some(Scope::Occurrence) | None, Some(_), _) => {
+            return Err(INVALID);
+        }
+        _ => {}
+    }
+    let edit = Edit {
         title: optional(map, "title")?,
         location: optional(map, "location")?,
         reminder: reminder(map, true)?,
-        when: when(map)?,
-    })
+        when: clock.or(instants),
+    };
+    Ok((edit, scope))
+}
+
+/// `scope`: absent for an event that does not repeat, else `occurrence` or `series`.
+pub(super) fn scope(map: &Map<String, Value>) -> Result<Option<Scope>, &'static str> {
+    match map.get("scope") {
+        None => Ok(None),
+        Some(Value::String(word)) => Scope::parse(word).map(Some).ok_or(INVALID),
+        Some(_) => Err(INVALID),
+    }
+}
+
+/// The time of day of every event of a series: `startClock` (`HH:MM`, spelled so) and
+/// `durationMinutes`, both or neither.
+fn clock(map: &Map<String, Value>) -> Result<Option<When>, &'static str> {
+    let (start, minutes) = match (map.get("startClock"), map.get("durationMinutes")) {
+        (None, None) => return Ok(None),
+        (Some(Value::String(start)), Some(minutes)) => (start, minutes),
+        _ => return Err(INVALID),
+    };
+    let spelled = |time: &NaiveTime| time.format("%H:%M").to_string() == *start;
+    let start = NaiveTime::parse_from_str(start, "%H:%M")
+        .ok()
+        .filter(spelled);
+    let minutes = minutes.as_u64().and_then(|n| u32::try_from(n).ok());
+    let minutes = minutes.filter(|n| (1..=MAX_SPAN_MINUTES).contains(n));
+    match (start, minutes) {
+        (Some(start), Some(minutes)) => Ok(Some(When::Clock { start, minutes })),
+        _ => Err(INVALID),
+    }
 }
 
 /// Whole milliseconds since the epoch, up to the end of the year 9999; a float or a string is
@@ -204,11 +299,7 @@ fn optional(map: &Map<String, Value>, key: &str) -> Result<Option<String>, &'sta
 
 /// A `YYYY-MM-DD` that is a day, spelled one way only.
 fn day(map: &Map<String, Value>, key: &str) -> Result<NaiveDate, &'static str> {
-    let text = text(map, key)?;
-    NaiveDate::parse_from_str(text, "%Y-%m-%d")
-        .ok()
-        .filter(|date| date.format("%Y-%m-%d").to_string() == text)
-        .ok_or(INVALID)
+    recurrence::day(text(map, key)?)
 }
 
 /// The time members: none, or `allDay` with the pair that goes with it. A member of the other kind

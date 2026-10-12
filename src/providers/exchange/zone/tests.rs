@@ -63,3 +63,38 @@ async fn the_computers_zone_is_a_known_one_or_utc() {
     let zone = TEST_ZONE.scope("Romance Standard Time", async { local() });
     assert_eq!(zone.await, "Romance Standard Time");
 }
+
+#[test]
+fn a_windows_key_name_is_read_to_its_nul_and_taken_only_when_listed() {
+    let units = |text: &str, size: usize| {
+        let mut units: Vec<u16> = text.encode_utf16().collect();
+        units.resize(size, 0);
+        units
+    };
+    assert_eq!(
+        key_name(&units("W. Europe Standard Time", 128)),
+        "W. Europe Standard Time"
+    );
+    assert_eq!(key_name(&units("UTC", 3)), "UTC");
+    assert_eq!(key_name(&units("", 128)), "");
+    assert_eq!(
+        listed("W. Europe Standard Time"),
+        Some("W. Europe Standard Time")
+    );
+    assert_eq!(listed("UTC"), Some("UTC"));
+    for unknown in [
+        "",
+        "Atlantis Standard Time",
+        "w. europe standard time",
+        "Europe/Vienna",
+    ] {
+        assert_eq!(listed(unknown), None, "{unknown:?}");
+    }
+    // Automatic daylight saving turned off: a zone that has it keeps standard time all year here,
+    // which its id does not say, so it is not known; one without daylight saving is unaffected.
+    let vienna = "W. Europe Standard Time";
+    assert_eq!(chosen(vienna, false, true), Some(vienna));
+    assert_eq!(chosen(vienna, true, true), None);
+    assert_eq!(chosen("UTC", true, false), Some("UTC"));
+    assert_eq!(chosen("Atlantis Standard Time", false, false), None);
+}

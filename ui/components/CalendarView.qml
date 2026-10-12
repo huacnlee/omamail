@@ -288,7 +288,9 @@ Item {
     if (!controller || !event || !event.start || !event.end) return
     var refusal = controller.rescheduleRefusal(event)
     if (refusal !== "") { controller.lastError = refusal; return }
-    if (event.exchangeMeeting === true) { rescheduleMeeting(event, startMs, endMs); return }
+    // A meeting, or an event of a repeating series (a drop cannot say whether it is this event or all of them),
+    // opens the editor, where saving asks; it never writes from the drag.
+    if (event.exchangeMeeting === true || event.isSeries === true) { rescheduleMeeting(event, startMs, endMs); return }
     if ((event.attendees || []).some(function(attendee) { return attendee.self !== true })) {
       controller.composeRequested({ editingEvent: event, startMs: startMs, endMs: endMs })
       return
@@ -296,9 +298,9 @@ Item {
     controller.updateEvent(event.sourceId, event, Calendar.rescheduleFields(event, startMs, endMs))
   }
 
-  // A meeting the owner organises is never moved by the drag: it opens the editor, where saving asks first and
-  // names the people it tells. They are read before it opens (the list holds none), and one found changed or
-  // locked since it was drawn is not moved from here.
+  // A meeting the owner organises, or an event of a series, is never moved by the drag: it opens the editor, where
+  // saving asks first and names the people it tells, or the part of the series it is for. The detail is read before
+  // it opens (the list holds neither), and one found changed or locked since it was drawn is not moved from here.
   function rescheduleMeeting(event, startMs, endMs) {
     controller.exchangeDetail(controller.findSource(event.sourceId), event, function(merged, error) {
       if (error) { controller.lastError = error; return }

@@ -371,7 +371,7 @@ fn only_a_meeting_whose_every_signal_says_the_owner_organises_it_is_organised() 
         &alone,
         "<t:IsOrganizer>false</t:IsOrganizer>",
     ]
-    .map(|inner| mine(inner).organiser_lock(owner));
+    .map(|inner| mine(inner).organiser_lock(owner, false));
     let codes = [
         Lock::Room,
         Lock::Guests,
@@ -432,8 +432,14 @@ fn a_received_single_meeting_is_removable_only_once_cancelled_or_declined() {
     assert_eq!(one(&own).removal(), None);
     let declined = "<t:MyResponseType>Decline</t:MyResponseType>";
     assert_eq!(one(declined).removal(), Some("declined"));
+    // One event of a series goes only once it is cancelled; declined, it stays, declined.
+    let event = "<t:CalendarItemType>Occurrence</t:CalendarItemType>";
+    assert_eq!(
+        one(&format!("{event}{flagged}")).removal(),
+        Some("cancelled")
+    );
+    assert_eq!(one(&format!("{event}{declined}")).removal(), None);
     for veto in [
-        "<t:CalendarItemType>Occurrence</t:CalendarItemType>",
         "<t:IsRecurring>true</t:IsRecurring>",
         "<t:IsOrganizer>true</t:IsOrganizer>",
         "<t:AppointmentState>1</t:AppointmentState>",
@@ -450,4 +456,85 @@ fn a_received_single_meeting_is_removable_only_once_cancelled_or_declined() {
         ..one(flagged)
     };
     assert_eq!(elsewhere.removal(), None);
+}
+
+const MASTER: &str = "<t:CalendarItemType>RecurringMaster</t:CalendarItemType>";
+
+fn cancelled(uid: &str, occurrence: Option<i64>) -> Cancellation {
+    Cancellation {
+        id: "m".into(),
+        uid: uid.into(),
+        occurrence,
+        ..Cancellation::default()
+    }
+}
+
+#[test]
+fn a_series_counts_as_cancelled_by_its_uid_alone_and_one_cancelled_event_is_not_the_series() {
+    let master = one(MASTER);
+    assert!(master.received_master() && master.series_incoming() && !master.incoming());
+    let whole = cancelled("u-1", None);
+    let (one_event, other) = (cancelled("u-1", Some(1)), cancelled("u-1", Some(2)));
+    assert_eq!(master.series_removal(&[]), None, "nobody cancelled it");
+    assert_eq!(master.series_removal(&[whole.clone()]), Some(0));
+    assert_eq!(
+        master.series_removal(&[one_event.clone()]),
+        None,
+        "one event is that event's"
+    );
+    let twice = [one_event.clone(), one_event.clone()];
+    assert_eq!(
+        master.series_removal(&twice),
+        None,
+        "the same event counted once"
+    );
+    assert_eq!(
+        master.series_removal(&[one_event.clone(), other.clone()]),
+        Some(2)
+    );
+    assert_eq!(
+        one(&format!("{MASTER}<t:IsCancelled>true</t:IsCancelled>")).series_removal(&[]),
+        Some(0)
+    );
+    // Another series, a cancellation with no uid, whatever item it names as its own: none of them.
+    let mut named = cancelled("", None);
+    named.associated = "AAMk".into();
+    for message in [cancelled("u-2", None), named] {
+        assert!(!message.is_for_series(&master.item));
+        assert_eq!(master.series_removal(&[message]), None);
+    }
+    // Not a received master: the owner's own, an event, a series with no uid, a private one.
+    for veto in [
+        "<t:MyResponseType>Organizer</t:MyResponseType>",
+        "<t:IsOrganizer>true</t:IsOrganizer>",
+        "<t:CalendarItemType>Occurrence</t:CalendarItemType>",
+        "<t:UID></t:UID>",
+        "<t:Sensitivity>Private</t:Sensitivity>",
+    ] {
+        assert_eq!(
+            one(&format!("{veto}{MASTER}")).series_removal(&[whole.clone()]),
+            None,
+            "{veto}"
+        );
+    }
+}
+
+#[test]
+fn all_of_a_series_is_answered_or_changed_only_by_what_its_master_says() {
+    let master = one(MASTER);
+    assert!(master.series_invitation() && !master.invitation());
+    let gone = EventDetail {
+        cancellation: Cancelled::Yes,
+        ..one(MASTER)
+    };
+    assert!(!gone.series_invitation());
+    let mine = one(&format!(
+        "{MASTER}<t:MyResponseType>Organizer</t:MyResponseType><t:IsOrganizer>true</t:IsOrganizer><t:AppointmentState>1</t:AppointmentState><t:ResponseObjects><t:CancelCalendarItem/></t:ResponseObjects>{}",
+        "<t:RequiredAttendees><t:Attendee><t:Mailbox><t:EmailAddress>bob@example.org</t:EmailAddress></t:Mailbox></t:Attendee></t:RequiredAttendees>"
+    ));
+    let owner = "ada@example.org";
+    assert!(
+        mine.series_organised(owner) && !mine.organised(owner) && mine.screen_lock(owner).is_none()
+    );
+    assert!(!mine.series_invitation());
 }
