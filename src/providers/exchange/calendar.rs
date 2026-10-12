@@ -20,9 +20,12 @@
 //!   two instants (`startMs`, `endMs`) or whole days (`startDate`, `endDate` the day after the last,
 //!   `YYYY-MM-DD`), never both, never longer than a year. An update names the title, the place and
 //!   the time only to change them, so what the screen drew (a placeholder for an empty subject, a
-//!   title it trimmed, a place it could not write) is never sent back.
-//!   Notes are written when an appointment is made and never after: the body is not read, so an
-//!   edit that sent it back would replace what nobody was shown.
+//!   title it trimmed, a place it could not write) is never sent back. A reminder is
+//!   `reminderMinutes`, whole minutes before the start from 0 to 40320 (four weeks): a new
+//!   appointment has none unless it names one, and an update leaves it alone unless it names one, or
+//!   -1 for none. Notes are written when an appointment is made and never after: what the detail
+//!   shows is text made from a body that may be HTML and may be cut, so an edit that sent it back
+//!   would replace what was written with what was shown.
 //! - **A private item is masked here**, before the answer leaves: Private, Confidential and any
 //!   sensitivity not known is "Private" with its time and nothing else, so no cache file, bar widget
 //!   or agent holds the real title. A cancelled item is left out, as Google's and Graph's are.
@@ -37,8 +40,8 @@ use futures_util::FutureExt;
 use serde_json::{Map, Value, json};
 
 use super::ews::{
-    Appointment, CalendarChange, CalendarItem, Edit, Lock, MAX_CURSOR_MS, MAX_ENTRIES, When,
-    Written, create_appointment, is_change_key, update_appointment,
+    Appointment, CalendarChange, CalendarItem, Edit, Lock, MAX_CURSOR_MS, MAX_ENTRIES, Reminder,
+    When, Written, create_appointment, is_change_key, update_appointment,
 };
 use super::{INVALID, account, fields, ids, text, token, write::turn, zone};
 
@@ -73,6 +76,7 @@ pub async fn create(params: &Value) -> Result<Value, &'static str> {
             "title",
             "location",
             "notes",
+            "reminderMinutes",
             "allDay",
             "startMs",
             "endMs",
@@ -84,6 +88,10 @@ pub async fn create(params: &Value) -> Result<Value, &'static str> {
         title: text(map, "title")?.to_owned(),
         location: optional(map, "location")?.unwrap_or_default(),
         notes: optional(map, "notes")?,
+        reminder: match reminder(map, false)? {
+            Reminder::Minutes(minutes) => Some(minutes),
+            _ => None,
+        },
         when: when(map)?.ok_or(INVALID)?,
     };
     create_appointment(&item, zone::UTC)?;
@@ -104,6 +112,7 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
             "changeKey",
             "title",
             "location",
+            "reminderMinutes",
             "allDay",
             "startMs",
             "endMs",
@@ -115,12 +124,14 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
     let edit = Edit {
         title: optional(map, "title")?,
         location: optional(map, "location")?,
+        reminder: reminder(map, true)?,
         when: when(map)?,
     };
     // Only what is named is judged and sent: a drag names the time alone.
     let whole = CalendarChange {
         title: edit.title.as_deref(),
         location: edit.location.as_deref(),
+        reminder: edit.reminder,
         when: edit.when,
     };
     if whole != CalendarChange::default() {
@@ -153,6 +164,20 @@ fn instant(map: &Map<String, Value>, key: &str) -> Result<i64, &'static str> {
         .and_then(Value::as_i64)
         .filter(|ms| (0..=MAX_CURSOR_MS).contains(ms))
         .ok_or(INVALID)
+}
+
+/// `reminderMinutes`: absent (`Keep`), or whole minutes before the start from 0 to four weeks; an
+/// update may also say -1, which is no reminder.
+fn reminder(map: &Map<String, Value>, update: bool) -> Result<Reminder, &'static str> {
+    match map.get("reminderMinutes").map(Value::as_i64) {
+        None => Ok(Reminder::Keep),
+        Some(Some(-1)) if update => Ok(Reminder::Off),
+        // The builders refuse more than four weeks, before any lookup.
+        Some(Some(minutes)) => u32::try_from(minutes)
+            .map(Reminder::Minutes)
+            .map_err(|_| INVALID),
+        Some(None) => Err(INVALID),
+    }
 }
 
 /// An optional text member: absent, or a string (never null).
@@ -195,7 +220,7 @@ fn when(map: &Map<String, Value>) -> Result<Option<When>, &'static str> {
 }
 
 /// An item and the version of it a caller drew.
-fn target(map: &Map<String, Value>) -> Result<(String, String), &'static str> {
+pub(super) fn target(map: &Map<String, Value>) -> Result<(String, String), &'static str> {
     let (id, key) = (text(map, "id")?, text(map, "changeKey")?);
     ids::validate(id)?;
     if !is_change_key(key) {

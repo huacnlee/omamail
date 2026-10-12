@@ -1,5 +1,7 @@
 //! The calendar operations against a scripted calendar that keeps its items, pages a view by start
-//! the way the server does and writes what it is asked to, refusing a stale version.
+//! the way the server does and writes what it is asked to, refusing a stale version. It answers an
+//! invitation the way Microsoft describes, re-creating the item under another id, and lists the
+//! Inbox's meeting cancellations.
 
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +10,7 @@ use chrono::{DateTime, NaiveDateTime, SecondsFormat};
 use quick_xml::escape::escape;
 
 use super::super::client::calendar::CalendarEvents;
-use super::super::{Appointment, Choice, Client, Edit, When, xml};
+use super::super::{Appointment, Choice, Client, Edit, Reminder, When, xml};
 use super::conn::client;
 use super::fake::{self, Fake, Offer, Out, Soap, message, ok, response};
 use crate::providers::exchange::ids;
@@ -30,13 +32,17 @@ pub struct Cal {
     pub attendees: usize,
     pub reminder: Option<u32>,
     pub version: u32,
+    /// The owner's answer to an invitation, which overrides `MyResponseType` in what is listed.
+    pub answer: Option<&'static str>,
+    /// The item `UID` is the one of this number (an answer re-creates an item, never its `UID`).
+    pub uid: Option<u16>,
 }
 
 pub fn secs(text: &str) -> i64 {
     DateTime::parse_from_rfc3339(text).unwrap().timestamp()
 }
 
-fn ews(n: u16) -> String {
+pub fn ews(n: u16) -> String {
     let mut bytes = [9u8; 40];
     bytes[..2].copy_from_slice(&n.to_be_bytes());
     STANDARD.encode(bytes)
@@ -85,7 +91,7 @@ impl Cal {
         format!("CK{}v{}", self.n, self.version)
     }
 
-    fn xml(&self, optional: bool, people: bool) -> String {
+    pub fn xml(&self, optional: bool, people: bool) -> String {
         let at = |secs| {
             DateTime::from_timestamp(secs, 0)
                 .unwrap()
@@ -101,13 +107,16 @@ impl Cal {
             ),
             ews(self.n),
             self.key(),
-            self.extra,
+            self.answer.map_or_else(
+                || self.extra.clone(),
+                |word| format!("<t:MyResponseType>{word}</t:MyResponseType>{}", self.extra)
+            ),
             escape(&self.subject),
             escape(&self.location),
             at(self.start),
             at(self.end),
             self.all_day,
-            self.n
+            self.uid.unwrap_or(self.n)
         );
         if let (true, Some((start, end))) = (optional, &self.walls) {
             out += &format!(
@@ -140,6 +149,13 @@ pub struct Store {
     pub items: Vec<Cal>,
     /// A view that asks for the wall clocks is a server error.
     pub refuse_walls: bool,
+    /// The meetings whose cancellation waits in the Inbox: a `UID`, and the `RecurrenceId` of the
+    /// one event of a series it cancels, if one.
+    pub cancelled: Vec<(String, Option<String>)>,
+    /// The `UID`s whose cancellations the server says are out of date (a newer message came after).
+    pub stale: Vec<String>,
+    /// A declined meeting stays on the calendar (else the server takes it off).
+    pub keeps_declined: bool,
     /// Every request but the folder lookup, as sent.
     pub requests: Vec<String>,
 }
@@ -160,7 +176,7 @@ pub fn operation(body: &str) -> xml::Node {
     tree.children.swap_remove(at).children.remove(0)
 }
 
-fn refused(kind: &str, code: &str) -> Out {
+pub fn refused(kind: &str, code: &str) -> Out {
     Out::Xml(response(kind, &[message(kind, "Error", code, "")]))
 }
 
@@ -217,6 +233,21 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                 let folder = r#"<m:Folders><t:CalendarFolder><t:FolderId Id="calendar-folder"/></t:CalendarFolder></m:Folders>"#;
                 Out::Xml(response("GetFolder", &[ok("GetFolder", folder)]))
             }
+            "FindItem" if soap.body.contains("IPM.Schedule.Meeting.Canceled") => {
+                let stale = store.stale.clone();
+                let one = |(uid, event): &(String, Option<String>)| {
+                    let event = event.as_ref().map_or_else(String::new, |at| {
+                        format!("<t:RecurrenceId>{at}</t:RecurrenceId>")
+                    });
+                    let old = stale.contains(uid);
+                    format!(
+                        r#"<t:MeetingCancellation><t:ItemId Id="{}"/><t:UID>{uid}</t:UID>{event}<t:IsOutOfDate>{old}</t:IsOutOfDate></t:MeetingCancellation>"#,
+                        ews(999)
+                    )
+                };
+                let found: Vec<String> = store.cancelled.iter().map(one).collect();
+                Out::Xml(fake::find(&found, true, found.len()))
+            }
             "FindItem" => {
                 let optional = soap.body.contains("StartWallClock");
                 if optional && store.refuse_walls {
@@ -243,11 +274,46 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
             }
             "GetItem" => match at {
                 Some(at) => {
-                    let item = format!("<m:Items>{}</m:Items>", store.items[at].xml(false, true));
+                    let item = format!("<m:Items>{}</m:Items>", store.items[at].xml(true, true));
                     Out::Xml(response("GetItem", &[ok("GetItem", &item)]))
                 }
                 None => refused("GetItem", "ErrorItemNotFound"),
             },
+            "CreateItem" if request.at(&["Items", "CalendarItem"]).is_none() => {
+                // An answer: the server re-creates the item under another id.
+                let reply = &request.child("Items").unwrap().children[0];
+                let id = reply.child("ReferenceItemId").unwrap();
+                let at = store
+                    .items
+                    .iter()
+                    .position(|cal| Some(ews(cal.n).as_str()) == id.attr("Id"));
+                let Some(at) = at else {
+                    return refused("CreateItem", "ErrorItemNotFound");
+                };
+                if id.attr("ChangeKey") != Some(store.items[at].key().as_str()) {
+                    return refused("CreateItem", "ErrorIrresolvableConflict");
+                }
+                let mut cal = store.items.remove(at);
+                cal.uid = Some(cal.uid.unwrap_or(cal.n));
+                cal.answer = Some(match reply.name.as_str() {
+                    "AcceptItem" => "Accept",
+                    "TentativelyAcceptItem" => "Tentative",
+                    _ => "Decline",
+                });
+                cal.n = store
+                    .items
+                    .iter()
+                    .map(|cal| cal.n)
+                    .max()
+                    .unwrap_or(0)
+                    .max(cal.n)
+                    + 1;
+                let answer = written("CreateItem", &cal);
+                if cal.answer != Some("Decline") || store.keeps_declined {
+                    store.items.push(cal);
+                }
+                answer
+            }
             "CreateItem" => {
                 let item = request.at(&["Items", "CalendarItem"]).unwrap();
                 let text = |name: &str| item.text_at(&[name]).unwrap_or("").to_owned();
@@ -261,6 +327,8 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                     end: written_time(&text("End"), zone),
                     all_day,
                     walls: all_day.then(|| (text("Start"), text("End"))),
+                    reminder: (text("ReminderIsSet") == "true")
+                        .then(|| text("ReminderMinutesBeforeStart").parse().unwrap()),
                     version: 1,
                     ..Cal::default()
                 };
@@ -285,6 +353,8 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                         "calendar:IsAllDayEvent" => cal.all_day = value == "true",
                         "calendar:Start" => cal.start = written_time(&value, zone),
                         "calendar:End" => cal.end = written_time(&value, zone),
+                        "item:ReminderIsSet" if value == "false" => cal.reminder = None,
+                        "item:ReminderMinutesBeforeStart" => cal.reminder = value.parse().ok(),
                         _ => {}
                     }
                 }
@@ -301,7 +371,7 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
 }
 
 /// A client of a scripted calendar, and its store; `wrap` may answer a request itself.
-async fn calendar(
+pub async fn calendar(
     items: Vec<Cal>,
     wrap: impl Fn(&Soap) -> Option<Out> + Send + Sync + 'static,
 ) -> (Fake, Client, Shared) {
@@ -316,7 +386,7 @@ async fn calendar(
     (fake, client, shared)
 }
 
-fn october(n: u16, day: u32) -> Cal {
+pub fn october(n: u16, day: u32) -> Cal {
     let at = |minute| format!("2026-10-{day:02}T09:{minute}:00Z");
     Cal::new(n, &format!("Event {n}"), &at("00"), &at("30"))
 }
@@ -459,6 +529,7 @@ fn appointment(title: &str, when: When) -> Appointment {
         title: title.into(),
         location: "Room 4".into(),
         notes: None,
+        reminder: None,
         when,
     }
 }
@@ -467,6 +538,7 @@ fn edit(title: &str, when: Option<When>) -> Edit {
     Edit {
         title: Some(title.into()),
         location: Some("Room 4".into()),
+        reminder: Reminder::Keep,
         when,
     }
 }
@@ -679,6 +751,7 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
     let moved = Edit {
         title: None,
         location: None,
+        reminder: Reminder::Keep,
         when: Some(timed("2026-10-05T10:00:00Z", "2026-10-05T10:30:00Z")),
     };
     client
@@ -694,6 +767,7 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
     let nothing = Edit {
         title: None,
         location: None,
+        reminder: Reminder::Keep,
         when: None,
     };
     let same = client

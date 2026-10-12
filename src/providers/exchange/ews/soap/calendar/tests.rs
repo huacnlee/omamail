@@ -53,6 +53,7 @@ fn plain(title: &str, when: When) -> Appointment {
         title,
         location,
         notes: None,
+        reminder: None,
         when,
     }
 }
@@ -249,6 +250,7 @@ fn no_request_can_mail_anybody_or_name_a_person_whatever_it_is_given() {
     let change = Change {
         title: Some(tricky),
         location: Some(tricky),
+        reminder: Reminder::Minutes(15),
         when: Some(item.when),
     };
     let requests = [
@@ -257,6 +259,8 @@ fn no_request_can_mail_anybody_or_name_a_person_whatever_it_is_given() {
         create_appointment(&item, VIENNA).unwrap(),
         update_appointment("AAMk", "K", &change, VIENNA).unwrap(),
         delete_appointment("AAMk", "K").unwrap(),
+        event_detail("AAMk", true),
+        find_cancellations(),
     ];
     let allowed = [
         "SendToNone",
@@ -310,6 +314,7 @@ fn nothing_is_repaired_a_field_or_a_time_that_cannot_be_written_is_a_refusal() {
             title,
             location,
             notes,
+            reminder: None,
             when,
         };
         assert_eq!(create_appointment(&item, VIENNA), Err(INVALID), "{item:?}");
@@ -337,4 +342,179 @@ fn nothing_is_repaired_a_field_or_a_time_that_cannot_be_written_is_a_refusal() {
     let (create, _) = parsed(&create_appointment(&plain("<b>&\"'", when), VIENNA).unwrap());
     let subject = create.at(&["Items", "CalendarItem", "Subject"]).unwrap();
     assert_eq!(subject.text, "<b>&\"'");
+}
+
+/// The `FieldURI`s a request's shape asks for.
+fn uris(node: &Node) -> Vec<String> {
+    let shape = node.at(&["ItemShape", "AdditionalProperties"]).unwrap();
+    let uri = |f: &Node| f.attr("FieldURI").unwrap().to_owned();
+    shape.children.iter().map(uri).collect()
+}
+
+#[test]
+fn a_reminder_is_written_only_when_it_is_named_and_never_past_four_weeks() {
+    let item = Appointment {
+        reminder: Some(15),
+        ..plain("Dentist", timed(HOUR.0, HOUR.1))
+    };
+    let (create, _) = parsed(&create_appointment(&item, VIENNA).unwrap());
+    let made = create.at(&["Items", "CalendarItem"]).unwrap();
+    let order = "Subject ReminderIsSet ReminderMinutesBeforeStart Start End IsAllDayEvent LegacyFreeBusyStatus";
+    assert_eq!(names(made).join(" "), order);
+    let set = ["ReminderIsSet", "ReminderMinutesBeforeStart"]
+        .map(|n| made.child(n).unwrap().text.clone());
+    assert_eq!(set, ["true", "15"]);
+    let sets = |reminder| {
+        let change = Change {
+            reminder,
+            ..Change::default()
+        };
+        let (update, _) = parsed(&update_appointment("A", "K", &change, VIENNA).unwrap());
+        let updates = update
+            .at(&["ItemChanges", "ItemChange", "Updates"])
+            .unwrap();
+        let one = |set: &Node| {
+            let value = &set.child("CalendarItem").unwrap().children[0];
+            format!(
+                "{}={}",
+                set.child("FieldURI").unwrap().attr("FieldURI").unwrap(),
+                value.text
+            )
+        };
+        updates
+            .children
+            .iter()
+            .map(one)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(sets(Reminder::Off), "item:ReminderIsSet=false");
+    let expected = "item:ReminderIsSet=true item:ReminderMinutesBeforeStart=40320";
+    assert_eq!(sets(Reminder::Minutes(40_320)), expected);
+    let late = Appointment {
+        reminder: Some(40_321),
+        ..item
+    };
+    assert_eq!(create_appointment(&late, VIENNA), Err(INVALID));
+    let change = Change {
+        reminder: Reminder::Minutes(40_321),
+        ..Change::default()
+    };
+    assert_eq!(update_appointment("A", "K", &change, VIENNA), Err(INVALID));
+}
+
+#[test]
+fn the_detail_read_asks_for_the_body_as_text_and_the_2013_properties_only_when_asked() {
+    let (get, zone) = parsed(&event_detail("AAMk+/=", true));
+    assert_eq!((get.name.as_str(), zone), ("GetItem", None));
+    let shape = get.child("ItemShape").unwrap();
+    assert_eq!(
+        names(shape).join(" "),
+        "BaseShape BodyType AdditionalProperties"
+    );
+    assert_eq!(shape.child("BodyType").unwrap().text, "Text");
+    let asked = uris(&get);
+    for uri in [
+        "item:Body",
+        "item:ResponseObjects",
+        "calendar:AppointmentState",
+        "calendar:MyResponseType",
+        "calendar:UID",
+        "calendar:Resources",
+        "calendar:IsOrganizer",
+        "calendar:JoinOnlineMeetingUrl",
+    ] {
+        assert!(asked.iter().any(|found| found == uri), "{uri}");
+    }
+    let id = get.at(&["ItemIds", "ItemId"]).unwrap();
+    assert_eq!(id.attrs, [("Id".to_owned(), "AAMk+/=".to_owned())]);
+    let (plain, _) = parsed(&event_detail("AAMk", false));
+    assert_eq!(uris(&plain).len(), asked.len() - 3);
+    assert!(
+        uris(&plain)
+            .iter()
+            .any(|uri| uri == "calendar:OriginalStart"),
+        "where an event sits"
+    );
+    assert!(
+        !uris(&plain)
+            .iter()
+            .any(|uri| uri.contains("Organizer") && uri != "calendar:Organizer")
+    );
+}
+
+#[test]
+fn an_answer_names_the_item_and_its_version_and_is_sent_to_the_organizer_or_saved_and_nothing_else()
+{
+    for (answer, element) in [
+        (Answer::Accept, "AcceptItem"),
+        (Answer::Tentative, "TentativelyAcceptItem"),
+        (Answer::Decline, "DeclineItem"),
+    ] {
+        for (send, disposition) in [(true, "SendAndSaveCopy"), (false, "SaveOnly")] {
+            let (create, zone) = parsed(&respond("AAMk+/=", "Dw+/=", answer, send).unwrap());
+            assert_eq!(zone, None);
+            let only = ("MessageDisposition".to_owned(), disposition.to_owned());
+            assert_eq!(
+                create.attrs,
+                [only],
+                "no SendMeetingInvitations, no SendOnly"
+            );
+            let items = create.child("Items").unwrap();
+            assert_eq!(
+                (names(&create), names(items)),
+                (vec!["Items"], vec![element])
+            );
+            let reply = &items.children[0];
+            assert_eq!(names(reply), ["ReferenceItemId"], "no body, no recipient");
+            let reference = &reply.children[0];
+            let attrs = [("Id", "AAMk+/="), ("ChangeKey", "Dw+/=")]
+                .map(|(k, v)| (k.to_owned(), v.to_owned()));
+            assert_eq!(reference.attrs, attrs);
+        }
+    }
+    for key in ["", "a b", "a\"b"] {
+        assert_eq!(
+            respond("AAMk", key, Answer::Accept, true),
+            Err(INVALID),
+            "{key:?}"
+        );
+    }
+    assert_eq!(
+        (
+            Answer::parse("tentative"),
+            Answer::parse("maybe"),
+            Answer::Decline.word()
+        ),
+        (Some(Answer::Tentative), None, "decline")
+    );
+}
+
+#[test]
+fn the_cancellations_are_the_inboxs_of_their_class_newest_first() {
+    let (find, _) = parsed(&find_cancellations());
+    let order = "ItemShape IndexedPageItemView Restriction SortOrder ParentFolderIds";
+    assert_eq!(names(&find).join(" "), order);
+    let class = find.at(&["Restriction", "IsEqualTo"]).unwrap();
+    let field = class.child("FieldURI").unwrap().attr("FieldURI");
+    let value = class
+        .at(&["FieldURIOrConstant", "Constant"])
+        .unwrap()
+        .attr("Value");
+    assert_eq!(
+        (field, value),
+        (
+            Some("item:ItemClass"),
+            Some("IPM.Schedule.Meeting.Canceled")
+        )
+    );
+    let sort = find.at(&["SortOrder", "FieldOrder"]).unwrap();
+    assert_eq!(sort.attr("Order"), Some("Descending"));
+    let folder = find
+        .at(&["ParentFolderIds", "DistinguishedFolderId"])
+        .unwrap();
+    assert_eq!(folder.attr("Id"), Some("inbox"));
+    let asked = uris(&find).join(" ");
+    let expected = "item:DateTimeReceived calendar:UID calendar:RecurrenceId meeting:AssociatedCalendarItemId meeting:IsOutOfDate";
+    assert_eq!(asked, expected);
 }

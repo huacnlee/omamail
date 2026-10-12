@@ -68,6 +68,10 @@ Rectangle {
   // An Exchange appointment's notes are not read, so the editor has no field that would show them
   // empty and replace them: they are written when it is made, and left alone after.
   readonly property bool notesShown: !(editing && !!chosenSource && chosenSource.kind === "exchange")
+  // An Exchange appointment takes a reminder of its own (none, or minutes before the start) and no calendar
+  // default, which it has not got: the buttons say so and "default" reads as none.
+  readonly property bool exchangeReminders: !!chosenSource && chosenSource.kind === "exchange"
+  readonly property string shownReminderMode: exchangeReminders && reminderMode === "default" ? "none" : reminderMode
   readonly property bool guestUpdate: editing && googleWrites
     && !!editingEvent.organizer && editingEvent.organizer.self === true
     && ((Array.isArray(editingEvent.attendees) && editingEvent.attendees.some(function(attendee) { return attendee.self !== true }))
@@ -316,7 +320,8 @@ Rectangle {
     originalGuestText = (event.attendees || []).map(function(attendee) { return String(attendee.email || "") }).filter(function(email) { return email !== "" }).join(", ")
     guestsField.text = originalGuestText
     reminderMode = "preserve"
-    reminderField.text = "10"
+    // An Exchange appointment's own reminder is where "Custom" starts from.
+    reminderField.text = event.reminderMinutes >= 0 ? String(event.reminderMinutes) : "10"
     availability = event.transparency || "opaque"
     eventVisibility = event.visibility || "default"
     timeZoneField.text = String(event.timeZone || "")
@@ -917,17 +922,28 @@ Rectangle {
             onChosen: function(value) { root.eventVisibility = value; root.visibilityChanged = true }
           }
         }
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(6)
+        visible: root.googleWrites || root.exchangeReminders
         FieldLabel { text: "Event reminders" }
         Flow {
+          objectName: "event-reminder-choices"
           width: parent.width
           spacing: Style.space(6)
           Repeater {
-            model: root.editing ? ["preserve", "default", "none", "custom"] : ["default", "none", "custom"]
+            model: root.exchangeReminders ? (root.editing ? ["preserve", "none", "custom"] : ["none", "custom"])
+              : root.editing ? ["preserve", "default", "none", "custom"] : ["default", "none", "custom"]
             IconTextButton {
               required property string modelData
+              objectName: "event-reminder-" + modelData
               text: modelData === "preserve" ? "Keep existing" : modelData === "default" ? "Calendar default"
                 : modelData === "none" ? "None" : "Custom reminder"
-              selected: root.reminderMode === modelData
+              selected: root.shownReminderMode === modelData
+              // The fill alone must never carry the choice: a theme can put it close to the normal one.
+              iconName: root.shownReminderMode === modelData ? "check" : ""
               foreground: root.textColor
               accent: root.accentColor
               fontFamily: root.panelFontFamily
@@ -941,6 +957,7 @@ Rectangle {
           spacing: Style.space(8)
           EditorField {
             id: reminderField
+            objectName: "event-reminder-minutes"
             width: Style.space(80)
             placeholderText: "Minutes"
             foreground: root.textColor

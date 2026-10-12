@@ -33,14 +33,14 @@ use std::collections::HashSet;
 
 use super::super::decode::calendar::{self as answer, CalendarItem};
 use super::super::decode::{self, Rej};
-use super::super::soap::calendar::{self as soap, Appointment, Change, When};
+use super::super::soap::calendar::{self as soap, Appointment, Change, Reminder, When};
 use super::{Client, Failed};
 use crate::providers::exchange::ids;
 
 pub const CONFLICT: &str = "exchange_calendar_conflict";
 pub const LOCKED: &str = "exchange_calendar_locked";
 pub const UNCONFIRMED: &str = "exchange_calendar_unconfirmed";
-const SERVER: &str = "exchange_server_error";
+pub(super) const SERVER: &str = "exchange_server_error";
 /// Most answers one read asks for.
 const MAX_ANSWERS: usize = 12;
 /// Most items one read returns: the figure Microsoft's default policy gives as a page limit.
@@ -58,6 +58,7 @@ pub struct CalendarEvents {
 pub struct Edit {
     pub title: Option<String>,
     pub location: Option<String>,
+    pub reminder: Reminder,
     pub when: Option<When>,
 }
 
@@ -81,7 +82,7 @@ fn definite(code: &str) -> bool {
 }
 
 /// The server's own answer about the item it was asked to write.
-fn refusal(rej: Rej) -> &'static str {
+pub(super) fn refusal(rej: Rej) -> &'static str {
     match rej.code {
         decode::STALE => CONFLICT,
         code if definite(code) || rej.unprocessed => code,
@@ -92,7 +93,7 @@ fn refusal(rej: Rej) -> &'static str {
 /// A write request that failed as a whole: its own code when it was not applied or the server's
 /// answer said it did nothing, else unknown. An HTTP 429 or 503 is a status, not such an answer: a
 /// gateway can give one for a request its backend went on to run.
-fn failure((code, applied): Failed) -> &'static str {
+pub(super) fn failure((code, applied): Failed) -> &'static str {
     match code {
         decode::STALE => CONFLICT,
         code if !applied => code,
@@ -116,9 +117,16 @@ fn changes<'a>(current: &CalendarItem, wanted: &'a Edit) -> Change<'a> {
     };
     let title = wanted.title.as_deref();
     let location = wanted.location.as_deref();
+    // A reminder the server already has is not sent again.
+    let reminder = match wanted.reminder {
+        Reminder::Off if current.reminder_minutes.is_none() => Reminder::Keep,
+        Reminder::Minutes(minutes) if current.reminder_minutes == Some(minutes) => Reminder::Keep,
+        other => other,
+    };
     Change {
         title: title.filter(|title| *title != current.subject),
         location: location.filter(|location| *location != current.location),
+        reminder,
         when: if same_time { None } else { wanted.when },
     }
 }
@@ -126,7 +134,7 @@ fn changes<'a>(current: &CalendarItem, wanted: &'a Edit) -> Change<'a> {
 /// What a write the server confirmed answers. An id it echoed that the codec refuses is answered
 /// like none (the asked id, or empty for a new item): the write happened, and the screen reads the
 /// range again, so it is never reported as a failure that a retry would repeat.
-fn written(id: &str, change_key: String, asked: Option<&str>) -> Written {
+pub(super) fn written(id: &str, change_key: String, asked: Option<&str>) -> Written {
     let id = ids::encode(id).unwrap_or_else(|_| asked.unwrap_or_default().to_owned());
     Written { id, change_key }
 }
@@ -213,6 +221,7 @@ impl Client {
         let whole = Change {
             title: wanted.title.as_deref(),
             location: wanted.location.as_deref(),
+            reminder: wanted.reminder,
             when: wanted.when,
         };
         // Judged before the connection is touched: what was named, as it would go at the most.

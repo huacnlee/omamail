@@ -4,6 +4,7 @@ const exchange = load("calendar/ExchangeEvents.js")
 const sources = load("calendar/Sources.js")
 const calendar = load("calendar/Calendar.js")
 const accounts = load("account/Accounts.js")
+const reminders = load("calendar/Reminders.js")
 
 const SOURCE = "exchange:exchange:alice@example.org"
 
@@ -112,7 +113,8 @@ const summaries = [
   assert.strictEqual(source.id, SOURCE)
   assert.strictEqual(source.name, "alice@example.org")
   assert.strictEqual(source.readOnly, false)
-  assert.strictEqual(source.remindersEnabled, false)
+  assert.strictEqual(source.remindersEnabled, true, "the server's own reminders, until turned off")
+  assert.strictEqual(sources.nativeCalendarFeatures(source), true)
   assert.strictEqual(sources.writable(source), true)
   assert.strictEqual(sources.comesWithAccount(source), true)
   assert.strictEqual(sources.providerLabel("exchange"), "Exchange")
@@ -121,6 +123,9 @@ const summaries = [
     enabled: false, readOnly: true, preferred: true, colorKey: "red" }] }
   const again = sources.withExchangeAccounts(saved, summaries).sources[0]
   deepEqual([again.enabled, again.colorKey, again.readOnly, again.preferred], [false, "red", false, false])
+  // A source saved with its reminders off keeps them off.
+  saved.sources[0].remindersEnabled = false
+  assert.strictEqual(sources.withExchangeAccounts(saved, summaries).sources[0].remindersEnabled, false)
   // It is saved and read back as what it is, never as a CalDAV calendar.
   const back = sources.load(sources.serialize({ version: 1, sources: [source] })).sources[0]
   deepEqual([back.kind, back.readOnly], ["exchange", false])
@@ -213,5 +218,149 @@ for (const [code, sentence] of [["exchange_calendar_conflict", "This event chang
   ["exchange_timeout", "The mail server took too long to answer"]]) {
   assert.strictEqual(exchange.writeError({ code: -32000, message: code }), sentence, code)
 }
+
+// ---------------------------------------------------------------- reminders
+
+{
+  const [set, none, odd] = drawn([timed({ reminderMinutes: 15 }), timed({ id: "t2", reminderMinutes: null }),
+    timed({ id: "t3", reminderMinutes: 1.5 })])
+  deepEqual([set.reminderMinutes, set.reminders], [15, { useDefault: false, overrides: [{ method: "popup", minutes: 15 }] }])
+  deepEqual([none.reminderMinutes, none.reminders.overrides, odd.reminderMinutes], [-1, [], -1])
+  // The desktop raises the server's own reminder, keyed by the item's uid and start (an answer gives it another
+  // id), and none for an invitation the owner declined. An event that ends as it starts still ends after it.
+  const list = { sources: [source] }
+  const point = drawn([timed({ id: "p", uid: "u-p", reminderMinutes: 0, endMs: Date.UTC(2026, 9, 23, 7, 0) })])[0]
+  const declined = drawn([timed({ id: "d", uid: "u-d", reminderMinutes: 5, response: "decline" })])[0]
+  const found = reminders.candidates([set, none, point, declined], list)
+  deepEqual(found.map(c => [c.eventId, c.due, c.end > c.start]), [["t1", set.start.ms - 15 * 60000, true],
+    ["p", point.start.ms, true]])
+  // The ledger skips a candidate whose end has passed: an at-start reminder of an event that ends as it
+  // starts is still there for a poll half a minute late, as long as one on time may be.
+  assert.strictEqual(found[1].end - found[1].due, 60000)
+  const renamed = drawn([timed({ id: "t9", reminderMinutes: 15 })])
+  assert.strictEqual(reminders.candidates(renamed, list)[0].occurrence, found[0].occurrence)
+}
+{
+  const choice = (mode, minutes, editing) => exchange.reminderChoice({ reminderMode: mode, reminderMinutes: minutes }, editing)
+  deepEqual([choice("custom", " 30 ", false), choice("custom", "40320", true)], [{ ok: true, minutes: 30 }, { ok: true, minutes: 40320 }])
+  for (const bad of ["40321", "1e2", "0x10", "-5", "", "1.5"])
+    assert.strictEqual(choice("custom", bad, false).ok, false, bad)
+  deepEqual([choice("none", "", false).minutes, choice("default", "", false).minutes, choice("none", "", true).minutes,
+    choice("preserve", "", true).minutes, choice("", "", true).minutes], [undefined, undefined, -1, undefined, undefined])
+  deepEqual([0, 15, 60, 90, 1440, 2880, -1, null, "15"].map(exchange.reminderText),
+    ["At the start", "15 minutes before", "1 hour before", "90 minutes before", "1 day before", "2 days before", "", "", ""])
+  const built = calendar.createEvent({ title: "x", startMs: 1000, endMs: 2000 }, 1)
+  built.reminderMinutes = 0
+  assert.strictEqual(exchange.createParams("a", built).reminderMinutes, 0)
+  const event = drawn([timed()])[0]
+  const edit = calendar.updateEvent({ title: "Standup", location: "Room 4", startMs: event.start.ms, endMs: event.end.ms }, event, 1)
+  assert.ok(!("reminderMinutes" in exchange.updateParams("a", event, edit)), "no choice leaves it")
+  edit.reminderMinutes = -1
+  assert.strictEqual(exchange.updateParams("a", event, edit).reminderMinutes, -1)
+}
+
+// ---------------------------------------------------------------- detail and answers
+
+const invitation = () => drawn([timed({ id: "i1", uid: "u-i1", title: "Planning", location: "",
+  editable: false, lock: "meeting", meeting: true, response: "none", kind: "single" })])[0]
+const INVITED = "Only its organizer can change this meeting."
+const detailOf = (extra) => Object.assign({ id: "i1", changeKey: "key-2", title: "Planning", location: "",
+  allDay: false, startMs: Date.UTC(2026, 9, 23, 7, 0), endMs: Date.UTC(2026, 9, 23, 7, 30), notes: "Agenda",
+  notesCut: true, organizer: { name: "Bob", email: "bob@example.org" }, response: "none", reminderMinutes: 10,
+  attendees: [{ name: "Alice", email: "alice@example.org", kind: "required", response: "none", self: true },
+    { name: "Cy", email: "cy@example.org", kind: "optional", response: "unknown", self: false },
+    { name: "Room 4", email: "room@example.org", kind: "resource", response: "accept", self: false }],
+  joinUrl: "https://meet.example.org/j/1", meeting: true, kind: "single", canRespond: true,
+  editable: false, lock: "meeting" }, extra || {})
+{
+  const event = invitation()
+  const merged = exchange.withDetail(event, detailOf())
+  deepEqual([merged.description, merged.notesCut, merged.meetLink, merged.reminderMinutes, merged.myResponse],
+    ["Agenda", true, "https://meet.example.org/j/1", 10, "none"])
+  deepEqual(merged.organizer, { email: "bob@example.org", displayName: "Bob" })
+  // The detail's own version is what the answer names; the list's stays what a write names.
+  deepEqual([merged.canRespond, merged.answerKey, merged.exchangeKey, merged.stale], [true, "key-2", "key-1", undefined])
+  deepEqual(calendar.attendeeRows(merged).map(r => [r.label, r.symbol, r.self, r.optional, r.resource]),
+    [["Awaiting reply", "?", true, false, false], ["Invited", "·", false, true, false], ["Accepted", "✓", false, false, true]])
+  assert.strictEqual(exchange.answerOf(merged.myResponse), "")
+  assert.strictEqual(exchange.answerOf("tentative"), "tentative")
+  // What changed since the list was drawn cannot be answered from it, and is said to be stale.
+  for (const change of [{ title: "Moved" }, { location: "Room 9" }, { startMs: Date.UTC(2026, 9, 23, 8) },
+    { endMs: Date.UTC(2026, 9, 23, 8) }, { allDay: true }]) {
+    const stale = exchange.withDetail(event, detailOf(change))
+    deepEqual([stale.stale, stale.canRespond], [true, false], JSON.stringify(change))
+  }
+  // A lock is the stricter of the two reads; a detail with no version cannot be answered.
+  const plain = drawn([timed()])[0]
+  assert.strictEqual(exchange.withDetail(plain, detailOf({ title: "Standup", location: "Room 4", canRespond: false,
+    editable: false, lock: "meeting", meeting: false })).lockReason, "Meeting with other people: change it in Outlook")
+  assert.strictEqual(exchange.withDetail(event, detailOf({ changeKey: "" })).canRespond, false)
+  assert.strictEqual(exchange.withDetail(event, { title: 5 }), null)
+  // An answer is sent with the detail's version, and only Yes and Maybe go without asking.
+  deepEqual(exchange.respondParams("a", merged, "tentative"), { accountId: "a", id: "i1", changeKey: "key-2",
+    response: "tentative", send: true })
+  deepEqual([exchange.deleteKind(merged), exchange.deleteKind(plain), exchange.deleteKind(event)], ["decline", "appointment", ""])
+  deepEqual(exchange.declineParams("a", merged), { accountId: "a", id: "i1", changeKey: "key-2", response: "decline",
+    send: true, remove: true })
+  const request = exchange.deleteRequest(merged)
+  deepEqual([request.title, request.message, request.dismiss, request.focus, request.choices],
+    ["Decline \"Planning\"?", "This tells the organizer you decline. The meeting is removed from your calendar.",
+      "Keep meeting", "dismiss", [{ value: "all", label: "Decline and remove" }]])
+  assert.strictEqual(exchange.deleteRequest(plain), null)
+  // One event of a series is declined and stays where it is.
+  const one = Object.assign({}, merged, { exchangeKind: "occurrence" })
+  assert.ok(!("remove" in exchange.declineParams("a", one)))
+  assert.strictEqual(exchange.deleteRequest(one).choices[0].label, "Decline")
+  deepEqual([exchange.deleteRefusal(source, merged), exchange.deleteRefusal(source, plain),
+    exchange.deleteRefusal(source, event), exchange.deleteRefusal(source, Object.assign({}, merged, { answerKey: "" }))],
+    ["", "", INVITED, "Refresh this event before changing it"])
+  assert.strictEqual(exchange.stableKey(merged), exchange.stableKey(Object.assign({}, merged, { exchangeId: "new" })))
+  // An invitation with no subject is drawn as "Untitled event" and is still what the list drew.
+  const untitled = drawn([timed({ id: "i2", title: "", location: "", editable: false, lock: "meeting" })])[0]
+  const read = exchange.withDetail(untitled, detailOf({ id: "i2", title: "" }))
+  deepEqual([untitled.summary, read.stale, read.canRespond], ["Untitled event", undefined, true])
+  // A meeting its organizer cancelled says so; the organizer's own copy is not one somebody else cancelled.
+  deepEqual([merged.cancelledByOrganizer, exchange.withDetail(event, detailOf({ cancelled: true, canRespond: false })).cancelledByOrganizer,
+    exchange.withDetail(event, detailOf({ cancelled: true, response: "organizer" })).cancelledByOrganizer], [false, true, false])
+  // A meeting somebody else sent says who may change it; the owner's own meeting and appointment keep their words.
+  deepEqual([event.lockReason, merged.lockReason,
+    drawn([timed({ editable: false, lock: "recurring", meeting: true, response: "accept" })])[0].lockReason,
+    drawn([timed({ editable: false, lock: "meeting", meeting: true, response: "organizer" })])[0].lockReason,
+    drawn([timed({ editable: false, lock: "recurring", meeting: false, response: "organizer" })])[0].lockReason],
+    [INVITED, INVITED, INVITED, "Meeting with other people: change it in Outlook", "Repeating event: change it in Outlook"])
+  // Cancelled: the owner's own answer is no longer shown, and the reminder only where it still comes (a meeting
+  // the server flags cancelled is left out of the list the reminders are read from).
+  const cancelled = exchange.withDetail(event, detailOf({ cancelled: true, canRespond: false,
+    attendees: [{ name: "Alice", email: "alice@example.org", kind: "required", response: "accept", self: true },
+      { name: "Room 4", email: "room@example.org", kind: "resource", response: "accept", self: false }] }))
+  deepEqual(calendar.attendeeRows(cancelled).map(r => r.label), ["Invited", "Accepted"])
+  deepEqual(calendar.attendeeRows(exchange.withDetail(event, detailOf({ attendees: [{ name: "Alice", email: "alice@example.org",
+    kind: "required", response: "accept", self: true }] }))).map(r => r.label), ["Accepted"], "kept while it stands")
+  deepEqual([cancelled.reminderMinutes, exchange.withDetail(event, detailOf({ cancelled: true, lock: "cancelled" })).reminderMinutes],
+    [10, -1])
+  // One event of the series was cancelled and this one does not say whether it is that one: a doubt, said as one.
+  const doubt = exchange.withDetail(event, detailOf({ canRespond: false, unplacedCancellation: true }))
+  deepEqual([doubt.cancelledByOrganizer, doubt.cancellationUnplaced, doubt.canRespond], [false, true, false])
+  deepEqual(calendar.attendeeRows(doubt).map(r => r.label)[0], "Awaiting reply", "a doubt hides nothing")
+  assert.strictEqual(exchange.withDetail(event, detailOf({ cancelled: true, unplacedCancellation: true })).cancellationUnplaced, false)
+  // The organizer is named unless it would only name the owner, on an event nobody else is on.
+  const own = exchange.withDetail(drawn([timed()])[0], detailOf({ title: "Standup", location: "Room 4", response: "organizer",
+    meeting: false, attendees: [], organizer: { name: "Alice", email: "alice@example.org" }, editable: true, lock: "" }))
+  const account = "exchange:alice@example.org"
+  deepEqual([exchange.organizerShown(own, account), exchange.organizerShown(drawn([timed()])[0], account),
+    exchange.organizerShown(Object.assign({}, own, { myResponse: "unknown" }), account),
+    exchange.organizerShown(Object.assign({}, own, { myResponse: "unknown" }), "exchange:bob@example.org"),
+    exchange.organizerShown(merged, account), exchange.organizerShown(event, account),
+    exchange.organizerShown(Object.assign({}, own, { exchangeMeeting: true }), account)],
+    [false, true, false, true, true, true, true])
+}
+for (const [code, sentence] of [["exchange_calendar_conflict", "This invitation changed. Refresh and answer again"],
+  ["exchange_calendar_unconfirmed", "The server did not confirm your answer. Look at your calendar before answering again"],
+  ["exchange_calendar_not_invitation", "That event is not an invitation you can answer here. Answer it in Outlook"],
+  ["invalid_params", "That invitation cannot be answered as it is"],
+  ["exchange_message_not_found", "That event is no longer in your calendar. Refresh and look again"]]) {
+  assert.strictEqual(exchange.respondError({ code: -32000, message: code }), sentence, code)
+}
+assert.strictEqual(exchange.detailError({ code: -32601, message: "Method not found" }), "Update the mail backend to see this event's details")
 
 console.log("calendar exchange: ok")

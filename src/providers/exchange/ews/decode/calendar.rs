@@ -17,16 +17,16 @@
 
 use chrono::{DateTime, Datelike, NaiveDateTime};
 
-use super::super::soap::calendar::{MAX_LOCATION_BYTES, MAX_TITLE_BYTES, is_change_key};
+use super::super::soap::calendar::{
+    MAX_LOCATION_BYTES, MAX_REMINDER_MINUTES, MAX_TITLE_BYTES, is_change_key,
+};
 use super::{Rej, each, first_item, id_attr, messages};
 use crate::providers::exchange::ews::xml::Node;
 
-const MAX_NAME_BYTES: usize = 320;
-const MAX_UID_BYTES: usize = 512;
+pub(super) const MAX_NAME_BYTES: usize = 320;
+pub(super) const MAX_UID_BYTES: usize = 512;
 /// More items than one answer can be asked for, by far: anything beyond is a damaged answer.
-const MAX_ELEMENTS: usize = 1000;
-/// Four weeks, the longest reminder Outlook sets.
-const MAX_REMINDER_MINUTES: u32 = 40_320;
+pub(super) const MAX_ELEMENTS: usize = 1000;
 /// Attendees counted per list: enough to know there are some.
 const MAX_ATTENDEES: usize = 200;
 
@@ -211,7 +211,7 @@ pub fn written(body: &Node, kind: &str) -> Result<Result<(String, String), Rej>,
 }
 
 /// A string cut to at most `max` bytes on a character boundary.
-fn cap(text: &str, max: usize) -> String {
+pub(super) fn cap(text: &str, max: usize) -> String {
     let mut end = text.len().min(max);
     while !text.is_char_boundary(end) {
         end -= 1;
@@ -219,7 +219,7 @@ fn cap(text: &str, max: usize) -> String {
     text[..end].to_owned()
 }
 
-fn instant(text: Option<&str>) -> Option<i64> {
+pub(super) fn instant(text: Option<&str>) -> Option<i64> {
     DateTime::parse_from_rfc3339(text?)
         .ok()
         .map(|date| date.timestamp_millis())
@@ -240,7 +240,7 @@ fn wall_clock(text: Option<&str>) -> Option<NaiveDateTime> {
     (moment.year() >= 1970 && (rest.is_empty() || rest == "Z" || offset(rest))).then_some(moment)
 }
 
-fn item(node: &Node) -> Result<Option<CalendarItem>, Rej> {
+pub(super) fn item(node: &Node) -> Result<Option<CalendarItem>, Rej> {
     let id = node.child("ItemId");
     let id_text = id_attr(id, "Id").ok_or(Rej::INVALID)?;
     let text = |name: &str| node.text_at(&[name]);
@@ -293,14 +293,7 @@ fn item(node: &Node) -> Result<Option<CalendarItem>, Rej> {
             Some("NoData") => "noData",
             _ => "busy",
         },
-        response: match text("MyResponseType") {
-            Some("Organizer") => "organizer",
-            Some("Tentative") => "tentative",
-            Some("Accept") => "accept",
-            Some("Decline") => "decline",
-            Some("NoResponseReceived") => "none",
-            _ => "unknown",
-        },
+        response: response(text("MyResponseType")),
         kind: match text("CalendarItemType") {
             Some("Single") => "single",
             Some("Occurrence") => "occurrence",
@@ -310,6 +303,18 @@ fn item(node: &Node) -> Result<Option<CalendarItem>, Rej> {
         },
         reminder_minutes: reminder,
     }))
+}
+
+/// `MyResponseType`, or an attendee's `ResponseType`: anything else, or nothing, is `unknown`.
+pub(super) fn response(word: Option<&str>) -> &'static str {
+    match word {
+        Some("Organizer") => "organizer",
+        Some("Tentative") => "tentative",
+        Some("Accept") => "accept",
+        Some("Decline") => "decline",
+        Some("NoResponseReceived") => "none",
+        _ => "unknown",
+    }
 }
 
 #[cfg(test)]
