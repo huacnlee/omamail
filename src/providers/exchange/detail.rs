@@ -34,6 +34,10 @@
 //!   removable one of a series its organizer cancelled, which `exchange.meetingRemove` with `scope`
 //!   `series` takes off whole, and `cancelledEvents` how many of its events they cancelled one by one
 //!   (0 for the series as a whole).
+//! - **In a calendar that is not the mailbox's default one** (`calendar`, `folders`) the detail is the item
+//!   alone: it cannot be answered or removed there, says no series, and is locked by that calendar's rule
+//!   (`EventDetail::other_lock`), a meeting whoever organises it. An answer is the default calendar's: a
+//!   request naming any other is `exchange_calendar_locked` before anything is looked up.
 //! - **An answer is the one call that mails a person, and only the organizer of the invitation.**
 //!   `send` is required, so no default decides whether somebody is mailed; `remove` goes only with a
 //!   sent decline. Like every write it takes no `requestToken`, waits for its turn only while its
@@ -44,22 +48,28 @@ use serde_json::{Value, json};
 
 use super::calendar::{scope, target};
 use super::ews::{
-    Answer, Attendee, Cancelled, EventDetail, Lock, Party, Scope, Series, respond as answer_request,
+    Answer, Attendee, Calendar, Cancelled, EventDetail, Lock, Party, Scope, Series,
+    respond as answer_request,
 };
-use super::{INVALID, account, fields, ids, text, token, write::turn, zone};
+use super::{INVALID, account, fields, folders, ids, text, token, write::turn, zone};
 
 pub async fn detail(params: &Value) -> Result<Value, &'static str> {
-    let map = fields(params, &["accountId", "id", "requestToken"])?;
+    let map = fields(params, &["accountId", "id", "calendar", "requestToken"])?;
     let id = text(map, "id")?.to_owned();
     ids::validate(&id)?;
     let account = account(map)?;
     let owner = ids::account(&account)?.to_owned();
     // The zone this computer is in, which says whether the time of every event may change here.
     let zone = zone::known();
+    let calendar = folders::calendar(map, &account)?;
     super::account::read(&account, token(map)?, move |client| {
         async move {
-            let found = client.event_detail(&id).await?;
-            reply(&found, &owner, zone).ok_or("exchange_invalid_response")
+            let found = client.event_detail(&id, &calendar).await?;
+            let shown = match calendar {
+                Calendar::Default => reply(&found, &owner, zone),
+                _ => reply_in_other(&found, &owner),
+            };
+            shown.ok_or("exchange_invalid_response")
         }
         .boxed()
     })
@@ -77,6 +87,7 @@ pub async fn respond(params: &Value) -> Result<Value, &'static str> {
             "send",
             "remove",
             "scope",
+            "calendar",
         ],
     )?;
     let (id, key) = target(map)?;
@@ -95,7 +106,10 @@ pub async fn respond(params: &Value) -> Result<Value, &'static str> {
         return Err(INVALID);
     }
     answer_request("A", &key, reply, send)?;
-    let mut lease = turn(&account(map)?).await?;
+    let account = account(map)?;
+    // An answer is the default calendar's: any other is locked, with nothing looked up.
+    folders::default_only(map, &account)?;
+    let mut lease = turn(&account).await?;
     let answered = lease
         .client()
         .respond(&id, &key, reply, send, remove, series)
@@ -164,6 +178,30 @@ fn series(detail: &EventDetail, owner: &str, zone: Option<&str>) -> Value {
         // which a change of the time of every event undoes.
         "exceptions": master.modified.len(),
     })
+}
+
+/// The detail of an item of a calendar that is not the mailbox's default one. Nothing is said there that
+/// only the default calendar does: the item is answered and
+/// removed nowhere but there and nothing of a series is read, so it cannot be answered or removed and
+/// says no series; and it is locked by that calendar's rule (`EventDetail::other_lock`), a meeting
+/// whoever organises it. A private item is masked as in the default calendar.
+fn reply_in_other(detail: &EventDetail, owner: &str) -> Option<Value> {
+    let mut shown = reply(detail, owner, None)?;
+    let lock = detail.other_lock();
+    for (key, value) in [
+        ("canRespond", json!(false)),
+        ("canRemove", json!(false)),
+        ("canRemoveSeries", json!(false)),
+        ("cancelledEvents", json!(0)),
+        ("cancelled", json!(detail.item.cancelled)),
+        ("unplacedCancellation", json!(false)),
+        ("series", Value::Null),
+        ("editable", json!(lock.is_none())),
+        ("lock", json!(lock.map_or("", Lock::code))),
+    ] {
+        shown[key] = value;
+    }
+    Some(shown)
 }
 
 /// The detail as the answer lists it; `None` for an item whose id the codec does not take.

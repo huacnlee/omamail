@@ -57,6 +57,14 @@ Item {
   property string discoveryError: ""
   property int discoverySerial: 0
   property bool discoverySaving: false
+  // A calendar another mailbox shares, being opened by that mailbox's address, and the sentence for one that
+  // could not be.
+  property bool sharedOpening: false
+  property string sharedError: ""
+  // The request opening it, which a Cancel tells the backend to stop: `{ accountId, requestToken }`.
+  property var sharedRequest: null
+  // What a discovery that did not see everything says beside what it saved (`ExchangeEvents.discoveryNotice`).
+  property string discoveryNotice: ""
   property int discoveryPendingCount: 0
   property var discoveryChoices: null
   property string discoveryChoiceAccount: ""
@@ -203,6 +211,7 @@ Item {
       if (String(account.id || "") !== String(accountId || "")) continue
       return account.signedIn === true
         && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud"
+          || account.calendarProvider === "exchange"
           || (account.calendarProvider === "google" && service.backendCanGoogleCalendars === true))
     }
     return false
@@ -247,7 +256,10 @@ Item {
       discoveryFinished(false, discoveryError, 0)
       return false
     }
-    if (service.backendCanDiscoverCalendars !== true) {
+    // An Exchange mailbox is asked through its own method, which finds its own other calendar folders; every
+    // other kind through `calendar.discover`.
+    var exchange = wanted.indexOf("exchange:") === 0
+    if (exchange ? !ExchangeEvents.backendReady(service) : service.backendCanDiscoverCalendars !== true) {
       discoveryError = "Update the backend to discover account calendars"
       discoveryFinished(false, discoveryError, 0)
       return false
@@ -256,18 +268,21 @@ Item {
     discoveringCalendars = true
     discoveringAccountId = wanted
     discoveryError = ""
+    discoveryNotice = ""
     var notifyConsent = microsoftConsentHandler(wanted)
-    service.backend.call("calendar.discover", { accountId: wanted }, function(result, error) {
+    service.backend.call(exchange ? "exchange.calendars" : "calendar.discover", { accountId: wanted }, function(result, error) {
       if (serial !== root.discoverySerial || root.discoveringAccountId !== wanted) return
       root.discoveringCalendars = false
       root.discoveringAccountId = ""
       if (error || !result || String(result.accountId || "") !== wanted
           || !Array.isArray(result.calendars) || !root.discoverableAccount(wanted)) {
-        root.discoveryError = notifyConsent(error) ? Microsoft.graphConsentMessage() : root.discoveryFailure(error)
+        root.discoveryError = exchange ? (error ? ExchangeEvents.errorText(error) : root.discoveryFailure(error))
+          : notifyConsent(error) ? Microsoft.graphConsentMessage() : root.discoveryFailure(error)
         root.discoveryFinished(false, root.discoveryError, 0)
         return
       }
       var next = Sources.applyDiscovery(root.sourceList, result)
+      root.discoveryNotice = exchange ? ExchangeEvents.discoveryNotice(result) : ""
       if (result.provider === "google") {
         root.discoveryChoiceAccount = wanted
         root.discoveryChoices = next
@@ -284,6 +299,63 @@ Item {
       root.writeSources()
     })
     return true
+  }
+
+  // A calendar another mailbox shares, added by that mailbox's address (`exchange.calendarShared`): the backend
+  // opens it and says whether the owner may read it, and only then is it saved, as a source of its own with its
+  // reminders off. Nothing else is changed while it is asked, which is why it holds discovery's flag.
+  function addSharedCalendar(accountId, text) {
+    var wanted = String(accountId || "")
+    if (discoveringCalendars || savingSource || wanted.indexOf("exchange:") !== 0 || !discoverableAccount(wanted))
+      return false
+    var typed = ExchangeEvents.sharedAddress(text, wanted)
+    if (!typed.ok) { sharedError = typed.error; return false }
+    if (!service || !service.backend || !service.backend.ready || !ExchangeEvents.backendReady(service)) {
+      sharedError = ExchangeEvents.errorText("backend_needs_update")
+      return false
+    }
+    sharedError = ""
+    discoveryNotice = ""
+    discoveringCalendars = true
+    sharedOpening = true
+    var serial = ++discoverySerial
+    var request = { accountId: wanted, requestToken: "calendar-shared:" + Date.now().toString(36) + ":" + serial }
+    sharedRequest = request
+    service.backend.call("exchange.calendarShared", { accountId: wanted, mailbox: typed.address,
+      requestToken: request.requestToken }, function(result, error) {
+      if (serial !== root.discoverySerial) return
+      root.discoveringCalendars = false
+      root.sharedOpening = false
+      root.sharedRequest = null
+      if (error || !result || String(result.accountId || "") !== wanted || !result.calendar
+          || !root.discoverableAccount(wanted)) {
+        root.sharedError = ExchangeEvents.sharedFailure(error)
+        return
+      }
+      root.discoveryPendingCount = 1
+      root.discoverySaving = true
+      root.sourceBeingSaved = null
+      root.sourceSecret = ""
+      root.sourceWritePayload = Sources.serialize(Sources.addShared(root.sourceList, result))
+      root.refreshAfterSourceWrite = true
+      root.savingSource = true
+      root.writeSources()
+    })
+    return true
+  }
+
+  // Cancel while a shared calendar is being opened: its answer is dropped however it ends (the serial has moved
+  // on), nothing is saved, and the backend is told to stop asking.
+  function cancelShared() {
+    sharedError = ""
+    if (!sharedOpening) return
+    ++discoverySerial
+    discoveringCalendars = false
+    sharedOpening = false
+    var request = sharedRequest
+    sharedRequest = null
+    if (request && service && service.backend && service.backend.ready)
+      service.backend.call("exchange.cancel", request, function() {})
   }
 
   function chooseDiscovered(id, enabled) {
@@ -365,6 +437,11 @@ Item {
       // not one is said first, in its own words.
       var invited = ExchangeEvents.guestList(fields.guestEmails === undefined ? "" : fields.guestEmails, source.accountId)
       if (!invited.ok) { eventCreated(false, invited.error); return false }
+      // Meetings are made on the mailbox's own default calendar: the backend would lock one anywhere else.
+      if (invited.emails.length > 0 && ExchangeEvents.otherCalendar(source)) {
+        eventCreated(false, ExchangeEvents.OTHER_CALENDAR_MEETING)
+        return false
+      }
       if (invited.emails.length > 0 && fields.confirmedSend !== true) {
         eventCreated(false, ExchangeEvents.UNCONFIRMED_SEND)
         return false
@@ -650,7 +727,7 @@ Item {
   // What an event holds beyond the list, read when it is opened: `callback(event, error)`, the event with the
   // detail laid over it (`ExchangeEvents.withDetail`) or a sentence.
   function exchangeDetail(source, event, callback) {
-    exchangeRequest("exchange.calendarEvent", { accountId: String(source.accountId || ""), id: String(event.exchangeId || "") },
+    exchangeRequest("exchange.calendarEvent", ExchangeEvents.detailParams(source, event),
       function(result, error) {
         if (error) { callback(null, error); return }
         var merged = ExchangeEvents.withDetail(event, result)
@@ -689,8 +766,8 @@ Item {
     var guests = eventDraft.guests
     var meeting = !!guests && guests.length > 0
     exchangeRequest(meeting ? "exchange.meetingCreate" : "exchange.calendarCreate",
-      meeting ? ExchangeEvents.meetingCreateParams(eventSource.accountId, eventDraft, guests)
-        : ExchangeEvents.createParams(eventSource.accountId, eventDraft),
+      meeting ? ExchangeEvents.meetingCreateParams(eventSource.accountId, eventDraft, guests, eventSource.calendarId)
+        : ExchangeEvents.createParams(eventSource.accountId, eventDraft, eventSource.calendarId),
       function(result, error) { root.finishEvent(!error, error) }, meeting ? ExchangeEvents.meetingError : undefined)
   }
 
@@ -1180,10 +1257,9 @@ Item {
       failSource(ExchangeEvents.errorText("backend_needs_update"))
       return
     }
-    service.backend.call("exchange.calendarEvents", { accountId: String(source.accountId || ""),
-      startMs: Math.floor(rangeStart), endMs: Math.ceil(rangeEnd) }, function(result, error) {
+    service.backend.call("exchange.calendarEvents", ExchangeEvents.eventsParams(source, rangeStart, rangeEnd), function(result, error) {
       if (error) { root.failSource(ExchangeEvents.errorText(error)); return }
-      root.replaceActiveSourceEvents(ExchangeEvents.eventsFromExchange(result, source.id))
+      root.replaceActiveSourceEvents(ExchangeEvents.eventsFromExchange(result, source.id, source.calendarId))
       if (result && result.truncated === true) { root.failSource(ExchangeEvents.TRUNCATED); return }
       root.processNext()
     })

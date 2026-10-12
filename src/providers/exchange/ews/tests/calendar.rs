@@ -12,7 +12,7 @@ use chrono::{DateTime, NaiveDateTime, SecondsFormat};
 use quick_xml::escape::escape;
 
 use super::super::client::calendar::CalendarEvents;
-use super::super::{Appointment, Choice, Client, Edit, Reminder, When, xml};
+use super::super::{Appointment, Calendar, Choice, Client, Edit, Reminder, When, xml};
 use super::conn::client;
 use super::fake::{self, Fake, Offer, Out, Soap, message, ok, response};
 use crate::providers::exchange::ids;
@@ -40,7 +40,76 @@ pub struct Cal {
     pub uid: Option<u16>,
     /// The number of the master of the series this is a member of, its own for the master.
     pub series: Option<u16>,
+    /// The id of the folder it is in, `None` for the mailbox's default calendar (`CALENDAR_FOLDER`).
+    pub folder: Option<String>,
+    /// What the signed-in user may do to it (modify, delete), said when a read asks for its rights:
+    /// everything when `None`, as the owner of a folder may, and nothing said at all when `unsaid`.
+    pub rights: Option<(bool, bool)>,
+    pub unsaid: bool,
 }
+
+/// The id the server gives the mailbox's own default calendar folder.
+pub const CALENDAR_FOLDER: &str = "calendar-folder";
+
+/// A calendar folder besides the default one: of the signed-in mailbox, or of another (`mailbox`, the
+/// `calendar` of that mailbox), with the rights the signed-in user has there.
+#[derive(Clone, Default)]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub class: String,
+    /// Read, create, modify, delete; `None` for a server that names none.
+    pub rights: Option<[bool; 4]>,
+    pub mailbox: Option<String>,
+    /// In Deleted Items, where a deep search from the root of the message folders still finds it.
+    pub deleted: bool,
+}
+
+/// The id of the scripted folder `n`.
+pub fn folder_id(n: u16) -> String {
+    let mut bytes = [7u8; 46];
+    bytes[..2].copy_from_slice(&n.to_be_bytes());
+    STANDARD.encode(bytes)
+}
+
+impl Folder {
+    /// A calendar folder of the signed-in mailbox, which its owner may do everything in.
+    pub fn own(n: u16, name: &str) -> Folder {
+        Folder {
+            id: folder_id(n),
+            name: name.to_owned(),
+            class: "IPF.Appointment".to_owned(),
+            rights: Some([true; 4]),
+            ..Folder::default()
+        }
+    }
+
+    /// The default calendar of the mailbox `address`, with the rights it gives the signed-in user.
+    pub fn shared(n: u16, address: &str, rights: [bool; 4]) -> Folder {
+        Folder {
+            mailbox: Some(address.to_owned()),
+            rights: Some(rights),
+            ..Folder::own(n, "Calendar")
+        }
+    }
+
+    fn xml(&self) -> String {
+        let rights = self.rights.map_or_else(String::new, |[read, create, modify, delete]| {
+            format!(
+                "<t:EffectiveRights><t:CreateAssociated>false</t:CreateAssociated><t:CreateContents>{create}</t:CreateContents><t:CreateHierarchy>false</t:CreateHierarchy><t:Delete>{delete}</t:Delete><t:Modify>{modify}</t:Modify><t:Read>{read}</t:Read></t:EffectiveRights>"
+            )
+        });
+        format!(
+            r#"<t:CalendarFolder><t:FolderId Id="{}" ChangeKey="AgAAAA=="/><t:DisplayName>{}</t:DisplayName><t:FolderClass>{}</t:FolderClass>{rights}</t:CalendarFolder>"#,
+            self.id,
+            escape(&self.name),
+            escape(&self.class)
+        )
+    }
+}
+
+/// The mailbox's own calendar, which every call meant before there was a choice.
+pub const DEFAULT: &Calendar = &Calendar::Default;
 
 pub fn secs(text: &str) -> i64 {
     DateTime::parse_from_rfc3339(text).unwrap().timestamp()
@@ -89,6 +158,31 @@ impl Cal {
             extra: self.extra + extra,
             ..self
         }
+    }
+
+    /// The item's element with its rights when they were asked for (`item:EffectiveRights`).
+    fn with_rights(&self, xml: String, asked: bool) -> String {
+        if !asked || self.unsaid {
+            return xml;
+        }
+        let (modify, delete) = self.rights.unwrap_or((true, true));
+        let rights = format!(
+            "<t:EffectiveRights><t:Read>true</t:Read><t:Modify>{modify}</t:Modify><t:Delete>{delete}</t:Delete></t:EffectiveRights></t:CalendarItem>"
+        );
+        xml.replace("</t:CalendarItem>", &rights)
+    }
+
+    /// This item, in the folder `id`.
+    pub fn within(self, id: &str) -> Cal {
+        Cal {
+            folder: Some(id.to_owned()),
+            ..self
+        }
+    }
+
+    /// The folder this item is in.
+    pub fn home(&self) -> &str {
+        self.folder.as_deref().unwrap_or(CALENDAR_FOLDER)
     }
 
     pub fn key(&self) -> String {
@@ -141,8 +235,8 @@ impl Cal {
             );
         }
         if people {
-            // The default calendar's, unless `extra` named another folder ahead of it.
-            out += r#"<t:ParentFolderId Id="calendar-folder"/>"#;
+            // Its own, unless `extra` named another folder ahead of it.
+            out += &format!(r#"<t:ParentFolderId Id="{}"/>"#, self.home());
         }
         if people && self.attendees > 0 {
             let one = "<t:Attendee><t:Mailbox><t:EmailAddress>guest@example.org</t:EmailAddress></t:Mailbox></t:Attendee>";
@@ -173,6 +267,10 @@ pub struct Store {
     pub keeps_master: Option<String>,
     /// Every request but the folder lookup, as sent.
     pub requests: Vec<String>,
+    /// The calendar folders besides the default one.
+    pub folders: Vec<Folder>,
+    /// A `FindFolder` restricted to a class is a server error.
+    pub refuse_restriction: bool,
 }
 
 pub type Shared = Arc<Mutex<Store>>;
@@ -280,8 +378,75 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
         let key = asked.and_then(|id| id.attr("ChangeKey"));
         match soap.op.as_str() {
             "GetFolder" => {
-                let folder = r#"<m:Folders><t:CalendarFolder><t:FolderId Id="calendar-folder"/></t:CalendarFolder></m:Folders>"#;
-                Out::Xml(response("GetFolder", &[ok("GetFolder", folder)]))
+                let asked = request
+                    .child("FolderIds")
+                    .unwrap()
+                    .children
+                    .first()
+                    .unwrap();
+                let mailbox = asked.text_at(&["Mailbox", "EmailAddress"]);
+                let found = match (asked.name.as_str(), mailbox) {
+                    ("DistinguishedFolderId", None) => Some(Folder {
+                        id: CALENDAR_FOLDER.to_owned(),
+                        rights: None,
+                        ..Folder::own(0, "Calendar")
+                    }),
+                    ("DistinguishedFolderId", Some(address)) => store
+                        .folders
+                        .iter()
+                        .find(|folder| folder.mailbox.as_deref() == Some(address))
+                        .cloned(),
+                    _ => store
+                        .folders
+                        .iter()
+                        .find(|folder| Some(folder.id.as_str()) == asked.attr("Id"))
+                        .cloned(),
+                };
+                match (found, mailbox) {
+                    (Some(folder), _) => {
+                        let folders = format!("<m:Folders>{}</m:Folders>", folder.xml());
+                        Out::Xml(response("GetFolder", &[ok("GetFolder", &folders)]))
+                    }
+                    (None, Some(_)) => refused("GetFolder", "ErrorNonExistentMailbox"),
+                    (None, None) => refused("GetFolder", "ErrorFolderNotFound"),
+                }
+            }
+            "FindFolder" => {
+                let restricted = request.child("Restriction").is_some();
+                if restricted && store.refuse_restriction {
+                    return refused("FindFolder", "ErrorUnsupportedPathForQuery");
+                }
+                let view = request.child("IndexedPageFolderView").unwrap();
+                let number = |name| view.attr(name).unwrap().parse::<usize>().unwrap();
+                let (offset, max) = (number("Offset"), number("MaxEntriesReturned"));
+                let parent = request.at(&["ParentFolderIds", "DistinguishedFolderId"]);
+                let deleted = parent.and_then(|node| node.attr("Id")) == Some("deleteditems");
+                // From the root, a deep search finds the default calendar and Deleted Items' too.
+                let default = Folder {
+                    id: CALENDAR_FOLDER.to_owned(),
+                    ..Folder::own(0, "Calendar")
+                };
+                let found: Vec<Folder> = std::iter::once(default)
+                    .filter(|_| !deleted)
+                    .chain(store.folders.iter().cloned())
+                    .filter(|folder| folder.mailbox.is_none() && (!deleted || folder.deleted))
+                    .filter(|folder| {
+                        !restricted || folder.class.eq_ignore_ascii_case("IPF.Appointment")
+                    })
+                    .collect();
+                let page: Vec<String> = found
+                    .iter()
+                    .skip(offset)
+                    .take(max)
+                    .map(Folder::xml)
+                    .collect();
+                let last = offset + page.len() >= found.len();
+                let root = format!(
+                    r#"<m:RootFolder TotalItemsInView="{}" IncludesLastItemInRange="{last}"><t:Folders>{}</t:Folders></m:RootFolder>"#,
+                    found.len(),
+                    page.concat()
+                );
+                Out::Xml(response("FindFolder", &[ok("FindFolder", &root)]))
             }
             "FindItem" if soap.body.contains("IPM.Schedule.Meeting.Canceled") => {
                 let stale = store.stale.clone();
@@ -363,16 +528,23 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                     secs(view.attr("EndDate").unwrap()),
                 );
                 let max: usize = view.attr("MaxEntriesReturned").unwrap().parse().unwrap();
+                // The folder the view is of: the default calendar, or one by its id.
+                let parent = request.at(&["ParentFolderIds", "FolderId"]);
+                let folder = parent
+                    .and_then(|node| node.attr("Id"))
+                    .unwrap_or(CALENDAR_FOLDER);
                 let mut found: Vec<&Cal> = store
                     .items
                     .iter()
                     .filter(|c| c.end >= from && c.start < to && !c.is_master())
+                    .filter(|c| c.home() == folder)
                     .collect();
                 found.sort_by_key(|cal| (cal.start, cal.n));
+                let asked = soap.body.contains("item:EffectiveRights");
                 let page: Vec<String> = found
                     .iter()
                     .take(max)
-                    .map(|cal| cal.xml(optional, false))
+                    .map(|cal| cal.with_rights(cal.xml(optional, false), asked))
                     .collect();
                 Out::Xml(fake::find(&page, found.len() <= max, found.len()))
             }
@@ -401,9 +573,10 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
             }
             "GetItem" => match at {
                 Some(at) => {
-                    let mut item = store.items[at].xml(true, true);
-                    // A master asked for its exceptions lists them.
                     let cal = &store.items[at];
+                    let asked = soap.body.contains("item:EffectiveRights");
+                    let mut item = cal.with_rights(cal.xml(true, true), asked);
+                    // A master asked for its exceptions lists them.
                     if cal.is_master() && soap.body.contains("calendar:ModifiedOccurrences") {
                         let listed: String = store
                             .items
@@ -489,8 +662,10 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                     .iter()
                     .filter_map(|name| list(name))
                     .collect();
+                let saved = request.at(&["SavedItemFolderId", "FolderId"]);
                 let cal = Cal {
                     n,
+                    folder: saved.and_then(|node| node.attr("Id")).map(str::to_owned),
                     extra: if lists.is_empty() {
                         lists
                     } else {
@@ -561,7 +736,7 @@ pub async fn calendar(
     let shared = store(items);
     let answer = script(shared.clone());
     let fake = Fake::start(Offer::Basic, move |soap| match soap.op.as_str() {
-        "GetFolder" if !soap.body.contains(r#"Id="calendar""#) => Out::Xml(fake::folders()),
+        "GetFolder" if soap.body.contains(r#"Id="inbox""#) => Out::Xml(fake::folders()),
         _ => wrap(soap).unwrap_or_else(|| answer(soap)),
     })
     .await;
@@ -579,7 +754,7 @@ const TO: &str = "2026-11-01T00:00:00Z";
 
 async fn whole_october(client: &mut Client, page: usize) -> Result<CalendarEvents, &'static str> {
     client
-        .calendar_events(secs(FROM) * 1000, secs(TO) * 1000, page)
+        .calendar_events(secs(FROM) * 1000, secs(TO) * 1000, page, DEFAULT)
         .await
 }
 
@@ -595,7 +770,7 @@ async fn a_range_is_paged_by_moving_its_start_and_every_item_comes_once_in_order
     ));
     let (fake, mut client, store) = calendar(items, |_| None).await;
     let found = client
-        .calendar_events(secs(FROM) * 1000, secs(TO) * 1000 + 1, 3)
+        .calendar_events(secs(FROM) * 1000, secs(TO) * 1000 + 1, 3, DEFAULT)
         .await
         .unwrap();
     assert!(!found.truncated);
@@ -700,14 +875,14 @@ async fn a_server_that_refuses_the_wall_clocks_is_asked_once_without_them() {
     );
 }
 
-fn timed(start: &str, end: &str) -> When {
+pub fn timed(start: &str, end: &str) -> When {
     When::Timed {
         start_ms: secs(start) * 1000,
         end_ms: secs(end) * 1000,
     }
 }
 
-fn appointment(title: &str, when: When) -> Appointment {
+pub fn appointment(title: &str, when: When) -> Appointment {
     Appointment {
         recurrence: None,
         title: title.into(),
@@ -718,7 +893,7 @@ fn appointment(title: &str, when: When) -> Appointment {
     }
 }
 
-fn edit(title: &str, when: Option<When>) -> Edit {
+pub fn edit(title: &str, when: Option<When>) -> Edit {
     Edit {
         title: Some(title.into()),
         location: Some("Room 4".into()),
@@ -738,26 +913,53 @@ async fn an_appointment_is_made_changed_by_what_differs_and_deleted_and_nobody_i
             timed("2026-10-05T07:00:00Z", "2026-10-05T07:30:00Z"),
         )
     };
-    let made = client.create_appointment(&dentist, zone).await.unwrap();
+    let made = client
+        .create_appointment(&dentist, zone, DEFAULT)
+        .await
+        .unwrap();
     assert_eq!(made.change_key, "CK1v1");
-    let other = client.create_appointment(&dentist, zone).await.unwrap();
+    let other = client
+        .create_appointment(&dentist, zone, DEFAULT)
+        .await
+        .unwrap();
     // An unchanged form sends nothing; a title sends the title alone.
     let same = client
-        .change_appointment(&made.id, "CK1v1", &edit("Dentist", None), zone, None)
+        .change_appointment(
+            &made.id,
+            "CK1v1",
+            &edit("Dentist", None),
+            zone,
+            None,
+            DEFAULT,
+        )
         .await;
     assert_eq!(same.unwrap().change_key, "CK1v1");
     assert_eq!(fake.log.count("UpdateItem"), 0);
     let renamed = client
-        .change_appointment(&made.id, "CK1v1", &edit("Renamed", None), zone, None)
+        .change_appointment(
+            &made.id,
+            "CK1v1",
+            &edit("Renamed", None),
+            zone,
+            None,
+            DEFAULT,
+        )
         .await;
     assert_eq!(renamed.unwrap().change_key, "CK1v2");
     let later = Some(timed("2026-10-05T08:00:00Z", "2026-10-05T08:30:00Z"));
     client
-        .change_appointment(&made.id, "CK1v2", &edit("Renamed", later), zone, None)
+        .change_appointment(
+            &made.id,
+            "CK1v2",
+            &edit("Renamed", later),
+            zone,
+            None,
+            DEFAULT,
+        )
         .await
         .unwrap();
     client
-        .delete_appointment(&other.id, "CK2v1", None)
+        .delete_appointment(&other.id, "CK2v1", None, DEFAULT)
         .await
         .unwrap();
     let store = store.lock().unwrap();
@@ -805,12 +1007,19 @@ async fn a_version_other_than_the_one_drawn_is_a_conflict_and_nothing_is_written
     let (fake, mut client, _) = calendar(vec![october(1, 5)], |_| None).await;
     // Changed since the screen was drawn: refused on the read, before anything is written.
     let stale = client
-        .change_appointment(&cal_id(1), "CK1v0", &edit("New", None), "UTC", None)
+        .change_appointment(
+            &cal_id(1),
+            "CK1v0",
+            &edit("New", None),
+            "UTC",
+            None,
+            DEFAULT,
+        )
         .await;
     assert_eq!(stale.err(), conflict);
     assert_eq!(
         client
-            .delete_appointment(&cal_id(1), "CK1v0", None)
+            .delete_appointment(&cal_id(1), "CK1v0", None, DEFAULT)
             .await
             .err(),
         conflict
@@ -825,7 +1034,14 @@ async fn a_version_other_than_the_one_drawn_is_a_conflict_and_nothing_is_written
     };
     let (fake, mut client, _) = calendar(vec![october(1, 5)], race).await;
     let lost = client
-        .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC", None)
+        .change_appointment(
+            &cal_id(1),
+            "CK1v1",
+            &edit("New", None),
+            "UTC",
+            None,
+            DEFAULT,
+        )
         .await;
     assert_eq!(lost.err(), conflict);
     assert_eq!(
@@ -864,10 +1080,12 @@ async fn nothing_but_a_plain_appointment_of_ones_own_is_written() {
     for n in (1..=9).chain([99]) {
         let key = format!("CK{n}v1");
         let changed = client
-            .change_appointment(&cal_id(n), &key, &edit("x", None), "UTC", None)
+            .change_appointment(&cal_id(n), &key, &edit("x", None), "UTC", None, DEFAULT)
             .await;
         assert_eq!(changed.err(), Some("exchange_calendar_locked"), "{n}");
-        let deleted = client.delete_appointment(&cal_id(n), &key, None).await;
+        let deleted = client
+            .delete_appointment(&cal_id(n), &key, None, DEFAULT)
+            .await;
         assert_eq!(deleted.err(), Some("exchange_calendar_locked"), "{n}");
     }
     assert_eq!(
@@ -905,7 +1123,14 @@ async fn a_failed_write_says_what_it_proves_and_is_never_sent_twice() {
         })
         .await;
         let changed = client
-            .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC", None)
+            .change_appointment(
+                &cal_id(1),
+                "CK1v1",
+                &edit("New", None),
+                "UTC",
+                None,
+                DEFAULT,
+            )
             .await;
         assert_eq!(changed.err(), Some(code));
         assert_eq!(fake.log.count("UpdateItem"), 1, "{code}");
@@ -919,14 +1144,20 @@ async fn a_failed_write_says_what_it_proves_and_is_never_sent_twice() {
     })
     .await;
     assert_eq!(
-        client.create_appointment(&dentist, "UTC").await.err(),
+        client
+            .create_appointment(&dentist, "UTC", DEFAULT)
+            .await
+            .err(),
         Some(unknown)
     );
     assert_eq!(fake.log.count("CreateItem"), 1);
     // A refused password: the folder lookup finds it, and the appointment is never written.
     let mut wrong = super::conn::client(&fake, Choice::Basic, "wrong");
     assert_eq!(
-        wrong.create_appointment(&dentist, "UTC").await.err(),
+        wrong
+            .create_appointment(&dentist, "UTC", DEFAULT)
+            .await
+            .err(),
         Some("exchange_unauthorized")
     );
     assert_eq!(fake.log.count("CreateItem"), 1);
@@ -945,7 +1176,7 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
         when: Some(timed("2026-10-05T10:00:00Z", "2026-10-05T10:30:00Z")),
     };
     client
-        .change_appointment(&cal_id(1), "CK1v1", &moved, "UTC", None)
+        .change_appointment(&cal_id(1), "CK1v1", &moved, "UTC", None, DEFAULT)
         .await
         .unwrap();
     let cal = store.lock().unwrap().items[0].clone();
@@ -961,7 +1192,7 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
         when: None,
     };
     let same = client
-        .change_appointment(&cal_id(1), "CK1v2", &nothing, "UTC", None)
+        .change_appointment(&cal_id(1), "CK1v2", &nothing, "UTC", None, DEFAULT)
         .await;
     assert_eq!(same.unwrap().change_key, "CK1v2");
     assert_eq!(fake.log.count("UpdateItem"), 1);
@@ -975,12 +1206,19 @@ async fn a_drag_writes_the_time_alone_and_an_id_the_codec_refuses_is_no_failure(
     };
     let (_fake, mut client, _) = calendar(vec![october(1, 5)], odd).await;
     let made = client
-        .create_appointment(&appointment("x", timed(FROM, TO)), "UTC")
+        .create_appointment(&appointment("x", timed(FROM, TO)), "UTC", DEFAULT)
         .await
         .expect("confirmed, never a failure");
     assert_eq!((made.id.as_str(), made.change_key.as_str()), ("", "K"));
     let changed = client
-        .change_appointment(&cal_id(1), "CK1v1", &edit("New", None), "UTC", None)
+        .change_appointment(
+            &cal_id(1),
+            "CK1v1",
+            &edit("New", None),
+            "UTC",
+            None,
+            DEFAULT,
+        )
         .await;
     assert_eq!(changed.unwrap().id, cal_id(1));
 }

@@ -2,7 +2,7 @@
 //! `calendar`: what is read, what is refused before anything is sent, and what an answer proves.
 
 use super::super::{Answer, Appointment, Cancelled, Client, Edit, Reminder, When};
-use super::calendar::{Cal, cal_id, calendar, ews, october, operation, refused, secs};
+use super::calendar::{Cal, DEFAULT, cal_id, calendar, ews, october, operation, refused, secs};
 use super::fake::{Out, Soap, ok, response};
 
 const NOT_INVITATION: Option<&str> = Some("exchange_calendar_not_invitation");
@@ -49,7 +49,7 @@ fn ops(store: &super::calendar::Shared) -> Vec<String> {
 #[tokio::test]
 async fn an_invitation_is_read_whole_and_answered_on_a_fresh_read_naming_the_version_drawn() {
     let (_fake, mut client, store) = calendar(vec![invitation(1)], |_| None).await;
-    let found = client.event_detail(&cal_id(1)).await.unwrap();
+    let found = client.event_detail(&cal_id(1), DEFAULT).await.unwrap();
     assert!(found.invitation() && found.cancellation == Cancelled::No);
     assert_eq!(found.notes, "Agenda", "an HTML body is not believed");
     let who = found.organizer.as_ref().map(|who| who.address.as_str());
@@ -142,7 +142,7 @@ async fn nothing_is_answered_that_is_not_an_invitation_or_not_the_version_drawn(
         .with(r#"<t:ParentFolderId Id="elsewhere"/>"#)
         .with(INVITED);
     let (fake, mut client, _) = calendar(vec![elsewhere], |_| None).await;
-    let found = client.event_detail(&cal_id(40)).await.unwrap();
+    let found = client.event_detail(&cal_id(40), DEFAULT).await.unwrap();
     assert!(found.elsewhere && found.incoming() && !found.invitation());
     let outside = answer(&mut client, 40, "CK40v1", Answer::Accept, true, false);
     assert_eq!(outside.await.err(), Some("exchange_calendar_locked"));
@@ -153,7 +153,7 @@ async fn nothing_is_answered_that_is_not_an_invitation_or_not_the_version_drawn(
 async fn a_meeting_its_organizer_cancelled_is_never_answered() {
     let (fake, mut client, store) = calendar(vec![invitation(1), invitation(2)], |_| None).await;
     store.lock().unwrap().cancelled = vec![("uid-1@example.org".into(), None)];
-    let found = client.event_detail(&cal_id(1)).await.unwrap();
+    let found = client.event_detail(&cal_id(1), DEFAULT).await.unwrap();
     assert!(found.cancellation == Cancelled::Yes && !found.invitation());
     let refused_answer = answer(&mut client, 1, "CK1v1", Answer::Accept, true, false);
     assert_eq!(refused_answer.await.err(), NOT_INVITATION);
@@ -164,7 +164,7 @@ async fn a_meeting_its_organizer_cancelled_is_never_answered() {
     // One the server says is out of date (the organizer took the owner off and put them back) cancels
     // nothing: the meeting is shown as it is and answered.
     store.lock().unwrap().stale = vec!["uid-1@example.org".into()];
-    let found = client.event_detail(&cal_id(1)).await.unwrap();
+    let found = client.event_detail(&cal_id(1), DEFAULT).await.unwrap();
     assert!(found.cancellation == Cancelled::No && found.invitation());
     let live = answer(&mut client, 1, "CK1v1", Answer::Accept, true, false);
     assert!(live.await.is_ok());
@@ -203,7 +203,13 @@ async fn a_meeting_its_organizer_cancelled_is_never_answered() {
     store.lock().unwrap().cancelled = vec![named];
     let mut said = Vec::new();
     for n in 1..=4 {
-        said.push(client.event_detail(&cal_id(n)).await.unwrap().cancellation);
+        said.push(
+            client
+                .event_detail(&cal_id(n), DEFAULT)
+                .await
+                .unwrap()
+                .cancellation,
+        );
     }
     let (yes, no, unplaced) = (Cancelled::Yes, Cancelled::No, Cancelled::Unplaced);
     assert_eq!(said, [no, yes, unplaced, yes], "a doubt is said as one");
@@ -222,7 +228,7 @@ async fn a_meeting_its_organizer_cancelled_is_never_answered() {
         inbox.then(|| refused("FindItem", "ErrorAccessDenied"))
     };
     let (fake, mut client, _) = calendar(vec![invitation(1)], blind).await;
-    let found = client.event_detail(&cal_id(1)).await.unwrap();
+    let found = client.event_detail(&cal_id(1), DEFAULT).await.unwrap();
     assert_eq!(found.cancellation, Cancelled::No);
     let tried = answer(&mut client, 1, "CK1v1", Answer::Accept, true, false);
     assert_eq!(tried.await.err(), Some("exchange_access_denied"));
@@ -316,7 +322,7 @@ async fn a_server_that_refuses_the_2013_properties_is_asked_once_without_them() 
         newer.then(|| refused("GetItem", "ErrorInvalidPropertyRequest"))
     };
     let (fake, mut client, store) = calendar(vec![invitation(1)], old).await;
-    let found = client.event_detail(&cal_id(1)).await.unwrap();
+    let found = client.event_detail(&cal_id(1), DEFAULT).await.unwrap();
     // Read so, it is still the invitation it was, but no answer is offered that would always fail.
     assert!(found.reduced && found.incoming() && !found.invitation());
     assert_eq!(fake.log.count("GetItem"), 2);
@@ -338,7 +344,7 @@ async fn a_server_that_refuses_the_2013_properties_is_asked_once_without_them() 
         (soap.op == "GetItem").then(|| Out::Xml(response("GetItem", &[ok("GetItem", &item)])))
     };
     let (_fake, mut client, _) = calendar(Vec::new(), message).await;
-    let found = client.event_detail(&cal_id(9)).await;
+    let found = client.event_detail(&cal_id(9), DEFAULT).await;
     assert_eq!(found.err(), Some("exchange_message_not_found"));
 }
 
@@ -357,7 +363,10 @@ async fn a_reminder_is_written_when_it_is_asked_for_and_only_when_it_changes() {
         reminder: Some(15),
         when,
     };
-    let made = client.create_appointment(&item, "UTC").await.unwrap();
+    let made = client
+        .create_appointment(&item, "UTC", DEFAULT)
+        .await
+        .unwrap();
     assert_eq!(store.lock().unwrap().items[0].reminder, Some(15));
     let mut key = made.change_key;
     let mut fields = Vec::new();
@@ -375,7 +384,7 @@ async fn a_reminder_is_written_when_it_is_asked_for_and_only_when_it_changes() {
             when: None,
         };
         key = client
-            .change_appointment(&made.id, &key, &edit, "UTC", None)
+            .change_appointment(&made.id, &key, &edit, "UTC", None, DEFAULT)
             .await
             .unwrap()
             .change_key;

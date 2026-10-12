@@ -10,6 +10,7 @@ use super::xml::{self, Node};
 
 pub mod calendar;
 pub mod detail;
+pub mod folders;
 
 pub const NOT_FOUND: &str = "exchange_message_not_found";
 pub const FOLDER: &str = "exchange_folder_unavailable";

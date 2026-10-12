@@ -259,7 +259,11 @@ function withMicrosoftAccounts(list, accountSummaries) {
 
 // An on-premises Exchange mailbox brings its own calendar the way a Microsoft one does: one source,
 // the mailbox's default calendar, read and written through the mailbox's own sign-in. Which events
-// may be written is the backend's say per event (`lockReason`), not the source's.
+// may be written is the backend's say per event (`lockReason`), not the source's. Its other calendars
+// (folders of the mailbox, calendars other mailboxes share with it) are sources of their own, found by
+// discovery or added by address (`applyDiscovery`, `addShared`), which this leaves as they were saved.
+// The default calendar's id is the account's, as it always was, so a file saved before there was a
+// choice keeps meaning the same calendar.
 function withExchangeAccounts(list, accountSummaries) {
   var next = copyList(list)
   var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
@@ -278,11 +282,13 @@ function withExchangeAccounts(list, accountSummaries) {
       name: trimmed(account.email || account.label || "Exchange Calendar"),
       enabled: saved ? saved.enabled !== false : true,
       // Never read back from the file: a saved stamp must not hide Edit and Delete.
-      readOnly: false,
+      readOnly: false, discovered: saved ? saved.discovered === true : false,
       colorKey: saved ? saved.colorKey : Palette.defaultKey(id),
       // The server's own reminders raise the desktop's, like a Google calendar's, until turned off.
       remindersEnabled: saved ? saved.remindersEnabled : true,
-      reminderMinutes: saved ? saved.reminderMinutes : -1, preferred: false
+      reminderMinutes: saved ? saved.reminderMinutes : -1,
+      // With more than one calendar, the owner may have chosen this one for new events.
+      preferred: saved ? saved.preferred === true : false
     })
   }
   return next
@@ -331,6 +337,7 @@ function errorLabel(source, accountSummaries) {
   if (accountId === "") return name
   var account = accountSummary(accountId, accountSummaries)
   var mailbox = account ? trimmed(account.email || account.label) : ""
+  if (mailbox !== "" && name.toLowerCase() === mailbox.toLowerCase()) return name
   return name + " · " + (mailbox === "" ? accountId : mailbox)
 }
 
@@ -345,15 +352,30 @@ function sameUrl(left, right) {
   return comparableUrl(left) === comparableUrl(right)
 }
 
+// Whether an Exchange discovery looked everywhere a calendar it found before could be listed: the default calendar
+// is in every answer, and the mailbox's other folders are complete when the folder search neither failed nor was
+// cut short (`steps.folders.code`, `truncated`). Only a calendar the answer looked for and did not list is dropped.
+function exchangeLookedFor(result) {
+  var value = result || {}
+  var steps = value.steps && typeof value.steps === "object" ? value.steps : {}
+  var folders = steps.folders && typeof steps.folders === "object" ? steps.folders : null
+  var failed = !folders || (folders.code !== null && folders.code !== undefined && String(folders.code) !== "")
+  return !failed && value.truncated !== true
+}
+
 // Replace the account-owned part of a source list with one bounded discovery
 // result. Saved visibility and theme colors follow a calendar's stable source
-// id; a hand-added iCloud CalDAV URL is adopted instead of drawn twice.
+// id; a hand-added iCloud CalDAV URL is adopted instead of drawn twice. Of an
+// Exchange mailbox, a calendar the owner added by hand stays theirs, and one
+// discovery found before stays until a discovery that looked for it does not
+// find it (`exchangeLookedFor`).
 function applyDiscovery(list, result) {
   var value = result || {}
   var provider = trimmed(value.provider).toLowerCase()
   var accountId = trimmed(value.accountId)
-  var kind = provider === "microsoft" ? "microsoft"
-    : (provider === "icloud" ? "icloud" : (provider === "google" ? "google" : ""))
+  var kind = provider === "microsoft" ? "microsoft" : provider === "icloud" ? "icloud"
+    : provider === "google" ? "google" : provider === "exchange" ? "exchange" : ""
+  var exchange = kind === "exchange"
   if (kind === "" || accountId === "" || !Array.isArray(value.calendars))
     return copyList(list)
   var current = list && Array.isArray(list.sources) ? list.sources : []
@@ -372,9 +394,11 @@ function applyDiscovery(list, result) {
         break
       }
     }
+    // Never made discovery's: a calendar the owner added stays the one they added, removed only by hand.
+    if (exchange && saved && addedByHand(saved)) continue
     var initial = kind === "google" ? remote.selected !== false && remote.hidden !== true : true
     discovered.push(makeSource({
-      id: id, kind: kind, name: remote.name,
+      id: id, kind: kind, name: exchange ? exchangeName(remote, accountId) : remote.name,
       accountId: accountId, calendarId: remote.calendarId,
       url: remote.url, username: remote.username,
       enabled: saved ? saved.enabled !== false : initial,
@@ -382,21 +406,84 @@ function applyDiscovery(list, result) {
       colorKey: saved ? saved.colorKey : Palette.defaultKey(id),
       accessRole: remote.accessRole, timeZone: remote.timeZone,
       canCreateMeet: remote.canCreateMeet, defaultReminders: remote.defaultReminders,
-      remindersEnabled: saved ? saved.remindersEnabled : initial,
+      // Nobody asked to be told of another calendar's events: of an Exchange mailbox's, only its own
+      // default calendar reminds until another is turned on.
+      remindersEnabled: saved ? saved.remindersEnabled : exchange ? remote.isDefault === true : initial,
       reminderMinutes: saved ? saved.reminderMinutes : -1,
       preferred: saved ? saved.preferred : remote.isDefault === true
     }))
   }
   var next = emptyList()
+  // An Exchange mailbox's own default calendar leads its calendars, wherever the ones added by hand were saved, so
+  // the calendar picker and Settings name it first.
+  var leading = exchange ? discovered.filter(function(item) { return trimmed(item.calendarId) === "" }) : []
   for (var c = 0; c < current.length; c++) {
     var source = current[c] || {}
     var owned = source.kind === kind && trimmed(source.accountId) === accountId
+    if (owned && leading.length > 0) {
+      next = add(next, leading[0])
+      leading = []
+    }
+    // Of an Exchange mailbox's calendars, discovery replaces what it found before, and drops one only where it
+    // looked; a calendar added by hand is the owner's and stays as it is.
+    if (owned && exchange) {
+      var listed = discovered.some(function(item) { return item.id === trimmed(source.id) })
+      owned = listed || (source.discovered === true && exchangeLookedFor(value))
+    }
     var adopted = kind === "icloud" && source.kind === "caldav"
       && discovered.some(function(item) { return sameUrl(item.url, source.url) })
     if (!owned && !adopted) next = add(next, source)
   }
   for (var d = 0; d < discovered.length; d++) next = add(next, discovered[d])
   return next
+}
+
+// What an Exchange calendar is called: the mailbox's own default one by the mailbox's address, another of
+// its folders by its name, and a calendar of another mailbox by its name and whose it is (every mailbox's own
+// is just "Calendar").
+function exchangeName(remote, accountId) {
+  var name = trimmed(remote.name) || "Calendar"
+  if (remote.isDefault === true && remote.own !== false)
+    return trimmed(accountId).replace(/^exchange:/, "") || name
+  var owner = trimmed(remote.mailbox)
+  return owner === "" ? name : name + " \u00b7 " + owner
+}
+
+// A calendar of another mailbox opened by its address (`exchange.calendarShared`) and saved by the owner's
+// doing: a source of its own, with its own colour, reminders off until asked for, and no claim to have been
+// discovered, so discovery leaves it where it is.
+function addShared(list, result) {
+  var value = result || {}
+  var remote = value.calendar || {}
+  var accountId = trimmed(value.accountId)
+  var id = trimmed(remote.sourceId)
+  if (trimmed(value.provider).toLowerCase() !== "exchange" || accountId === "" || id === ""
+      || trimmed(remote.calendarId) === "")
+    return copyList(list)
+  var current = list && Array.isArray(list.sources) ? list.sources : []
+  var saved = null
+  for (var s = 0; s < current.length; s++) {
+    if (current[s] && trimmed(current[s].id) === id) { saved = current[s]; break }
+  }
+  return add(list, {
+    id: id, kind: "exchange", name: exchangeName(remote, accountId),
+    accountId: accountId, calendarId: remote.calendarId,
+    enabled: true, readOnly: remote.readOnly === true,
+    discovered: saved ? saved.discovered === true : false,
+    colorKey: saved ? saved.colorKey : Palette.defaultKey(id),
+    accessRole: remote.accessRole,
+    remindersEnabled: saved ? saved.remindersEnabled : false,
+    reminderMinutes: saved ? saved.reminderMinutes : -1,
+    preferred: saved ? saved.preferred : false
+  })
+}
+
+// Whether a calendar was added by hand and is removed by hand: a CalDAV one, and an Exchange one that is
+// neither the mailbox's default calendar nor found by discovery.
+function addedByHand(source) {
+  var value = source || {}
+  if (value.discovered === true) return false
+  return value.kind === "caldav" || (value.kind === "exchange" && trimmed(value.calendarId) !== "")
 }
 
 function forAccount(list, accountId) {

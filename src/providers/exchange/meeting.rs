@@ -17,7 +17,9 @@
 //! - **Only a meeting the owner organises is changed or cancelled**, decided by the client on a fresh
 //!   read (`EventDetail::organised`): `exchange_calendar_locked` otherwise, and a `changeKey` that is
 //!   not the item's is `exchange_calendar_conflict`, nothing sent and nothing retried. Meetings are the
-//!   default calendar's alone; an item anywhere else is locked.
+//!   default calendar's alone: a request that names another calendar (`calendar`) is
+//!   `exchange_calendar_locked` once the rest of it is judged and before the account is looked up
+//!   (`folders::default_only`), and an item found anywhere else is locked.
 //! - **`exchange.meetingRemove` mails nobody**, so it asks for nothing: it takes a meeting somebody
 //!   else organised and cancelled, or the owner declined, off the calendar, and refuses anything else
 //!   with `exchange_calendar_not_removable`.
@@ -50,11 +52,12 @@ use super::ews::{
     CalendarChange, MeetingEdit, Scope, When, cancel_meeting, create_meeting, update_meeting,
 };
 use super::guests::{self, Guests, MAX_GUESTS};
-use super::{INVALID, account, fields, ids, write::turn, zone};
+use super::{INVALID, account, fields, folders, ids, write::turn, zone};
 
 /// The appointment's members that a meeting's create and update share with it.
-const CREATE: [&str; 10] = [
+const CREATE: [&str; 11] = [
     "accountId",
+    "calendar",
     "title",
     "location",
     "notes",
@@ -65,8 +68,9 @@ const CREATE: [&str; 10] = [
     "startDate",
     "endDate",
 ];
-const UPDATE: [&str; 15] = [
+const UPDATE: [&str; 16] = [
     "accountId",
+    "calendar",
     "id",
     "changeKey",
     "title",
@@ -154,6 +158,7 @@ pub async fn create(params: &Value) -> Result<Value, &'static str> {
     let item = appointment(map)?;
     create_meeting(&item, &guests, zone::UTC)?;
     let zone = zone_of(&item)?;
+    folders::default_only(map, &account)?;
     let mut lease = turn(&account).await?;
     let client = lease.client();
     let written = client.create_meeting(&item, &guests, zone).await?;
@@ -200,6 +205,7 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
         update_meeting("A", &key, &whole, zone::UTC)?;
     }
     let zone = zone_of_change(&wanted.edit)?;
+    folders::default_only(map, &account)?;
     let mut lease = turn(&account).await?;
     let client = lease.client();
     let changed = client
@@ -219,6 +225,7 @@ pub async fn cancel(params: &Value) -> Result<Value, &'static str> {
         "sendCancellations",
         "scope",
         "seriesAttendees",
+        "calendar",
     ];
     let (map, account, owner) = judged(params, &allowed, "sendCancellations")?;
     let (id, key) = target(map)?;
@@ -231,6 +238,7 @@ pub async fn cancel(params: &Value) -> Result<Value, &'static str> {
         Some(_) => return Err(INVALID),
     };
     cancel_meeting("A", &key, note.as_deref())?;
+    folders::default_only(map, &account)?;
     let mut lease = turn(&account).await?;
     let client = lease.client();
     let told = client
@@ -240,10 +248,15 @@ pub async fn cancel(params: &Value) -> Result<Value, &'static str> {
 }
 
 pub async fn remove(params: &Value) -> Result<Value, &'static str> {
-    let map = fields(params, &["accountId", "id", "changeKey", "scope"])?;
+    let map = fields(
+        params,
+        &["accountId", "id", "changeKey", "scope", "calendar"],
+    )?;
     let (id, key) = target(map)?;
     let scope = scope(map)?;
-    let mut lease = turn(&account(map)?).await?;
+    let account = account(map)?;
+    folders::default_only(map, &account)?;
+    let mut lease = turn(&account).await?;
     let client = lease.client();
     if scope == Some(Scope::Series) {
         let done = client.remove_series(&id, &key).await?;

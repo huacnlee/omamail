@@ -41,6 +41,7 @@ use crate::providers::exchange::ids;
 
 pub mod calendar;
 pub mod detail;
+pub mod folders;
 pub mod meeting;
 pub mod series;
 

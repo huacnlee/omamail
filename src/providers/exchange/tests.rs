@@ -16,6 +16,7 @@ use crate::credentials::{CredentialKey, CredentialKind, Secret};
 use crate::mail::tests::{AccountFixture, account_fixture, isolated};
 
 mod calendar;
+mod folders;
 mod meeting;
 mod series;
 
@@ -35,7 +36,7 @@ async fn world(
 ) -> World {
     let fake = Fake::start(offer, move |soap| {
         // The mail folders; the calendar's own is the script's to answer.
-        if soap.op == "GetFolder" && !soap.body.contains(r#"Id="calendar""#) {
+        if soap.op == "GetFolder" && soap.body.contains(r#"Id="inbox""#) {
             Out::Xml(fake::folders())
         } else {
             script(soap)

@@ -9,17 +9,22 @@ mod soap;
 mod xml;
 
 pub(super) use client::calendar::{Edit, Written};
+pub(super) use client::folders::{Discovered, Found, Origin};
 pub(super) use client::meeting::MeetingEdit;
 pub(super) use client::{Client, Folders, MAX_IDS, MAX_MIME_IDS, Outcome};
 pub(super) use conn::{Choice, Config, DEADLINE, clock, endpoint};
 pub(super) use decode::calendar::{CalendarItem, Lock};
 pub(super) use decode::detail::{Attendee, Cancelled, EventDetail, Series};
+#[cfg(test)]
+pub(super) use decode::folders::CalendarFolder;
+pub(super) use decode::folders::Rights;
 pub(super) use decode::{Item, MAX_MIME, Party};
 pub(super) use soap::calendar::{
     Answer, Appointment, Change as CalendarChange, MAX_CURSOR_MS, MAX_ENTRIES, MAX_SPAN_MINUTES,
     Reminder, Scope, When, cancel_meeting, create_appointment, create_meeting, is_change_key,
     respond, update_appointment, update_meeting,
 };
+pub(super) use soap::folders::Calendar;
 pub(super) use soap::{Change, Condition, Role};
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use chrono::NaiveTime;
 
 use super::super::xml::Node;
 use super::super::{Answer, Attendee, Client, Edit, Lock, MeetingEdit, Reminder, Scope, When};
-use super::calendar::{Cal, Shared, cal_id, calendar, ews, operation, refused, secs};
+use super::calendar::{Cal, DEFAULT, Shared, cal_id, calendar, ews, operation, refused, secs};
 use super::detail::INVITED;
 use super::fake::{Fake, Out, Soap, ok, response};
 
@@ -69,7 +69,7 @@ async fn change(
         when,
     };
     let id = cal_id(n);
-    let done = client.change_appointment(&id, key, &edit, VIENNA, scope);
+    let done = client.change_appointment(&id, key, &edit, VIENNA, scope, DEFAULT);
     Ok(done.await?.id)
 }
 
@@ -131,7 +131,9 @@ fn left(store: &Shared) -> Vec<u16> {
 async fn one_event_or_all_of_a_plain_series_is_written_through_a_scope_and_nobody_is_mailed() {
     let (fake, mut client, store) = calendar(weekly(3, ""), |_| None).await;
     let (from, to) = (secs("2026-10-01T00:00:00Z"), secs("2026-11-01T00:00:00Z"));
-    let found = client.calendar_events(from * 1000, to * 1000, 100).await;
+    let found = client
+        .calendar_events(from * 1000, to * 1000, 100, DEFAULT)
+        .await;
     let found = found.unwrap().items;
     let listed: Vec<_> = found.iter().map(|i| (i.kind, i.screen_lock())).collect();
     assert_eq!(
@@ -139,7 +141,7 @@ async fn one_event_or_all_of_a_plain_series_is_written_through_a_scope_and_nobod
         [("occurrence", None); 3],
         "the events, never the master"
     );
-    let detail = client.event_detail(&cal_id(3)).await.unwrap();
+    let detail = client.event_detail(&cal_id(3), DEFAULT).await.unwrap();
     let series = detail.series.unwrap();
     let said = (series.key.as_str(), series.repeat.text.as_str());
     assert_eq!(said, ("CK1v1", "Every week on Monday, 3 times"));
@@ -182,10 +184,11 @@ async fn one_event_or_all_of_a_plain_series_is_written_through_a_scope_and_nobod
             minutes: 7 * 24 * 60 + 1,
         })),
     );
-    let london = client.change_appointment(&four, "CK1v2", &ten_edit, "GMT Standard Time", ALL);
+    let london =
+        client.change_appointment(&four, "CK1v2", &ten_edit, "GMT Standard Time", ALL, DEFAULT);
     let london = london.await.err();
     let long = client
-        .change_appointment(&four, "CK1v2", &long_edit, VIENNA, ALL)
+        .change_appointment(&four, "CK1v2", &long_edit, VIENNA, ALL, DEFAULT)
         .await;
     let zone_differs = Some("exchange_calendar_zone_differs");
     assert_eq!(
@@ -207,13 +210,17 @@ async fn one_event_or_all_of_a_plain_series_is_written_through_a_scope_and_nobod
     assert!(!body.contains("IsAllDayEvent"));
     // Deleted: one event alone, then all of it through the master; nobody told either time.
     let quiet = "SendMeetingCancellations";
-    let gone = client.delete_appointment(&cal_id(4), "CK1v3", ONE).await;
+    let gone = client
+        .delete_appointment(&cal_id(4), "CK1v3", ONE, DEFAULT)
+        .await;
     assert_eq!(
         (gone, named(&store, quiet)),
         (Ok(()), sent(4, "SendToNone"))
     );
     assert_eq!(left(&store), [1, 2, 3]);
-    let gone = client.delete_appointment(&cal_id(2), "CK1v4", ALL).await;
+    let gone = client
+        .delete_appointment(&cal_id(2), "CK1v4", ALL, DEFAULT)
+        .await;
     assert_eq!(
         (gone, named(&store, quiet)),
         (Ok(()), sent(1, "SendToNone"))
@@ -258,7 +265,7 @@ async fn a_repeating_meeting_tells_exactly_the_people_its_question_named_one_eve
     exception(&mut items[2], "");
     (items[2].start, items[2].end) = (items[2].start + 3600, items[2].end + 3600);
     let (fake, mut client, store) = calendar(items, |_| None).await;
-    let detail = client.event_detail(&cal_id(3)).await.unwrap();
+    let detail = client.event_detail(&cal_id(3), DEFAULT).await.unwrap();
     let series = detail.series.as_ref().unwrap();
     let address = |list: &[Attendee]| {
         list.iter()
@@ -354,7 +361,12 @@ async fn all_of_it(
     let (bob, two, renamed) = (["bob@example.org".to_owned()], cal_id(2), people(None));
     let change = client.change_meeting(&two, "CK1v1", &renamed, OWNER, VIENNA, ALL, Some(&bob));
     let change = change.await.err();
-    let series = client.event_detail(&two).await.unwrap().series.unwrap();
+    let series = client
+        .event_detail(&two, DEFAULT)
+        .await
+        .unwrap()
+        .series
+        .unwrap();
     let cancel = client.cancel_meeting(&two, &series.key, None, OWNER, ALL, Some(&bob));
     (change, cancel.await.err(), series.lock(OWNER))
 }
@@ -400,7 +412,7 @@ async fn a_series_with_an_event_of_its_own_guests_is_changed_and_cancelled_one_e
             .take(usize::from(count))
             .for_each(|cal| exception(cal, ""));
         let (_fake, mut client, store) = calendar(items, |_| None).await;
-        let detail = client.event_detail(&cal_id(2)).await.unwrap();
+        let detail = client.event_detail(&cal_id(2), DEFAULT).await.unwrap();
         assert_eq!(
             detail.series.unwrap().lock(OWNER),
             lock,
@@ -439,7 +451,7 @@ async fn a_series_is_answered_through_its_master_unless_its_organizer_cancelled_
     // One event cancelled leaves the rest to answer.
     let one_event = (UID.to_owned(), Some(monday(1)));
     store.lock().unwrap().cancelled.push(one_event);
-    let detail = client.event_detail(&cal_id(2)).await.unwrap();
+    let detail = client.event_detail(&cal_id(2), DEFAULT).await.unwrap();
     let series = detail.series.unwrap();
     assert!(series.can_respond && series.lock(OWNER).is_some() && series.removal.is_none());
     let (two, three) = (cal_id(2), cal_id(3));
@@ -547,7 +559,7 @@ fn removals(store: &Shared) -> usize {
 async fn a_cancelled_series_is_taken_off_in_one_call_and_only_what_its_organizer_cancelled() {
     // Cancelled as a whole: the detail says so, and its one cancellation takes all of it.
     let (fake, mut client, store) = cancelled(3, &[None], |_| None).await;
-    let detail = client.event_detail(&cal_id(3)).await.unwrap();
+    let detail = client.event_detail(&cal_id(3), DEFAULT).await.unwrap();
     let said = (detail.removal(), detail.series.unwrap().removal);
     assert_eq!(said, (Some("cancelled"), Some(0)));
     let done = client.remove_series(&cal_id(3), "CK1v1").await.unwrap();

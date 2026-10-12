@@ -30,6 +30,13 @@
 // detail's own (`writeKey`). A repeat is made from the composer's control (`repeatRule`): what Microsoft's schema
 // can say, and nothing else.
 //
+// Which calendar an event is in is a reference the backend gave (`exchange.calendars`): the source's
+// `calendarId`, empty for the mailbox's own default calendar. Every request about an event names it
+// (`exchangeCalendar`), so the backend reads, makes and changes things in the calendar the screen drew them
+// from, and a request about the default calendar names none, as before there was a choice. A calendar that is
+// not the default one takes plain appointments and nothing that reaches people: the backend locks meetings,
+// answers and removals there, and this side offers none of them (`otherCalendar`).
+//
 // A meeting with other people is the one thing here that reaches somebody who has not asked to be told,
 // so nothing below builds such a request without the caller's `confirmedSend` and the words that tell the
 // person who will be reached (`reachRequest`, `deleteRequest`); the backend refuses without its own
@@ -65,6 +72,7 @@ var LOCKS = {
   cancelled: "Cancelled meeting: change it in Outlook",
   foreign: "Somebody else's invitation: change it in Outlook",
   "private": "Private event, shown without its details: change it in Outlook",
+  calendar: "The owner of this calendar has not let you change its events",
   unknown: "This kind of event can only be changed in Outlook"
 }
 
@@ -99,7 +107,7 @@ function moment(ms, allDay) {
   return { ms: ms, allDay: allDay, tzid: "", resolved: true }
 }
 
-function eventsFromExchange(payload, sourceId) {
+function eventsFromExchange(payload, sourceId, calendarId) {
   var items = payload && Array.isArray(payload.events) ? payload.events : []
   var out = []
   for (var i = 0; i < items.length; i++) {
@@ -123,6 +131,8 @@ function eventsFromExchange(payload, sourceId) {
       // The version it was drawn from, which a write names so that a change made elsewhere since is
       // refused and not overwritten.
       exchangeKey: String(item.changeKey || ""), exchangeKind: String(item.kind || ""),
+      // The calendar it is in, which every later request about it names (empty: the default one).
+      exchangeCalendar: String(calendarId || ""),
       exchangeMeeting: item.meeting === true, lockReason: lockReason(item),
       sequence: 0, summary: String(item.title || "Untitled event"),
       // The title as the server gave it, which a detail is compared with: an empty one is drawn as above.
@@ -163,9 +173,42 @@ function timeFields(start, end, allDay) {
   return { allDay: false, startMs: Math.floor(start), endMs: Math.floor(end) }
 }
 
+// Names the calendar in a request: nothing for the default calendar, whose requests are what they were
+// before there was a choice.
+function inCalendar(params, calendarId) {
+  var calendar = String(calendarId || "")
+  if (calendar !== "") params.calendar = calendar
+  return params
+}
+
+// Whether a source is a calendar other than the mailbox's own default one: it takes plain appointments and
+// no meeting, answer or removal.
+function otherCalendar(source) {
+  return !!source && String(source.calendarId || "") !== ""
+}
+
+// Whether a source is a calendar of another person's mailbox, opened by its address: its reference names the
+// mailbox after the folder. Nothing is deleted there (`deleteRefusal`): a delete moves an item to Deleted Items,
+// and which mailbox's that is when the calendar is somebody else's is not something Microsoft's pages say.
+function otherMailbox(source) {
+  return otherCalendar(source) && String(source.calendarId).indexOf(":") >= 0
+}
+
+var SHARED_DELETE = "Events in another person's calendar are not deleted from here"
+
+// The request that reads a calendar's range, and the one that reads one event's detail.
+function eventsParams(source, startMs, endMs) {
+  return inCalendar({ accountId: String(source.accountId || ""), startMs: Math.floor(startMs), endMs: Math.ceil(endMs) },
+    source.calendarId)
+}
+
+function detailParams(source, event) {
+  return inCalendar({ accountId: String(source.accountId || ""), id: String(event.exchangeId || "") }, event.exchangeCalendar)
+}
+
 // `built` is what `Calendar.createEvent` or `Calendar.updateEvent` made of the form. Notes go with a
 // new appointment only: an existing one's notes are not read, so an edit neither shows nor writes them.
-function createParams(accountId, built) {
+function createParams(accountId, built, calendarId) {
   var fields = built.fields
   var params = timeFields(fields.start, fields.end, built.allDay)
   params.accountId = String(accountId || "")
@@ -174,7 +217,7 @@ function createParams(accountId, built) {
   if (fields.description !== "") params.notes = fields.description
   if (built.reminderMinutes >= 0) params.reminderMinutes = built.reminderMinutes
   if (built.exchangeRule) params.recurrence = built.exchangeRule
-  return params
+  return inCalendar(params, calendarId)
 }
 
 // The version a write names: what the screen was drawn from. For an event of a series, the detail's own for one
@@ -219,7 +262,7 @@ function updateParams(accountId, event, built) {
   }
   // -1 is no reminder; no number at all leaves the reminder as the server has it.
   if (typeof built.reminderMinutes === "number") params.reminderMinutes = built.reminderMinutes
-  return params
+  return inCalendar(params, event.exchangeCalendar)
 }
 
 // The part of a series a delete, cancellation, decline or removal is for: what the confirmation's choice said.
@@ -227,11 +270,11 @@ function deleteScopeOf(event) {
   return event && event.isSeries === true ? String(event.deleteScope || "") : ""
 }
 
-// A call naming an event at the version the scope says, and the scope when there is one.
+// A call naming an event at the version the scope says, the scope when there is one, and the calendar it is in.
 function scoped(accountId, event, key, scope) {
   var params = { accountId: String(accountId || ""), id: String(event.exchangeId || ""), changeKey: String(key || "") }
   if (scope !== "") params.scope = scope
-  return params
+  return inCalendar(params, event.exchangeCalendar)
 }
 
 function deleteParams(accountId, event) {
@@ -569,6 +612,7 @@ function deleteKind(event) {
 function deleteRefusal(source, event) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
+  if (otherMailbox(source)) return SHARED_DELETE
   var kind = deleteKind(event)
   if (kind === "") return String(event && event.lockReason || "") || LOCKS.unknown
   var scope = deleteScopeOf(event), scopes = deleteScopes(event)
@@ -700,6 +744,7 @@ var OWN_ADDRESS = "Leave your own address out of the guests: you are already on 
 var NO_GUESTS = "A meeting needs at least one guest. To end it, cancel it"
 var UNCONFIRMED_SEND = "Confirm what is sent to the guests first"
 var PEOPLE_UNKNOWN = "Open the meeting again to see who is on it"
+var OTHER_CALENDAR_MEETING = "Meetings are made on your own default calendar. Choose it, or leave the guests out"
 
 // The mailbox's own address, from the account id (`exchange:alice@example.org`).
 function ownAddress(accountId) {
@@ -720,6 +765,46 @@ function guestList(text, accountId) {
     if (email.toLowerCase() === own) return { ok: false, error: OWN_ADDRESS }
   }
   return typed
+}
+
+// The address of a mailbox that shares its calendar, as typed: `{ ok, address }`, lower-cased, or the sentence for
+// what cannot be one. The mailbox's own is refused, as the backend refuses it: its calendars are found, not added.
+function sharedAddress(text, accountId) {
+  var address = String(text === undefined || text === null ? "" : text).trim().toLowerCase()
+  if (address === "") return { ok: false, error: "Enter the email address of the mailbox that shares its calendar" }
+  var local = address.substring(0, address.lastIndexOf("@"))
+  if (address.length > 254 || local.length > 64 || !ADDRESS.test(address))
+    return { ok: false, error: "That is not an email address. Use the primary address of the mailbox" }
+  if (address === ownAddress(accountId))
+    return { ok: false, error: "That is your own mailbox: its calendars are found, not added by address" }
+  return { ok: true, address: address }
+}
+
+// What a refusal to open a shared calendar says.
+function sharedFailure(error) {
+  var code = Protocol.errorCode(error)
+  if (code === "exchange_calendar_not_shared")
+    return "That calendar is not shared with you, or no mailbox on this server has that address. Use the primary address of the mailbox"
+  if (code === "exchange_calendar_own_mailbox")
+    return "That address is another name for your own mailbox: its calendar is already here"
+  if (code === "Invalid params" || code === "invalid_params")
+    return "That is not an email address. Use the primary address of the mailbox"
+  if (code === "Method not found" || code === "method_not_found")
+    return "Update the mail backend to add a shared calendar"
+  return Protocol.sentence(error, false)
+}
+
+// What a discovery that did not see everything says beside what it saved, or "": the calendars it could not look
+// for are kept as they were (`Sources.applyDiscovery`), and the owner is told why the list may be old.
+function discoveryNotice(result) {
+  var value = result || {}
+  var steps = value.steps && typeof value.steps === "object" ? value.steps : {}
+  var folders = steps.folders && typeof steps.folders === "object" ? steps.folders : null
+  if (!folders || (folders.code !== null && folders.code !== undefined && String(folders.code) !== ""))
+    return "The mailbox's other calendar folders could not be read, so the calendars found before are kept."
+  if (value.truncated === true)
+    return "This mailbox has more calendars than one search lists, so the calendars found before are kept."
+  return ""
 }
 
 // The people on a meeting other than the owner and any room, as its detail read them: who a question names
@@ -760,8 +845,8 @@ function meetingPeople(event, emails, scope) {
 }
 
 // A new meeting: the appointment's own fields, who is invited, and the word that the invitations are sent.
-function meetingCreateParams(accountId, built, emails) {
-  var params = createParams(accountId, built)
+function meetingCreateParams(accountId, built, emails, calendarId) {
+  var params = createParams(accountId, built, calendarId)
   params.requiredAttendees = emails
   params.sendInvitations = true
   return params

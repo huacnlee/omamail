@@ -118,11 +118,12 @@ const summaries = [
   assert.strictEqual(sources.writable(source), true)
   assert.strictEqual(sources.comesWithAccount(source), true)
   assert.strictEqual(sources.providerLabel("exchange"), "Exchange")
-  // What the owner chose is kept; a read-only stamp a file carries is not inherited.
+  // What the owner chose is kept, the default for new events too (a mailbox may have several calendars); a
+  // read-only stamp a file carries is not inherited.
   const saved = { sources: [{ id: SOURCE, kind: "exchange", accountId: "exchange:alice@example.org",
     enabled: false, readOnly: true, preferred: true, colorKey: "red" }] }
   const again = sources.withExchangeAccounts(saved, summaries).sources[0]
-  deepEqual([again.enabled, again.colorKey, again.readOnly, again.preferred], [false, "red", false, false])
+  deepEqual([again.enabled, again.colorKey, again.readOnly, again.preferred], [false, "red", false, true])
   // A source saved with its reminders off keeps them off.
   saved.sources[0].remindersEnabled = false
   assert.strictEqual(sources.withExchangeAccounts(saved, summaries).sources[0].remindersEnabled, false)

@@ -4,6 +4,7 @@ pub mod calendar;
 mod conn;
 pub mod detail;
 pub mod fake;
+pub mod folders;
 mod meeting;
 mod ops;
 pub mod series;

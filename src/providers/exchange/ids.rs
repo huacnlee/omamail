@@ -58,6 +58,17 @@ pub fn validate(id: &str) -> Result<(), &'static str> {
     unbase32(id).map(|_| ())
 }
 
+/// The primary address of a mailbox whose calendar a request names (`exchange.calendarShared`, a
+/// calendar reference): the shape a guest's address has
+/// (`guests::is_address`), in lower case, so one mailbox has one spelling and no quoted or display-name
+/// form can reach a request.
+pub fn mailbox(address: &str) -> Result<&str, &'static str> {
+    let lower = !address.bytes().any(|b| b.is_ascii_uppercase());
+    (lower && super::guests::is_address(address))
+        .then_some(address)
+        .ok_or(INVALID)
+}
+
 /// `exchange:<address>`, the shape every provider's id has, before any lookup is made.
 pub fn account(id: &str) -> Result<&str, &'static str> {
     id.strip_prefix("exchange:")

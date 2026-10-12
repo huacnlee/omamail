@@ -50,6 +50,13 @@ Item {
     property string discoveryChoiceAccount: ""
     property string defaultId: ""
     property var reminderPolicy: null
+    property string sharedError: ""
+    property bool sharedOpening: false
+    property int sharedCalls: 0
+    property string sharedAccount: ""
+    property string sharedText: ""
+    property int cancelCalls: 0
+    property string discoveryNotice: ""
     signal calendarSaved(bool ok, string error)
     signal discoveryFinished(bool ok, string error, int count)
 
@@ -58,6 +65,8 @@ Item {
     function updateCalendarPassword(_source, _password) {}
     function discoveredCount(_accountId) { return 0 }
     function discoverAccountCalendars(_accountId) { discoverCalls++; return true }
+    function addSharedCalendar(accountId, text) { sharedCalls++; sharedAccount = accountId; sharedText = text; return true }
+    function cancelShared() { cancelCalls++; sharedError = ""; sharedOpening = false }
     function setSourceEnabled(sourceId, _enabled) { toggleCalls++; toggledId = sourceId }
     function setDefaultCalendar(sourceId) { defaultId = sourceId }
     function setReminderPolicy(sourceId, enabled, minutes) {
@@ -102,6 +111,15 @@ Item {
       calendarController.selectedColor = ""
       calendarController.defaultId = ""
       calendarController.reminderPolicy = null
+      calendarController.sharedError = ""
+      calendarController.sharedOpening = false
+      calendarController.sharedCalls = 0
+      calendarController.sharedAccount = ""
+      calendarController.sharedText = ""
+      calendarController.cancelCalls = 0
+      calendarController.discoveryNotice = ""
+      calendarController.savingSource = false
+      calendarController.discoveringCalendars = false
       calendarController.discoveryChoices = null
       signInSpy.clear()
       wait(1)
@@ -228,13 +246,211 @@ Item {
       verify(texts.indexOf("Exchange · 1 calendar") >= 0, JSON.stringify(texts))
       verify(texts.indexOf("Other calendars") < 0, "nothing is left over")
       verify(!texts.some(function(text) { return text.indexOf("mailbox to connect its calendars") >= 0 }))
-      compare(findChild(settings, "calendar-discover-exchange").visible, false)
+      // Its default calendar is there before any is found; the others are found from here.
+      var find = findChild(settings, "calendar-discover-exchange")
+      compare(find.visible, true)
+      compare(find.text, "Find calendars")
+      find.clicked()
+      compare(calendarController.discoverCalls, 1)
       var summaries = JSON.parse(JSON.stringify(mailService.accountSummaries))
       summaries[0].signedIn = false
       mailService.accountSummaries = summaries
       wait(1)
       compare(findChild(settings, "calendar-discover-exchange").visible, true)
       compare(findChild(settings, "calendar-discover-exchange").text, "Sign in...")
+    }
+
+    // An Exchange mailbox's calendars are listed under it, each with what sets it apart, and only one that was
+    // added by hand is removed from here.
+    function exchangeSources() {
+      return [
+        { id: "exchange:exchange:alice@example.org", kind: "exchange", name: "alice@example.org",
+          accountId: "exchange:alice@example.org", enabled: true, readOnly: false, discovered: true,
+          colorKey: "accent", preferred: true, remindersEnabled: true, reminderMinutes: -1 },
+        { id: "exchange:exchange:alice@example.org:" + "1".repeat(64), kind: "exchange", name: "Team",
+          accountId: "exchange:alice@example.org", calendarId: "aaaaaanfuws2ljnf", enabled: true, readOnly: false,
+          discovered: true, colorKey: "accent", remindersEnabled: false, reminderMinutes: -1 },
+        { id: "exchange:exchange:alice@example.org:" + "2".repeat(64), kind: "exchange",
+          name: "Calendar \u00b7 colleague@example.org", accountId: "exchange:alice@example.org",
+          calendarId: "aaaaaanfuws2ljnf:colleague@example.org", enabled: true, readOnly: true, discovered: false,
+          colorKey: "accent", remindersEnabled: false, reminderMinutes: -1 },
+        { id: "exchange:exchange:alice@example.org:" + "3".repeat(64), kind: "exchange",
+          name: "Calendar \u00b7 team@example.org", accountId: "exchange:alice@example.org",
+          calendarId: "aaaaaanfuws2ljnf:team@example.org", enabled: true, readOnly: false, discovered: false,
+          colorKey: "accent", remindersEnabled: false, reminderMinutes: -1 }
+      ]
+    }
+
+    function exchangeAccount(signedIn) {
+      return [{ id: "exchange:alice@example.org", email: "alice@example.org", provider: "exchange",
+        calendarProvider: "exchange", signedIn: signedIn !== false }]
+    }
+
+    function collectAll(root, objectName) {
+      var found = []
+      function collect(item) {
+        if (!item) return
+        if (item.objectName === objectName) found.push(item)
+        for (var i = 0; i < item.children.length; i++) collect(item.children[i])
+      }
+      collect(root)
+      return found
+    }
+
+    function test_an_exchange_mailbox_lists_its_calendars_under_it_and_refreshes_them() {
+      mailService.accountSummaries = exchangeAccount()
+      calendarController.sourceList = ({ version: 1, sources: exchangeSources() })
+      wait(1)
+      var details = collectAll(settings, "calendar-source-detail").map(function(item) { return item.text })
+      compare(details, ["Default for new events", "", "Read-only", ""], "the name says whose a calendar is, once")
+      var texts = []
+      function collect(item) {
+        if (!item) return
+        if (item.visible && item.text !== undefined) texts.push(String(item.text))
+        for (var i = 0; i < item.children.length; i++) collect(item.children[i])
+      }
+      collect(settings)
+      verify(texts.indexOf("Calendar \u00b7 colleague@example.org") >= 0, JSON.stringify(texts))
+      verify(!texts.some(function(text) { return text.indexOf("Shared by") >= 0 }), "the name already says whose it is")
+      var removes = collectAll(settings, "calendar-source-remove")
+      compare(removes.map(function(item) { return item.visible }), [false, false, true, true],
+        "only a calendar added by hand is removed from here")
+      var find = findChild(settings, "calendar-discover-exchange")
+      compare(find.text, "Refresh calendars")
+      compare(findChild(settings, "calendar-default-picker").options.map(function(option) { return option.label }),
+        ["Primary", "Team", "Calendar \u00b7 team@example.org"], "a calendar that is only read is nowhere to put an event")
+      var modes = collectAll(settings, "calendar-reminder-mode").map(function(item) { return item.value })
+      compare(modes, ["google", "off", "off", "off"], "only the default calendar reminds until another is turned on")
+    }
+
+    // A calendar another mailbox shares is added by the address of that mailbox: the address, a button, and the
+    // sentence for a refusal. The controller does the asking.
+    function test_a_shared_calendar_is_added_by_typing_the_address_of_its_mailbox() {
+      mailService.accountSummaries = exchangeAccount()
+      calendarController.sourceList = ({ version: 1, sources: exchangeSources() })
+      wait(1)
+      compare(findChild(settings, "calendar-shared-form").visible, false)
+      var open = findChild(settings, "calendar-shared-open")
+      compare(open.visible, true)
+      compare(open.text, "Add a shared calendar...")
+      open.clicked()
+      compare(findChild(settings, "calendar-shared-form").visible, true)
+      compare(open.visible, false)
+      var add = findChild(settings, "calendar-shared-add")
+      compare(add.enabled, false, "nothing to add until an address is typed")
+      var field = findChild(settings, "calendar-shared-address")
+      field.text = "   "
+      compare(add.enabled, false)
+      field.text = "Colleague@Example.org"
+      compare(add.enabled, true)
+      add.clicked()
+      compare(calendarController.sharedCalls, 1)
+      compare(calendarController.sharedAccount, "exchange:alice@example.org")
+      compare(calendarController.sharedText, "Colleague@Example.org", "the controller judges it")
+      // While it is opened the button says so the way discovery's does, and Cancel stops it.
+      calendarController.sharedOpening = true
+      compare(add.text, "Opening...")
+      findChild(settings, "calendar-shared-cancel").clicked()
+      compare(calendarController.cancelCalls, 1)
+      compare(findChild(settings, "calendar-shared-form").visible, false)
+      compare(add.text, "Add calendar")
+      open.clicked()
+      // Nothing is added while something else is saved or found.
+      calendarController.savingSource = true
+      compare(add.enabled, false)
+      calendarController.savingSource = false
+      calendarController.discoveringCalendars = true
+      compare(add.enabled, false)
+      calendarController.discoveringCalendars = false
+      // Saved: the form is done.
+      calendarController.discoveryFinished(true, "", 1)
+      compare(findChild(settings, "calendar-shared-form").visible, false)
+      compare(findChild(settings, "calendar-shared-address").text, "")
+    }
+
+    function test_a_refusal_to_add_a_shared_calendar_is_said_under_the_form_and_cancel_closes_it() {
+      mailService.accountSummaries = exchangeAccount()
+      wait(1)
+      findChild(settings, "calendar-shared-open").clicked()
+      var error = findChild(settings, "calendar-shared-error")
+      compare(error.visible, false)
+      calendarController.sharedError = "That calendar is not shared with you"
+      compare(error.visible, true)
+      compare(error.text, "That calendar is not shared with you")
+      findChild(settings, "calendar-shared-address").text = "nobody@example.org"
+      findChild(settings, "calendar-shared-cancel").clicked()
+      compare(findChild(settings, "calendar-shared-form").visible, false)
+      compare(findChild(settings, "calendar-shared-address").text, "")
+      compare(calendarController.sharedError, "", "and the sentence goes with the form")
+      compare(calendarController.sharedCalls, 0)
+      compare(calendarController.cancelCalls, 1)
+    }
+
+    // The mailbox poll replaces the account summaries twice a cycle; the address being typed into the form, the
+    // open form and the field itself survive it, whether the mailbox's state changed or not.
+    function test_an_address_being_typed_survives_the_mailbox_poll() {
+      mailService.accountSummaries = exchangeAccount()
+      calendarController.sourceList = ({ version: 1, sources: exchangeSources() })
+      wait(1)
+      findChild(settings, "calendar-shared-open").clicked()
+      var field = findChild(settings, "calendar-shared-address")
+      field.forceActiveFocus()
+      var focused = field.activeFocus
+      field.text = "lin@example.test"
+      var changed = exchangeAccount()
+      changed[0].lastError = "The server did not answer"
+      mailService.accountSummaries = changed
+      wait(1)
+      mailService.accountSummaries = exchangeAccount()
+      wait(1)
+      var after = findChild(settings, "calendar-shared-address")
+      verify(after === field, "the same field, not one built again")
+      compare(after.text, "lin@example.test")
+      compare(after.activeFocus, focused)
+      compare(findChild(settings, "calendar-shared-form").visible, true)
+      // The mailbox's live state still reaches its block.
+      var signedOut = exchangeAccount(false)
+      mailService.accountSummaries = signedOut
+      wait(1)
+      compare(findChild(settings, "calendar-discover-exchange").text, "Sign in...")
+    }
+
+    // "Find calendars" cannot be pressed while a shared calendar is being opened, and looks it.
+    function test_find_calendars_looks_disabled_while_it_cannot_be_pressed() {
+      mailService.accountSummaries = exchangeAccount()
+      wait(1)
+      var find = findChild(settings, "calendar-discover-exchange")
+      compare([find.enabled, find.opacity], [true, 1])
+      calendarController.discoveringCalendars = true
+      compare(find.enabled, false)
+      verify(find.opacity < 1)
+    }
+
+    // A discovery that did not see everything says so beside what it saved.
+    function test_a_partial_discovery_is_said_with_what_was_saved() {
+      mailService.accountSummaries = exchangeAccount()
+      calendarController.sourceList = ({ version: 1, sources: exchangeSources() })
+      wait(1)
+      calendarController.discoveryNotice = "The mailbox's other calendar folders could not be read, so the calendars found before are kept."
+      calendarController.discoveryFinished(true, "", 1)
+      var said = collectAll(settings, "calendar-result").map(function(item) { return item.text })
+      compare(said, ["Found 1 calendar. "
+        + "The mailbox's other calendar folders could not be read, so the calendars found before are kept."],
+        "what was found, not a count of what is listed")
+      calendarController.discoveryNotice = ""
+      calendarController.discoveryFinished(true, "", 2)
+      compare(collectAll(settings, "calendar-result")[0].text, "Saved 2 calendars. Choose reminders below, then open your calendar.")
+    }
+
+    function test_a_shared_calendar_is_added_only_to_a_signed_in_exchange_mailbox() {
+      mailService.accountSummaries = exchangeAccount(false)
+      wait(1)
+      compare(findChild(settings, "calendar-shared-open").visible, false)
+      mailService.accountSummaries = [{ id: "imap:person@icloud.com", email: "person@icloud.com",
+        calendarProvider: "icloud", signedIn: true }]
+      wait(1)
+      var open = findChild(settings, "calendar-shared-open")
+      verify(open === null || open.visible === false)
     }
 
     // The server's own reminders are raised like Google's, so the calendar has a reminder row that says whose

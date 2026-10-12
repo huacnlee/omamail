@@ -19,6 +19,8 @@ Column {
   property string setupAccountId: ""
   property string setupError: ""
   property bool setupComplete: false
+  // The Exchange mailbox whose "add a shared calendar" form is open.
+  property string sharedFormAccount: ""
   signal accountSetupRequested(int index)
   signal clientSetupRequested()
   signal addAccountRequested()
@@ -52,6 +54,21 @@ Column {
     })
   }
 
+  // The mailboxes listed below, by id. A poll replaces `accountSummaries` twice a cycle with no mailbox having
+  // changed, and a block built over that array is destroyed and rebuilt each time, taking with it whatever is
+  // being typed into it (the address of a shared calendar) and the keyboard. These ids change only when a
+  // mailbox is added, removed or becomes discoverable; each block reads its mailbox's live state by id.
+  readonly property string discoverableKey: discoverableAccounts().map(function(account) {
+    return String(account.id || "")
+  }).join("\n")
+  readonly property var discoverableIds: discoverableKey === "" ? [] : discoverableKey.split("\n")
+
+  function discoverableAccount(id) {
+    var accounts = discoverableAccounts()
+    for (var i = 0; i < accounts.length; i++) if (String(accounts[i].id || "") === id) return accounts[i]
+    return {}
+  }
+
   function providerName(account) {
     return account && account.calendarProvider === "icloud" ? "iCloud"
       : account && account.calendarProvider === "exchange" ? "Exchange"
@@ -78,8 +95,7 @@ Column {
   // refreshed by discovery instead — unless the mailbox is gone, when there
   // is nothing left to refresh it and this is the only way to be rid of it.
   function removable(source) {
-    var value = source || {}
-    return (value.kind === "caldav" && value.discovered !== true) || root.orphaned(value)
+    return Sources.addedByHand(source) || root.orphaned(source || {})
   }
 
   // Calendars listed under their mailbox's row: the provider and the address
@@ -470,27 +486,29 @@ Column {
   }
 
   Repeater {
-    model: root.discoverableAccounts()
+    model: root.discoverableIds
 
     Column {
       id: accountBlock
-      required property var modelData
-      readonly property var calendars: root.accountCalendars(modelData.id)
+      required property string modelData
+      readonly property var account: root.discoverableAccount(modelData)
+      readonly property var calendars: root.accountCalendars(modelData)
+      // An Exchange mailbox brings its default calendar before any is found: what discovery found is counted.
+      readonly property int found: account.calendarProvider !== "exchange" ? calendars.length
+        : calendars.filter(function(source) { return source.discovered === true }).length
       width: root.width
       spacing: Style.space(2)
 
       SettingRow {
-        title: String(accountBlock.modelData.email || accountBlock.modelData.label || "")
-        detail: root.providerName(accountBlock.modelData) + " · "
-          + (accountBlock.modelData.signedIn !== true ? "Sign in to connect calendars"
+        title: String(accountBlock.account.email || accountBlock.account.label || "")
+        detail: root.providerName(accountBlock.account) + " · "
+          + (accountBlock.account.signedIn !== true ? "Sign in to connect calendars"
             : accountBlock.calendars.length > 0
               ? accountBlock.calendars.length + (accountBlock.calendars.length === 1 ? " calendar" : " calendars")
               : "Uses this mailbox's sign-in")
         Button {
           id: discoveryButton
-          objectName: "calendar-discover-" + String(accountBlock.modelData.calendarProvider || "account")
-          // An Exchange mailbox has its default calendar and nothing to find yet; signed out, it signs in.
-          visible: accountBlock.modelData.calendarProvider !== "exchange" || accountBlock.modelData.signedIn !== true
+          objectName: "calendar-discover-" + String(accountBlock.account.calendarProvider || "account")
           focusable: true
           bordered: true
           foreground: root.textColor
@@ -498,26 +516,28 @@ Column {
           fontSize: Style.font.caption
           enabled: !!root.controller && !root.controller.discoveringCalendars
             && !root.controller.savingSource
-          text: accountBlock.modelData.signedIn !== true ? "Sign in..."
+          // A button that cannot be pressed looks it, as the ones beside it do, whatever the shell's style draws.
+          opacity: enabled ? 1.0 : 0.4
+          text: accountBlock.account.signedIn !== true ? "Sign in..."
             : root.controller && root.controller.discoveringCalendars
-            && root.controller.discoveringAccountId === String(accountBlock.modelData.id || "")
+            && root.controller.discoveringAccountId === String(accountBlock.account.id || "")
             ? "Finding..."
-            : (accountBlock.calendars.length > 0
-               ? "Refresh calendars" : accountBlock.modelData.calendarProvider === "google" ? "Enable Google Calendar" : "Find calendars")
-            + (accountBlock.modelData.calendarProvider === "google" ? "..." : "")
+            : (accountBlock.found > 0
+               ? "Refresh calendars" : accountBlock.account.calendarProvider === "google" ? "Enable Google Calendar" : "Find calendars")
+            + (accountBlock.account.calendarProvider === "google" ? "..." : "")
           onClicked: {
             resultText.text = ""
             root.colorEditingId = ""
             root.passwordEditingId = ""
-            root.setupAccountId = String(accountBlock.modelData.id || "")
+            root.setupAccountId = String(accountBlock.account.id || "")
             root.setupError = ""
             root.setupComplete = false
-            if (accountBlock.modelData.signedIn !== true) {
+            if (accountBlock.account.signedIn !== true) {
               root.accountSetupRequested(root.accountIndex(root.setupAccountId))
               return
             }
             if (root.controller)
-              root.controller.discoverAccountCalendars(accountBlock.modelData.id)
+              root.controller.discoverAccountCalendars(accountBlock.account.id)
           }
         }
       }
@@ -528,6 +548,81 @@ Column {
           required property var modelData
           source: modelData
           detail: root.nestedDetail(modelData)
+        }
+      }
+
+      // A calendar another mailbox shares is added by the address of that mailbox (discovery finds only the
+      // mailbox's own), and read before it is saved.
+      IconTextButton {
+        objectName: "calendar-shared-open"
+        visible: accountBlock.account.calendarProvider === "exchange" && accountBlock.account.signedIn === true
+          && root.sharedFormAccount !== String(accountBlock.account.id || "")
+        iconName: "plus"
+        text: "Add a shared calendar..."
+        foreground: root.textColor
+        fontFamily: root.panelFontFamily
+        enabled: !!root.controller && !root.controller.savingSource && !root.controller.discoveringCalendars
+        onClicked: {
+          root.colorEditingId = ""
+          root.passwordEditingId = ""
+          root.sharedFormAccount = String(accountBlock.account.id || "")
+          if (root.controller) root.controller.sharedError = ""
+        }
+      }
+
+      Column {
+        objectName: "calendar-shared-form"
+        width: parent.width
+        spacing: Style.space(6)
+        visible: root.sharedFormAccount === String(accountBlock.account.id || "")
+          && accountBlock.account.calendarProvider === "exchange" && accountBlock.account.signedIn === true
+        onVisibleChanged: if (!visible) sharedAddress.text = ""
+        TextField {
+          id: sharedAddress
+          objectName: "calendar-shared-address"
+          width: parent.width
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "Address of the mailbox that shares its calendar"
+          onAccepted: if (sharedAdd.enabled) sharedAdd.clicked()
+        }
+        Row {
+          spacing: Style.space(6)
+          IconTextButton {
+            id: sharedAdd
+            objectName: "calendar-shared-add"
+            text: root.controller && root.controller.sharedOpening ? "Opening..." : "Add calendar"
+            foreground: root.textColor
+            accent: root.accentColor
+            fontFamily: root.panelFontFamily
+            enabled: !!root.controller && sharedAddress.text.trim() !== ""
+              && !root.controller.savingSource && !root.controller.discoveringCalendars
+            onClicked: root.controller.addSharedCalendar(accountBlock.account.id, sharedAddress.text)
+          }
+          IconTextButton {
+            objectName: "calendar-shared-cancel"
+            text: "Cancel"
+            bordered: false
+            foreground: root.dimColor
+            fontFamily: root.panelFontFamily
+            // Also while the calendar is being opened: the answer is dropped and nothing is saved.
+            onClicked: {
+              root.sharedFormAccount = ""
+              if (root.controller) root.controller.cancelShared()
+            }
+          }
+        }
+        Text {
+          objectName: "calendar-shared-error"
+          width: parent.width
+          visible: text !== ""
+          text: root.controller ? String(root.controller.sharedError || "") : ""
+          color: root.urgentColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
         }
       }
     }
@@ -740,6 +835,7 @@ Column {
 
   Text {
     id: resultText
+    objectName: "calendar-result"
     // Whether the text reports success, said by the reporter rather than
     // read back out of the words: an error can begin with anything.
     property bool ok: false
@@ -941,7 +1037,13 @@ Column {
       resultText.ok = ok
       root.setupError = ok ? "" : error
       root.setupComplete = ok
-      resultText.text = ok ? "Saved " + count + (count === 1 ? " calendar. Choose reminders below, then open your calendar." : " calendars. Choose reminders below, then open your calendar.") : ""
+      // A shared calendar was saved: the form that asked for it is done.
+      if (ok) root.sharedFormAccount = ""
+      // A discovery that did not see everything says what it found and that the calendars found before are kept,
+      // so the count is never taken for the whole list.
+      var notice = ok && root.controller ? String(root.controller.discoveryNotice || "") : ""
+      resultText.text = !ok ? "" : notice !== "" ? "Found " + count + (count === 1 ? " calendar. " : " calendars. ") + notice
+        : "Saved " + count + (count === 1 ? " calendar. Choose reminders below, then open your calendar." : " calendars. Choose reminders below, then open your calendar.")
     }
   }
 }

@@ -94,9 +94,13 @@ Rectangle {
   readonly property bool reachesPeople: exchangeReminders && !!controller && typeof controller.reachRequest === "function"
     && !!formNow && controller.reachRequest(editing ? editingSourceId : selectedSourceId, editingEvent, formNow) !== null
   readonly property var formNow: opened ? formFields("all") : null
-  // Whether the form has a guest field: on Exchange a new event or a meeting the owner organises, on Google a
-  // new event or one the owner organises.
-  readonly property bool guestsOffered: exchangeReminders ? (!editing || editingEvent.exchangeMeeting === true)
+  // Meetings are the Exchange mailbox's own default calendar's: one found beside it, or shared by another
+  // mailbox, takes personal appointments and has no guest field.
+  readonly property bool exchangeMeetings: exchangeReminders && !ExchangeEvents.otherCalendar(chosenSource)
+  // Whether the form has a guest field: on Exchange a new event or a meeting the owner organises, on a
+  // calendar that takes meetings; on Google a new event or one the owner organises.
+  readonly property bool guestsOffered: exchangeReminders
+    ? exchangeMeetings && (!editing || editingEvent.exchangeMeeting === true)
     : !editing || (!!editingEvent.organizer && editingEvent.organizer.self === true)
   // The fields of a save held for the owner's answer.
   property var pendingFields: null
@@ -564,7 +568,9 @@ Rectangle {
       destinationSourceId: selectedSourceId,
       sendUpdates: sendUpdates === "none" ? "none" : "all",
       timeZone: timeZoneField.text.trim(),
-      guestEmails: !editing || guestsField.text !== originalGuestText ? guestsField.text : undefined,
+      // A guest field that is not shown (an Exchange calendar that takes no meetings) says nothing.
+      guestEmails: exchangeReminders && !guestsOffered ? undefined
+        : !editing || guestsField.text !== originalGuestText ? guestsField.text : undefined,
       transparency: !editing || availabilityChanged ? availability : undefined,
       visibility: !editing || visibilityChanged ? eventVisibility : undefined,
       reminderMode: reminderMode,

@@ -80,6 +80,7 @@
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, SecondsFormat};
 
+use super::folders::{Where, folder_element};
 use super::{envelope, envelope_in, esc, field};
 use crate::providers::exchange::guests::{self, Guests};
 use crate::providers::exchange::recurrence::{
@@ -131,6 +132,8 @@ const DETAIL: &str = "item:ParentFolderId item:Subject item:Sensitivity item:Bod
     calendar:IsRecurring calendar:CalendarItemType calendar:MyResponseType calendar:UID \
     calendar:AppointmentState calendar:Organizer calendar:RequiredAttendees \
     calendar:OptionalAttendees calendar:Resources calendar:OriginalStart";
+/// What the signed-in user may do to an item, asked of one in another mailbox.
+const RIGHTS: &str = "item:EffectiveRights";
 /// Introduced in Exchange Server 2013 (the first two), or the second word on where an event of a
 /// series sits: what a detail view can do without, so a server that refuses them is asked again with
 /// none (never for an answer).
@@ -297,15 +300,28 @@ fn fields(uris: &str) -> String {
     uris.split_whitespace().map(field).collect()
 }
 
-/// `FindItem` of the `calendar` folder over a `CalendarView` from the second `start_ms` falls in to
-/// the end of the second `end_ms` falls in (a range never shrinks), at most `max` items. The server
-/// expands a series into its occurrences, and "a start time that is on or after EndDate will not be
-/// returned".
+/// `calendar_view_in` of the mailbox's own `calendar` folder.
 pub fn calendar_view(
     start_ms: i64,
     end_ms: i64,
     max: usize,
     optional: bool,
+) -> Result<String, &'static str> {
+    calendar_view_in(start_ms, end_ms, max, optional, Where::Default)
+}
+
+/// `FindItem` of the calendar folder `at` names over a `CalendarView` from the second `start_ms` falls
+/// in to the end of the second `end_ms` falls in (a range never shrinks), at most `max` items. The
+/// server expands a series into its occurrences, and "a start time that is on or after EndDate will
+/// not be returned". A folder other than the default calendar is asked for each item's own rights too
+/// (`item:EffectiveRights`, which Microsoft lists among what a `FindItem` answer carries): there they,
+/// and not the folder's, say what the user may change.
+pub fn calendar_view_in(
+    start_ms: i64,
+    end_ms: i64,
+    max: usize,
+    optional: bool,
+    at: Where,
 ) -> Result<String, &'static str> {
     if !(1..=MAX_ENTRIES).contains(&max)
         || !(0..=MAX_CURSOR_MS).contains(&start_ms)
@@ -313,11 +329,14 @@ pub fn calendar_view(
     {
         return Err(INVALID);
     }
-    let extra = if optional {
+    let mut extra = if optional {
         fields(OPTIONAL)
     } else {
         String::new()
     };
+    if at != Where::Default {
+        extra += &field(RIGHTS);
+    }
     Ok(envelope(&format!(
         concat!(
             r#"<m:FindItem Traversal="Shallow"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape>"#,
@@ -330,14 +349,17 @@ pub fn calendar_view(
         max,
         instant(start_ms)?,
         instant(end_ms + 999)?,
-        CALENDAR
+        folder_element(at)?
     )))
 }
 
-/// `GetItem` of one item (its EWS id, checked by `ids::decode`) for what a write must know first.
-pub fn get_appointment(id: &str) -> String {
+/// `GetItem` of one item (its EWS id, checked by `ids::decode`) for what a write must know first, and
+/// with `rights` what the signed-in user may do to it (`item:EffectiveRights`): asked of an item of any
+/// calendar but the default one, where the server alone says whether it may be changed.
+pub fn get_appointment(id: &str, rights: bool) -> String {
+    let rights = if rights { field(RIGHTS) } else { String::new() };
     envelope(&format!(
-        r#"<m:GetItem><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>{}</t:AdditionalProperties></m:ItemShape><m:ItemIds><t:ItemId Id="{}"/></m:ItemIds></m:GetItem>"#,
+        r#"<m:GetItem><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>{}{rights}</t:AdditionalProperties></m:ItemShape><m:ItemIds><t:ItemId Id="{}"/></m:ItemIds></m:GetItem>"#,
         fields(READ),
         esc(id)
     ))
@@ -355,6 +377,13 @@ pub fn get_calendar_folder() -> String {
 pub fn event_detail(id: &str, optional: bool) -> String {
     let item = format!(r#"<t:ItemId Id="{}"/>"#, esc(id));
     detail_read(&item, optional, "")
+}
+
+/// `event_detail` with what the signed-in user may do to the item, for an item of any calendar but the
+/// default one.
+pub fn event_detail_rights(id: &str, optional: bool) -> String {
+    let item = format!(r#"<t:ItemId Id="{}"/>"#, esc(id));
+    detail_read(&item, optional, RIGHTS)
 }
 
 /// The same read of the master of the series the event `id` belongs to (`RecurringMasterItemId`),
@@ -593,7 +622,17 @@ fn check_reminder(minutes: u32) -> Result<(), &'static str> {
 /// are any. `zone` is the Windows id
 /// a day is made in. The children are in the order the schema keeps them.
 pub fn create_appointment(item: &Appointment, zone: &str) -> Result<String, &'static str> {
-    create_item(item, None, zone, "SendToNone")
+    create_appointment_in(item, zone, Where::Default)
+}
+
+/// `create_appointment` in the calendar folder `at` names (`SavedItemFolderId`, "the target folder for
+/// operations that ... create items"): nobody is mailed there either.
+pub fn create_appointment_in(
+    item: &Appointment,
+    zone: &str,
+    at: Where,
+) -> Result<String, &'static str> {
+    create_item(item, None, zone, "SendToNone", at)
 }
 
 /// `CreateItem` of a meeting: an appointment with `guests` on it, who are mailed their invitations
@@ -606,7 +645,14 @@ pub fn create_meeting(
     if guests.len() == 0 {
         return Err(INVALID);
     }
-    create_item(item, Some(guests), zone, "SendToAllAndSaveCopy")
+    // Meetings are the default calendar's alone (`folders::default_only`).
+    create_item(
+        item,
+        Some(guests),
+        zone,
+        "SendToAllAndSaveCopy",
+        Where::Default,
+    )
 }
 
 /// One attendee list of a `CalendarItem`, nothing for an empty one.
@@ -633,7 +679,9 @@ fn create_item(
     guests: Option<&Guests>,
     zone: &str,
     invitations: &str,
+    at: Where,
 ) -> Result<String, &'static str> {
+    let folder = folder_element(at)?;
     if let Some(guests) = guests {
         guests::check(&guests.required, &guests.optional, "")?;
     }
@@ -686,7 +734,7 @@ fn create_item(
                 "<t:LegacyFreeBusyStatus>{}</t:LegacyFreeBusyStatus>{}{}{}</t:CalendarItem></m:Items></m:CreateItem>"
             ),
             invitations,
-            CALENDAR,
+            folder,
             text(&item.title),
             body,
             reminder,

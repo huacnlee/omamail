@@ -195,6 +195,8 @@ pub const ALL: &[&str] = &[
     "exchange.sendAs",
     "exchange.invalidate",
     "exchange.cancel",
+    "exchange.calendars",
+    "exchange.calendarShared",
     "exchange.calendarEvents",
     "exchange.calendarEvent",
     "exchange.calendarCreate",
