@@ -278,6 +278,12 @@ deepEqual(selectedListHints.map(function (h) { return h.key + " " + h.label }),
 assert.ok(!keymap.hintsFor("list", ["move"], true).some(function (h) {
   return h.key === "v"
 }), "a provider without move does not offer the move hint")
+const spellingSuggestions = byId("spellingSuggestions")
+assert.strictEqual(keymap.displayFor(spellingSuggestions), "Ctrl+.")
+assert.strictEqual(keymap.isEnabled(spellingSuggestions, "compose", false), true)
+for (const context of ["list", "reader", "search", "page", "calendar", "assistant"]) {
+  assert.strictEqual(keymap.isEnabled(spellingSuggestions, context, false), false)
+}
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],
