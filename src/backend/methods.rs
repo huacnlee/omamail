@@ -181,6 +181,20 @@ pub const ALL: &[&str] = &[
     "jmap.stream.open",
     "jmap.stream.poll",
     "jmap.stream.close",
+    "exchange.verify",
+    "exchange.list",
+    "exchange.messages",
+    "exchange.read",
+    "exchange.attachment",
+    "exchange.modify",
+    "exchange.trash",
+    "exchange.untrash",
+    "exchange.send",
+    "exchange.saveDraft",
+    "exchange.deleteDraft",
+    "exchange.sendAs",
+    "exchange.invalidate",
+    "exchange.cancel",
 ];
 
 pub fn available() -> Vec<&'static str> {

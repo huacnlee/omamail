@@ -103,7 +103,7 @@ The sidebar is a compound component with four roles:
 - provider labels or folders, A to Z;
 - account identity and account menu trigger.
 
-Expanded rows contain an icon, label, and optional suffix such as an unread count or visible key. Collapsed rows keep the icon and active state, while the label moves to a tooltip. The active mailbox uses fill plus persistent shape and text/icon treatment; unread additionally uses a dot and stronger weight.
+Expanded rows contain an icon, label, and optional suffix: a label's unread count, the visible key, or, where the provider's listing counts its Flagged view rather than estimating it, the Flagged total. That total is a size rather than mail waiting, so it is secondary text in the regular weight, never the accent, and leaves no dot on a collapsed rail; it is read only while the window shows that mailbox on its own, never in the merged view or with the window shut. Collapsed rows keep the icon and active state, while the label moves to a tooltip. The active mailbox uses fill plus persistent shape and text/icon treatment; unread additionally uses a dot and stronger weight.
 
 The collapsed state is a user preference and survives the window. It is not inferred from temporary width except when the responsive mode removes the sidebar entirely.
 

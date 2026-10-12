@@ -655,7 +655,8 @@ if grep -Eq 'Provider\.(query|labelQuery|addressQuery|webMessageUrl|webBoxUrl)\(
   fail "provider query and message URL construction must use the native domain"
 fi
 if grep -Eq '^function (query|searchQuery|labelQuery|addressQuery|webMessageUrl|webBoxUrl|cachedSummaryInSearch)\(' \
-    providers/Registry.js providers/Gmail.js providers/Outlook.js providers/Hey.js providers/Jmap.js providers/Imap.js; then
+    providers/Registry.js providers/Gmail.js providers/Outlook.js providers/Hey.js providers/Jmap.js providers/Imap.js \
+    providers/Exchange.js; then
   fail "legacy provider domain functions belong only in test oracles"
 fi
 grep -q 'capabilities: capabilities(facts.capabilities)' providers/Registry.js \
@@ -685,7 +686,8 @@ grep -q 'text: "Searching server"' components/SearchBar.qml \
   || fail "the search field must name what is still running"
 grep -q 'RotationAnimator on rotation' components/SearchBar.qml \
   || fail "the server-search state must remain visible when its label no longer fits"
-for client in providers/GmailApiClient.qml providers/HeyClient.qml providers/ImapClient.qml; do
+for client in providers/GmailApiClient.qml providers/HeyClient.qml providers/ImapClient.qml \
+    providers/ExchangeClient.qml; do
   grep -q 'function listMessages(query, maxResults, pageToken, callback, progress)' "$client" \
     || fail "$client must expose the shared progressive search interface"
   grep -q 'function getMessages(ids, full, callback, existingHandle, progress)' "$client" \
@@ -696,7 +698,7 @@ done
 # nothing to say and answers with an empty list — but it has to answer, or the
 # reader would need to know which provider it is looking at.
 for client in providers/GmailApiClient.qml providers/HeyClient.qml \
-    providers/ImapClient.qml providers/JmapClient.qml; do
+    providers/ImapClient.qml providers/JmapClient.qml providers/ExchangeClient.qml; do
   grep -q 'function getSummaries(ids, callback)' "$client" \
     || fail "$client must expose the shared conversation-member interface"
 done
@@ -833,7 +835,7 @@ grep -q 'email: root\.configuredEmail' account/MailAccount.qml \
 
 # Destructive account actions consume the semantic danger role passed from the
 # app. Calling it dim or urgent at the button loses the action's meaning.
-for page in components/SetupPage.qml components/ImapSetupPage.qml; do
+for page in components/SetupPage.qml components/ImapSetupPage.qml components/ExchangeSetupPage.qml; do
   grep -q 'required property color dangerColor' "$page" \
     || fail "$page must receive the semantic danger colour"
   awk '
@@ -975,8 +977,8 @@ MENUROWS
 # makes the same concept drift between pages and prevents App from naming it.
 for file in components/AppMenu.qml components/MessageMenu.qml components/AccountSwitcher.qml \
   components/ProviderPicker.qml components/MailboxTabs.qml components/SetupPage.qml \
-  components/ImapSetupPage.qml components/KeyHints.qml components/ImagePopover.qml \
-  components/ComposeView.qml; do
+  components/ImapSetupPage.qml components/ExchangeSetupPage.qml components/KeyHints.qml \
+  components/ImagePopover.qml components/ComposeView.qml; do
   if grep -nE '(^|[^A-Za-z])Color\.' "$file"; then
     fail "$file reads theme colours instead of receiving semantic roles"
   fi
@@ -1212,7 +1214,7 @@ grep -q 'from: from' account/MailAccount.qml \
   || fail "MailAccount must pass the selected From address to Message.js"
 grep -q 'fromHeader(values.from, values.fromName)' message/Message.js \
   || fail "Message.js must write the selected From header, display name and all"
-for client in providers/GmailApiClient.qml providers/ImapClient.qml; do
+for client in providers/GmailApiClient.qml providers/ImapClient.qml providers/ExchangeClient.qml; do
   grep -q 'function getSendAs' "$client" \
     || fail "$client must implement the provider-neutral sender-list operation"
 done
@@ -1347,6 +1349,22 @@ if "selectionIsPreview" not in mark.group(0):
                      "(`root.selectionIsPreview`), or stepping a list reads it")
 PREVIEWREAD
 
+# The standalone host (`backend/Runtime.qml`) accepts its bundled backend's API
+# and the one step past it. Below apiVersion-1, `make app-run` refuses the
+# checkout's own backend as incompatible; above releasedApiVersion, a release
+# bundle claims an API it does not carry. The release pin folds only
+# backend-api.json, so the window, not equality, is what holds on main.
+python3 - <<'BUNDLEDAPI' || exit 1
+import json, pathlib, re
+contract = json.loads(pathlib.Path("../backend-api.json").read_text())
+api, released = contract["apiVersion"], contract["releasedApiVersion"]
+found = re.search(r"bundledApiVersion: root\.standalone \? (\d+) : 0", pathlib.Path("Service.qml").read_text())
+bundled = int(found.group(1)) if found else None
+if bundled is None or not api - 1 <= bundled <= released:
+    raise SystemExit(f"BUNDLEDAPI: ui/Service.qml bundledApiVersion {bundled} must be between apiVersion-1 ({api - 1}) "
+                     f"and releasedApiVersion ({released}): the standalone host accepts its bundled API and one step past it")
+BUNDLEDAPI
+
 # The backend a QML file calls is the contract's, by name: a method that is
 # not declared cannot be called at all, and one the checkout has not shipped
 # yet is declared unreleased so `Backend` can refuse it on the pinned binary.
@@ -1361,6 +1379,10 @@ files = [p for p in (root / "ui").rglob("*") if p.suffix in (".qml", ".js") and 
 called = {}
 for path in files:
     for match in re.finditer(r'\.call\(\s*"([a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+)"', path.read_text()):
+        called.setdefault(match.group(1), set()).add(str(path.relative_to(root)))
+# Clients that send through `nativeRequest` name a method as a bare literal, which the scan above cannot see.
+for path in (root / "ui" / "providers").glob("*Client.qml"):
+    for match in re.finditer(r'"((?:exchange|imap|jmap)\.[a-z][A-Za-z0-9]*)"', path.read_text()):
         called.setdefault(match.group(1), set()).add(str(path.relative_to(root)))
 unknown = sorted(set(called) - methods)
 if unknown:

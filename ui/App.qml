@@ -456,6 +456,10 @@ Item {
   function toggleSidebar() {
     if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
   }
+  // The rail's Flagged total is the mailbox on screen's own; a merged view,
+  // which no one mailbox speaks for, has none.
+  readonly property int starredCount: !!service && !service.unified && !!service.current
+    ? service.current.starredCount : 0
 
   // Entered at the top. The page keeps its scroll for as long as it is in
   // history — Back from a mailbox's form returns to the row that opened it —
@@ -1175,95 +1179,18 @@ Item {
     // before the service has finished making the row.
   }
 
-  // The setup pages. Built by the Loader above, one at a time, so the ones not
-  // in use hold no half-typed fields and no state to go stale.
-  Component {
-    id: providerPickerPage
-
-    ProviderPicker {
-      textColor: root.foreground
-      dimColor: root.dim
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      // Back is shown wherever there is something to go back to — which on
-      // first run, where the chooser is the root, there is not.
-      onChosen: function(providerId) { root.chooseProvider(providerId) }
-    }
-  }
-
-  Component {
-    id: gmailSetupPage
-
-    SetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: heySetupPage
-
-    HeySetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: outlookSetupPage
-
-    OutlookSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: jmapSetupPage
-
-    JmapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: imapSetupPage
-
-    ImapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
+  // The setup pages live in SetupPages, one map. A new mailbox is added
+  // there, so this file does not grow.
+  SetupPages {
+    id: setupPages
+    service: root.service
+    textColor: root.foreground
+    dimColor: root.dim
+    dangerColor: root.danger
+    accentColor: root.accent
+    panelFontFamily: root.fontFamily
+    onChosen: function(providerId) { root.chooseProvider(providerId) }
+    onRemoveRequested: root.removeCurrentAccountFromEditor()
   }
 
   // Every mailbox at once. The rail it lands on has to be one they all have,
@@ -1344,6 +1271,9 @@ Item {
     if (!service) return
     var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
+    // A removed mailbox takes its saved sign-in with it, once the removal is confirmed.
+    var host = service.accountAt(index)
+    if (host) host.forgetStoredCredentials()
     service.removeAccountAt(index)
     // The editor's page is gone with its account. Settings is where the rest
     // of them are, over a fresh root: the list underneath may have changed
@@ -1820,6 +1750,7 @@ Item {
           panelFontFamily: root.fontFamily
           slots: root.sidebarSlots
           numbersVisible: focusScope.ctrlHeld
+          starredCount: root.starredCount
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
             root.showCalendar()
@@ -2242,7 +2173,7 @@ Item {
           // Setups that share nothing but their place on screen: a chooser for
           // a mailbox whose kind is not settled yet, then whichever page that
           // kind needs — a Cloud walkthrough, a program and a button, or a
-          // server and a password. A Loader rather than four visibilities, so
+          // server and a password. A Loader rather than a visibility each, so
           // the pages not in use hold no fields and no state.
           Loader {
             id: setup
@@ -2254,12 +2185,7 @@ Item {
             // The provider is on the entry, so a service that briefly reports
             // Gmail while it rebuilds an account host cannot swap the page.
             readonly property string kind: root.editingProvider !== "" ? root.editingProvider : "gmail"
-            sourceComponent: root.showPicker
-              ? providerPickerPage
-              : (setup.kind === "imap" ? imapSetupPage
-                : (setup.kind === "jmap" ? jmapSetupPage
-                : (setup.kind === "outlook" ? outlookSetupPage
-                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))))
+            sourceComponent: setupPages.pageFor(kind, root.showPicker)
           }
           }
         }
