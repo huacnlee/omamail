@@ -252,6 +252,7 @@ fn no_request_can_mail_anybody_or_name_a_person_whatever_it_is_given() {
         location: Some(tricky),
         reminder: Reminder::Minutes(15),
         when: Some(item.when),
+        ..Change::default()
     };
     let requests = [
         calendar_view(0, 1000, 1, true).unwrap(),
@@ -517,4 +518,199 @@ fn the_cancellations_are_the_inboxs_of_their_class_newest_first() {
     let asked = uris(&find).join(" ");
     let expected = "item:DateTimeReceived calendar:UID calendar:RecurrenceId meeting:AssociatedCalendarItemId meeting:IsOutOfDate";
     assert_eq!(asked, expected);
+}
+
+fn who(list: &[&str]) -> Vec<String> {
+    list.iter().map(|a| (*a).to_owned()).collect()
+}
+
+/// The addresses of one attendee list, in order.
+fn listed(node: &Node, list: &str) -> Vec<String> {
+    node.child(list).map_or_else(Vec::new, |list| {
+        let people = list.children("Attendee").into_iter();
+        let address = |a: &Node| a.text_at(&["Mailbox", "EmailAddress"]).unwrap().to_owned();
+        people.map(address).collect()
+    })
+}
+
+#[test]
+fn a_new_meeting_mails_its_people_with_a_copy_kept_and_nobody_is_no_meeting() {
+    let guests = Guests {
+        required: who(&["ada@example.org", "bob@example.org"]),
+        optional: who(&["cy@example.org"]),
+    };
+    let lunch = Appointment {
+        location: "Canteen".into(),
+        ..plain("Lunch", timed(HOUR.0, HOUR.1))
+    };
+    let (create, zone) = parsed(&create_meeting(&lunch, &guests, VIENNA).unwrap());
+    assert_eq!(zone, None, "instants need no zone");
+    let only = (
+        "SendMeetingInvitations".to_owned(),
+        "SendToAllAndSaveCopy".to_owned(),
+    );
+    assert_eq!(
+        create.attrs,
+        [only],
+        "no MessageDisposition: that is for messages"
+    );
+    let item = create.at(&["Items", "CalendarItem"]).unwrap();
+    let order = names(item);
+    let tail = &order[order.len() - 3..];
+    assert_eq!(tail, ["Location", "RequiredAttendees", "OptionalAttendees"]);
+    assert_eq!(listed(item, "RequiredAttendees"), guests.required);
+    assert_eq!(listed(item, "OptionalAttendees"), guests.optional);
+    // Only optional people: no required list, and still a meeting.
+    let quiet = Guests {
+        required: Vec::new(),
+        optional: who(&["cy@example.org"]),
+    };
+    let (create, _) = parsed(&create_meeting(&lunch, &quiet, VIENNA).unwrap());
+    let item = create.at(&["Items", "CalendarItem"]).unwrap();
+    assert!(item.child("RequiredAttendees").is_none());
+    // Nobody, or anybody who is not an address, is refused here too.
+    for required in [
+        &[][..],
+        &["Ada <ada@example.org>"],
+        &["ada@example.org", "ADA@example.org"],
+    ] {
+        let guests = Guests {
+            required: who(required),
+            optional: Vec::new(),
+        };
+        assert_eq!(
+            create_meeting(&lunch, &guests, VIENNA),
+            Err(INVALID),
+            "{required:?}"
+        );
+    }
+    // The appointment's own create still invites nobody.
+    let (plain, _) = parsed(&create_appointment(&lunch, VIENNA).unwrap());
+    assert_eq!(plain.attr("SendMeetingInvitations"), Some("SendToNone"));
+}
+
+#[test]
+fn a_meeting_update_tells_everybody_never_overwrites_and_writes_a_list_whole_or_empties_it() {
+    let required = who(&["ada@example.org", "dee@example.org"]);
+    let change = Change {
+        title: Some("Lunch, moved"),
+        required: Some(&required),
+        optional: Some(&[]),
+        ..Change::default()
+    };
+    let (update, _) = parsed(&update_meeting("AAMk", "K", &change, VIENNA).unwrap());
+    let attrs = [
+        ("MessageDisposition", "SaveOnly"),
+        ("ConflictResolution", "NeverOverwrite"),
+        (
+            "SendMeetingInvitationsOrCancellations",
+            "SendToAllAndSaveCopy",
+        ),
+    ];
+    assert_eq!(
+        update.attrs,
+        attrs.map(|(k, v)| (k.to_owned(), v.to_owned()))
+    );
+    let updates = update
+        .at(&["ItemChanges", "ItemChange", "Updates"])
+        .unwrap();
+    assert_eq!(
+        names(updates),
+        ["SetItemField", "SetItemField", "DeleteItemField"]
+    );
+    let uri = |at: usize| {
+        let field = updates.children[at].child("FieldURI").unwrap();
+        field.attr("FieldURI").unwrap().to_owned()
+    };
+    let lists = [uri(1), uri(2)];
+    assert_eq!(
+        lists,
+        ["calendar:RequiredAttendees", "calendar:OptionalAttendees"]
+    );
+    let set = updates.children[1].child("CalendarItem").unwrap();
+    assert_eq!(listed(set, "RequiredAttendees"), required);
+    // A meeting left with nobody, a person who is not an address, and an empty change are refused.
+    let nobody = Change {
+        required: Some(&[]),
+        optional: Some(&[]),
+        ..Change::default()
+    };
+    let named = who(&["Ada <ada@example.org>"]);
+    let unnamed = Change {
+        required: Some(&named),
+        ..Change::default()
+    };
+    for change in [nobody, unnamed, Change::default()] {
+        assert_eq!(update_meeting("AAMk", "K", &change, VIENNA), Err(INVALID));
+    }
+    // The owner's own reminder alone tells nobody; with anything else, everybody is told.
+    let mut own = Change {
+        reminder: Reminder::Minutes(15),
+        ..Change::default()
+    };
+    let (quiet, _) = parsed(&update_meeting("AAMk", "K", &own, VIENNA).unwrap());
+    let sending = quiet.attr("SendMeetingInvitationsOrCancellations");
+    assert_eq!(sending, Some("SendToNone"));
+    own.title = Some("Lunch");
+    let (told, _) = parsed(&update_meeting("AAMk", "K", &own, VIENNA).unwrap());
+    let sending = told.attr("SendMeetingInvitationsOrCancellations");
+    assert_eq!(sending, Some("SendToAllAndSaveCopy"));
+    // An appointment's update names nobody: a request that did would be a meeting.
+    let people = Change {
+        title: Some("x"),
+        optional: Some(&required),
+        ..Change::default()
+    };
+    assert_eq!(
+        update_appointment("AAMk", "K", &people, VIENNA),
+        Err(INVALID)
+    );
+}
+
+#[test]
+fn a_cancellation_is_sent_to_everybody_and_a_removal_is_saved_and_sent_to_nobody() {
+    let (cancel, _) = parsed(&cancel_meeting("AAMk", "K", Some("Sorry,\r\nnext week")).unwrap());
+    let only = (
+        "MessageDisposition".to_owned(),
+        "SendAndSaveCopy".to_owned(),
+    );
+    assert_eq!(cancel.attrs, [only]);
+    let item = cancel.at(&["Items", "CancelCalendarItem"]).unwrap();
+    assert_eq!(names(item), ["ReferenceItemId", "NewBodyContent"]);
+    let reference = &item.children[0];
+    assert_eq!(
+        (reference.attr("Id"), reference.attr("ChangeKey")),
+        (Some("AAMk"), Some("K"))
+    );
+    let note = &item.children[1];
+    assert_eq!(
+        (note.attr("BodyType"), note.text.as_str()),
+        (Some("Text"), "Sorry,\r\nnext week")
+    );
+    let (bare, _) = parsed(&cancel_meeting("AAMk", "K", None).unwrap());
+    assert_eq!(
+        names(bare.at(&["Items", "CancelCalendarItem"]).unwrap()),
+        ["ReferenceItemId"]
+    );
+    let long = "x".repeat(MAX_CANCEL_NOTE_BYTES + 1);
+    for (key, note) in [
+        ("", None),
+        ("a b", None),
+        ("K", Some(&long[..])),
+        ("K", Some("a\u{7}b")),
+        ("K", Some(" ")),
+    ] {
+        assert_eq!(
+            cancel_meeting("AAMk", key, note),
+            Err(INVALID),
+            "{key:?} {note:?}"
+        );
+    }
+    assert!(cancel_meeting("AAMk", "K", Some(&long[1..])).is_ok());
+    let (remove, _) = parsed(&remove_cancellation("AAMk", "K").unwrap());
+    let only = ("MessageDisposition".to_owned(), "SaveOnly".to_owned());
+    assert_eq!(remove.attrs, [only]);
+    let item = remove.at(&["Items", "RemoveItem"]).unwrap();
+    assert_eq!(names(item), ["ReferenceItemId"], "no body, no recipient");
+    assert_eq!(remove_cancellation("AAMk", ""), Err(INVALID));
 }

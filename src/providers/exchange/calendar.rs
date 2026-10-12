@@ -7,7 +7,9 @@
 //! - **Nothing is mailed, ever, and only a plain appointment is written**: a single item with nobody
 //!   else on it that its owner made. Each event of a range says whether it is one (`editable`, and
 //!   `lock` naming why not), and the client decides again on a fresh read before every update and
-//!   delete; what it refuses is `exchange_calendar_locked`.
+//!   delete; what it refuses is `exchange_calendar_locked`. A meeting the owner organises is
+//!   `editable` as a meeting (`meeting` true, `CalendarItem::meeting_lock`): it is changed only by
+//!   the meeting calls (`meeting`), which these refuse to stand in for.
 //! - **A write names the version it was drawn from** (`changeKey`); another one is
 //!   `exchange_calendar_conflict` and nothing is applied. It is never retried with a fresh key.
 //! - **A write is never cancelled, detached or repeated.** It takes no `requestToken`, waits for the
@@ -84,16 +86,7 @@ pub async fn create(params: &Value) -> Result<Value, &'static str> {
             "endDate",
         ],
     )?;
-    let item = Appointment {
-        title: text(map, "title")?.to_owned(),
-        location: optional(map, "location")?.unwrap_or_default(),
-        notes: optional(map, "notes")?,
-        reminder: match reminder(map, false)? {
-            Reminder::Minutes(minutes) => Some(minutes),
-            _ => None,
-        },
-        when: when(map)?.ok_or(INVALID)?,
-    };
+    let item = appointment(map)?;
     create_appointment(&item, zone::UTC)?;
     let mut lease = turn(&account(map)?).await?;
     let written = lease
@@ -121,18 +114,14 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
         ],
     )?;
     let (id, key) = target(map)?;
-    let edit = Edit {
-        title: optional(map, "title")?,
-        location: optional(map, "location")?,
-        reminder: reminder(map, true)?,
-        when: when(map)?,
-    };
+    let edit = edit(map)?;
     // Only what is named is judged and sent: a drag names the time alone.
     let whole = CalendarChange {
         title: edit.title.as_deref(),
         location: edit.location.as_deref(),
         reminder: edit.reminder,
         when: edit.when,
+        ..CalendarChange::default()
     };
     if whole != CalendarChange::default() {
         update_appointment("A", &key, &whole, zone::UTC)?;
@@ -153,8 +142,32 @@ pub async fn delete(params: &Value) -> Result<Value, &'static str> {
     Ok(json!({"deleted": true}))
 }
 
-fn reply(written: &Written) -> Value {
+pub(super) fn reply(written: &Written) -> Value {
     json!({"id": written.id, "changeKey": written.change_key})
+}
+
+/// A new event as a request names it: the members `calendarCreate` and `meetingCreate` share.
+pub(super) fn appointment(map: &Map<String, Value>) -> Result<Appointment, &'static str> {
+    Ok(Appointment {
+        title: text(map, "title")?.to_owned(),
+        location: optional(map, "location")?.unwrap_or_default(),
+        notes: optional(map, "notes")?,
+        reminder: match reminder(map, false)? {
+            Reminder::Minutes(minutes) => Some(minutes),
+            _ => None,
+        },
+        when: when(map)?.ok_or(INVALID)?,
+    })
+}
+
+/// A change as a request names it: the members `calendarUpdate` and `meetingUpdate` share.
+pub(super) fn edit(map: &Map<String, Value>) -> Result<Edit, &'static str> {
+    Ok(Edit {
+        title: optional(map, "title")?,
+        location: optional(map, "location")?,
+        reminder: reminder(map, true)?,
+        when: when(map)?,
+    })
 }
 
 /// Whole milliseconds since the epoch, up to the end of the year 9999; a float or a string is
@@ -244,7 +257,7 @@ pub fn event(item: &CalendarItem) -> Option<Value> {
             item.organizer.as_str(),
         )
     };
-    let lock = item.lock();
+    let lock = item.screen_lock();
     let mut event = json!({
         "id": ids::encode(&item.id).ok()?,
         "changeKey": item.change_key,

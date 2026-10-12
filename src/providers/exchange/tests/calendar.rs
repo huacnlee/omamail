@@ -388,8 +388,8 @@ async fn a_detail_says_who_the_owner_is_and_masks_what_is_private_and_an_answer_
             {"name": "Cy", "email": "cy@example.org", "kind": "required", "response": "unknown", "self": false}],
         "attendeesCut": false, "response": "none", "reminderMinutes": 15,
         "joinUrl": "https://meet.example.org/j/7", "sensitivity": "normal", "meeting": true,
-        "recurring": false, "cancelled": false, "unplacedCancellation": false, "kind": "single", "canRespond": true,
-        "editable": false, "lock": "meeting"});
+        "recurring": false, "cancelled": false, "unplacedCancellation": false, "canRemove": false, "kind": "single",
+        "canRespond": true, "editable": false, "lock": "meeting"});
     assert_eq!(read(1).await.unwrap(), expected);
     let outside = read(0).await.unwrap();
     let said = ["editable", "lock", "canRespond"].map(|key| outside[key].clone());

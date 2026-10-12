@@ -248,10 +248,10 @@ Item {
       compare(detail.canDelete && detail.canWrite, true)
       compare(findChild(detail, "event-lock-reason").visible, false)
       var locked = JSON.parse(JSON.stringify(event))
-      locked.lockReason = "Meeting with other people: change it in Outlook"
+      locked.lockReason = "This meeting can only be changed in Outlook"
       detail = createTemporaryObject(detailComponent, this, { controller: controller, event: locked })
       compare(detail.canDelete || detail.canWrite, false)
-      compare(findChild(detail, "event-lock-reason").text, "Meeting with other people: change it in Outlook")
+      compare(findChild(detail, "event-lock-reason").text, "This meeting can only be changed in Outlook")
       // The owner's file marks it read only: the flag, not a missing reason, is what refuses.
       var marked = { availableSources: { sources: [{ id: sourceId, kind: "exchange", readOnly: true }] }, service: mailService }
       detail = createTemporaryObject(detailComponent, this, { controller: marked, event: event })
@@ -332,7 +332,7 @@ Item {
       deletedSpy.clear()
       var listed = loaded([row({ id: "i1", editable: false, lock: "meeting" })])[0]
       compare(controller.deleteEvent(sourceId, listed), false)
-      compare(deletedSpy.signalArguments[0][1], "Meeting with other people: change it in Outlook")
+      compare(deletedSpy.signalArguments[0][1], "This meeting can only be changed in Outlook")
       compare(mailService.requests.length, 0)
     }
 

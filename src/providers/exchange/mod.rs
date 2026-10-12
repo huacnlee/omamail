@@ -7,7 +7,7 @@
 //!   password in its body and nothing stores it.
 //! - Every method answers within `account::TOTAL` (25 seconds, the wait for the account's turn
 //!   included), inside the window's 30. Reads run on a task that outlives their caller until that
-//!   deadline; mutations and sends take no token and are never cancelled, and a write is never cut
+//!   deadline; mutations, sends and meetings take no token and are never cancelled, and a write is never cut
 //!   once written; a send is never repeated and its failure codes say what is known of it
 //!   (`ews::Client::send`).
 //! - Errors are static codes. Only `exchange_unauthorized` (the login was refused) latches an
@@ -18,7 +18,9 @@ mod calendar;
 mod check;
 mod detail;
 mod ews;
+mod guests;
 mod ids;
+mod meeting;
 mod query;
 mod read;
 mod resource;
@@ -67,6 +69,10 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
         "exchange.calendarUpdate" => Box::pin(calendar::update(params)).await,
         "exchange.calendarDelete" => Box::pin(calendar::delete(params)).await,
         "exchange.calendarRespond" => Box::pin(detail::respond(params)).await,
+        "exchange.meetingCreate" => Box::pin(meeting::create(params)).await,
+        "exchange.meetingUpdate" => Box::pin(meeting::update(params)).await,
+        "exchange.meetingCancel" => Box::pin(meeting::cancel(params)).await,
+        "exchange.meetingRemove" => Box::pin(meeting::remove(params)).await,
         "exchange.sendAs" => {
             let account = account(fields(params, &["accountId"])?)?;
             let address = ids::account(&account)?;

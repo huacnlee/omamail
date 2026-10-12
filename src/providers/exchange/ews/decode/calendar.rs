@@ -54,6 +54,8 @@ pub struct CalendarItem {
     pub recurring: bool,
     /// Attendees in the three lists, which only a read that asked for them can say (0 in a view).
     pub attendees: usize,
+    /// How many of them are in `Resources` (rooms, equipment): a meeting with one is not written here.
+    pub resources: usize,
     /// Private, Confidential or a sensitivity this decoder does not know: not to be shown.
     pub private: bool,
     /// `free`, `tentative`, `busy`, `oof`, `workingElsewhere` or `noData`.
@@ -75,6 +77,10 @@ pub enum Lock {
     /// An invitation from somebody else, answered or not: the item is theirs.
     Foreign,
     Private,
+    /// The owner's meeting has a room or equipment on it, which this client does not write back.
+    Room,
+    /// The owner's meeting has somebody on it whose address was not read, or more people than are.
+    Guests,
     Unknown,
 }
 
@@ -86,6 +92,8 @@ impl Lock {
             Lock::Meeting => "meeting",
             Lock::Foreign => "foreign",
             Lock::Private => "private",
+            Lock::Room => "room",
+            Lock::Guests => "guests",
             Lock::Unknown => "unknown",
         }
     }
@@ -113,6 +121,40 @@ impl CalendarItem {
             return Some(Lock::Foreign);
         }
         self.private.then_some(Lock::Private)
+    }
+
+    /// `None` for a meeting the owner may change and cancel as its organizer: a single item, a
+    /// meeting they sent (`MyResponseType` Organizer) with no room or equipment on it, shown with its
+    /// real title. What a view cannot show (the people, the response objects) is judged again on a
+    /// fresh read before anything is sent (`EventDetail::organised`), so this is the first half of the
+    /// stricter of two.
+    pub fn meeting_lock(&self) -> Option<Lock> {
+        if self.cancelled {
+            return Some(Lock::Cancelled);
+        }
+        match self.kind {
+            "single" if self.recurring => return Some(Lock::Recurring),
+            "single" => {}
+            "occurrence" | "exception" | "master" => return Some(Lock::Recurring),
+            _ => return Some(Lock::Unknown),
+        }
+        // An invitation somebody else sent is theirs: answered, never changed.
+        if !self.meeting || self.response != "organizer" {
+            return Some(Lock::Meeting);
+        }
+        if self.resources > 0 {
+            return Some(Lock::Room);
+        }
+        self.private.then_some(Lock::Private)
+    }
+
+    /// The lock a screen shows: the meeting's rule for a meeting, the appointment's for the rest.
+    pub fn screen_lock(&self) -> Option<Lock> {
+        if self.meeting {
+            self.meeting_lock()
+        } else {
+            self.lock()
+        }
     }
 }
 
@@ -251,17 +293,13 @@ pub(super) fn item(node: &Node) -> Result<Option<CalendarItem>, Rej> {
     };
     let flag = |name: &str| matches!(text(name), Some("true" | "1"));
     let uid = text("UID").unwrap_or("");
-    let attendees = ["RequiredAttendees", "OptionalAttendees", "Resources"]
-        .iter()
-        .filter_map(|list| node.child(list))
-        .map(|list| {
-            list.children
-                .iter()
-                .filter(|a| a.name == "Attendee")
-                .take(MAX_ATTENDEES)
-                .count()
+    let count = |list: &str| {
+        node.child(list).map_or(0, |list| {
+            let listed = list.children.iter().filter(|a| a.name == "Attendee");
+            listed.take(MAX_ATTENDEES).count()
         })
-        .sum();
+    };
+    let resources = count("Resources");
     let reminder = text("ReminderMinutesBeforeStart")
         .and_then(|minutes| minutes.parse::<u32>().ok())
         .filter(|minutes| flag("ReminderIsSet") && *minutes <= MAX_REMINDER_MINUTES);
@@ -283,7 +321,8 @@ pub(super) fn item(node: &Node) -> Result<Option<CalendarItem>, Rej> {
         cancelled: flag("IsCancelled"),
         meeting: flag("IsMeeting"),
         recurring: flag("IsRecurring"),
-        attendees,
+        attendees: count("RequiredAttendees") + count("OptionalAttendees") + resources,
+        resources,
         private: !matches!(text("Sensitivity"), None | Some("Normal" | "Personal")),
         busy: match text("LegacyFreeBusyStatus") {
             Some("Free") => "free",

@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../calendar/Calendar.js" as Calendar
+import "../calendar/ExchangeEvents.js" as ExchangeEvents
 import "../compose/Recipients.js" as Recipients
 
 Rectangle {
@@ -72,6 +73,19 @@ Rectangle {
   // default, which it has not got: the buttons say so and "default" reads as none.
   readonly property bool exchangeReminders: !!chosenSource && chosenSource.kind === "exchange"
   readonly property string shownReminderMode: exchangeReminders && reminderMode === "default" ? "none" : reminderMode
+  // Guests of an Exchange event are mailed an invitation (new) or told of a change (a meeting the owner organises):
+  // saving asks the owner first (`sendConfirm`). Only a new event and a meeting have a guest field.
+  // Whether saving the form as it stands opens the question: the controller's own decision, so a form that
+  // reaches nobody (a reminder alone) or that the write refuses first says so on its button without "...".
+  readonly property bool reachesPeople: exchangeReminders && !!controller && typeof controller.reachRequest === "function"
+    && !!formNow && controller.reachRequest(editing ? editingSourceId : selectedSourceId, editingEvent, formNow) !== null
+  readonly property var formNow: opened ? formFields("all") : null
+  // Whether the form has a guest field: on Exchange a new event or a meeting the owner organises, on Google a
+  // new event or one the owner organises.
+  readonly property bool guestsOffered: exchangeReminders ? (!editing || editingEvent.exchangeMeeting === true)
+    : !editing || (!!editingEvent.organizer && editingEvent.organizer.self === true)
+  // The fields of a save held for the owner's answer.
+  property var pendingFields: null
   readonly property bool guestUpdate: editing && googleWrites
     && !!editingEvent.organizer && editingEvent.organizer.self === true
     && ((Array.isArray(editingEvent.attendees) && editingEvent.attendees.some(function(attendee) { return attendee.self !== true }))
@@ -252,6 +266,7 @@ Rectangle {
     createMeet = false
     originalGuestText = ""
     guestsField.text = ""
+    pendingFields = null
     reminderMode = "default"
     reminderField.text = "10"
     availability = "opaque"
@@ -317,7 +332,10 @@ Rectangle {
     editingEvent = event
     allDay = !!(event.start && event.start.allDay)
     createMeet = false
-    originalGuestText = (event.attendees || []).map(function(attendee) { return String(attendee.email || "") }).filter(function(email) { return email !== "" }).join(", ")
+    // An Exchange meeting's field names everybody but the owner, who cannot name themselves there.
+    originalGuestText = String(event.exchangeId || "") !== "" ? ExchangeEvents.guestText(event)
+      : (event.attendees || []).map(function(attendee) { return String(attendee.email || "") }).filter(function(email) { return email !== "" }).join(", ")
+    pendingFields = null
     guestsField.text = originalGuestText
     reminderMode = "preserve"
     // An Exchange appointment's own reminder is where "Custom" starts from.
@@ -476,8 +494,24 @@ Rectangle {
     // this form pending unless that slot is free: otherwise an older write's
     // completion could be mistaken for this form's and close it.
     if (controller.creatingEvent || controller.eventWriting || loadingSeries || transferring || transferNeedsRefresh) return
-    if (!dateRange.ok) return
-    var fields = {
+    var fields = formFields(sendUpdates)
+    if (!fields) return
+    // What reaches other people is asked about first, in words that name them; nothing is sent before the
+    // answer, and the controller refuses a send that was not asked about (`confirmedSend`).
+    var ask = typeof controller.reachRequest === "function"
+      ? controller.reachRequest(editing ? editingSourceId : selectedSourceId, editingEvent, fields) : null
+    if (ask) {
+      pendingFields = fields
+      sendConfirm.openFor(ask)
+      return
+    }
+    dispatch(fields, false)
+  }
+
+  // What the form holds, as a write takes it; null while its dates do not make a range.
+  function formFields(sendUpdates) {
+    if (!dateRange.ok) return null
+    return {
       title: titleField.text,
       allDay: allDay,
       startMs: dateRange.startMs,
@@ -502,9 +536,27 @@ Rectangle {
         count: countField.text
       }
     }
+  }
+
+  function dispatch(fields, confirmed) {
+    fields.confirmedSend = confirmed === true
+    pendingFields = null
     writePending = true
     if (editing) controller.updateEvent(editingSourceId, editingEvent, fields)
     else controller.createEvent(selectedSourceId, fields)
+  }
+
+  ConfirmDeleteDialog {
+    id: sendConfirm
+    objectName: "event-send-confirm"
+    textColor: root.textColor
+    dimColor: root.dimColor
+    dangerColor: root.accentColor
+    popupBackgroundColor: root.backgroundColor
+    popupBorderColor: Style.normalBorderFor(root.textColor, root.accentColor)
+    panelFontFamily: root.panelFontFamily
+    // The held form is what goes, not anything the question carried back.
+    onConfirmed: function(request) { if (root.pendingFields) root.dispatch(root.pendingFields, true) }
   }
 
   CalendarPalette {
@@ -842,13 +894,15 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
-        visible: root.googleWrites
+        objectName: "event-guests-column"
+        // An Exchange form shows the column only with its guest field: an appointment's has nothing in it.
+        visible: root.googleWrites || root.exchangeReminders && root.guestsOffered
         FieldLabel { text: "Guests"; visible: guestsField.visible }
         EditorField {
           id: guestsField
           objectName: "event-guests-field"
           width: parent.width
-          visible: !root.editing || (!!root.editingEvent.organizer && root.editingEvent.organizer.self === true)
+          visible: root.guestsOffered
           placeholderText: "Guest email addresses, separated by commas"
           foreground: root.textColor
           accent: root.accentColor
@@ -877,6 +931,7 @@ Rectangle {
         }
         IconTextButton {
           objectName: "event-more-options"
+          visible: root.googleWrites
           text: "More options..."
           selected: root.advancedOptionsOpen
           foreground: root.textColor
@@ -887,7 +942,7 @@ Rectangle {
         Column {
           width: parent.width
           spacing: Style.space(6)
-          visible: root.advancedOptionsOpen
+          visible: root.advancedOptionsOpen && root.googleWrites
           FieldLabel { text: "Time zone for repeating events" }
           EditorField {
             id: timeZoneField
@@ -1100,8 +1155,9 @@ Rectangle {
         text: {
           var busy = root.controller
             && (root.controller.creatingEvent || root.controller.eventWriting)
-          if (root.editing) return busy ? "Saving" : root.guestUpdate ? "Send update" : "Save changes"
-          return busy ? "Creating" : "Create event"
+          if (root.editing) return busy ? "Saving" : root.guestUpdate ? "Send update"
+            : root.reachesPeople ? "Save changes..." : "Save changes"
+          return busy ? "Creating" : root.reachesPeople ? "Create event..." : "Create event"
         }
         iconName: root.editing ? "check" : "plus"
         // The Enter action: accent edge and text, not a solid fill.

@@ -43,6 +43,12 @@ Item {
     function exchangeDetail(source, event, callback) {
       pending = pending.concat([{ id: event.exchangeId, callback: callback }])
     }
+    property int updates: 0
+    property var composed: []
+    signal composeRequested(var request)
+    onComposeRequested: function(request) { composed = composed.concat([request]) }
+    function rescheduleRefusal(event) { return String(event.lockReason || "") }
+    function updateEvent(sourceId, event, fields) { updates++; return true }
   }
   Views.CalendarView {
     id: view
@@ -89,6 +95,9 @@ Item {
       fixture.source = { id: "exchange:exchange:alice@example.org", kind: "exchange",
         accountId: "exchange:alice@example.org", readOnly: false }
       fixture.pending = []
+      fixture.composed = []
+      fixture.updates = 0
+      fixture.lastError = ""
       fixture.nativeCalls = []
       fixture.refreshes = 0
       fixture.answeredKey = ""
@@ -205,6 +214,20 @@ Item {
       // Same start, another identity: not the event that was open.
       fixture.events = listed([row("other", "k1", { uid: "u-other" }), row("two", "k1")])
       compare(view.detailOpen, false)
+    }
+    function test_a_dragged_meeting_the_owner_organises_is_never_written_and_opens_the_editor_over_its_people() {
+      var mine = { response: "organizer", editable: true, lock: "" }
+      var drawn = listed([row("m", "k1", mine)])[0]
+      var later = drawn.start.ms + 3600000
+      view.reschedule(drawn, later, drawn.end.ms + 3600000)
+      compare([fixture.updates, fixture.pending.length], [0, 1], "the drag writes nothing; the people are read first")
+      answer(0, ExchangeEvents.withDetail(drawn, detail("m", "k1", { response: "organizer", editable: true, lock: "", canRespond: false })))
+      compare(fixture.composed.length, 1)
+      compare([fixture.composed[0].startMs, fixture.composed[0].editingEvent.attendees.length], [later, 1])
+      // One that changed since it was drawn is not moved from here, and the range is read again.
+      view.reschedule(drawn, later, drawn.end.ms + 3600000)
+      answer(1, ExchangeEvents.withDetail(drawn, detail("m", "k2", { title: "Moved", response: "organizer", editable: true, lock: "" })))
+      compare([fixture.composed.length, fixture.updates, fixture.lastError], [1, 0, Calendar.CONFLICT])
     }
   }
 }

@@ -16,6 +16,7 @@ use crate::credentials::{CredentialKey, CredentialKind, Secret};
 use crate::mail::tests::{AccountFixture, account_fixture, isolated};
 
 mod calendar;
+mod meeting;
 
 const ACCOUNT: &str = "exchange:ada@example.org";
 
@@ -743,6 +744,24 @@ fn every_method() -> Vec<(&'static str, Value)> {
             "calendarRespond",
             json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K", "response": "accept", "send": true}),
         ),
+        check.clone(),
+        (
+            "meetingCreate",
+            json!({"accountId": ACCOUNT, "title": "x", "allDay": false, "startMs": 0, "endMs": 60_000,
+                "requiredAttendees": ["bob@example.org"], "sendInvitations": true}),
+        ),
+        (
+            "meetingUpdate",
+            json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K", "title": "x", "sendUpdates": true}),
+        ),
+        (
+            "meetingCancel",
+            json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K", "sendCancellations": true}),
+        ),
+        (
+            "meetingRemove",
+            json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K"}),
+        ),
     ]
 }
 
@@ -787,7 +806,7 @@ async fn every_method_answers_inside_the_window_when_the_server_stops_answering(
             // Written, and never cut once written: what became of them is not known.
             "send" => Some("exchange_send_failed"),
             "saveDraft" => Some("exchange_draft_unconfirmed"),
-            "calendarCreate" => Some("exchange_calendar_unconfirmed"),
+            "calendarCreate" | "meetingCreate" => Some("exchange_calendar_unconfirmed"),
             // The folder lookup is all a check of a signed-in mailbox asks.
             "verify" => None,
             _ => Some("exchange_timeout"),
@@ -849,6 +868,10 @@ async fn a_mailbox_another_call_holds_makes_no_call_wait_past_its_deadline() {
             "calendarUpdate",
             "calendarDelete",
             "calendarRespond",
+            "meetingCreate",
+            "meetingUpdate",
+            "meetingCancel",
+            "meetingRemove",
         ]
         .contains(&method)
         {

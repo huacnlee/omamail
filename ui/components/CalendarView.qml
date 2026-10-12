@@ -284,11 +284,25 @@ Item {
     if (!controller || !event || !event.start || !event.end) return
     var refusal = controller.rescheduleRefusal(event)
     if (refusal !== "") { controller.lastError = refusal; return }
+    if (event.exchangeMeeting === true) { rescheduleMeeting(event, startMs, endMs); return }
     if ((event.attendees || []).some(function(attendee) { return attendee.self !== true })) {
       controller.composeRequested({ editingEvent: event, startMs: startMs, endMs: endMs })
       return
     }
     controller.updateEvent(event.sourceId, event, Calendar.rescheduleFields(event, startMs, endMs))
+  }
+
+  // A meeting the owner organises is never moved by the drag: it opens the editor, where saving asks first and
+  // names the people it tells. They are read before it opens (the list holds none), and one found changed or
+  // locked since it was drawn is not moved from here.
+  function rescheduleMeeting(event, startMs, endMs) {
+    controller.exchangeDetail(controller.findSource(event.sourceId), event, function(merged, error) {
+      if (error) { controller.lastError = error; return }
+      if (merged.stale === true) { controller.lastError = Calendar.CONFLICT; root.refresh(); return }
+      var refused = controller.rescheduleRefusal(merged)
+      if (refused !== "") { controller.lastError = refused; return }
+      controller.composeRequested({ editingEvent: merged, startMs: startMs, endMs: endMs })
+    })
   }
 
   function activateSelection() {

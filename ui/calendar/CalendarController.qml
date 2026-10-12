@@ -355,6 +355,18 @@ Item {
       var wanted = ExchangeEvents.reminderChoice(fields, false)
       if (!wanted.ok) { eventCreated(false, wanted.error); return false }
       built.reminderMinutes = wanted.minutes
+      // A repeating event is made in Outlook: refused before anybody is asked about guests.
+      if (built.recurring) { eventCreated(false, "A repeating event on an Exchange calendar is made in Outlook"); return false }
+      // Guests are mailed an invitation they have not asked for: not before the owner has been told who and
+      // said so (`reachRequest` asks; `confirmedSend` is the composer saying it was answered). A list that is
+      // not one is said first, in its own words.
+      var invited = ExchangeEvents.guestList(fields.guestEmails === undefined ? "" : fields.guestEmails, source.accountId)
+      if (!invited.ok) { eventCreated(false, invited.error); return false }
+      if (invited.emails.length > 0 && fields.confirmedSend !== true) {
+        eventCreated(false, ExchangeEvents.UNCONFIRMED_SEND)
+        return false
+      }
+      built.guests = invited.emails
     }
     if (source.kind === "google") {
       var refusedOptions = googleOptionsRefusal(fields)
@@ -434,6 +446,19 @@ Item {
       var changed = ExchangeEvents.reminderChoice(fields, true)
       if (!changed.ok) { eventUpdated(false, changed.error); return false }
       built.reminderMinutes = changed.minutes
+      // A meeting the owner organises is changed with its people told, which is asked first, and the people
+      // must be known, because the question names them; a list that is not one, or is nobody, is said before
+      // that. A change of the owner's reminder alone tells nobody and asks nothing. An appointment stays one,
+      // whatever the form says.
+      if (event.exchangeMeeting === true) {
+        if (ExchangeEvents.peopleOf(event).length === 0) { eventUpdated(false, ExchangeEvents.PEOPLE_UNKNOWN); return false }
+        var typed = fields.guestEmails === undefined ? null : ExchangeEvents.guestList(fields.guestEmails, source.accountId)
+        if (typed && !typed.ok) { eventUpdated(false, typed.error); return false }
+        if (typed && typed.emails.length === 0) { eventUpdated(false, ExchangeEvents.NO_GUESTS); return false }
+        built.guests = typed ? ExchangeEvents.changedGuests(event, typed.emails) : null
+        var mails = ExchangeEvents.meetingMails(ExchangeEvents.meetingUpdateParams(source.accountId, event, built, built.guests))
+        if (mails && fields.confirmedSend !== true) { eventUpdated(false, ExchangeEvents.UNCONFIRMED_SEND); return false }
+      }
     }
     var destination = fields.destinationSourceId && fields.destinationSourceId !== sourceId
       ? findSource(fields.destinationSourceId) : null
@@ -467,7 +492,15 @@ Item {
     return true
   }
 
-  // What the delete confirmation asks: named, with a button per consequence.
+  // What saving a form would tell other people, as the question the owner answers first; null when it tells
+  // nobody, and the composer saves at once.
+  function reachRequest(sourceId, event, fields) {
+    var source = findSource(String(sourceId || ""))
+    return source && source.kind === "exchange" ? ExchangeEvents.reachRequest(source.accountId, event, fields) : null
+  }
+
+  // What the delete confirmation asks: named, with a button per consequence. A meeting, an invitation and a
+  // meeting its organizer cancelled have their own words (what is sent, and to whom).
   function deleteRequest(sourceId, event) {
     var source = findSource(String(sourceId || ""))
     var request = source && source.kind === "exchange" && ExchangeEvents.deleteRequest(event)
@@ -484,6 +517,8 @@ Item {
     var event = {}
     for (var key in request.event) event[key] = request.event[key]
     event.deleteSendUpdates = request.choice === "none" ? "none" : "all"
+    // The question was answered: what is sent to people (a meeting cancelled) goes only from here.
+    event.confirmedSend = true
     return deleteEvent(request.sourceId, event)
   }
 
@@ -511,11 +546,15 @@ Item {
       return false
     }
     var source = findSource(sourceId)
-    // An Exchange event says for itself what deleting it is: an appointment, or an invitation declined.
+    // An Exchange event says for itself what deleting it is: an appointment, a meeting the owner cancels, an
+    // invitation declined, or a meeting its organizer cancelled taken off the calendar.
     var refusal = source && source.kind === "exchange" ? ExchangeEvents.deleteRefusal(source, event)
       : Calendar.writeRefusal(source, event, "delete")
     if (refusal === "" && responding && source.kind === "exchange" && ExchangeEvents.deleteKind(event) === "decline")
       refusal = "Another answer is still being sent"
+    // Cancelling a meeting tells everybody on it, so only the answered question cancels one.
+    if (refusal === "" && source.kind === "exchange" && ExchangeEvents.deleteKind(event) === "cancel"
+        && event.confirmedSend !== true) refusal = ExchangeEvents.UNCONFIRMED_SEND
     if (refusal !== "") { eventDeleted(false, refusal); return false }
     writeOp = "delete"
     writeSource = source
@@ -628,18 +667,29 @@ Item {
     return true
   }
 
+  // With guests it is a meeting, which the backend sends only for `sendInvitations`, and so does this.
   function createExchangeEvent() {
-    exchangeRequest("exchange.calendarCreate", ExchangeEvents.createParams(eventSource.accountId, eventDraft),
-      function(result, error) { root.finishEvent(!error, error) })
+    var guests = eventDraft.guests
+    var meeting = !!guests && guests.length > 0
+    exchangeRequest(meeting ? "exchange.meetingCreate" : "exchange.calendarCreate",
+      meeting ? ExchangeEvents.meetingCreateParams(eventSource.accountId, eventDraft, guests)
+        : ExchangeEvents.createParams(eventSource.accountId, eventDraft),
+      function(result, error) { root.finishEvent(!error, error) }, meeting ? ExchangeEvents.meetingError : undefined)
   }
 
-  // A delete of an invitation is its decline, which also takes it off the calendar.
+  // One method for each thing a write can be, and the words its failure is told in: an appointment's own calls,
+  // a meeting's change and its cancellation, an invitation's decline (which also takes it off the calendar) and
+  // the removal of a meeting its organizer cancelled or the owner declined.
   function startExchangeWrite() {
     var account = writeSource.accountId
     var event = writeEvent
-    var call = writeOp !== "delete" ? ["exchange.calendarUpdate", ExchangeEvents.updateParams(account, event, writeDraft)]
-      : ExchangeEvents.deleteKind(event) === "decline"
-        ? ["exchange.calendarRespond", ExchangeEvents.declineParams(account, event), ExchangeEvents.respondError]
+    var kind = writeOp === "delete" ? ExchangeEvents.deleteKind(event) : ""
+    var call = writeOp !== "delete" ? (event.exchangeMeeting === true
+        ? ["exchange.meetingUpdate", ExchangeEvents.meetingUpdateParams(account, event, writeDraft, writeDraft.guests), ExchangeEvents.meetingError]
+        : ["exchange.calendarUpdate", ExchangeEvents.updateParams(account, event, writeDraft)])
+      : kind === "cancel" ? ["exchange.meetingCancel", ExchangeEvents.cancelParams(account, event), ExchangeEvents.meetingError]
+      : kind === "decline" ? ["exchange.calendarRespond", ExchangeEvents.declineParams(account, event), ExchangeEvents.respondError]
+      : kind === "remove" ? ["exchange.meetingRemove", ExchangeEvents.removeParams(account, event), ExchangeEvents.meetingError]
       : ["exchange.calendarDelete", ExchangeEvents.deleteParams(account, event)]
     exchangeRequest(call[0], call[1], function(result, error) { root.finishWrite(!error, error) }, call[2])
   }

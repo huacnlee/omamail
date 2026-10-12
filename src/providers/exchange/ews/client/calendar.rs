@@ -105,7 +105,7 @@ pub(super) fn failure((code, applied): Failed) -> &'static str {
 
 /// What differs between the item as the server holds it and the change asked for. Days are compared
 /// with nothing (the read asks for no wall clock), so a day that was named is written.
-fn changes<'a>(current: &CalendarItem, wanted: &'a Edit) -> Change<'a> {
+pub(super) fn changes<'a>(current: &CalendarItem, wanted: &'a Edit) -> Change<'a> {
     let same_time = match wanted.when {
         Some(When::Timed { start_ms, end_ms }) => {
             !current.all_day
@@ -128,6 +128,7 @@ fn changes<'a>(current: &CalendarItem, wanted: &'a Edit) -> Change<'a> {
         location: location.filter(|location| *location != current.location),
         reminder,
         when: if same_time { None } else { wanted.when },
+        ..Change::default()
     }
 }
 
@@ -223,6 +224,7 @@ impl Client {
             location: wanted.location.as_deref(),
             reminder: wanted.reminder,
             when: wanted.when,
+            ..Change::default()
         };
         // Judged before the connection is touched: what was named, as it would go at the most.
         if !soap::is_change_key(change_key) {

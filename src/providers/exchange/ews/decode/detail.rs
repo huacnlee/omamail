@@ -16,8 +16,9 @@
 //! - What may be shown and answered is decided elsewhere: the provider masks a private item, and
 //!   `EventDetail::invitation` says whether the owner may answer, every signal agreeing.
 
-use super::calendar::CalendarItem;
+use super::super::soap::calendar::is_change_key;
 use super::calendar::{self, MAX_ELEMENTS, MAX_NAME_BYTES, MAX_UID_BYTES, cap, instant};
+use super::calendar::{CalendarItem, Lock};
 use super::{Party, Rej, check, each, first_item, id_attr, messages, party};
 use crate::providers::exchange::ews::xml::Node;
 
@@ -62,6 +63,8 @@ pub struct EventDetail {
     pub state: Option<u32>,
     /// Whether the response objects listed for the item include `AcceptItem`; `None` when none were.
     pub can_accept: Option<bool>,
+    /// Whether they include `CancelCalendarItem`, which Microsoft says only the organizer sees.
+    pub can_cancel: Option<bool>,
     /// Where an event of a series sits: its `RecurrenceId`, else its `OriginalStart` (both asked for
     /// with the Exchange 2013 properties); `None` when the server did not say.
     pub position: Option<i64>,
@@ -113,11 +116,73 @@ impl EventDetail {
             && self.cancellation == Cancelled::No
             && self.can_accept != Some(false)
     }
+
+    /// Why the owner may not change or cancel this meeting as its organizer from here, `None` when
+    /// they may; decided again on a fresh read before anybody is told. `CalendarItem::meeting_lock`
+    /// first (a single meeting the owner sent, no room, not private or cancelled), then the read itself
+    /// (in the default calendar, with the Exchange 2013 properties), then the people: every one of them
+    /// read with an address, since a change or a cancellation mails them all and the question names
+    /// them (`Guests`), and somebody on it besides `owner`, the mailbox's own address. Last
+    /// `IsOrganizer` not false, `AppointmentState` without the received bit and `CancelCalendarItem`
+    /// among the response objects when they are listed. Every signal must agree and one that says
+    /// otherwise vetoes, as for an invitation.
+    pub fn organiser_lock(&self, owner: &str) -> Option<Lock> {
+        if let Some(lock) = self.item.meeting_lock() {
+            return Some(lock);
+        }
+        if self.elsewhere || self.reduced {
+            return Some(Lock::Unknown);
+        }
+        let people = &self.attendees;
+        if self.attendees_cut || people.iter().any(|who| who.who.address.is_empty()) {
+            return Some(Lock::Guests);
+        }
+        let others = people
+            .iter()
+            .any(|who| !who.who.address.eq_ignore_ascii_case(owner));
+        let sent = self.is_organizer != Some(false)
+            && self.state.is_none_or(|bits| bits & RECEIVED == 0)
+            && self.can_cancel != Some(false);
+        (!(others && sent)).then_some(Lock::Meeting)
+    }
+
+    /// Whether the owner organises this meeting and may change or cancel it: `organiser_lock` clear.
+    pub fn organised(&self, owner: &str) -> bool {
+        self.organiser_lock(owner).is_none()
+    }
+
+    /// What taking this received single meeting off the calendar is, `None` when it may not be:
+    /// `cancelled` (the server's flag, or a cancellation in the Inbox that is certainly this meeting's)
+    /// or `declined` (the owner answered No). An invitation nobody cancelled or declined is answered first: deleting it would
+    /// leave its organizer waiting. A meeting the server flags cancelled may have lost the owner's
+    /// answer, so for that flag any answer but the organizer's own will do, the received signals still
+    /// agreeing.
+    pub fn removal(&self) -> Option<&'static str> {
+        let item = &self.item;
+        let flagged = item.cancelled
+            && item.meeting
+            && !item.private
+            && item.response != "organizer"
+            && self.is_organizer != Some(true)
+            && self.state.is_none_or(|bits| bits & RECEIVED != 0);
+        let single = item.kind == "single" && !item.recurring;
+        if self.elsewhere || self.reduced || !single || !(self.incoming() || flagged) {
+            return None;
+        }
+        if item.cancelled || self.cancellation == Cancelled::Yes {
+            Some("cancelled")
+        } else {
+            (item.response == "decline").then_some("declined")
+        }
+    }
 }
 
 /// A `MeetingCancellation` message in the Inbox: the organizer's cancellation of a meeting.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Cancellation {
+    /// The message's own `ItemId`, which a `RemoveItem` names; its change key is empty when unusable.
+    pub id: String,
+    pub change_key: String,
     /// The `UID` of the meeting it cancels, empty when the server gave none.
     pub uid: String,
     /// `RecurrenceId`: the one event of a series it cancels; `None` for the whole series, and for a
@@ -170,6 +235,8 @@ pub fn detail(body: &Node) -> Result<Option<EventDetail>, Rej> {
             node if node.name == "CalendarItem" => Ok(calendar::item(node)?.map(|item| {
                 let (notes, notes_cut) = notes(node);
                 let (attendees, attendees_cut) = people(node);
+                let objects = node.child("ResponseObjects");
+                let offered = |name| objects.map(|listed| listed.child(name).is_some());
                 let flag = |name: &str| match node.text_at(&[name]) {
                     Some("true" | "1") => Some(true),
                     Some("false" | "0") => Some(false),
@@ -190,9 +257,8 @@ pub fn detail(body: &Node) -> Result<Option<EventDetail>, Rej> {
                     state: node
                         .text_at(&["AppointmentState"])
                         .and_then(|bits| bits.parse().ok()),
-                    can_accept: node
-                        .child("ResponseObjects")
-                        .map(|objects| objects.child("AcceptItem").is_some()),
+                    can_accept: offered("AcceptItem"),
+                    can_cancel: offered("CancelCalendarItem"),
                     position: instant(node.text_at(&["RecurrenceId"]))
                         .or_else(|| instant(node.text_at(&["OriginalStart"]))),
                     cancellation: Cancelled::No,
@@ -220,18 +286,23 @@ pub fn cancellations(body: &Node) -> Result<Vec<Cancellation>, Rej> {
         return Err(Rej::INVALID);
     }
     let found = elements.iter().filter(|e| e.name == "MeetingCancellation");
-    Ok(found
+    found
         .map(|element| {
             let uid = element.text_at(&["UID"]).unwrap_or("");
-            Cancellation {
+            let id = element.child("ItemId");
+            Ok(Cancellation {
+                id: id_attr(id, "Id").ok_or(Rej::INVALID)?,
+                change_key: id_attr(id, "ChangeKey")
+                    .filter(|key| is_change_key(key))
+                    .unwrap_or_default(),
                 uid: if uid.len() > MAX_UID_BYTES { "" } else { uid }.to_owned(),
                 occurrence: instant(element.text_at(&["RecurrenceId"])),
                 associated: id_attr(element.child("AssociatedCalendarItemId"), "Id")
                     .unwrap_or_default(),
                 out_of_date: matches!(element.text_at(&["IsOutOfDate"]), Some("true" | "1")),
-            }
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// A mailbox with its name cut and an address over its bound dropped; `None` when neither is left.

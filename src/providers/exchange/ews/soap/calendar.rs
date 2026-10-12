@@ -40,10 +40,37 @@
 //!   `SendMeetingInvitations`. The caller has decided on a fresh read that the owner may answer.
 //! - The Inbox's meeting cancellations are found by `item:ItemClass`, the class Microsoft gives one
 //!   (`IPM.Schedule.Meeting.Canceled`), newest first.
+//!
+//! **Meetings with other people** (CreateItem for a calendar item, UpdateItem, RequiredAttendees,
+//! Attendee, DeleteItemField, CancelCalendarItem, RemoveItem and MeetingCancellation pages, "Update
+//! appointments and meetings" and "Delete appointments and cancel meetings") are the only requests that
+//! mail a person who did not ask, so each says whom it mails in the one attribute the schema has for it,
+//! and nothing else here can:
+//!
+//! - `create_meeting`: `SendMeetingInvitations="SendToAllAndSaveCopy"` with the people as
+//!   `RequiredAttendees` and `OptionalAttendees` after the place, where the schema keeps them. Nobody
+//!   to mail is refused: that is an appointment, which says `SendToNone`.
+//! - `update_meeting`: `SendMeetingInvitationsOrCancellations="SendToAllAndSaveCopy"` and
+//!   `NeverOverwrite`, a list changed only whole (`SetItemField`) or emptied (`DeleteItemField`): the
+//!   server sends anybody taken off a list a cancellation. Both lists emptied is refused. A change of
+//!   the owner's own reminder alone goes with `SendToNone`.
+//!
+//! Every builder checks the people's addresses, count and duplicates (`guests::check`); the mailbox's
+//! own address is refused by the handler and the client, which know it.
+//! - `cancel_meeting`: `CreateItem MessageDisposition="SendAndSaveCopy"` of a `CancelCalendarItem`
+//!   naming the meeting and its version, with the organizer's optional note as `NewBodyContent`, never a
+//!   bare `DeleteItem` that would not say so to every attendee.
+//! - `remove_cancellation`: `CreateItem MessageDisposition="SaveOnly"` of a `RemoveItem` naming a
+//!   `MeetingCancellation` message ("valid only for a MeetingCancellation"): it has no recipient and
+//!   is saved, not sent, so the meeting leaves the calendar and nobody is mailed.
+//!
+//! The appointment builders share the item's shape with these (`create_item`, `update_item`), keep
+//! `SendToNone`, and refuse a change that names people: that would be a meeting.
 
 use chrono::{DateTime, Datelike, NaiveDate, SecondsFormat};
 
 use super::{envelope, envelope_in, esc, field};
+use crate::providers::exchange::guests::{self, Guests};
 
 const INVALID: &str = "invalid_params";
 const CALENDAR: &str = r#"<t:DistinguishedFolderId Id="calendar"/>"#;
@@ -61,6 +88,8 @@ const MAX_SPAN_DAYS: i64 = 366;
 const MAX_CHANGE_KEY: usize = 200;
 /// Four weeks, the longest reminder Outlook sets.
 pub const MAX_REMINDER_MINUTES: u32 = 40_320;
+/// What a cancellation says besides that it is one: a note, not a document.
+pub const MAX_CANCEL_NOTE_BYTES: usize = 2000;
 
 /// What a view asks for: the properties its fast path lists, and no body, preview or attendee.
 const VIEW: &str = "item:Subject item:Sensitivity calendar:Start calendar:End \
@@ -123,13 +152,28 @@ pub enum Reminder {
 
 /// What an update sets: each member `None` (or `Keep`) when it stays as it is. Notes are never part
 /// of one: what the detail shows is text made from a body that may be HTML and may be cut, so a
-/// rewrite would replace what was written with what was shown.
+/// rewrite would replace what was written with what was shown. `required` and `optional` are, for a
+/// meeting, the whole of a list as it is to be (an empty one takes everybody off it).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Change<'a> {
     pub title: Option<&'a str>,
     pub location: Option<&'a str>,
     pub reminder: Reminder,
     pub when: Option<When>,
+    pub required: Option<&'a [String]>,
+    pub optional: Option<&'a [String]>,
+}
+
+impl Change<'_> {
+    /// Whether this changes the owner's own reminder and nothing else, which tells nobody.
+    pub fn reminder_only(&self) -> bool {
+        self.reminder != Reminder::Keep
+            && *self
+                == Change {
+                    reminder: self.reminder,
+                    ..Change::default()
+                }
+    }
 }
 
 /// The owner's answer to an invitation.
@@ -360,6 +404,50 @@ fn check_reminder(minutes: u32) -> Result<(), &'static str> {
 /// are any. `zone` is the Windows id
 /// a day is made in. The children are in the order the schema keeps them.
 pub fn create_appointment(item: &Appointment, zone: &str) -> Result<String, &'static str> {
+    create_item(item, None, zone, "SendToNone")
+}
+
+/// `CreateItem` of a meeting: an appointment with `guests` on it, who are mailed their invitations
+/// with a copy kept. At least one person, or it is an appointment and refused.
+pub fn create_meeting(
+    item: &Appointment,
+    guests: &Guests,
+    zone: &str,
+) -> Result<String, &'static str> {
+    if guests.len() == 0 {
+        return Err(INVALID);
+    }
+    create_item(item, Some(guests), zone, "SendToAllAndSaveCopy")
+}
+
+/// One attendee list of a `CalendarItem`, nothing for an empty one.
+fn attendees(list: &str, who: &[String]) -> String {
+    if who.is_empty() {
+        return String::new();
+    }
+    let people: String = who
+        .iter()
+        .map(|address| {
+            format!(
+                "<t:Attendee><t:Mailbox><t:EmailAddress>{}</t:EmailAddress></t:Mailbox></t:Attendee>",
+                esc(address)
+            )
+        })
+        .collect();
+    format!("<t:{list}>{people}</t:{list}>")
+}
+
+/// The one `CreateItem` of a calendar item: `invitations` is what the caller's own function says about
+/// mailing the people on it, and `guests` who they are (none for an appointment).
+fn create_item(
+    item: &Appointment,
+    guests: Option<&Guests>,
+    zone: &str,
+    invitations: &str,
+) -> Result<String, &'static str> {
+    if let Some(guests) = guests {
+        guests::check(&guests.required, &guests.optional, "")?;
+    }
     check_text(&item.title, MAX_TITLE_BYTES, false, true)?;
     check_text(&item.location, MAX_LOCATION_BYTES, false, false)?;
     if let Some(notes) = &item.notes {
@@ -384,15 +472,20 @@ pub fn create_appointment(item: &Appointment, zone: &str) -> Result<String, &'st
             format!("<t:ReminderIsSet>true</t:ReminderIsSet><t:ReminderMinutesBeforeStart>{minutes}</t:ReminderMinutesBeforeStart>")
         },
     );
+    let people = guests.map_or_else(String::new, |guests| {
+        attendees("RequiredAttendees", &guests.required)
+            + &attendees("OptionalAttendees", &guests.optional)
+    });
     Ok(envelope_in(
         zone_for(&item.when, zone)?,
         &format!(
             concat!(
-                r#"<m:CreateItem SendMeetingInvitations="SendToNone"><m:SavedItemFolderId>{}</m:SavedItemFolderId>"#,
+                r#"<m:CreateItem SendMeetingInvitations="{}"><m:SavedItemFolderId>{}</m:SavedItemFolderId>"#,
                 "<m:Items><t:CalendarItem><t:Subject>{}</t:Subject>{}{}",
                 "<t:Start>{}</t:Start><t:End>{}</t:End><t:IsAllDayEvent>{}</t:IsAllDayEvent>",
-                "<t:LegacyFreeBusyStatus>{}</t:LegacyFreeBusyStatus>{}</t:CalendarItem></m:Items></m:CreateItem>"
+                "<t:LegacyFreeBusyStatus>{}</t:LegacyFreeBusyStatus>{}{}</t:CalendarItem></m:Items></m:CreateItem>"
             ),
+            invitations,
             CALENDAR,
             text(&item.title),
             body,
@@ -401,7 +494,8 @@ pub fn create_appointment(item: &Appointment, zone: &str) -> Result<String, &'st
             end,
             all_day,
             if all_day { "Free" } else { "Busy" },
-            location
+            location,
+            people
         ),
     ))
 }
@@ -417,16 +511,70 @@ fn set(uri: &str, value: &str) -> String {
 /// `UpdateItem` of one appointment (EWS id and the change key it was drawn at), setting what
 /// `change` names and nothing else, with `NeverOverwrite` and no mail. A new time sets
 /// `IsAllDayEvent` first, then for a day the owner's zone, and then the start and end. An empty
-/// change is refused: there is nothing to send.
+/// change is refused: there is nothing to send. So is one that names people: an appointment has
+/// none, and a request that gave it some would be a meeting.
 pub fn update_appointment(
     id: &str,
     key: &str,
     change: &Change,
     zone: &str,
 ) -> Result<String, &'static str> {
+    if change.required.is_some() || change.optional.is_some() {
+        return Err(INVALID);
+    }
+    update_item(id, key, change, zone, "SendToNone")
+}
+
+/// `UpdateItem` of a meeting the caller organises, the update sent to everybody on it (and a
+/// cancellation to anybody a list no longer names). A reminder is the owner's own, so a change of it
+/// alone goes with `SendToNone`, as Outlook sends nothing for one. Changing nothing, or leaving nobody
+/// on it (both lists named and both empty), is refused.
+pub fn update_meeting(
+    id: &str,
+    key: &str,
+    change: &Change,
+    zone: &str,
+) -> Result<String, &'static str> {
+    if change.required.is_some_and(<[String]>::is_empty)
+        && change.optional.is_some_and(<[String]>::is_empty)
+    {
+        return Err(INVALID);
+    }
+    let sending = match change.reminder_only() {
+        true => "SendToNone",
+        false => "SendToAllAndSaveCopy",
+    };
+    update_item(id, key, change, zone, sending)
+}
+
+/// One `SetItemField` of an attendee list, or the `DeleteItemField` that empties it.
+fn set_attendees(list: &str, who: &[String]) -> String {
+    let uri = format!("calendar:{list}");
+    if who.is_empty() {
+        format!("<t:DeleteItemField>{}</t:DeleteItemField>", field(&uri))
+    } else {
+        set(&uri, &attendees(list, who))
+    }
+}
+
+/// The one `UpdateItem` of a calendar item: `sending` is what the caller's own function says about
+/// telling the people on it.
+fn update_item(
+    id: &str,
+    key: &str,
+    change: &Change,
+    zone: &str,
+    sending: &str,
+) -> Result<String, &'static str> {
     if !is_change_key(key) || *change == Change::default() {
         return Err(INVALID);
     }
+    let (required, optional) = (change.required, change.optional);
+    guests::check(
+        required.unwrap_or_default(),
+        optional.unwrap_or_default(),
+        "",
+    )?;
     let mut updates = String::new();
     if let Some(title) = change.title {
         check_text(title, MAX_TITLE_BYTES, false, true)?;
@@ -471,18 +619,61 @@ pub fn update_appointment(
         updates += &set("calendar:Start", &format!("<t:Start>{start}</t:Start>"));
         updates += &set("calendar:End", &format!("<t:End>{end}</t:End>"));
     }
+    if let Some(who) = required {
+        updates += &set_attendees("RequiredAttendees", who);
+    }
+    if let Some(who) = optional {
+        updates += &set_attendees("OptionalAttendees", who);
+    }
     Ok(envelope_in(
         named,
         &format!(
             concat!(
-                r#"<m:UpdateItem MessageDisposition="SaveOnly" ConflictResolution="NeverOverwrite" SendMeetingInvitationsOrCancellations="SendToNone">"#,
+                r#"<m:UpdateItem MessageDisposition="SaveOnly" ConflictResolution="NeverOverwrite" SendMeetingInvitationsOrCancellations="{}">"#,
                 r#"<m:ItemChanges><t:ItemChange><t:ItemId Id="{}" ChangeKey="{}"/><t:Updates>{}</t:Updates></t:ItemChange></m:ItemChanges></m:UpdateItem>"#
             ),
+            sending,
             esc(id),
             esc(key),
             updates
         ),
     ))
+}
+
+/// `CreateItem` of a `CancelCalendarItem` for the meeting `id` names at version `key`, sent to
+/// everybody on it with a copy kept; `note` is the organizer's own words, if any.
+pub fn cancel_meeting(id: &str, key: &str, note: Option<&str>) -> Result<String, &'static str> {
+    if !is_change_key(key) {
+        return Err(INVALID);
+    }
+    let note = match note {
+        Some(note) => {
+            check_text(note, MAX_CANCEL_NOTE_BYTES, true, true)?;
+            format!(
+                r#"<t:NewBodyContent BodyType="Text">{}</t:NewBodyContent>"#,
+                text(note)
+            )
+        }
+        None => String::new(),
+    };
+    Ok(envelope(&format!(
+        r#"<m:CreateItem MessageDisposition="SendAndSaveCopy"><m:Items><t:CancelCalendarItem><t:ReferenceItemId Id="{}" ChangeKey="{}"/>{note}</t:CancelCalendarItem></m:Items></m:CreateItem>"#,
+        esc(id),
+        esc(key)
+    )))
+}
+
+/// `CreateItem` of a `RemoveItem` for the `MeetingCancellation` message `id` names at version `key`:
+/// the meeting it cancels leaves the calendar and nobody is mailed.
+pub fn remove_cancellation(id: &str, key: &str) -> Result<String, &'static str> {
+    if !is_change_key(key) {
+        return Err(INVALID);
+    }
+    Ok(envelope(&format!(
+        r#"<m:CreateItem MessageDisposition="SaveOnly"><m:Items><t:RemoveItem><t:ReferenceItemId Id="{}" ChangeKey="{}"/></t:RemoveItem></m:Items></m:CreateItem>"#,
+        esc(id),
+        esc(key)
+    )))
 }
 
 /// `DeleteItem` of one appointment into Deleted Items, cancellations to none, naming its version
