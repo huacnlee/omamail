@@ -5,11 +5,18 @@ import "../../compose/Spelling.js" as Spelling
 
 // The real composer attaches the optional spelling adapter to its body
 // document, does not change the draft while checking, and unloads cleanly when
-// disabled. Underlines are proven by the adapter contract test and the Sonnet
-// probe; here the point is the wiring, not the highlighter.
+// disabled. These tests also exercise the visible, bounded underline passes.
 Item {
   width: 900
   height: 600
+  property bool watchUnderlines: false
+  property int minimumUnderlines: 0
+  Connections {
+    target: compose
+    function onSpellingDelegateCountChanged() {
+      if (watchUnderlines) minimumUnderlines = Math.min(minimumUnderlines, compose.spellingDelegateCount)
+    }
+  }
 
   QtObject {
     id: mailService
@@ -78,6 +85,7 @@ Item {
     }
 
     function init() {
+      watchUnderlines = false
       compose.begin("new", null, "", [])
       // Reset the layout and the requested language: an earlier case may have
       // narrowed the composer or pointed at a dictionary that is not here.
@@ -118,6 +126,56 @@ Item {
       }, 5000)
       verify(compose.spellingDelegateCount <= Spelling.MAX_UNDERLINE_RANGES)
       verify(compose.spellingRanges[0].start > 90000)
+    }
+
+    function test_typing_keeps_underlines_before_the_caret_until_replaced() {
+      if (!readyAdapter()) return
+      var body = named(compose, "compose-body-editor")
+      body.text = "mispelled here wrod here "
+      compose.refreshSpellingRanges()
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      compare(compose.spellingRanges.length, 2)
+      minimumUnderlines = compose.spellingDelegateCount
+      watchUnderlines = true
+      body.cursorPosition = body.text.indexOf("wrod") + 2
+      body.forceActiveFocus()
+      keyClick(Qt.Key_X, Qt.NoModifier, 0)
+      compare(compose.spellingRanges.length, 1, "only the unchanged prefix is retained")
+      compare(compose.spellingRanges[0].start, 0)
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      verify(minimumUnderlines > 0, "underlines never disappear during typing or publication")
+      compare(compose.spellingRanges[0].start, 0)
+    }
+
+    function test_scrolling_keeps_underlines_until_the_next_pass() {
+      if (!readyAdapter()) return
+      var body = named(compose, "compose-body-editor")
+      var flick = named(compose, "compose-body")
+      body.text = "mispelled here wrod here \n".repeat(100)
+      compose.refreshSpellingRanges()
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      var underline = named(compose, "spelling-underline")
+      var contentY = underline.y
+      minimumUnderlines = compose.spellingDelegateCount
+      watchUnderlines = true
+      flick.contentY += 20
+      compare(underline.y, contentY, "segments stay in content coordinates")
+      verify(compose.spellingDelegateCount > 0, "the scroll step keeps the existing model")
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      verify(minimumUnderlines > 0, "scrolling and publication never empty the model")
+    }
+
+    function test_removing_a_word_drops_its_underline() {
+      if (!readyAdapter()) return
+      var body = named(compose, "compose-body-editor")
+      body.text = "mispelled here wrod here "
+      compose.refreshSpellingRanges()
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      compare(compose.spellingRanges.length, 2)
+      body.remove(15, 20)
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      compare(compose.spellingRanges, [{ start: 0, end: 9 }])
+      compare(compose.spellingDelegateCount, 1)
     }
 
     function test_revision_change_abandons_an_incomplete_pass_before_it_can_paint() {

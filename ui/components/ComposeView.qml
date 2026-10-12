@@ -88,8 +88,24 @@ DropArea {
     spellingGeneration += 1
     spellingPass = null
     spellingSlice.stop()
-    spellingSegments.clear()
-    spellingRanges = []
+  }
+
+  // Keep only unchanged prefixes; native string comparisons avoid a body scan.
+  // Include the delimiter so typing at a word's end drops that word too.
+  function retainSpellingBeforeEdit(text, previous) {
+    var low = 0
+    var high = spellingRanges.length
+    while (low < high) {
+      var mid = Math.floor((low + high) / 2)
+      var end = spellingRanges[mid].end + 1
+      if (text.substring(0, end) === previous.substring(0, end)) low = mid + 1
+      else high = mid
+    }
+    spellingRanges = spellingRanges.slice(0, low)
+    var keptEnd = low > 0 ? spellingRanges[low - 1].end : 0
+    while (spellingSegments.count > 0
+        && spellingSegments.get(spellingSegments.count - 1).wordEnd > keptEnd)
+      spellingSegments.remove(spellingSegments.count - 1)
   }
 
   function scheduleSpellingLayout() {
@@ -100,7 +116,11 @@ DropArea {
   function refreshSpellingRanges() {
     cancelSpellingPass()
     var adapter = spellingAdapter
-    if (!adapter || !spellingAvailable || !spellingEnabled || bodyFlick.height <= 0) return
+    if (!adapter || !spellingAvailable || !spellingEnabled || bodyFlick.height <= 0) {
+      spellingSegments.clear()
+      spellingRanges = []
+      return
+    }
     var text = bodyEdit.text
     var top = Math.max(0, bodyFlick.contentY)
     var bottom = top + bodyFlick.height
@@ -113,6 +133,7 @@ DropArea {
     spellingWindow = Spelling.wordWindow(text, start, end)
     spellingPass = Spelling.createPass(text, spellingWindow, visibleStart, visibleEnd, bodyRevision)
     spellingPass.generation = spellingGeneration
+    spellingPass.segments = []
     spellingSlice.restart()
   }
 
@@ -128,21 +149,26 @@ DropArea {
         var segments = Spelling.underlineSegments(range.start, range.end,
           function(position) { return bodyEdit.positionToRectangle(position) },
           bodyEdit.leftPadding, bodyEdit.width - bodyEdit.rightPadding)
-        var before = spellingSegments.count
-        for (var i = 0; i < segments.length && spellingSegments.count < Spelling.MAX_UNDERLINE_RANGES; i++) {
+        var before = pass.segments.length
+        for (var i = 0; i < segments.length && pass.segments.length < Spelling.MAX_UNDERLINE_RANGES; i++) {
           // Margin words warm the checker cache; only viewport geometry paints.
           var segment = segments[i]
           if (segment.y >= bodyFlick.contentY && segment.y < bodyFlick.contentY + bodyFlick.height)
-            spellingSegments.append({ segmentX: segment.x, segmentY: segment.y, segmentWidth: segment.width })
+            pass.segments.push({ segmentX: segment.x, segmentY: segment.y,
+              segmentWidth: segment.width, wordEnd: range.end })
         }
-        return spellingSegments.count > before
+        return pass.segments.length > before
       })
     if (pass.revision !== bodyRevision || pass.generation !== spellingGeneration) {
       cancelSpellingPass()
       return
     }
+    if (!pass.done) { spellingSlice.restart(); return }
+    // Publish a complete view without an empty intermediate frame or model.
+    for (var i = 0; i < pass.segments.length; i++) spellingSegments.set(i, pass.segments[i])
+    if (spellingSegments.count > pass.segments.length)
+      spellingSegments.remove(pass.segments.length, spellingSegments.count - pass.segments.length)
     spellingRanges = pass.ranges.slice()
-    if (!pass.done) spellingSlice.restart()
   }
 
   onBodyRevisionChanged: cancelSpellingPass()
@@ -2066,6 +2092,7 @@ DropArea {
         // Sonnet can emit textChanged while rehighlighting an unchanged
         // document. Only a plain-text change edits the draft or its revision.
         if (text === lastPlainText) return
+        root.retainSpellingBeforeEdit(text, lastPlainText)
         lastPlainText = text
         root.noteDraftChanged()
         if (!root.settingBodyText && activeFocus) {
