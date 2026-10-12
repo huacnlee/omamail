@@ -173,6 +173,7 @@ pub async fn send(
         "gmail" => gmail.call("gmail.send", &params).await?,
         "imap" | "outlook" => crate::providers::imap::call("imap.send", &params).await?,
         "jmap" => jmap.call("jmap.send", &params).await?,
+        "exchange" => crate::providers::exchange::send_queued(&params).await?,
         "hey" => {
             params["program"] = json!(crate::providers::hey_access::program()?);
             let raw = raw.to_owned();
@@ -202,6 +203,9 @@ pub async fn send(
             match provider.as_str() {
                 "gmail" => gmail.call("gmail.deleteDraft", &params).await.map(|_| ()),
                 "imap" | "outlook" => crate::providers::imap::call("imap.deleteDraft", &params)
+                    .await
+                    .map(|_| ()),
+                "exchange" => crate::providers::exchange::call("exchange.deleteDraft", &params)
                     .await
                     .map(|_| ()),
                 "jmap" if answer["draftRemoved"] == true => Ok(()),

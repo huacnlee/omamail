@@ -164,6 +164,9 @@ impl Sync {
                 if account.starts_with("jmap:") {
                     return jmap.check(&account).await;
                 }
+                if account.starts_with("exchange:") {
+                    return crate::providers::exchange::check(&account).await;
+                }
                 if account.starts_with("imap:") || account.starts_with("outlook:") {
                     let oauth = account.starts_with("outlook:");
                     let provider = if oauth { "outlook" } else { "imap" };
@@ -1011,7 +1014,12 @@ mod tests {
         for account in ["imap:a@example.org", "outlook:a@example.org"] {
             assert!(provider_push(account.into(), Arc::new(Notify::new())).is_some());
         }
-        for account in ["a@example.org", "jmap:a@example.org", "hey:a@example.org"] {
+        for account in [
+            "a@example.org",
+            "jmap:a@example.org",
+            "hey:a@example.org",
+            "exchange:a@example.org",
+        ] {
             assert!(provider_push(account.into(), Arc::new(Notify::new())).is_none());
         }
     }

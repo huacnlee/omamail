@@ -81,6 +81,15 @@ Where a server offers JMAP and IMAP alike, this is the better of the two. A JMAP
 
 What your particular server does not have, the panel does not offer — and here that is a fact about your account rather than about the protocol. A server with no Archive mailbox has no Archive row and no `e`; one whose Junk folder trains nothing has no "report spam"; a credential that cannot submit mail makes the mailbox read-only. Each of them says which it is instead of failing after you have pressed it.
 
+**Exchange** is for a mailbox on an on-premises Exchange server that offers no IMAP, the kind an organization runs itself. It is not for Microsoft 365, which stays on **Outlook** above: Microsoft is [switching Exchange Web Services off in Exchange Online][ews-retirement] between October 2026 and April 2027, and reading Microsoft 365 would need Microsoft Graph, which this provider does not use.
+
+You enter the email address, the server address, a sign-in name and the password. The server address is the one ending `/EWS/Exchange.asmx`, for example `https://mail.example.org/EWS/Exchange.asmx`, and your administrator can give it to you. You type it: it is never guessed from your address or looked up, so no DNS record or Autodiscover answer decides where your password goes, and nothing contacts the server until you press **Connect the mailbox**. The sign-in name is `DOMAIN\user` or `user@domain`; empty means your email address.
+
+The password goes only to the address you typed, over HTTPS whose certificate and name are verified first, with NTLM where the server offers it and Basic where that is all it offers; a server that offers only Negotiate is refused before anything secret is sent, and no redirect is followed. It is kept in the system keyring, never in a file, and deleted whenever the server address or sign-in name changes, so it has to be typed again. When the server signs in with NTLM, that is kept with the account, so a server that later offers only Basic is refused rather than sent the password; a Basic sign-in is not kept, and changing the server address or sign-in name forgets the method too. A password the server refuses is not sent again until you change it, because a directory that counts failed sign-ins would lock the account.
+
+The rail is Inbox, Unread, Flagged, Drafts, Sent, Junk and Trash, the last two when the server has them. You can list, read, mark read and unread, flag, trash (a move to Deleted Items), search, send and save drafts in the server's Drafts folder; the server files the sent copy itself. Search covers Inbox, Sent and Drafts, never Trash or Junk. A message opens up to 24 MiB, but every request to the server has 20 seconds however large it is, so reading or sending a message of many megabytes needs a connection fast enough to carry it in that time. New mail is found by polling at the check interval. Exchange 2013 SP1 or later is required, and sending needs a Sent folder: an account without one is read-only and says why.
+
+What Exchange does not have, the panel does not offer: no archive (Microsoft documents no Archive folder name, and folder names are never guessed), no folders of your own, no labels or conversations, no report spam, no push and no calendar or contacts.
 
 **IMAP** is an address and a password. Fastmail, iCloud, Zoho, GMX, Proton via its Bridge, or a server of your own: the servers are filled in from the address for the ones this knows, and shown behind a disclosure so they can be corrected for the ones it does not. Most providers want an *app password* rather than the one you sign in to their website with, and the form says so before you find out the hard way.
 
@@ -106,7 +115,7 @@ That removes the plugin and its private runtime. Account data, caches, drafts
 and keyring entries stay in place. Removing those is separate and up to you:
 
 ```bash
-secret-tool clear service omamail    # refresh tokens and JMAP and IMAP passwords
+secret-tool clear service omamail    # refresh tokens and JMAP, IMAP and Exchange passwords
 hey auth logout                      # the HEY session, if you added one
 rm -rf ~/.config/omamail             # the OAuth client and account list
 rm -rf ~/.cache/omamail              # cached mail
@@ -121,4 +130,5 @@ and the mailto desktop file are yours to add and yours to remove.
 [Back to installation](../README.md#install)
 
 [hey-cli]: https://github.com/basecamp/hey-cli
+[ews-retirement]: https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online
 [microsoft-mail-oauth]: https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth

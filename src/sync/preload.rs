@@ -85,13 +85,22 @@ where
     Fut: std::future::Future<Output = Result<Value, &'static str>>,
 {
     if size > MAX_AUTOMATIC_BYTES
-        || (size == 0 && (account.starts_with("imap:") || account.starts_with("outlook:")))
+        || (size == 0
+            && (account.starts_with("imap:")
+                || account.starts_with("outlook:")
+                || account.starts_with("exchange:")))
     {
         return Ok(None);
     }
     let resource = match read().await {
         Ok(resource) => resource,
-        Err("message_too_large" | "imap_response_too_large" | "gmail_response_too_large") => {
+        Err(
+            "message_too_large"
+            | "imap_response_too_large"
+            | "gmail_response_too_large"
+            | "exchange_message_too_large"
+            | "exchange_response_too_large",
+        ) => {
             return Ok(None);
         }
         Err(error) => return Err(error),
@@ -120,6 +129,8 @@ fn inbox(account: &str) -> &'static str {
         "imap"
     } else if account.starts_with("outlook:") {
         "outlook"
+    } else if account.starts_with("exchange:") {
+        "exchange"
     } else {
         "gmail"
     };
@@ -153,6 +164,8 @@ impl Provider {
                 crate::providers::hey::call(method, &checked).await
             } else if account.starts_with("imap:") || account.starts_with("outlook:") {
                 crate::providers::imap::call(method, &params).await
+            } else if account.starts_with("exchange:") {
+                Box::pin(crate::providers::exchange::call(method, &params)).await
             } else {
                 self.gmail.call(method, &params).await
             }
@@ -184,6 +197,13 @@ impl Provider {
                 return Err("preload_incomplete");
             }
             Ok(result["page"].clone())
+        } else if account.starts_with("exchange:") {
+            let list = json!({"accountId":account,"query":query,"limit":limit,"pageToken":""});
+            let result = self.request(account, "exchange.list", list, live).await?;
+            // The rows are the header-only resources of the page's ids: held previews.
+            let mut page = result["page"].clone();
+            page["messages"] = result["rows"].clone();
+            Ok(page)
         } else {
             self.request(
                 account,
@@ -225,6 +245,16 @@ impl Provider {
                     json!({"accountId":account,"ids":[id],"full":full,"progressive":false}),
                     live,
                 )
+                .await?;
+            result["messages"]
+                .as_array()
+                .and_then(|m| m.first())
+                .cloned()
+                .ok_or("preload_message_missing")
+        } else if account.starts_with("exchange:") {
+            let ids = json!({"accountId":account,"ids":[id],"full":full});
+            let result = self
+                .request(account, "exchange.messages", ids, live)
                 .await?;
             result["messages"]
                 .as_array()
@@ -352,6 +382,7 @@ mod tests {
             ("outlook:a", 0),
             ("a", MAX_AUTOMATIC_BYTES + 1),
             ("jmap:a", MAX_AUTOMATIC_BYTES + 1),
+            ("exchange:a", 0),
         ] {
             let result = small_body(account, size, || async {
                 panic!("forbidden background full read")
@@ -394,6 +425,7 @@ mod tests {
             ("a", "in:inbox"),
             ("hey:a", "box:imbox"),
             ("jmap:a", "role:inbox"),
+            ("exchange:a", "role:inbox"),
             ("imap:a", "folder:INBOX"),
             ("outlook:a", "folder:INBOX"),
         ] {
