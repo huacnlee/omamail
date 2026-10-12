@@ -24,6 +24,12 @@ Item {
     ]
     property string accountEmail: "me@example.com"
     property string activeAccountId: "me@example.com"
+    property var configWrites: []
+    function writeConfig(name, text, callback) {
+      configWrites = configWrites.concat([String(name)])
+      if (typeof callback === "function") callback(false, "No filesystem writer in this fixture")
+      return false
+    }
     function preferredSendAs(_r) { return null }
     function switchTo(_id) { return true }
     function refreshRecipientContacts() {}
@@ -164,6 +170,44 @@ Item {
       compare(menu.spellingWord, "mispelled")
       verify(menu.spellingSuggestions.length > 0)
       menu.close()
+    }
+
+    function test_complete_local_spelling_session() {
+      if (!readyAdapter()) return
+      mailService.configWrites = []
+      var body = named(compose, "compose-body-editor")
+      var menu = named(compose, "compose-text-menu")
+      body.forceActiveFocus()
+      var typed = "mispelled "
+      for (var i = 0; i < typed.length; i++) keyClick(typed.toUpperCase().charCodeAt(i), Qt.NoModifier, 0)
+      compare(body.text, typed)
+      tryVerify(function() { return compose.spellingRanges.length > 0 })
+      body.cursorPosition = 3
+      verify(compose.openSpellingAtCaret())
+      compare(menu.spellingWord, "mispelled")
+      verify(menu.spellingSuggestions.length > 0)
+      menu.chooseSuggestion(0)
+      verify(body.text !== typed)
+      compare(compose.bodyWasEdited, true)
+      body.undo()
+      compare(body.text, typed)
+      body.insert(body.text.length, "zqxjlocalonlyspell ")
+      body.cursorPosition = body.text.indexOf("zqxjlocalonlyspell") + 2
+      body.forceActiveFocus()
+      verify(compose.openSpellingAtCaret())
+      menu.ignoreWordRow.activated()
+      compare(compose.spellingAdapter.inspect(body.cursorPosition).misspelled, false)
+      compose.spellingEnabled = false
+      tryVerify(function() { return compose.spellingAdapter === null })
+      compare(compose.spellingDelegateCount, 0)
+      compose.spellingEnabled = true
+      tryVerify(function() { return compose.spellingAvailable })
+      compose.spellingLanguage = "zz_ZZ"
+      tryCompare(compose, "spellingStatus", "no-dictionary")
+      compare(compose.spellingDelegateCount, 0)
+      compose.spellingLanguage = "en_US"
+      tryCompare(compose, "spellingStatus", "ready")
+      compare(mailService.configWrites.length, 0, "no spelling file writer was invoked")
     }
 
     function test_body_adapter_attaches_and_checking_does_not_mutate() {

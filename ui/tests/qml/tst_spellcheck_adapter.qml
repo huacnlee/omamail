@@ -49,6 +49,33 @@ Item {
       return a
     }
 
+    function test_language_changes_discard_native_verdict_cache() {
+      var a = adapter()
+      if (!a) return
+      compare(a.isMisspelled("mispelled"), true)
+      verify(a.verdictCache.size > 0)
+      a.language = "zz_ZZ"
+      compare(a.available, false)
+      compare(a.verdictCache.size, 0)
+      a.language = "en_US"
+      compare(a.available, true)
+      compare(a.verdictCache.size, 0)
+      compare(a.isMisspelled("mispelled"), true)
+    }
+
+    function test_hostile_override_never_becomes_the_native_dictionary_name() {
+      var a = adapter()
+      if (!a) return
+      try {
+        var values = ["../x", "en_US\r\n", "en_US\u0000", "éé", "x".repeat(500)]
+        for (var i = 0; i < values.length; i++) {
+          a.language = values[i]
+          verify(a.resolvedLanguage !== values[i])
+          verify(a.resolvedLanguage === Qt.locale().name || a.resolvedLanguage === "")
+        }
+      } finally { a.language = "en_US" }
+    }
+
     function test_ready_and_status() {
       var a = adapter()
       if (!a) return

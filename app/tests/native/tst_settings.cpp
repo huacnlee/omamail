@@ -75,6 +75,20 @@ void SettingsTest::acceptsSpellingSettings()
     QVERIFY2(store.replace(settings, &error), qPrintable(error));
     QCOMPARE(store.load(&error), settings);
     QVERIFY(error.isEmpty());
+    auto systemLanguage = settings;
+    systemLanguage[QStringLiteral("spellingLanguage")] = QString();
+    QVERIFY2(store.replace(systemLanguage, &error), qPrintable(error));
+    QCOMPARE(store.load(&error), systemLanguage);
+
+    QFile saved(path);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    const QByteArray original = saved.readAll();
+    saved.close();
+    auto unreviewed = systemLanguage;
+    unreviewed[QStringLiteral("unreviewedSpellingSetting")] = true;
+    QVERIFY(!store.replace(unreviewed, &error));
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    QCOMPARE(saved.readAll(), original); // refusal must not modify the saved settings
 }
 
 void SettingsTest::invalidJsonIsPreserved()
