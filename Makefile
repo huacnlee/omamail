@@ -74,6 +74,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/CalendarPalette.qml \
 	ui/components/ConfirmDeleteDialog.qml \
 	ui/components/SetupPage.qml \
+	ui/components/SetupPages.qml \
 	ui/components/ShortcutHelp.qml \
 	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml ui/calendar/CalendarReminders.qml ui/calendar/CalendarReminderInbox.qml \
 	ui/components/CalendarView.qml \

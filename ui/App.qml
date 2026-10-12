@@ -1175,95 +1175,18 @@ Item {
     // before the service has finished making the row.
   }
 
-  // The setup pages. Built by the Loader above, one at a time, so the ones not
-  // in use hold no half-typed fields and no state to go stale.
-  Component {
-    id: providerPickerPage
-
-    ProviderPicker {
-      textColor: root.foreground
-      dimColor: root.dim
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      // Back is shown wherever there is something to go back to — which on
-      // first run, where the chooser is the root, there is not.
-      onChosen: function(providerId) { root.chooseProvider(providerId) }
-    }
-  }
-
-  Component {
-    id: gmailSetupPage
-
-    SetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: heySetupPage
-
-    HeySetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: outlookSetupPage
-
-    OutlookSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: jmapSetupPage
-
-    JmapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: imapSetupPage
-
-    ImapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
+  // The setup pages live in SetupPages, one map. A new mailbox is added
+  // there, so this file does not grow.
+  SetupPages {
+    id: setupPages
+    service: root.service
+    textColor: root.foreground
+    dimColor: root.dim
+    dangerColor: root.danger
+    accentColor: root.accent
+    panelFontFamily: root.fontFamily
+    onChosen: function(providerId) { root.chooseProvider(providerId) }
+    onRemoveRequested: root.removeCurrentAccountFromEditor()
   }
 
   // Every mailbox at once. The rail it lands on has to be one they all have,
@@ -2242,7 +2165,7 @@ Item {
           // Setups that share nothing but their place on screen: a chooser for
           // a mailbox whose kind is not settled yet, then whichever page that
           // kind needs — a Cloud walkthrough, a program and a button, or a
-          // server and a password. A Loader rather than four visibilities, so
+          // server and a password. A Loader rather than a visibility each, so
           // the pages not in use hold no fields and no state.
           Loader {
             id: setup
@@ -2254,12 +2177,7 @@ Item {
             // The provider is on the entry, so a service that briefly reports
             // Gmail while it rebuilds an account host cannot swap the page.
             readonly property string kind: root.editingProvider !== "" ? root.editingProvider : "gmail"
-            sourceComponent: root.showPicker
-              ? providerPickerPage
-              : (setup.kind === "imap" ? imapSetupPage
-                : (setup.kind === "jmap" ? jmapSetupPage
-                : (setup.kind === "outlook" ? outlookSetupPage
-                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))))
+            sourceComponent: setupPages.pageFor(kind, root.showPicker)
           }
           }
         }
