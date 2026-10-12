@@ -437,7 +437,7 @@ function eventsFromGoogle(payload, sourceId) {
 function eventKey(event) {
   if (!event) return ""
   return String(event.sourceId || "") + "\n" + String(event.googleId || event.graphId
-    || String(event.uid || "") + "\n" + String(event.recurrenceIdMs || event.start && event.start.ms || ""))
+    || event.exchangeId || String(event.uid || "") + "\n" + String(event.recurrenceIdMs || event.start && event.start.ms || ""))
 }
 
 // ------------------------------------------------------------- Microsoft
@@ -541,6 +541,10 @@ function graphEventBody(fields, allDay) {
   }
   return body
 }
+
+// What a write that finds the event changed since it was drawn says, for every provider that
+// notices (Google's revision, an Exchange change key).
+var CONFLICT = "This event changed elsewhere. Refresh and try again."
 
 function graphResponseError(status, responseText) {
   var payload = null
@@ -882,7 +886,7 @@ function createEvent(fields, nowMs) {
   if (!recurrence.ok) return recurrence
   var uid = "omamail-" + Math.floor(Number(nowMs) || Date.now())
   var result = {
-    ok: true, uid: uid,
+    ok: true, uid: uid, fields: checked, allDay: fields.allDay === true,
     ics: veventLines(uid, 0, Number(nowMs) || Date.now(), checked, recurrence.rule, fields.allDay === true).join("\r\n"),
     google: googleEventBody(checked, fields.allDay === true),
     graph: graphEventBody(checked, fields.allDay === true),
@@ -933,6 +937,9 @@ function deleteRequest(event, source, canReadSeries) {
     choices.push({ value: "all", label: "Delete and notify guests" })
   } else {
     if (series) message = "Every occurrence of this series will be deleted."
+    // An Exchange appointment is moved to Deleted Items, and nobody is told.
+    if (!!source && source.kind === "exchange")
+      message = "This appointment moves to Deleted Items. Nobody is told."
     choices.push({ value: "all", label: "Delete" })
   }
   return { kind: "event", name: String(value.summary || "Untitled event"), message: message, choices: choices }
@@ -941,7 +948,14 @@ function deleteRequest(event, source, canReadSeries) {
 function writeRefusal(source, event, operation) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
-  if (operation === "reschedule" && source.kind !== "google")
+  // An Exchange event says for itself whether it is a plain appointment (`lockReason`, the backend's
+  // decision, made again before the write), and carries the version a write has to name. Dragging
+  // writes through the editor's own call, so an appointment moves exactly as the editor moves it.
+  if (source.kind === "exchange" && event) {
+    if (event.lockReason) return String(event.lockReason)
+    if (String(event.exchangeKey || "") === "") return "Refresh this event before changing it"
+  }
+  if (operation === "reschedule" && source.kind !== "google" && source.kind !== "exchange")
     return "Open the event editor to change its time"
   if (source.kind === "google" && event && event.eventType === "fromGmail" && operation !== "delete")
     return "Google does not allow changing the time or details of events created from Gmail"
@@ -981,7 +995,7 @@ function updateEvent(fields, existing, nowMs) {
     ["DTSTAMP", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY",
       "DESCRIPTION", "LOCATION"])
   return {
-    ok: true, uid: uid,
+    ok: true, uid: uid, fields: checked, allDay: allDay,
     ics: rewritten !== "" ? rewritten
       : veventLines(uid, sequence, stampMs, checked, "", allDay).join("\r\n"),
     google: googleEventPatch(checked, allDay, !!(event.start && event.start.allDay)),

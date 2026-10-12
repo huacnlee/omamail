@@ -168,7 +168,8 @@ fn eligible(provider: &str, query: &str, row: &Value) -> bool {
     if provider == "hey" {
         return true;
     }
-    if !matches!(provider, "gmail" | "jmap") {
+    // Exchange follows JMAP: `role:` queries whose rows carry the folder's role in `labelIds`.
+    if !matches!(provider, "gmail" | "jmap" | "exchange") {
         return false;
     }
     if row["labelIds"].as_array().is_some_and(|labels| {
@@ -449,6 +450,8 @@ impl QueryCache {
                 "jmap"
             } else if account.starts_with("hey:") {
                 "hey"
+            } else if account.starts_with("exchange:") {
+                "exchange"
             } else {
                 "gmail"
             };

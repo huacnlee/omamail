@@ -13,7 +13,7 @@ pub fn settings_readonly(provider: &str, account: &str) -> Result<Value, &'stati
 }
 
 fn settings_with(provider: &str, account: &str, raw: Value) -> Result<Value, &'static str> {
-    if !["gmail", "outlook", "imap", "jmap"].contains(&provider)
+    if !["gmail", "outlook", "imap", "jmap", "exchange"].contains(&provider)
         || account.is_empty()
         || account.len() > 1024
         || account.chars().any(char::is_control)
@@ -106,6 +106,7 @@ pub async fn password(provider: &str, account: &str) -> Result<String, &'static 
     let kind = match provider {
         "imap" => CredentialKind::ImapPassword,
         "jmap" => CredentialKind::JmapSecret,
+        "exchange" => CredentialKind::ExchangePassword,
         _ => return Err("auth_provider_invalid"),
     };
     let secret = store::get(CredentialKey {

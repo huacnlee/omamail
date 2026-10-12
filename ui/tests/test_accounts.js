@@ -678,6 +678,43 @@ assert.strictEqual(accounts.count(accounts.discardDraftAt(pendingList, 0)), 3)
     "basic", "an unknown scheme is normalised the way the file's own is")
 }
 
+// --------------------------------------------------------- Exchange settings
+//
+// Three strings that cannot authenticate anyone, kept across every load and
+// save: `makeAccount` builds each entry from a fixed key list, so a block it
+// does not list would be dropped on the next write and the mailbox would be
+// unconfigured after a restart.
+
+{
+  const url = "https://mail.example.org/EWS/Exchange.asmx"
+  const reloaded = accounts.find(accounts.load(accounts.serialize(accounts.add(accounts.emptyList(), {
+    email: "Ada@Example.org", provider: "exchange",
+    exchange: { ewsUrl: url, username: "EXAMPLE\\ada", authScheme: "ntlm" }
+  }))), "exchange:ada@example.org")
+  assert.ok(reloaded, "the id is the lower-cased address under the provider's prefix, and it does not read as Gmail")
+  deepEqual(reloaded.exchange, { ewsUrl: url, username: "EXAMPLE\\ada", authScheme: "ntlm" })
+
+  // A key nobody meant the account to carry is dropped on the way through, which
+  // stops a password pasted into a hand-edited file being copied from save to save.
+  const smuggled = accounts.makeAccount({ email: "ada@example.org", provider: "exchange",
+    exchange: { ewsUrl: url, username: "ada", pass: "hunter2", token: "t", secret: "s" } })
+  deepEqual(Object.keys(smuggled.exchange).sort(), ["authScheme", "ewsUrl", "username"])
+  assert.ok(accounts.serialize(accounts.add(accounts.emptyList(), smuggled)).indexOf("hunter2") < 0)
+
+  // The method is one the backend speaks or "choose from what the server offers".
+  for (const [given, wanted] of [["ntlm", "ntlm"], [" Basic ", "basic"], ["auto", "auto"], ["digest", "auto"],
+      ["negotiate", "auto"], [undefined, "auto"], [7, "auto"]])
+    assert.strictEqual(accounts.makeExchangeSettings({ authScheme: given }).authScheme, wanted, String(given))
+  deepEqual(accounts.makeExchangeSettings({ ewsUrl: "  " + url + " ", username: " ada " }),
+    { ewsUrl: url, username: "ada", authScheme: "auto" })
+  deepEqual(accounts.makeExchangeSettings(null), { ewsUrl: "", username: "", authScheme: "auto" })
+
+  // A row with a server or a login in it holds something its owner would miss.
+  assert.ok(accounts.carriesData({ id: "", exchange: { ewsUrl: url } }))
+  assert.ok(accounts.carriesData({ id: "", exchange: { username: "ada" } }))
+  assert.strictEqual(accounts.carriesData({ id: "", exchange: {} }), false)
+}
+
 // ------------------------------------------------------------- signatures
 
 {

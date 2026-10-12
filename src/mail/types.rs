@@ -12,6 +12,7 @@ pub enum Provider {
     Hey,
     Jmap,
     Imap,
+    Exchange,
 }
 
 impl Provider {
@@ -22,6 +23,7 @@ impl Provider {
             Self::Hey => "hey",
             Self::Jmap => "jmap",
             Self::Imap => "imap",
+            Self::Exchange => "exchange",
         }
     }
 }
@@ -36,6 +38,7 @@ impl TryFrom<&str> for Provider {
             "hey" => Ok(Self::Hey),
             "jmap" => Ok(Self::Jmap),
             "imap" => Ok(Self::Imap),
+            "exchange" => Ok(Self::Exchange),
             _ => Err("mail_provider_unknown"),
         }
     }

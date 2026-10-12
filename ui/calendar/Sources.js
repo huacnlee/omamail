@@ -3,7 +3,7 @@
 .import "Palette.js" as Palette
 
 var VERSION = 1
-var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
+var KINDS = ["caldav", "google", "microsoft", "icloud", "hey", "exchange"]
 var COLOR_KEYS = Palette.keys()
 
 function defaultColorKey(identity) { return Palette.defaultKey(identity) }
@@ -26,11 +26,19 @@ function sourceId(raw) {
   var kind = normalizeKind(value.kind)
   if (kind === "google") return "google:" + trimmed(value.accountId)
   if (kind === "microsoft") return "microsoft:" + trimmed(value.accountId)
+  if (kind === "exchange") return "exchange:" + trimmed(value.accountId)
   var address = trimmed(value.url).toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
   return kind + ":" + address
+}
+
+// Whether the provider behind a kind can write to a calendar at all, which no saved file can
+// overrule: a file may say less (`readOnly: true`) and never more. What an Exchange calendar takes is
+// decided event by event (`Calendar.writeRefusal`); HEY has no calendar to write to.
+function providerWrites(kind) {
+  return kind !== "hey"
 }
 
 function makeSource(raw) {
@@ -44,7 +52,7 @@ function makeSource(raw) {
     url: trimmed(value.url), username: trimmed(value.username),
     accountId: trimmed(value.accountId), enabled: value.enabled !== false,
     calendarId: trimmed(value.calendarId),
-    readOnly: value.readOnly === true, discovered: value.discovered === true,
+    readOnly: value.readOnly === true || !providerWrites(kind), discovered: value.discovered === true,
     colorKey: colorKey,
     accessRole: trimmed(value.accessRole), timeZone: trimmed(value.timeZone),
     canCreateMeet: value.canCreateMeet === true,
@@ -132,6 +140,10 @@ function validate(raw) {
   }
   if (source.kind === "hey")
     return { ok: false, error: "The HEY CLI does not expose calendar events" }
+  if (source.kind === "exchange") {
+    return source.accountId !== "" ? { ok: true, source: source }
+      : { ok: false, error: "Choose a signed-in Exchange account" }
+  }
   if (source.name === "") return { ok: false, error: "Add a calendar name" }
   if (!/^https:\/\//i.test(source.url))
     return { ok: false, error: "Use an HTTPS CalDAV calendar address" }
@@ -245,9 +257,44 @@ function withMicrosoftAccounts(list, accountSummaries) {
   return next
 }
 
+// An on-premises Exchange mailbox brings its own calendar the way a Microsoft one does: one source,
+// the mailbox's default calendar, read and written through the mailbox's own sign-in. Which events
+// may be written is the backend's say per event (`lockReason`), not the source's.
+function withExchangeAccounts(list, accountSummaries) {
+  var next = copyList(list)
+  var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
+  for (var i = 0; i < accounts.length; i++) {
+    var account = accounts[i] || {}
+    if (account.provider !== "exchange" || account.signedIn !== true) continue
+    var accountId = trimmed(account.id || account.email)
+    if (accountId === "") continue
+    var id = "exchange:" + accountId
+    var saved = null
+    for (var s = 0; s < next.sources.length; s++) {
+      if (next.sources[s] && next.sources[s].id === id) saved = next.sources[s]
+    }
+    next = add(next, {
+      id: id, kind: "exchange", accountId: accountId,
+      name: trimmed(account.email || account.label || "Exchange Calendar"),
+      enabled: saved ? saved.enabled !== false : true,
+      // Never read back from the file: a saved stamp must not hide Edit and Delete.
+      readOnly: false,
+      colorKey: saved ? saved.colorKey : Palette.defaultKey(id),
+      remindersEnabled: false, reminderMinutes: -1, preferred: false
+    })
+  }
+  return next
+}
+
+// Every source a mailbox brings with it, added to what was saved.
+function withAccounts(list, accountSummaries) {
+  return withExchangeAccounts(withMicrosoftAccounts(
+    withGoogleAccounts(list, accountSummaries), accountSummaries), accountSummaries)
+}
+
 function comesWithAccount(source) {
   return !!source && (source.kind === "google" || source.kind === "microsoft"
-    || source.kind === "icloud")
+    || source.kind === "icloud" || source.kind === "exchange")
 }
 
 function accountSummary(accountId, accountSummaries) {
@@ -369,6 +416,7 @@ function providerLabel(kind) {
   if (value === "google" || value === "gmail") return "Google"
   if (value === "microsoft" || value === "outlook") return "Microsoft"
   if (value === "icloud") return "iCloud"
+  if (value === "exchange") return "Exchange"
   if (value === "hey") return "HEY"
   return "CalDAV"
 }
