@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../../components" as Omamail
+import "../../calendar/ExchangeEvents.js" as ExchangeEvents
 
 Item {
   width: 900
@@ -171,18 +172,29 @@ Item {
 
     // An Exchange calendar takes appointments: no repeat, and notes when one is made but no field for
     // them when it is edited (they are not read, so the field would show them empty and replace them).
-    function test_an_exchange_appointment_has_no_repeat_and_notes_only_when_it_is_made() {
+    function test_an_exchange_event_repeats_as_the_schema_says_and_takes_notes_only_when_it_is_made() {
       var groups = JSON.parse(JSON.stringify(initialGroups))
       groups[0].calendars[0].kind = "exchange"
       eventController.writableSourceGroups = groups
       composer.begin()
       findChild(composer, "event-title-field").text = "Dentist"
       findChild(composer, "event-description-field").text = "Bring the card"
-      compare(findChild(composer, "event-repeat-selector").visible, false)
+      compare(findChild(composer, "event-repeat-selector").visible, true)
       composer.recurring = true
+      // A week offers its days, the first event's on until the person picks; a year has no interval.
+      var first = ExchangeEvents.weekdayOf(composer.dateRange.startMs)
+      compare([findChild(composer, "event-repeat-days").visible, composer.dayOn(first)], [true, true])
+      composer.toggleDay(first)
+      compare(composer.dayOn(first), true, "the last day on stays on")
+      composer.toggleDay(first === "monday" ? "tuesday" : "monday")
+      findChild(composer, "event-repeat-until").text = "2027-03-01"
       composer.submit("all")
-      compare(eventController.createdFields.recurrence.enabled, false)
+      var recurrence = eventController.createdFields.recurrence
+      compare([recurrence.enabled, recurrence.days.length, recurrence.until, recurrence.by], [true, 2, "2027-03-01", "date"])
       compare(eventController.createdFields.description, "Bring the card")
+      eventController.eventWriting = false
+      composer.recurrenceFrequency = "YEARLY"
+      compare([findChild(composer, "event-repeat-days").visible, findChild(composer, "event-repeat-interval").visible], [false, false])
       eventController.eventWriting = false
       composer.close()
       composer.beginEdit("google:me@example.com", { exchangeId: "one", exchangeKey: "k", sourceId: "google:me@example.com",

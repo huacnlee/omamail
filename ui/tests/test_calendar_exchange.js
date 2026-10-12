@@ -402,17 +402,23 @@ assert.strictEqual(exchange.detailError({ code: -32601, message: "Method not fou
   deepEqual([asked.title, asked.message, asked.dismiss, asked.focus, asked.choices[0].label],
     ["Invite 2 people to \"Lunch\"?", "This sends an invitation to 2 people: bob@example.org, cy@example.org.",
       "Keep editing", "dismiss", "Send invitation to 2 people"])
-  // What the write refuses asks nothing, so its own words come first: not an address, the owner, nobody, a series.
+  // What the write refuses asks nothing, so its own words come first: not an address, the owner, nobody, a repeat
+  // the server cannot be told.
   for (const typed of ["", "  ", "not an address", "alice@example.org"])
     assert.strictEqual(exchange.reachRequest(ACCOUNT, null, { title: "Lunch", guestEmails: typed }), null, typed)
   assert.strictEqual(exchange.reachRequest(ACCOUNT, null, { title: "Lunch", guestEmails: "bob@example.org",
-    recurrence: { enabled: true } }), null, "a repeating event is made in Outlook")
+    recurrence: { enabled: true, frequency: "YEARLY", interval: "2" } }), null, "a repeat the server cannot be told")
   const form = (extra) => Object.assign({ title: "Lunch", location: "Room 4", description: "", allDay: false,
     startMs: mine.start.ms, endMs: mine.end.ms }, extra)
   assert.strictEqual(exchange.reachRequest(ACCOUNT, drawn([timed()])[0], form({ guestEmails: "bob@example.org" })), null,
     "an appointment stays one")
   for (const quiet of [form({ reminderMode: "custom", reminderMinutes: "15" }), form({ guestEmails: " " })])
     assert.strictEqual(exchange.reachRequest(ACCOUNT, mine, quiet), null, "the reminder alone tells nobody; nobody is refused")
+  // A repeating meeting says which part of it changed, and a form that changes nothing of all of it asks nothing.
+  const series = Object.assign({}, mine, { isSeries: true, seriesKey: "s1", seriesEditable: true })
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, series, form({ scope: "series" })), null)
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, series, form({ title: "Lunch, moved", scope: "occurrence" })).message,
+    "This tells 2 people this event of the meeting changed: bob@example.org, cy@example.org.")
   assert.strictEqual(exchange.reachRequest(ACCOUNT, mine, form({ title: "Lunch, moved" })).message,
     "This tells 2 people the meeting changed: bob@example.org, cy@example.org.")
   // Whoever is taken off is named apart: told they were removed, not that the meeting changed.
@@ -455,6 +461,215 @@ for (const [code, sentence] of [
   ["exchange_calendar_not_removable", "That meeting is neither cancelled nor declined, so it is not removed from here. Decline it to remove it"],
   ["invalid_params", "That meeting cannot be sent as it is. Check its title, dates, times and guest addresses"]]) {
   assert.strictEqual(exchange.meetingError({ code: -32000, message: code }), sentence, code)
+}
+
+// ---------------------------------------------------------------- repeating events
+
+withZone("Europe/Vienna", () => {
+  // A Tuesday 23:30 in Vienna is Tuesday's series, though the instant is Tuesday 21:30 UTC.
+  const start = new Date(2026, 9, 27, 23, 30).getTime()
+  const rule = (form, allDay) => exchange.repeatRule(Object.assign({ enabled: true }, form), start, allDay)
+  deepEqual(rule({ frequency: "WEEKLY", interval: "2", days: ["thursday", "tuesday"], count: "6" }).rule,
+    { frequency: "weekly", interval: 2, days: ["tuesday", "thursday"], end: "count", count: 6, firstDate: "2026-10-27" })
+  deepEqual(rule({ frequency: "MONTHLY", by: "weekday", until: "2027-03-01" }, true).rule,
+    { frequency: "monthly", interval: 1, by: "weekday", end: "until", until: "2027-03-01" })
+  deepEqual(rule({ frequency: "YEARLY", interval: "1" }).rule, { frequency: "yearly", end: "never", firstDate: "2026-10-27" })
+  assert.strictEqual(exchange.repeatRule({ enabled: false }, start, false).rule, null)
+  for (const [form, said] of [
+    [{ frequency: "YEARLY", interval: "2" }, "A yearly repeat is every year"],
+    [{ frequency: "WEEKLY", interval: "100" }, "Repeat interval must be a whole number from 1 to 99"],
+    [{ frequency: "DAILY", interval: "1000" }, "Repeat interval must be a whole number from 1 to 999"],
+    [{ frequency: "WEEKLY", days: ["monday"] }, "Include Tuesday, the day the event starts on"],
+    [{ frequency: "DAILY", count: "3", until: "2027-03-01" }, "Choose an end date or a number of occurrences, not both"],
+    [{ frequency: "DAILY", until: "2026-10-26" }, "The last day cannot be before the first event"],
+    [{ frequency: "DAILY", until: "4501-01-01" }, "Enter the last day as YYYY-MM-DD"],
+    [{ frequency: "DAILY", count: "1e2" }, "Occurrences must be a whole number from 1 to 999"],
+    [{ frequency: "HOURLY" }, "Choose how often the event repeats"]]) {
+    assert.strictEqual(rule(form).error, said, JSON.stringify(form))
+  }
+  deepEqual(exchange.repeatChoices(start), { date: "On day 27", weekday: "On the fourth Tuesday" })
+})
+
+{
+  // An event of a series as the list draws it, and once its detail said what the series is.
+  const [listed] = drawn([timed({ kind: "occurrence" })])
+  assert.strictEqual(listed.isSeries, true)
+  assert.strictEqual(exchange.repeatLine(listed), "Repeating event")
+  const series = { text: "Every week on Friday", kind: "weekly", key: "series-2", editable: true, canRespond: false }
+  const detail = (extra) => Object.assign({ title: "Standup", location: "Room 4", allDay: false, startMs: listed.start.ms,
+    endMs: listed.end.ms, changeKey: "own-1", kind: "occurrence", editable: true, lock: "", series }, extra || {})
+  const event = exchange.withDetail(listed, detail())
+  deepEqual([event.repeatText, event.seriesKey, event.seriesEditable, event.seriesCanRespond], ["Every week on Friday", "series-2", true, false])
+  assert.strictEqual(exchange.repeatLine(event), "Repeats · Every week on Friday")
+  // Changed since it was drawn: nothing for all of it, and the version drawn.
+  const stale = exchange.withDetail(listed, detail({ title: "Moved" }))
+  deepEqual([stale.seriesEditable, exchange.writeKey(stale, "series")], [false, "key-1"])
+  deepEqual([exchange.writeKey(event, "occurrence"), exchange.writeKey(event, "series")], ["own-1", "series-2"])
+  // One event moves by its instants; all of them by a time of day, and only when it changed.
+  const built = (start, end, scope) => ({ allDay: false, scope, fields: { title: "Standup", location: "Room 4", start, end } })
+  const later = event.start.ms + 3600000
+  const one = exchange.updateParams("exchange:alice@example.org", event, built(later, later + 1800000, "occurrence"))
+  deepEqual([one.scope, one.changeKey, one.startMs, "startClock" in one], ["occurrence", "own-1", later, false])
+  const all = exchange.updateParams("exchange:alice@example.org", event, built(later, later + 2700000, "series"))
+  deepEqual([all.scope, all.changeKey, all.durationMinutes, "startMs" in all, "allDay" in all], ["series", "series-2", 45, false, false])
+  assert.strictEqual(all.startClock, exchange.clockText(later))
+  const same = exchange.updateParams("exchange:alice@example.org", event, built(event.start.ms, event.end.ms, "series"))
+  assert.strictEqual("startClock" in same, false)
+  // A new time of every event undoes the events changed on their own, and the form says so; nothing else does.
+  const changed = exchange.withDetail(listed, detail({ series: Object.assign({}, series, { exceptions: 1 }) }))
+  const form = (start, end, extra) => Object.assign({ scope: "series", allDay: false, startMs: start, endMs: end }, extra)
+  const undoes = "Changing the time of every event also undoes changes made to single events."
+  deepEqual([changed.seriesExceptions, event.seriesExceptions], [1, 0])
+  deepEqual([exchange.exceptionsLine(changed, form(later, later + 1800000)),
+    exchange.exceptionsLine(changed, form(event.start.ms, event.end.ms + 900000)),
+    exchange.exceptionsLine(changed, form(event.start.ms, event.end.ms)),
+    exchange.exceptionsLine(changed, form(later, later + 1800000, { scope: "occurrence" })),
+    exchange.exceptionsLine(event, form(later, later + 1800000))], [undoes, undoes, "", "", ""])
+  const refusal = (fields) => exchange.scopeRefusal(event, Object.assign({ allDay: false, start: event.start.ms, end: event.end.ms }, fields))
+  deepEqual([refusal({}), refusal({ scope: "occurrence" }), refusal({ scope: "series" })], ["Choose whether to change this event or all of them", "", ""])
+  assert.strictEqual(refusal({ scope: "series", start: event.start.ms + 86400000, end: event.end.ms + 86400000 }),
+    "To move every event to other days, change its repeat in Outlook")
+  assert.strictEqual(refusal({ scope: "series", allDay: true }), "Every event of a series keeps being at a time of day")
+  assert.strictEqual(exchange.scopeRefusal(stale, { scope: "series" }), "This repeating series can only be changed one event at a time")
+  // A delete asks which part, offers all of it only where blessed, and names that part's version.
+  const asked = exchange.deleteRequest(event)
+  deepEqual(asked.choices, [{ value: "series", label: "Delete all events" }, { value: "occurrence", label: "Delete this event" }])
+  assert.strictEqual(asked.focus, "dismiss")
+  deepEqual(exchange.deleteScopes(stale), ["occurrence"])
+  const choose = (from, scope) => Object.assign({}, from, { deleteScope: scope })
+  assert.strictEqual(exchange.deleteRefusal({ kind: "exchange" }, choose(stale, "series")), "Choose whether it is this event or all of them")
+  assert.strictEqual(exchange.deleteRefusal({ kind: "exchange" }, choose(event, "")), "Choose whether it is this event or all of them")
+  deepEqual(exchange.deleteParams("exchange:alice@example.org", choose(event, "series")),
+    { accountId: "exchange:alice@example.org", id: "t1", changeKey: "series-2", scope: "series" })
+}
+
+{
+  // An invitation to a series: answered for one event by its own version, for all of it by the series'; declined
+  // whole it leaves the calendar, one event stays declined.
+  const [listed] = drawn([timed({ kind: "occurrence", meeting: true, response: "none", editable: false, lock: "meeting" })])
+  const series = { text: "Every day", kind: "daily", key: "series-3", editable: false, canRespond: true }
+  const invited = exchange.withDetail(listed, { title: "Standup", location: "Room 4", allDay: false, startMs: listed.start.ms,
+    endMs: listed.end.ms, changeKey: "own-3", kind: "occurrence", meeting: true, response: "none", canRespond: true,
+    editable: false, lock: "meeting", series, canRemove: false })
+  deepEqual([exchange.respondParams("a", invited, "accepted", "series").changeKey, exchange.respondParams("a", invited, "accepted").changeKey],
+    ["series-3", "own-3"])
+  const decline = (scope) => exchange.declineParams("a", Object.assign({}, invited, { deleteScope: scope }))
+  deepEqual([decline("series").scope, decline("series").remove, decline("occurrence").remove, "scope" in decline("occurrence")],
+    ["series", true, undefined, false])
+  const declining = exchange.deleteRequest(invited)
+  deepEqual([declining.message, declining.choices.map((c) => c.label)], ["This tells the organizer you decline. Declining every "
+    + "event of the series (every day) removes the series from your calendar; declining this event keeps it there, declined.",
+    ["Decline all events and remove", "Decline this event"]])
+  // A series its organizer cancelled: all of it in one call, said with how many; one event stays its own removal.
+  const cancelled = exchange.withDetail(listed, { title: "Standup", location: "Room 4", allDay: false, startMs: listed.start.ms,
+    endMs: listed.end.ms, changeKey: "own-3", kind: "occurrence", meeting: true, response: "none", cancelled: true,
+    canRemove: true, canRemoveSeries: true, cancelledEvents: 3, editable: false, lock: "meeting", series })
+  deepEqual([cancelled.canRemoveSeries, cancelled.cancelledEvents], [true, 3])
+  deepEqual(exchange.deleteRequest(cancelled).choices.map((c) => c.label), ["Remove all 3 cancelled events", "Remove this event"])
+  deepEqual(exchange.removeParams("a", Object.assign({}, cancelled, { deleteScope: "series" })),
+    { accountId: "a", id: "t1", changeKey: "series-3", scope: "series" })
+  assert.strictEqual(exchange.removeParams("a", Object.assign({}, cancelled, { deleteScope: "occurrence" })).scope, "occurrence",
+    "an event of a series is removed through its scope")
+  const alone = Object.assign({}, cancelled, { canRemoveSeries: false, deleteScope: "series" })
+  assert.strictEqual("scope" in exchange.removeParams("a", alone), false, "all of it only where the backend said so")
+  const once = exchange.withDetail(listed, { title: "Standup", location: "Room 4", allDay: false, startMs: listed.start.ms,
+    endMs: listed.end.ms, changeKey: "own-3", kind: "occurrence", meeting: true, response: "none", cancelled: true,
+    canRemove: true, canRemoveSeries: true, cancelledEvents: 1, editable: false, lock: "meeting", series })
+  deepEqual([once.canRemoveSeries, once.cancelledEvents, exchange.deleteScopes(once)], [false, 0, ["occurrence"]],
+    "one event cancelled is that event's removal, never all of it")
+  const removeOne = exchange.deleteRequest(once)
+  deepEqual([removeOne.message, removeOne.choices], ["The organizer cancelled this event of the series. Nobody is told. "
+    + "The rest of the series stays on your calendar.", [{ value: "occurrence", label: "Remove this event" }]])
+  assert.strictEqual(exchange.deleteRefusal({ kind: "exchange" }, Object.assign({}, once, { deleteScope: "occurrence" })), "")
+  const whole = exchange.withDetail(listed, { title: "Standup", location: "Room 4", allDay: false, startMs: listed.start.ms,
+    endMs: listed.end.ms, changeKey: "own-3", kind: "occurrence", meeting: true, response: "none", cancelled: true,
+    canRemove: true, canRemoveSeries: true, cancelledEvents: 0, editable: false, lock: "meeting", series })
+  assert.strictEqual(exchange.deleteRequest(whole).message,
+    "The organizer cancelled this series (every day). Nobody is told. Remove all of it from your calendar, or only this event.")
+  assert.strictEqual(exchange.deleteRequest(cancelled).message,
+    "The organizer cancelled 3 events of this series (every day). Nobody is told. Remove all 3 from your calendar, or only this event.")
+  assert.strictEqual(exchange.removeNotice({ removed: true, count: 50, more: true }),
+    "Removed 50 cancelled events. More are left on your calendar. Open one and remove it again")
+  assert.strictEqual(exchange.removeNotice({ removed: true, count: 2, more: false, seriesLeft: false }), "")
+  assert.strictEqual(exchange.removeNotice({ removed: true, count: 1, more: false, seriesLeft: true }),
+    "Removed 1 cancelled event. The series itself is still on your calendar. Look at your calendar before removing it again")
+  assert.strictEqual(exchange.removeError({ code: -32000, message: "exchange_calendar_unconfirmed" }),
+    "The server did not confirm it. Look at your calendar before trying again")
+  assert.ok(exchange.writeError({ code: -32000, message: "exchange_calendar_zone_unknown" }).indexOf("time zone") > 0)
+  assert.strictEqual(exchange.writeError({ code: -32000, message: "exchange_calendar_zone_differs" }),
+    "This series repeats in another time zone than this computer's, so its time can only be changed in Outlook")
+}
+
+{
+  const ACCOUNT = "exchange:alice@example.org"
+  // A repeating meeting the owner organises whose event 3 is an exception with fewer people: all of it tells the
+  // series' (its master's) people, which the question names, the guest field starts from and the write carries.
+  const [listed] = drawn([timed({ kind: "exception", meeting: true, response: "organizer" })])
+  const owner = { name: "Alice", email: "alice@example.org", kind: "required", response: "organizer", self: true }
+  const bob = { name: "Bob", email: "bob@example.org", kind: "required", response: "accept", self: false }
+  const cy = { name: "Cy", email: "cy@example.org", kind: "optional", response: "none", self: false }
+  const series = { text: "Every week on Friday until 2026-12-11", kind: "weekly", key: "s1", editable: true, lock: "",
+    timeEditable: true, canRespond: false, attendees: [owner, bob, cy], attendeesCut: false }
+  const read = (extra) => Object.assign({ title: "Standup", location: "Room 4", allDay: false, startMs: listed.start.ms,
+    endMs: listed.end.ms, changeKey: "own-1", kind: "exception", meeting: true, response: "organizer", editable: true,
+    lock: "", attendees: [owner, bob], series }, extra || {})
+  const meeting = exchange.withDetail(listed, read())
+  deepEqual([exchange.guestText(meeting), exchange.guestText(meeting, "series"), meeting.seriesTimeEditable, meeting.seriesLockReason],
+    ["bob@example.org", "bob@example.org, cy@example.org", true, ""])
+  const form = (extra) => Object.assign({ title: "Standup", location: "Room 4", description: "", allDay: false,
+    startMs: listed.start.ms, endMs: listed.end.ms }, extra)
+  deepEqual([exchange.reachRequest(ACCOUNT, meeting, form({ title: "Moved", scope: "series" })).message,
+    exchange.reachRequest(ACCOUNT, meeting, form({ title: "Moved", scope: "occurrence" })).message],
+    ["This tells 2 people every event of the meeting (every week on Friday until 2026-12-11) changed: bob@example.org, cy@example.org.",
+      "This tells 1 person this event of the meeting changed: bob@example.org."])
+  // A new time of every event mails people, so it is asked about, and the write carries the people asked about.
+  const later = listed.start.ms + 3600000
+  const clock = exchange.reachRequest(ACCOUNT, meeting, form({ scope: "series", startMs: later, endMs: later + 1800000 }))
+  assert.ok(clock !== null && clock.choices[0].label === "Send update to 2 people", "a new time of all of it is asked about")
+  const built = { allDay: false, scope: "series", fields: { title: "Standup", location: "Room 4", start: later, end: later + 1800000 } }
+  const all = exchange.meetingUpdateParams(ACCOUNT, meeting, built, null)
+  deepEqual([all.startClock !== undefined, all.seriesAttendees, exchange.meetingMails(all)], [true, ["bob@example.org", "cy@example.org"], true])
+  deepEqual(exchange.meetingMails({ accountId: "a", id: "m", changeKey: "k", sendUpdates: true, scope: "series",
+    seriesAttendees: ["bob@example.org"], reminderMinutes: 15 }), false, "the people named change nothing")
+  const one = exchange.meetingUpdateParams(ACCOUNT, meeting, Object.assign({}, built, { scope: "occurrence" }), null)
+  assert.strictEqual("seriesAttendees" in one, false)
+  // Unchanged guests of all of it are the series' people, in any order or case.
+  deepEqual([exchange.changedGuests(meeting, ["CY@example.org", "bob@example.org"], "series"),
+    exchange.changedGuests(meeting, ["bob@example.org"], "series")], [null, ["bob@example.org"]])
+  // A form the write refuses asks nothing: no part chosen, guests of one event, other days, a time not changed here.
+  for (const refused of [form({ title: "Moved" }), form({ title: "Moved", scope: "occurrence", guestEmails: "d@example.org" }),
+    form({ title: "Moved", scope: "series", startMs: listed.start.ms + 86400000, endMs: listed.end.ms + 86400000 })])
+    assert.strictEqual(exchange.reachRequest(ACCOUNT, meeting, refused), null, JSON.stringify(refused))
+  const elsewhere = exchange.withDetail(listed, read({ series: Object.assign({}, series, { timeEditable: false }) }))
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, elsewhere, form({ scope: "series", startMs: later, endMs: later + 1800000 })), null)
+  assert.strictEqual(exchange.scopeRefusal(elsewhere, { scope: "series", allDay: false, start: later, end: later + 1800000 }),
+    "The time of every event can only be changed in Outlook")
+  deepEqual([exchange.seriesWhenLine(meeting), exchange.seriesWhenLine(elsewhere)],
+    ["Every event keeps its own day; only the time changes.", "Every event keeps its own day and time. Change the time of all "
+      + "of them in Outlook: the series repeats in another time zone than this computer's, or by a rule Omamail does not read."])
+  // Cancelling names each part's people where they differ, and all of it carries the people its question named.
+  const cancel = exchange.deleteRequest(meeting)
+  deepEqual([cancel.message, cancel.choices.map((c) => c.label)], ["This cancels this event for 1 person: bob@example.org. They are "
+    + "sent a cancellation. Cancelling every event of the series (every week on Friday until 2026-12-11) instead cancels it for "
+    + "2 people: bob@example.org, cy@example.org. Each of them is sent a cancellation.",
+    ["Cancel all events for 2 people", "Cancel this event for 1 person"]])
+  deepEqual(exchange.cancelParams(ACCOUNT, Object.assign({}, meeting, { deleteScope: "series" })).seriesAttendees,
+    ["bob@example.org", "cy@example.org"])
+  assert.strictEqual("seriesAttendees" in exchange.cancelParams(ACCOUNT, Object.assign({}, meeting, { deleteScope: "occurrence" })), false)
+  const same = exchange.withDetail(listed, read({ attendees: [owner, bob, cy] }))
+  assert.strictEqual(exchange.deleteRequest(same).message, "This cancels this event, or every event of the series (every week on "
+    + "Friday until 2026-12-11), for 2 people: bob@example.org, cy@example.org. Each of them is sent a cancellation.")
+  // The series' people not all read: all of it is locked, and says why.
+  const cut = exchange.withDetail(listed, read({ series: Object.assign({}, series, { attendeesCut: true }) }))
+  deepEqual([cut.seriesEditable, cut.seriesLockReason, exchange.deleteScopes(cut)],
+    [false, "Not every guest's address could be read: change it in Outlook", ["occurrence"]])
+  // An event of the series has guests of its own: all of it is locked, saying why, and only this event is cancelled.
+  const own = exchange.withDetail(listed, read({ series: Object.assign({}, series, { editable: false, lock: "exceptionGuests" }) }))
+  deepEqual([own.seriesEditable, own.seriesLockReason, exchange.deleteScopes(own)],
+    [false, "Some events of this series have their own guests: change all of them in Outlook", ["occurrence"]])
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, own, form({ title: "Moved", scope: "series" })), null)
+  const none = exchange.withDetail(listed, read({ series: Object.assign({}, series, { attendees: [owner] }) }))
+  deepEqual(exchange.deleteScopes(none), ["occurrence"], "all of it is cancelled only for people a question can name")
 }
 
 console.log("calendar exchange: ok")

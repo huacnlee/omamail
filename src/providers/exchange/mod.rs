@@ -23,6 +23,7 @@ mod ids;
 mod meeting;
 mod query;
 mod read;
+mod recurrence;
 mod resource;
 mod verify;
 mod write;

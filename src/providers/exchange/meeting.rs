@@ -24,14 +24,31 @@
 //! - **A write is never cancelled, detached or repeated**, as an appointment's (`calendar`): no
 //!   `requestToken`, a turn only while the request can still end inside the call, and an outcome that
 //!   cannot be known is `exchange_calendar_unconfirmed`: the people may have been told.
+//! - **A meeting that repeats is made, changed and cancelled as a repeating appointment is**
+//!   (`calendar`): `recurrence` on a create (the invitations are for every event), and `scope` on a
+//!   change (with the time of day of every event as `startClock` and `durationMinutes`) and on a
+//!   cancellation; each still refused without its word that people are mailed, and a change of one
+//!   event names no people (they are the series'). A change or cancellation of all of it also names
+//!   the people its question named (`seriesAttendees`, required with `scope` `series` and refused
+//!   otherwise), which the client holds against the master's people on its fresh read: the server
+//!   mails the master's, which one event's own list need not be; and while any exception of the series
+//!   has people of its own, all of it is locked (`EventDetail::exceptions_agree`), because what the
+//!   master would mail them is not documented. `exchange.meetingRemove` with `scope`
+//!   `series` takes a whole series its organizer cancelled off the calendar in one call (`{removed,
+//!   because, count, more, seriesLeft}`: at most 50 cancellations, `more` when some are left,
+//!   `seriesLeft` when its master is still there), decided on its master before any write and refused
+//!   unless it is cancelled (`EventDetail::series_removal`); one event of a series is removed with
+//!   `scope` `occurrence`, and named with none it is locked.
 //! - The fields of an event are an appointment's (`calendar::appointment`, `calendar::edit`): notes
 //!   are written when a meeting is made and never after. A cancellation may carry a note of at most
 //!   2000 bytes, the organizer's own words in the message the people get.
 
 use serde_json::{Map, Value, json};
 
-use super::calendar::{appointment, edit, reply, target};
-use super::ews::{CalendarChange, MeetingEdit, cancel_meeting, create_meeting, update_meeting};
+use super::calendar::{appointment, edit, reply, scope, target, zone_of, zone_of_change};
+use super::ews::{
+    CalendarChange, MeetingEdit, Scope, When, cancel_meeting, create_meeting, update_meeting,
+};
 use super::guests::{self, Guests, MAX_GUESTS};
 use super::{INVALID, account, fields, ids, write::turn, zone};
 
@@ -48,7 +65,7 @@ const CREATE: [&str; 10] = [
     "startDate",
     "endDate",
 ];
-const UPDATE: [&str; 11] = [
+const UPDATE: [&str; 15] = [
     "accountId",
     "id",
     "changeKey",
@@ -60,6 +77,10 @@ const UPDATE: [&str; 11] = [
     "endMs",
     "startDate",
     "endDate",
+    "scope",
+    "startClock",
+    "durationMinutes",
+    "seriesAttendees",
 ];
 
 /// A member that must be the boolean `true`: the caller's word that it knows who will be mailed.
@@ -83,6 +104,23 @@ fn people(map: &Map<String, Value>, key: &str) -> Result<Option<Vec<String>>, &'
     }
 }
 
+/// The people a write to all of a series is to tell, as the question named them (`seriesAttendees`):
+/// required with `scope` `series` and refused without it. The client compares them with the master's
+/// people on its fresh read, so nobody the question did not name is mailed.
+fn told(
+    map: &Map<String, Value>,
+    scope: Option<Scope>,
+    owner: &str,
+) -> Result<Option<Vec<String>>, &'static str> {
+    let told = people(map, "seriesAttendees")?;
+    match (&told, scope) {
+        (Some(list), Some(Scope::Series)) if !list.is_empty() => guests::check(list, &[], owner)?,
+        (None, scope) if scope != Some(Scope::Series) => {}
+        _ => return Err(INVALID),
+    }
+    Ok(told)
+}
+
 /// The request's members, its word that people will be mailed, and the mailbox and its address.
 fn judged<'a>(
     params: &'a Value,
@@ -99,7 +137,12 @@ fn judged<'a>(
 pub async fn create(params: &Value) -> Result<Value, &'static str> {
     let allowed = [
         &CREATE[..],
-        &["requiredAttendees", "optionalAttendees", "sendInvitations"],
+        &[
+            "requiredAttendees",
+            "optionalAttendees",
+            "sendInvitations",
+            "recurrence",
+        ],
     ]
     .concat();
     let (map, account, owner) = judged(params, &allowed, "sendInvitations")?;
@@ -110,9 +153,10 @@ pub async fn create(params: &Value) -> Result<Value, &'static str> {
     guests::check(&guests.required, &guests.optional, &owner)?;
     let item = appointment(map)?;
     create_meeting(&item, &guests, zone::UTC)?;
+    let zone = zone_of(&item)?;
     let mut lease = turn(&account).await?;
     let client = lease.client();
-    let written = client.create_meeting(&item, &guests, zone::local()).await?;
+    let written = client.create_meeting(&item, &guests, zone).await?;
     let mut done = reply(&written);
     done["invited"] = json!(guests.len());
     Ok(done)
@@ -126,12 +170,18 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
     .concat();
     let (map, account, owner) = judged(params, &allowed, "sendUpdates")?;
     let (id, key) = target(map)?;
+    let (edit, scope) = edit(map)?;
+    let told = told(map, scope, &owner)?;
     let wanted = MeetingEdit {
-        edit: edit(map)?,
+        edit,
         required: people(map, "requiredAttendees")?,
         optional: people(map, "optionalAttendees")?,
     };
     let (required, optional) = (wanted.required.as_deref(), wanted.optional.as_deref());
+    // The people of a series are the series': one event of it names none.
+    if scope == Some(Scope::Occurrence) && (required.is_some() || optional.is_some()) {
+        return Err(INVALID);
+    }
     guests::check(
         required.unwrap_or_default(),
         optional.unwrap_or_default(),
@@ -142,17 +192,18 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
         title: wanted.edit.title.as_deref(),
         location: wanted.edit.location.as_deref(),
         reminder: wanted.edit.reminder,
-        when: wanted.edit.when,
+        when: wanted.edit.when.map(When::judged),
         required,
         optional,
     };
     if whole != CalendarChange::default() {
         update_meeting("A", &key, &whole, zone::UTC)?;
     }
+    let zone = zone_of_change(&wanted.edit)?;
     let mut lease = turn(&account).await?;
     let client = lease.client();
     let changed = client
-        .change_meeting(&id, &key, &wanted, &owner, zone::local())
+        .change_meeting(&id, &key, &wanted, &owner, zone, scope, told.as_deref())
         .await?;
     let mut done = reply(&changed.written);
     done["sent"] = json!(changed.sent);
@@ -166,9 +217,13 @@ pub async fn cancel(params: &Value) -> Result<Value, &'static str> {
         "changeKey",
         "message",
         "sendCancellations",
+        "scope",
+        "seriesAttendees",
     ];
     let (map, account, owner) = judged(params, &allowed, "sendCancellations")?;
     let (id, key) = target(map)?;
+    let scope = scope(map)?;
+    let told = told(map, scope, &owner)?;
     let note = match map.get("message") {
         None => None,
         Some(Value::String(note)) if note.is_empty() => None,
@@ -179,15 +234,24 @@ pub async fn cancel(params: &Value) -> Result<Value, &'static str> {
     let mut lease = turn(&account).await?;
     let client = lease.client();
     let told = client
-        .cancel_meeting(&id, &key, note.as_deref(), &owner)
+        .cancel_meeting(&id, &key, note.as_deref(), &owner, scope, told.as_deref())
         .await?;
     Ok(json!({"cancelled": true, "told": told}))
 }
 
 pub async fn remove(params: &Value) -> Result<Value, &'static str> {
-    let map = fields(params, &["accountId", "id", "changeKey"])?;
+    let map = fields(params, &["accountId", "id", "changeKey", "scope"])?;
     let (id, key) = target(map)?;
+    let scope = scope(map)?;
     let mut lease = turn(&account(map)?).await?;
-    let because = lease.client().remove_meeting(&id, &key).await?;
+    let client = lease.client();
+    if scope == Some(Scope::Series) {
+        let done = client.remove_series(&id, &key).await?;
+        let (count, more, left) = (done.count, done.more, done.left);
+        return Ok(
+            json!({"removed": true, "because": "cancelled", "count": count, "more": more, "seriesLeft": left}),
+        );
+    }
+    let because = client.remove_meeting(&id, &key, scope).await?;
     Ok(json!({"removed": true, "because": because}))
 }

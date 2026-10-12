@@ -6,6 +6,7 @@ pub mod detail;
 pub mod fake;
 mod meeting;
 mod ops;
+pub mod series;
 mod wire;
 
 /// How much faster than real time the deadlines of this process run (`conn::clock`). Only a test

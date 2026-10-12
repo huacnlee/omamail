@@ -23,6 +23,13 @@
 // once; No is the delete's confirmation (`deleteKind`), because it also takes the meeting off the
 // calendar. The minutes of an event's reminder are `reminders`, which the desktop reminders read.
 //
+// An event of a repeating series is changed, deleted, cancelled and answered as this event (an occurrence, which
+// becomes an exception) or as all of them (the series' master), as the person chooses. The backend says per event
+// whether all of the series may be changed (`seriesEditable`) or answered (`seriesCanRespond`), and nothing here
+// offers a part it did not bless; a write to all of it names the series' version (`seriesKey`), to one event the
+// detail's own (`writeKey`). A repeat is made from the composer's control (`repeatRule`): what Microsoft's schema
+// can say, and nothing else.
+//
 // A meeting with other people is the one thing here that reaches somebody who has not asked to be told,
 // so nothing below builds such a request without the caller's `confirmedSend` and the words that tell the
 // person who will be reached (`reachRequest`, `deleteRequest`); the backend refuses without its own
@@ -52,6 +59,8 @@ var LOCKS = {
   // The owner's own meeting, which the backend locks for what it carries: a room, or people not all read.
   room: "A meeting with a room: change it in Outlook",
   guests: "Not every guest's address could be read: change it in Outlook",
+  // All of a series of the owner's meetings, one of whose events has guests of its own (or they were not all read).
+  exceptionGuests: "Some events of this series have their own guests: change all of them in Outlook",
   recurring: "Repeating event: change it in Outlook",
   cancelled: "Cancelled meeting: change it in Outlook",
   foreign: "Somebody else's invitation: change it in Outlook",
@@ -125,7 +134,10 @@ function eventsFromExchange(payload, sourceId) {
       attendees: [], start: moment(start, allDay), end: moment(end, allDay),
       // For the desktop reminders (an invitation the owner declined raises none) and the detail.
       reminderMinutes: reminder, reminders: reminderPolicy(reminder), myResponse: String(item.response || ""),
-      canRespond: false, notesCut: false, canRemove: false,
+      canRespond: false, notesCut: false, canRemove: false, canRemoveSeries: false, cancelledEvents: 0,
+      // One event of a repeating series, and what the detail will say of the series (`withDetail`).
+      isSeries: item.kind === "occurrence" || item.kind === "exception", repeatText: "", seriesKey: "",
+      seriesEditable: false, seriesCanRespond: false,
       recurrence: "", meetLink: "", sourceId: String(sourceId || ""), href: "", source: null
     })
   }
@@ -161,21 +173,47 @@ function createParams(accountId, built) {
   params.location = fields.location
   if (fields.description !== "") params.notes = fields.description
   if (built.reminderMinutes >= 0) params.reminderMinutes = built.reminderMinutes
+  if (built.exchangeRule) params.recurrence = built.exchangeRule
   return params
+}
+
+// The version a write names: what the screen was drawn from. For an event of a series, the detail's own for one
+// event and the series' (its master's) for all of them; a stale detail keeps the list's, so the write is refused
+// and never made over what it had not shown.
+function writeKey(event, scope) {
+  var listed = String(event && event.exchangeKey || "")
+  if (!event || event.isSeries !== true || event.stale === true) return listed
+  return scope === "series" ? String(event.seriesKey || "") : String(event.answerKey || listed)
+}
+
+// "HH:MM" on the local clock: the time of day of every event of a series.
+function clockText(ms) {
+  var date = new Date(ms)
+  return two(date.getHours()) + ":" + two(date.getMinutes())
 }
 
 // The title, the place and the time are named only when the form changed them, so what the screen
 // drew is never written back: a drag names the time alone, and neither the placeholder of an empty
-// subject nor a title the form trimmed is sent.
+// subject nor a title the form trimmed is sent. Every event of a series is given a time of day and how
+// long it lasts, never instants: its days are its repeat's, and its time stays on the wall of its zone.
 function updateParams(accountId, event, built) {
   var fields = built.fields
+  var scope = event.isSeries === true ? String(built.scope || "") : ""
   var params = { accountId: String(accountId || ""), id: String(event.exchangeId || ""),
-    changeKey: String(event.exchangeKey || "") }
+    changeKey: writeKey(event, scope) }
+  if (scope !== "") params.scope = scope
   if (fields.title !== String(event.summary || "").trim()) params.title = fields.title
   if (fields.location !== String(event.location || "")) params.location = fields.location
   var before = event.start || { ms: 0, allDay: false }
   var beforeEnd = event.end ? event.end.ms : before.ms
-  if (built.allDay !== (before.allDay === true) || fields.start !== before.ms || fields.end !== beforeEnd) {
+  if (scope === "series") {
+    var length = Math.round((fields.end - fields.start) / 60000)
+    if (built.allDay !== true && (clockText(fields.start) !== clockText(before.ms)
+        || length !== Math.round((beforeEnd - before.ms) / 60000))) {
+      params.startClock = clockText(fields.start)
+      params.durationMinutes = length
+    }
+  } else if (built.allDay !== (before.allDay === true) || fields.start !== before.ms || fields.end !== beforeEnd) {
     var when = timeFields(fields.start, fields.end, built.allDay)
     for (var key in when) params[key] = when[key]
   }
@@ -184,9 +222,21 @@ function updateParams(accountId, event, built) {
   return params
 }
 
+// The part of a series a delete, cancellation, decline or removal is for: what the confirmation's choice said.
+function deleteScopeOf(event) {
+  return event && event.isSeries === true ? String(event.deleteScope || "") : ""
+}
+
+// A call naming an event at the version the scope says, and the scope when there is one.
+function scoped(accountId, event, key, scope) {
+  var params = { accountId: String(accountId || ""), id: String(event.exchangeId || ""), changeKey: String(key || "") }
+  if (scope !== "") params.scope = scope
+  return params
+}
+
 function deleteParams(accountId, event) {
-  return { accountId: String(accountId || ""), id: String(event.exchangeId || ""),
-    changeKey: String(event.exchangeKey || "") }
+  var scope = deleteScopeOf(event)
+  return scoped(accountId, event, writeKey(event, scope), scope)
 }
 
 // What the form's reminder buttons mean for a new appointment (`editing` false: "none", and the calendar
@@ -218,6 +268,132 @@ function reminderText(minutes) {
   return plural(value, "minute")
 }
 
+// ------------------------------------------------------------------ repeating events
+
+// The names a request gives the weekdays, in the order a JavaScript date counts them (Sunday is 0).
+var WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+var ORDINALS = ["first", "second", "third", "fourth", "last"]
+
+function capital(word) { return word.charAt(0).toUpperCase() + word.substring(1) }
+
+// The weekday of a first day, as a request names it.
+function weekdayOf(startMs) { return WEEKDAYS[new Date(startMs).getDay()] }
+
+// What a monthly repeat can follow on a first day: its date, or its weekday of the month (a fifth is the last).
+function repeatChoices(startMs) {
+  var date = new Date(startMs)
+  return { date: "On day " + date.getDate(),
+    weekday: "On the " + ORDINALS[Math.min(4, Math.floor((date.getDate() - 1) / 7))] + " " + capital(weekdayOf(startMs)) }
+}
+
+// A repeat as the backend takes it from what the form holds, or the form's own sentence for one the server cannot
+// be told: an interval from 1 to 99 (999 days), and none for a year; the days of a week, the first event's among
+// them; a month by its date or its weekday; and one end: none, a last day or a count. `startMs` is the first
+// event's start (local midnight of its day for a whole day), whose local day a timed series is made from.
+function repeatRule(raw, startMs, allDay) {
+  var form = raw || {}
+  if (form.enabled !== true) return { ok: true, rule: null }
+  var frequency = String(form.frequency || "").toLowerCase()
+  if (["daily", "weekly", "monthly", "yearly"].indexOf(frequency) < 0)
+    return { ok: false, error: "Choose how often the event repeats" }
+  var rule = { frequency: frequency }
+  var text = String(form.interval === undefined ? "1" : form.interval).trim()
+  if (frequency === "yearly") {
+    if (text !== "" && text !== "1") return { ok: false, error: "A yearly repeat is every year" }
+  } else {
+    var most = frequency === "daily" ? 999 : 99
+    var interval = /^\d{1,3}$/.test(text) ? Number(text) : 0
+    if (interval < 1 || interval > most) return { ok: false, error: "Repeat interval must be a whole number from 1 to " + most }
+    rule.interval = interval
+  }
+  if (frequency === "weekly") {
+    var first = weekdayOf(startMs), picked = form.days, days = []
+    var count = picked && typeof picked.length === "number" ? picked.length : 0
+    for (var i = 0; i < count; i++) if (WEEKDAYS.indexOf(String(picked[i])) >= 0) days.push(String(picked[i]))
+    if (days.length === 0) days = [first]
+    if (days.indexOf(first) < 0) return { ok: false, error: "Include " + capital(first) + ", the day the event starts on" }
+    // Once each, from Monday.
+    rule.days = WEEKDAYS.slice(1).concat(WEEKDAYS[0]).filter(function(day) { return days.indexOf(day) >= 0 })
+  }
+  if (frequency === "monthly" && form.by === "weekday") rule.by = "weekday"
+  var times = String(form.count === undefined ? "" : form.count).trim()
+  var until = String(form.until === undefined ? "" : form.until).trim()
+  if (times !== "" && until !== "") return { ok: false, error: "Choose an end date or a number of occurrences, not both" }
+  if (times !== "") {
+    if (!/^\d{1,3}$/.test(times) || Number(times) < 1) return { ok: false, error: "Occurrences must be a whole number from 1 to 999" }
+    rule.end = "count"
+    rule.count = Number(times)
+  } else if (until !== "") {
+    if (!isFinite(localMidnight(until)) || Number(until.substring(0, 4)) > 4500)
+      return { ok: false, error: "Enter the last day as YYYY-MM-DD" }
+    if (localMidnight(until) < localMidnight(dayText(startMs))) return { ok: false, error: "The last day cannot be before the first event" }
+    rule.end = "until"
+    rule.until = until
+  } else rule.end = "never"
+  if (allDay !== true) rule.firstDate = dayText(startMs)
+  return { ok: true, rule: rule }
+}
+
+// Why a form for an event of a series cannot be saved as it is, or "": the part it is for must be chosen and blessed;
+// all of a series keeps its days and its kind (its repeat is changed in Outlook), and one event names no people.
+function scopeRefusal(event, fields) {
+  var scope = String(fields && fields.scope || "")
+  if (scope !== "occurrence" && scope !== "series") return "Choose whether to change this event or all of them"
+  if (scope === "occurrence")
+    return event.exchangeMeeting === true && fields.guestEmails !== undefined
+      ? "The guests of a repeating meeting are changed for all of its events" : ""
+  if (event.seriesEditable !== true) return "This repeating series can only be changed one event at a time"
+  var start = event.start || { ms: 0, allDay: false }
+  var end = event.end ? event.end.ms : start.ms
+  if ((fields.allDay === true) !== (start.allDay === true))
+    return "Every event of a series keeps being " + (start.allDay === true ? "a whole day" : "at a time of day")
+  if (start.allDay === true ? fields.start !== start.ms || fields.end !== end
+      : dayText(fields.start) !== dayText(start.ms) || dayGap(fields.start, fields.end) !== dayGap(start.ms, end))
+    return "To move every event to other days, change its repeat in Outlook"
+  if (start.allDay !== true && event.seriesTimeEditable !== true && (fields.start !== start.ms || fields.end !== end))
+    return "The time of every event can only be changed in Outlook"
+  return ""
+}
+
+// What the form says under the dates of all of a series: every event keeps its own day, and its time too where the
+// backend did not say it may change here (`timeEditable`: the series repeats in this computer's zone, by a rule read).
+function seriesWhenLine(event) {
+  if (event && event.start && event.start.allDay === true) return "Every event keeps its own day."
+  return event && event.seriesTimeEditable === true ? "Every event keeps its own day; only the time changes."
+    : "Every event keeps its own day and time. Change the time of all of them in Outlook: the series repeats in "
+      + "another time zone than this computer's, or by a rule Omamail does not read."
+}
+
+// What a new time of every event costs where some events were changed on their own: the server drops those changes
+// when the series' time changes (seen live; Outlook warns of it too), so the form says so before it is saved. "" for
+// any other form, a change of the title or place of every event included, which keeps them. `fields` holds `scope`,
+// `allDay`, `startMs` and `endMs` as the form has them.
+function exceptionsLine(event, fields) {
+  if (!event || event.isSeries !== true || !fields || fields.scope !== "series" || fields.allDay === true) return ""
+  if (!(event.seriesExceptions > 0) || !event.start || event.start.allDay === true) return ""
+  var end = event.end ? event.end.ms : event.start.ms
+  function minutes(from, to) { return Math.round((to - from) / 60000) }
+  var moved = clockText(fields.startMs) !== clockText(event.start.ms)
+    || minutes(fields.startMs, fields.endMs) !== minutes(event.start.ms, end)
+  return moved ? "Changing the time of every event also undoes changes made to single events." : ""
+}
+
+// The repeat in a sentence's own words ("every week on Monday"), or "" where the backend gave none.
+function repeatWords(event) {
+  var text = String(event && event.repeatText || "")
+  return text === "" || text.indexOf("Repeats") === 0 ? "" : text.charAt(0).toLowerCase() + text.substring(1)
+}
+
+// How many calendar days later than `from` the day of `to` is.
+function dayGap(from, to) { return Math.round((localMidnight(dayText(to)) - localMidnight(dayText(from))) / 86400000) }
+
+// The line under an event that repeats: how, in the backend's words, or "Repeating event" until they are read.
+function repeatLine(event) {
+  if (!event || event.isSeries !== true) return ""
+  var text = String(event.repeatText || "")
+  return text === "" ? "Repeating event" : text.indexOf("Repeats") === 0 ? text : "Repeats · " + text
+}
+
 // ------------------------------------------------------------------ detail and answers
 
 // How the owner's own answer and a person's read in the attendee rows (`Calendar.attendeeRows`).
@@ -246,22 +422,28 @@ function sameAsDrawn(event, detail) {
   return start.allDay === true || (detail.startMs === start.ms && detail.endMs === (event.end || {}).ms)
 }
 
+// The people a detail lists, as the attendee rows draw them.
+function attendeeRows(people) {
+  var rows = []
+  var list = Array.isArray(people) ? people : []
+  for (var i = 0; i < list.length; i++) {
+    var who = list[i] || {}
+    rows.push({
+      email: String(who.email || ""), displayName: String(who.name || ""),
+      responseStatus: STATUS.hasOwnProperty(who.response) ? STATUS[who.response] : "unknown",
+      optional: who.kind === "optional", resource: who.kind === "resource", self: who.self === true
+    })
+  }
+  return rows
+}
+
 // The event with the detail laid over it, or null for something that is no detail. `stale` says the item is
 // not what the list drew: a write to it still names the version drawn (and is refused as a conflict, never made
 // over the newer one) and it cannot be answered from that screen. `answerKey` is the detail's own version, which
 // an answer names. The lock is the stricter of the two reads: the fresh one can see people the list could not.
 function withDetail(event, detail) {
   if (!event || !detail || typeof detail !== "object" || typeof detail.title !== "string") return null
-  var people = Array.isArray(detail.attendees) ? detail.attendees : []
-  var attendees = []
-  for (var i = 0; i < people.length; i++) {
-    var who = people[i] || {}
-    attendees.push({
-      email: String(who.email || ""), displayName: String(who.name || ""),
-      responseStatus: STATUS.hasOwnProperty(who.response) ? STATUS[who.response] : "unknown",
-      optional: who.kind === "optional", resource: who.kind === "resource", self: who.self === true
-    })
-  }
+  var attendees = attendeeRows(detail.attendees)
   var stale = !sameAsDrawn(event, detail)
   // A meeting the server itself flags cancelled is left out of the list the reminders are read from, so
   // none will come: it shows none.
@@ -291,6 +473,29 @@ function withDetail(event, detail) {
   // as one, and not answered from here.
   merged.cancellationUnplaced = received && !merged.cancelledByOrganizer && detail.unplacedCancellation === true
   merged.canRemove = detail.canRemove === true && !stale && merged.answerKey !== ""
+  // What the backend read of the series: how it repeats, its version and what may be done to all of it; a stale
+  // detail offers none of it, and nothing without a version to name.
+  var series = detail.series && typeof detail.series === "object" ? detail.series : null
+  merged.isSeries = event.isSeries === true || detail.kind === "occurrence" || detail.kind === "exception"
+  merged.repeatText = series ? String(series.text || "Repeats") : ""
+  merged.seriesKey = series ? String(series.key || "") : ""
+  var blessed = series !== null && !stale && merged.seriesKey !== ""
+  // The people a change or a cancellation of all of it tells are the series' (its master's), which this event's own
+  // (an exception's) need not be; all of it is not changed from here unless every one of them was read.
+  merged.seriesAttendees = series ? attendeeRows(series.attendees) : []
+  var cut = series !== null && series.attendeesCut === true
+  merged.seriesEditable = blessed && series.editable === true && !cut
+  merged.seriesTimeEditable = merged.seriesEditable && series.timeEditable === true
+  merged.seriesLockReason = blessed && !merged.seriesEditable
+    ? (cut ? LOCKS.guests : lockReason({ lock: series.lock, meeting: detail.meeting, response: detail.response })) : ""
+  merged.seriesCanRespond = blessed && series.canRespond === true
+  // How many of its events were changed on their own, which a new time of every event undoes.
+  merged.seriesExceptions = series !== null && typeof series.exceptions === "number" ? Math.max(0, Math.floor(series.exceptions)) : 0
+  // Its organizer cancelled the series, and all of it may go at once: how many events they cancelled one by one,
+  // 0 when they cancelled it whole. One event cancelled is that event's own removal, never all of it.
+  var counted = typeof detail.cancelledEvents === "number" ? Math.floor(detail.cancelledEvents) : 0
+  merged.canRemoveSeries = blessed && merged.canRemove && detail.canRemoveSeries === true && counted !== 1
+  merged.cancelledEvents = merged.canRemoveSeries && counted >= 2 ? counted : 0
   var locked = lockReason(detail)
   if (locked !== "") merged.lockReason = locked
   if (stale) merged.stale = true
@@ -316,18 +521,35 @@ function stableKey(event) {
     + String(event && event.start && event.start.ms || "")
 }
 
-// An answer as it is sent: `send` is always true from here, the organizer is told, as the mail card does.
-function respondParams(accountId, event, answer) {
-  return { accountId: String(accountId || ""), id: String(event.exchangeId || ""),
-    changeKey: String(event.answerKey || ""), response: ANSWERS[answer] || "", send: true }
+// An answer as it is sent: `send` is always true from here, the organizer is told, as the mail card does. All the
+// events of a series are answered through it (`scope` `series`, the series' version); one event by its own.
+function respondParams(accountId, event, answer, scope) {
+  var whole = scope === "series"
+  var params = scoped(accountId, event, whole ? event.seriesKey : event.answerKey, whole ? "series" : "")
+  params.response = ANSWERS[answer] || ""
+  params.send = true
+  return params
 }
 
-// A decline is the answer, sent, and the meeting leaving the calendar, as Outlook does; one event of a series
-// stays on it, declined (the backend takes a single meeting off and nothing else).
+// A decline is the answer, sent, and the meeting leaving the calendar, as Outlook does: a single meeting or a whole
+// series. One event of a series stays on it, declined.
 function declineParams(accountId, event) {
-  var params = respondParams(accountId, event, "declined")
-  if (String(event.exchangeKind || "") === "single") params.remove = true
+  var whole = deleteScopeOf(event) === "series"
+  var params = respondParams(accountId, event, "declined", whole ? "series" : "")
+  if (String(event.exchangeKind || "") === "single" || whole) params.remove = true
   return params
+}
+
+// What an event of a series may be deleted, cancelled, declined or removed as: all of it (first) only where the
+// backend blessed it (changed, answered, or for a removal cancelled by its organizer), and this one.
+function deleteScopes(event) {
+  var kind = deleteKind(event)
+  if (!event || event.isSeries !== true || kind === "") return []
+  if (kind === "remove") return event.canRemoveSeries === true ? ["series", "occurrence"] : ["occurrence"]
+  var whole = kind === "decline" ? event.seriesCanRespond === true : event.seriesEditable === true
+  // All of a meeting is cancelled only for the people the question can name.
+  if (kind === "cancel" && peopleOf(event, "series").length === 0) whole = false
+  return whole ? ["series", "occurrence"] : ["occurrence"]
 }
 
 // What deleting this event is: "" when it may not be, `appointment` (a personal one, nobody told), `remove`
@@ -349,7 +571,10 @@ function deleteRefusal(source, event) {
   if (source.readOnly === true) return "This calendar is read-only"
   var kind = deleteKind(event)
   if (kind === "") return String(event && event.lockReason || "") || LOCKS.unknown
-  var key = kind === "decline" || kind === "remove" ? event.answerKey : event.exchangeKey
+  var scope = deleteScopeOf(event), scopes = deleteScopes(event)
+  // A part of a series that was not offered is no choice, and neither is none where some were.
+  if ((scopes.length > 0 || scope !== "") && scopes.indexOf(scope) < 0) return "Choose whether it is this event or all of them"
+  var key = scope === "series" ? event.seriesKey : kind === "decline" || kind === "remove" ? event.answerKey : writeKey(event, scope)
   return String(key || "") === "" ? "Refresh this event before changing it" : ""
 }
 
@@ -359,12 +584,12 @@ function deleteRefusal(source, event) {
 function deleteRequest(event) {
   var kind = deleteKind(event)
   var name = String(event && event.summary || "Untitled event")
+  var scopes = deleteScopes(event)
+  if (scopes.length > 0) return seriesRequest(event, kind, name, scopes)
   if (kind === "cancel") {
-    var emails = peopleOf(event).map(function(who) { return String(who.email) })
-    var count = peopleText(emails.length)
-    return confirmation(name, "Cancel \"" + name + "\"?", "This cancels the meeting for " + count + ": "
-      + whoText(emails) + ". " + (emails.length === 1 ? "They are" : "Each of them is") + " sent a cancellation.",
-      "Cancel meeting for " + count)
+    var emails = emailsOf(peopleOf(event))
+    return confirmation(name, "Cancel \"" + name + "\"?", "This cancels the meeting for " + sentTo(emails, "a cancellation"),
+      "Cancel meeting for " + peopleText(emails.length))
   }
   if (kind === "remove")
     return confirmation(name, "Remove \"" + name + "\" from your calendar?", event.cancelledByOrganizer === true
@@ -376,6 +601,38 @@ function deleteRequest(event) {
     single ? "This tells the organizer you decline. The meeting is removed from your calendar."
       : "This tells the organizer you decline this event. It stays on your calendar, declined.",
     single ? "Decline and remove" : "Decline")
+}
+
+// The confirmation for an event of a series: one button for each part it may be for (all of it first), saying which,
+// and `request.choice` is that part. The way out has the focus. A cancellation names who each part tells: this
+// event's people, and the series' (its master's) for all of it, apart where they differ.
+function seriesRequest(event, kind, name, scopes) {
+  var both = scopes.length === 2
+  var how = repeatWords(event)
+  var every = "every event of the series" + (how !== "" ? " (" + how + ")" : "")
+  var title = (kind === "cancel" ? "Cancel" : kind === "decline" ? "Decline" : kind === "remove" ? "Remove" : "Delete")
+    + " \"" + name + "\"" + (kind === "remove" ? " from your calendar?" : "?")
+  var one = emailsOf(peopleOf(event)), all = emailsOf(peopleOf(event, "series"))
+  var events = Number(event.cancelledEvents) || 0
+  var said = {
+    cancel: [!both ? "This cancels this event of the meeting for " + sentTo(one, "a cancellation")
+      : sameList(one, all) ? "This cancels this event, or " + every + ", for " + sentTo(one, "a cancellation")
+      : "This cancels this event for " + sentTo(one, "a cancellation") + " Cancelling " + every + " instead cancels it for "
+        + sentTo(all, "a cancellation"),
+      "Cancel all events for " + peopleText(all.length), "Cancel this event for " + peopleText(one.length), "Keep meeting"],
+    decline: [both ? "This tells the organizer you decline. Declining " + every + " removes the series from your calendar; "
+        + "declining this event keeps it there, declined."
+      : "This tells the organizer you decline this event. It stays on your calendar, declined.",
+      "Decline all events and remove", "Decline this event", "Keep meeting"],
+    remove: [!both ? "The organizer cancelled this event of the series. Nobody is told. The rest of the series stays on your calendar."
+      : "The organizer cancelled " + (events > 0 ? events + " events of this series" : "this series") + (how !== "" ? " (" + how + ")" : "")
+        + ". Nobody is told. Remove " + (events > 0 ? "all " + events : "all of it") + " from your calendar, or only this event.",
+      events > 0 ? "Remove all " + events + " cancelled events" : "Remove this series from your calendar", "Remove this event", "Keep meeting"],
+    appointment: ["This event repeats" + (how !== "" ? " " + how : "") + ". " + (both ? "Delete this event, or every event of the series."
+      : "Delete this event.") + " Deleted events move to Deleted Items. Nobody is told.", "Delete all events", "Delete this event", "Keep event"]
+  }[kind]
+  return { kind: "event", name: name, title: title, message: said[0], dismiss: said[3], focus: "dismiss",
+    choices: scopes.map(function(scope) { return { value: scope, label: said[scope === "series" ? 1 : 2] } }) }
 }
 
 // A question that reaches people, or takes something off the calendar: its title, the sentence that names who is
@@ -412,6 +669,10 @@ function writeError(error) {
   if (code === "exchange_calendar_locked") return LOCKS.unknown
   if (code === "exchange_calendar_unconfirmed")
     return "The server did not confirm the change. Look at your calendar before trying again"
+  if (code === "exchange_calendar_zone_unknown")
+    return "This computer's time zone is not one Omamail can give the server, so a repeating event would move an hour when the clocks change. Make it in Outlook"
+  if (code === "exchange_calendar_zone_differs")
+    return "This series repeats in another time zone than this computer's, so its time can only be changed in Outlook"
   if (code === "exchange_message_not_found") return "That event is no longer in your calendar. Refresh and look again"
   if (code === "Invalid params" || code === "invalid_params")
     return "That event cannot be saved as it is. Check its title, dates and times"
@@ -462,10 +723,11 @@ function guestList(text, accountId) {
 }
 
 // The people on a meeting other than the owner and any room, as its detail read them: who a question names
-// when it says who will be told. An event whose detail was not read has none. The list is walked by its
-// length, so it reads the same after crossing a signal, where Qt 6.12 hands it over as a sequence.
-function peopleOf(event) {
-  var all = event && event.attendees, out = []
+// when it says who will be told; for all of a series (`scope` `series`), its master's. An event whose detail was not
+// read has none. The list is walked by its length, so it reads the same after crossing a signal, where Qt 6.12
+// hands it over as a sequence.
+function peopleOf(event, scope) {
+  var all = event && (scope === "series" ? event.seriesAttendees : event.attendees), out = []
   var count = all && typeof all.length === "number" ? all.length : 0
   for (var i = 0; i < count; i++) {
     var who = all[i] || {}
@@ -474,15 +736,24 @@ function peopleOf(event) {
   return out
 }
 
-// What the guest field holds for a meeting being changed: everybody but the owner, who cannot name themselves.
-function guestText(event) {
-  return peopleOf(event).map(function(who) { return String(who.email) }).join(", ")
+function emailsOf(people) { return people.map(function(who) { return String(who.email) }) }
+
+// Whether two lists name the same people, in any order or case.
+function sameList(one, other) {
+  function key(list) { return list.map(function(email) { return String(email).toLowerCase() }).sort().join("\n") }
+  return key(one) === key(other)
+}
+
+// What the guest field holds for a meeting being changed: everybody but the owner, who cannot name themselves; for
+// all of a series, the series' people.
+function guestText(event, scope) {
+  return emailsOf(peopleOf(event, scope)).join(", ")
 }
 
 // The people as the typed list makes them: whoever was optional stays optional, everybody else is required.
-function meetingPeople(event, emails) {
+function meetingPeople(event, emails, scope) {
   var optional = {}
-  peopleOf(event).forEach(function(who) { if (who.optional === true) optional[String(who.email).toLowerCase()] = true })
+  peopleOf(event, scope).forEach(function(who) { if (who.optional === true) optional[String(who.email).toLowerCase()] = true })
   var required = [], extra = []
   emails.forEach(function(email) { (optional[email.toLowerCase()] === true ? extra : required).push(email) })
   return { required: required, optional: extra }
@@ -497,30 +768,63 @@ function meetingCreateParams(accountId, built, emails) {
 }
 
 // A change of a meeting the owner organises, the people named only when the field changed (`emails` null
-// leaves them), and the word that the update is sent to everybody on it.
+// leaves them), and the word that the update is sent to everybody on it. All of a series also names the people the
+// question named (`seriesAttendees`), which the backend holds against the master's before anybody is told.
 function meetingUpdateParams(accountId, event, built, emails) {
   var params = updateParams(accountId, event, built)
   params.sendUpdates = true
+  var scope = String(params.scope || "")
+  if (scope === "series") params.seriesAttendees = emailsOf(peopleOf(event, scope))
   if (emails) {
-    var people = meetingPeople(event, emails)
+    var people = meetingPeople(event, emails, scope)
     params.requiredAttendees = people.required
     params.optionalAttendees = people.optional
   }
   return params
 }
 
+// A cancellation, and for all of a series the people its question named (`seriesAttendees`, as for a change).
 function cancelParams(accountId, event) {
-  return { accountId: String(accountId || ""), id: String(event.exchangeId || ""),
-    changeKey: String(event.exchangeKey || ""), sendCancellations: true }
+  var scope = deleteScopeOf(event)
+  var params = scoped(accountId, event, writeKey(event, scope), scope)
+  params.sendCancellations = true
+  if (scope === "series") params.seriesAttendees = emailsOf(peopleOf(event, scope))
+  return params
 }
 
-// Taking a cancelled or declined meeting off the calendar names the detail's own version.
+// Taking a cancelled or declined meeting off the calendar names the detail's own version and, for an event of a
+// series, `scope` `occurrence`; all of a series its organizer cancelled, the series' and `scope` `series`.
 function removeParams(accountId, event) {
-  return { accountId: String(accountId || ""), id: String(event.exchangeId || ""),
-    changeKey: String(event.answerKey || "") }
+  var scope = deleteScopeOf(event)
+  var whole = scope === "series" && event.canRemoveSeries === true
+  return scoped(accountId, event, whole ? event.seriesKey : event.answerKey, whole ? "series" : scope === "occurrence" ? scope : "")
+}
+
+// What a removal of a cancelled series left to say: the backend stops at a bound and says more are left, or says the
+// series itself is still there, which the person is told so they look. "" when nothing needs saying.
+function removeNotice(result) {
+  if (!result || (result.more !== true && result.seriesLeft !== true)) return ""
+  var count = Number(result.count)
+  var done = isFinite(count) && count > 0 ? Math.floor(count) : 0
+  return (done > 0 ? "Removed " + done + " cancelled event" + (done === 1 ? "" : "s") + ". " : "")
+    + (result.more === true ? "More are left on your calendar. Open one and remove it again"
+      : "The series itself is still on your calendar. Look at your calendar before removing it again")
+}
+
+// What a failed removal says: it mails nobody, so an outcome nobody knows is not "the guests may have been told".
+function removeError(error) {
+  if (Protocol.errorCode(error) === "exchange_calendar_unconfirmed")
+    return "The server did not confirm it. Look at your calendar before trying again"
+  return meetingError(error)
 }
 
 function peopleText(count) { return count === 1 ? "1 person" : count + " people" }
+
+// "2 people: ada@example.org, bob@example.org. Each of them is sent a cancellation."
+function sentTo(emails, what) {
+  return peopleText(emails.length) + ": " + whoText(emails) + ". " + (emails.length === 1 ? "They are" : "Each of them is")
+    + " sent " + what + "."
+}
 
 // "ada@example.org, bob@example.org and 3 more": the first few, so a long list is still named.
 function whoText(emails) {
@@ -529,45 +833,66 @@ function whoText(emails) {
 }
 
 // Whether a change of a meeting tells its people: anything it names but the owner's own reminder, which the
-// backend writes telling nobody.
+// backend writes telling nobody (and the people a question named, which change nothing).
 function meetingMails(params) {
   for (var key in params)
-    if (["accountId", "id", "changeKey", "sendUpdates", "reminderMinutes"].indexOf(key) < 0) return true
+    if (["accountId", "id", "changeKey", "sendUpdates", "reminderMinutes", "scope", "seriesAttendees"].indexOf(key) < 0) return true
   return false
 }
 
-// The guests a field names, or null when they are the people already on the meeting, in any order or case: the
-// backend compares the same way and writes nothing for them, so nothing is asked about and nothing named.
-function changedGuests(event, emails) {
+// The guests a field names, or null when they are the people already on the meeting (or on all of a series, for
+// `scope` `series`), in any order or case: the backend compares the same way and writes nothing for them, so
+// nothing is asked about and nothing named.
+function changedGuests(event, emails, scope) {
   if (!emails) return null
-  function key(list) { return list.map(function(email) { return String(email).toLowerCase() }).sort().join("\n") }
-  return key(peopleOf(event).map(function(who) { return who.email })) === key(emails) ? null : emails
+  return sameList(emailsOf(peopleOf(event, scope)), emails) ? null : emails
+}
+
+// A form for an event of a series as `scopeRefusal` judges it, from what `Calendar.updateEvent` built of it.
+function scopeFields(fields, built) {
+  return { scope: fields.scope, allDay: built.allDay, start: built.fields.start, end: built.fields.end,
+    guestEmails: fields.guestEmails }
 }
 
 // What saving a form tells people, as the question the owner answers first, or null when it tells nobody (an
 // appointment, a change of the owner's reminder alone) or the write will refuse it and say why (an address that
-// is not one, a meeting left with nobody, a repeating new event). `event` is the meeting being changed, null for a
+// is not one, a meeting left with nobody, a repeat the server cannot be told). `event` is the meeting being changed, null for a
 // new event; `fields` is what the composer holds (`guestEmails` undefined for a guest field nobody changed).
 function reachRequest(accountId, event, fields) {
   var name = String(fields && fields.title || event && event.summary || "Untitled event")
   var typed = fields && fields.guestEmails !== undefined ? guestList(fields.guestEmails, accountId) : null
   if (typed && (!typed.ok || typed.emails.length === 0)) return null
   if (!event) {
-    if (!typed || fields.recurrence && fields.recurrence.enabled === true) return null
+    if (!typed) return null
+    // A repeat the server cannot be told is refused in its own words, before any question.
+    var repeating = !!fields.recurrence && fields.recurrence.enabled === true
+    if (repeating && !repeatRule(fields.recurrence, fields.startMs, fields.allDay).ok) return null
     var count = peopleText(typed.emails.length)
+    var repeats = repeating ? " The meeting repeats, so the invitation is for every event of it." : ""
     return confirmation(name, "Invite " + count + " to \"" + name + "\"?",
-      "This sends an invitation to " + count + ": " + whoText(typed.emails) + ".", "Send invitation to " + count,
+      "This sends an invitation to " + count + ": " + whoText(typed.emails) + "." + repeats, "Send invitation to " + count,
       "Keep editing")
   }
   if (event.exchangeMeeting !== true) return null
   var built = Calendar.updateEvent(fields, event, Date.now())
-  var guests = typed ? changedGuests(event, typed.emails) : null
-  if (!built.ok || !meetingMails(meetingUpdateParams(accountId, event, built, guests))) return null
-  var told = peopleOf(event).map(function(who) { return String(who.email) })
+  if (!built.ok) return null
+  // A part of a series the write refuses (none chosen, people for one event, other days) is said in its own words.
+  var scope = event.isSeries === true ? String(fields.scope || "") : ""
+  if (event.isSeries === true && scopeRefusal(event, scopeFields(fields, built)) !== "") return null
+  built.scope = scope
+  var guests = typed ? changedGuests(event, typed.emails, scope) : null
+  if (!meetingMails(meetingUpdateParams(accountId, event, built, guests))) return null
+  // All of a series tells the series' people, this event its own.
+  var told = emailsOf(peopleOf(event, scope))
+  if (told.length === 0) return null
   var wanted = guests || told
   var kept = wanted.map(function(email) { return email.toLowerCase() })
   var removed = told.filter(function(email) { return kept.indexOf(email.toLowerCase()) < 0 })
-  var message = "This tells " + peopleText(wanted.length) + " the meeting changed: " + whoText(wanted) + "."
+  // A meeting that repeats says which part of it changed.
+  var how = repeatWords(event)
+  var what = scope === "occurrence" ? "this event of the meeting"
+    : scope === "series" ? "every event of the meeting" + (how !== "" ? " (" + how + ")" : "") : "the meeting"
+  var message = "This tells " + peopleText(wanted.length) + " " + what + " changed: " + whoText(wanted) + "."
   if (removed.length > 0) message += " It tells " + whoText(removed) + " they were removed."
   var label = removed.length > 0 ? "Send to " + peopleText(wanted.length + removed.length)
     : "Send update to " + peopleText(wanted.length)

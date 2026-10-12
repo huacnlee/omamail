@@ -2,7 +2,7 @@
 //! what is refused before anything is sent, and what a failure proves.
 
 use super::super::xml::Node;
-use super::super::{Appointment, Client, Edit, MeetingEdit, Reminder, When};
+use super::super::{Appointment, Client, Edit, MeetingEdit, Reminder, Scope, When};
 use super::calendar::{Cal, Shared, cal_id, calendar, ews, october, operation, refused, secs};
 use super::detail::INVITED;
 use super::fake::{Out, Soap};
@@ -50,6 +50,7 @@ fn edit(title: Option<&str>, required: Option<&[&str]>, optional: Option<&[&str]
 
 fn lunch() -> Appointment {
     Appointment {
+        recurrence: None,
         title: "Lunch".into(),
         location: "Canteen".into(),
         notes: None,
@@ -129,7 +130,7 @@ async fn change(
     wanted: MeetingEdit,
 ) -> Result<(bool, String, Node), &'static str> {
     let done = client
-        .change_meeting(&cal_id(1), key, &wanted, OWNER, "UTC")
+        .change_meeting(&cal_id(1), key, &wanted, OWNER, "UTC", None, None)
         .await?;
     Ok((done.sent, done.written.change_key, written(store)))
 }
@@ -219,7 +220,7 @@ async fn a_change_tells_everybody_and_writes_a_list_only_whole_only_when_it_chan
         edit(None, Some(&[]), Some(&[])),
     ] {
         let refused = client
-            .change_meeting(&cal_id(1), "CK1v4", &wanted, OWNER, "UTC")
+            .change_meeting(&cal_id(1), "CK1v4", &wanted, OWNER, "UTC", None, None)
             .await;
         assert_eq!(refused.err(), Some("invalid_params"));
     }
@@ -235,6 +236,8 @@ async fn a_change_tells_everybody_and_writes_a_list_only_whole_only_when_it_chan
             &edit(None, Some(&[]), None),
             OWNER,
             "UTC",
+            None,
+            None,
         )
         .await;
     assert_eq!(emptied.err(), Some("invalid_params"));
@@ -279,9 +282,19 @@ async fn nothing_the_owner_does_not_organise_whole_is_changed_or_cancelled() {
     for n in (1..=11).chain([20, 21]) {
         let key = format!("CK{n}v1");
         let changed = client
-            .change_meeting(&cal_id(n), &key, &edit(Some("x"), None, None), OWNER, "UTC")
+            .change_meeting(
+                &cal_id(n),
+                &key,
+                &edit(Some("x"), None, None),
+                OWNER,
+                "UTC",
+                None,
+                None,
+            )
             .await;
-        let cancelled = client.cancel_meeting(&cal_id(n), &key, None, OWNER).await;
+        let cancelled = client
+            .cancel_meeting(&cal_id(n), &key, None, OWNER, None, None)
+            .await;
         assert_eq!((changed.err(), cancelled.err()), (LOCKED, LOCKED), "{n}");
     }
     // Another version is a conflict, never retried with the fresh one.
@@ -292,10 +305,12 @@ async fn nothing_the_owner_does_not_organise_whole_is_changed_or_cancelled() {
             &edit(Some("x"), None, None),
             OWNER,
             "UTC",
+            None,
+            None,
         )
         .await;
     let cancelled = client
-        .cancel_meeting(&cal_id(30), "CK30v0", None, OWNER)
+        .cancel_meeting(&cal_id(30), "CK30v0", None, OWNER, None, None)
         .await;
     let conflict = Some("exchange_calendar_conflict");
     assert_eq!((stale.err(), cancelled.err()), (conflict, conflict));
@@ -306,7 +321,7 @@ async fn nothing_the_owner_does_not_organise_whole_is_changed_or_cancelled() {
 async fn a_cancellation_tells_everybody_once_in_the_organizers_words() {
     let (fake, mut client, store) = calendar(vec![mine(1)], |_| None).await;
     let told = client
-        .cancel_meeting(&cal_id(1), "CK1v1", Some("Sorry"), OWNER)
+        .cancel_meeting(&cal_id(1), "CK1v1", Some("Sorry"), OWNER, None, None)
         .await;
     assert_eq!(told, Ok(2), "the owner is not among those told");
     let create = written(&store);
@@ -325,7 +340,7 @@ async fn a_cancellation_tells_everybody_once_in_the_organizers_words() {
         })
         .await;
         let told = client
-            .cancel_meeting(&cal_id(1), "CK1v1", None, OWNER)
+            .cancel_meeting(&cal_id(1), "CK1v1", None, OWNER, None, None)
             .await;
         assert_eq!(told.err(), Some("exchange_calendar_unconfirmed"));
         assert_eq!(fake.log.count("CreateItem"), 1);
@@ -344,12 +359,22 @@ async fn a_cancelled_or_declined_meeting_leaves_the_calendar_and_nobody_is_maile
     ];
     let (fake, mut client, store) = calendar(items, |_| None).await;
     store.lock().unwrap().cancelled = vec![("uid-1@example.org".into(), None)];
+    // A single meeting named as one event of a series is not what the screen drew: nothing done.
+    let one = client
+        .remove_meeting(&cal_id(1), "CK1v1", Some(Scope::Occurrence))
+        .await;
+    let writes =
+        |fake: &super::fake::Fake| fake.log.count("CreateItem") + fake.log.count("DeleteItem");
+    assert_eq!(
+        (one.err(), writes(&fake)),
+        (Some("exchange_calendar_conflict"), 0)
+    );
     // Another version is a conflict, with nothing done.
-    let stale = client.remove_meeting(&cal_id(1), "CK1v0").await;
+    let stale = client.remove_meeting(&cal_id(1), "CK1v0", None).await;
     assert_eq!(stale.err(), Some("exchange_calendar_conflict"));
     // The cancellation is processed: a RemoveItem of the message, saved and sent to nobody.
     assert_eq!(
-        client.remove_meeting(&cal_id(1), "CK1v1").await,
+        client.remove_meeting(&cal_id(1), "CK1v1", None).await,
         Ok("cancelled")
     );
     let create = written(&store);
@@ -361,7 +386,9 @@ async fn a_cancelled_or_declined_meeting_leaves_the_calendar_and_nobody_is_maile
     // Flagged by the server, or declined: moved to Deleted Items with nobody told.
     for (n, why) in [(2, "cancelled"), (3, "declined")] {
         assert_eq!(
-            client.remove_meeting(&cal_id(n), &format!("CK{n}v1")).await,
+            client
+                .remove_meeting(&cal_id(n), &format!("CK{n}v1"), None)
+                .await,
             Ok(why)
         );
         let delete = written(&store);
@@ -373,7 +400,9 @@ async fn a_cancelled_or_declined_meeting_leaves_the_calendar_and_nobody_is_maile
     }
     // An invitation nobody cancelled or declined, and the owner's own meeting, stay.
     for n in [4, 5] {
-        let kept = client.remove_meeting(&cal_id(n), &format!("CK{n}v1")).await;
+        let kept = client
+            .remove_meeting(&cal_id(n), &format!("CK{n}v1"), None)
+            .await;
         assert_eq!(kept.err(), Some("exchange_calendar_not_removable"), "{n}");
     }
     assert_eq!(
@@ -401,7 +430,10 @@ async fn a_cancelled_or_declined_meeting_leaves_the_calendar_and_nobody_is_maile
         let answer = move |soap: &Soap| (soap.op == "CreateItem").then(out);
         let (fake, mut client, store) = calendar(vec![invited(1, "")], answer).await;
         store.lock().unwrap().cancelled = vec![("uid-1@example.org".into(), None)];
-        assert_eq!(client.remove_meeting(&cal_id(1), "CK1v1").await, expected);
+        assert_eq!(
+            client.remove_meeting(&cal_id(1), "CK1v1", None).await,
+            expected
+        );
         assert_eq!(
             (fake.log.count("CreateItem"), fake.log.count("DeleteItem")),
             (1, deletes)
@@ -414,7 +446,7 @@ async fn a_cancelled_or_declined_meeting_leaves_the_calendar_and_nobody_is_maile
     );
     let (fake, mut client, _) = calendar(vec![elsewhere], |_| None).await;
     assert_eq!(
-        client.remove_meeting(&cal_id(1), "CK1v1").await.err(),
+        client.remove_meeting(&cal_id(1), "CK1v1", None).await.err(),
         LOCKED
     );
     assert_eq!(writes(&fake), 0);
@@ -426,7 +458,7 @@ async fn a_cancelled_or_declined_meeting_leaves_the_calendar_and_nobody_is_maile
         Some("2026-10-05T09:00:00Z".into()),
     );
     store.lock().unwrap().cancelled = vec![one_event];
-    let doubt = client.remove_meeting(&cal_id(1), "CK1v1").await;
+    let doubt = client.remove_meeting(&cal_id(1), "CK1v1", None).await;
     assert_eq!(doubt.err(), Some("exchange_calendar_not_removable"));
     // A cancellation the server says is out of date (the organizer took the owner off and put them
     // back): the meeting goes on, and nothing is removed.
@@ -435,7 +467,7 @@ async fn a_cancelled_or_declined_meeting_leaves_the_calendar_and_nobody_is_maile
         let mut held = store.lock().unwrap();
         (held.cancelled, held.stale) = (vec![stale], vec!["uid-1@example.org".into()]);
     }
-    let live = client.remove_meeting(&cal_id(1), "CK1v1").await;
+    let live = client.remove_meeting(&cal_id(1), "CK1v1", None).await;
     assert_eq!(live.err(), Some("exchange_calendar_not_removable"));
     assert_eq!(writes(&fake), 0);
 }

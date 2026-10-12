@@ -355,8 +355,11 @@ Item {
       var wanted = ExchangeEvents.reminderChoice(fields, false)
       if (!wanted.ok) { eventCreated(false, wanted.error); return false }
       built.reminderMinutes = wanted.minutes
-      // A repeating event is made in Outlook: refused before anybody is asked about guests.
-      if (built.recurring) { eventCreated(false, "A repeating event on an Exchange calendar is made in Outlook"); return false }
+      // A repeat the server can be told (`repeatRule`); one it cannot is refused in the form's own words, before
+      // anybody is asked about guests.
+      var rule = ExchangeEvents.repeatRule(fields.recurrence, built.fields.start, built.allDay)
+      if (!rule.ok) { eventCreated(false, rule.error); return false }
+      built.exchangeRule = rule.rule
       // Guests are mailed an invitation they have not asked for: not before the owner has been told who and
       // said so (`reachRequest` asks; `confirmedSend` is the composer saying it was answered). A list that is
       // not one is said first, in its own words.
@@ -381,12 +384,11 @@ Item {
     eventSource = source
     eventDraft = built
     creatingEvent = true
-    if ((source.kind === "microsoft" || source.kind === "exchange") && built.recurring) {
+    if (source.kind === "microsoft" && built.recurring) {
       creatingEvent = false
       eventSource = null
       eventDraft = null
-      eventCreated(false, "A repeating event on " + (source.kind === "exchange" ? "an Exchange" : "a Microsoft")
-        + " calendar is made in Outlook")
+      eventCreated(false, "A repeating event on a Microsoft calendar is made in Outlook")
       return false
     }
     if (source.kind === "google") createGoogleEvent()
@@ -446,16 +448,22 @@ Item {
       var changed = ExchangeEvents.reminderChoice(fields, true)
       if (!changed.ok) { eventUpdated(false, changed.error); return false }
       built.reminderMinutes = changed.minutes
+      // An event of a series is changed as this event or as all of them, which the form must have said.
+      if (event.isSeries === true) {
+        var unscoped = ExchangeEvents.scopeRefusal(event, ExchangeEvents.scopeFields(fields, built))
+        if (unscoped !== "") { eventUpdated(false, unscoped); return false }
+        built.scope = fields.scope
+      }
       // A meeting the owner organises is changed with its people told, which is asked first, and the people
       // must be known, because the question names them; a list that is not one, or is nobody, is said before
       // that. A change of the owner's reminder alone tells nobody and asks nothing. An appointment stays one,
       // whatever the form says.
       if (event.exchangeMeeting === true) {
-        if (ExchangeEvents.peopleOf(event).length === 0) { eventUpdated(false, ExchangeEvents.PEOPLE_UNKNOWN); return false }
+        if (ExchangeEvents.peopleOf(event, built.scope).length === 0) { eventUpdated(false, ExchangeEvents.PEOPLE_UNKNOWN); return false }
         var typed = fields.guestEmails === undefined ? null : ExchangeEvents.guestList(fields.guestEmails, source.accountId)
         if (typed && !typed.ok) { eventUpdated(false, typed.error); return false }
         if (typed && typed.emails.length === 0) { eventUpdated(false, ExchangeEvents.NO_GUESTS); return false }
-        built.guests = typed ? ExchangeEvents.changedGuests(event, typed.emails) : null
+        built.guests = typed ? ExchangeEvents.changedGuests(event, typed.emails, built.scope) : null
         var mails = ExchangeEvents.meetingMails(ExchangeEvents.meetingUpdateParams(source.accountId, event, built, built.guests))
         if (mails && fields.confirmedSend !== true) { eventUpdated(false, ExchangeEvents.UNCONFIRMED_SEND); return false }
       }
@@ -510,15 +518,21 @@ Item {
     return request
   }
 
-  // The answer: the series, or this event with or without telling guests.
+  // The answer: the series, or this event with or without telling guests. An Exchange event of a series is
+  // deleted, cancelled, declined or removed as the part the choice names (`series` or `occurrence`).
   function confirmDelete(request) {
     if (!request || !request.event) return false
-    if (request.choice === "series") return deleteSeries(request.sourceId, request.event)
     var event = {}
     for (var key in request.event) event[key] = request.event[key]
-    event.deleteSendUpdates = request.choice === "none" ? "none" : "all"
     // The question was answered: what is sent to people (a meeting cancelled) goes only from here.
     event.confirmedSend = true
+    var source = findSource(request.sourceId)
+    if (!!source && source.kind === "exchange") {
+      if (event.isSeries === true) event.deleteScope = String(request.choice || "")
+      return deleteEvent(request.sourceId, event)
+    }
+    if (request.choice === "series") return deleteSeries(request.sourceId, request.event)
+    event.deleteSendUpdates = request.choice === "none" ? "none" : "all"
     return deleteEvent(request.sourceId, event)
   }
 
@@ -648,12 +662,15 @@ Item {
   // not an invitation or changed since this screen drew it; the list is then read again, where the item stands
   // under the id the server gave it. No also takes the meeting off the calendar and is asked about first, so it
   // is `deleteEvent`'s and never this.
-  function respondToInvitation(sourceId, event, answer) {
+  // All the events of a series are answered only where the backend said they may be (`seriesCanRespond`).
+  function respondToInvitation(sourceId, event, answer, scope) {
     var source = findSource(sourceId)
+    var whole = scope === "series"
     if (!source || source.kind !== "exchange" || !event || event.canRespond !== true || responding
-        || creatingEvent || eventWriting || String(event.answerKey || "") === "" || answer === "declined") return false
+        || creatingEvent || eventWriting || String(event.answerKey || "") === "" || answer === "declined"
+        || whole && event.seriesCanRespond !== true) return false
     responding = true
-    exchangeRequest("exchange.calendarRespond", ExchangeEvents.respondParams(source.accountId, event, answer),
+    exchangeRequest("exchange.calendarRespond", ExchangeEvents.respondParams(source.accountId, event, answer, whole ? "series" : ""),
       function(result, error) {
         root.responding = false
         if (error) {
@@ -689,9 +706,14 @@ Item {
         : ["exchange.calendarUpdate", ExchangeEvents.updateParams(account, event, writeDraft)])
       : kind === "cancel" ? ["exchange.meetingCancel", ExchangeEvents.cancelParams(account, event), ExchangeEvents.meetingError]
       : kind === "decline" ? ["exchange.calendarRespond", ExchangeEvents.declineParams(account, event), ExchangeEvents.respondError]
-      : kind === "remove" ? ["exchange.meetingRemove", ExchangeEvents.removeParams(account, event), ExchangeEvents.meetingError]
+      : kind === "remove" ? ["exchange.meetingRemove", ExchangeEvents.removeParams(account, event), ExchangeEvents.removeError]
       : ["exchange.calendarDelete", ExchangeEvents.deleteParams(account, event)]
-    exchangeRequest(call[0], call[1], function(result, error) { root.finishWrite(!error, error) }, call[2])
+    exchangeRequest(call[0], call[1], function(result, error) {
+      root.finishWrite(!error, error)
+      // Removing a cancelled series stops at a bound and says so: the person asks again.
+      var more = error ? "" : ExchangeEvents.removeNotice(result)
+      if (more !== "") root.lastError = more
+    }, call[2])
   }
 
   // The account's primary Microsoft calendar, which is the one calendar a

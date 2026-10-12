@@ -51,7 +51,7 @@ async fn calendar_requests_are_refused_before_any_account_credential_or_socket_i
         ["calendarUpdate", {"id": id, "changeKey": key, "title": "x", "notes": "y"}],
         ["calendarUpdate", {"id": id, "changeKey": key, "title": "x", "requestToken": "t"}],
         ["calendarDelete", {"id": id, "changeKey": ""}],
-        ["calendarDelete", {"id": id, "changeKey": key, "scope": "series"}],
+        ["calendarDelete", {"id": id, "changeKey": key, "scope": "all"}],
         ["calendarCreate", {"reminderMinutes": 40_321}],
         ["calendarCreate", {"reminderMinutes": -1}],
         ["calendarCreate", {"reminderMinutes": 1.5}],
@@ -146,8 +146,9 @@ async fn a_month_is_instants_and_days_with_what_is_private_masked_and_what_was_c
     let days = |id| format!("{} {}", by(id)["startDate"], by(id)["endDate"]);
     assert_eq!(days(2), r#""2026-10-05" "2026-10-06""#);
     assert_eq!(days(3), r#""2026-10-12" "2026-10-15""#, "from the instants");
+    // An event of a plain series is written through a scope, so it is not locked.
     let locks = [4, 6, 7, 8].map(|id| by(id)["lock"].as_str().unwrap());
-    assert_eq!(locks, ["recurring", "private", "private", "foreign"]);
+    assert_eq!(locks, ["", "private", "private", "foreign"]);
     // Masked before the answer leaves: nothing of a private or confidential item's content anywhere.
     for id in [6, 7] {
         let shown =
@@ -389,6 +390,7 @@ async fn a_detail_says_who_the_owner_is_and_masks_what_is_private_and_an_answer_
         "attendeesCut": false, "response": "none", "reminderMinutes": 15,
         "joinUrl": "https://meet.example.org/j/7", "sensitivity": "normal", "meeting": true,
         "recurring": false, "cancelled": false, "unplacedCancellation": false, "canRemove": false, "kind": "single",
+        "canRemoveSeries": false, "cancelledEvents": 0, "series": null,
         "canRespond": true, "editable": false, "lock": "meeting"});
     assert_eq!(read(1).await.unwrap(), expected);
     let outside = read(0).await.unwrap();

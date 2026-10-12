@@ -21,17 +21,24 @@
 //!    answer would be to something other than what the person saw). Nothing has been sent.
 //! 2. `CreateItem` of the response object, never repeated. The server re-creates the calendar item
 //!    under another id on every answer, and the answer names it when the server did.
-//! 3. Only for a sent decline asked to `remove` the meeting, of a single item: where the server left
-//!    it on the calendar (found by its `UID` and start, declined) it is deleted into Deleted Items with
-//!    nobody told. A best effort that never fails the answer.
+//! 3. Only for a sent decline asked to `remove` the meeting, of a single item or a whole series: where
+//!    the server left it on the calendar it is deleted into Deleted Items with nobody told (a single
+//!    item found by its `UID` and start; a series by its master, looked for by its own id and the id
+//!    the answer gave it). A best effort that never fails the answer, and never says the meeting is off
+//!    unless the reads say so.
+//!
+//! **A whole series is answered through its master** ("the entire series"), read through the event
+//! named: it must itself be an invitation the owner may answer (`EventDetail::series_invitation`,
+//! only a cancellation of the whole series counting against it) at the version the caller drew. One
+//! event is answered by its own id, as ever.
 //!
 //! What a failure of the answer proves is what it proves for an appointment (`calendar`): a code
 //! that says the server did nothing keeps its name, and anything else once the request was written
 //! is `exchange_calendar_unconfirmed`: the organizer may have been told.
 
+use super::super::decode::NOT_FOUND;
 use super::super::decode::calendar::{self as view, CalendarItem};
-use super::super::decode::detail::{self as answer, Cancelled, EventDetail};
-use super::super::decode::{self, NOT_FOUND};
+use super::super::decode::detail::{self as answer, Cancellation, Cancelled, EventDetail};
 use super::super::soap::calendar::{self as soap, Answer, MAX_ENTRIES};
 use super::Client;
 use super::calendar::{CONFLICT, LOCKED, SERVER, Written, failure, refusal, written};
@@ -47,12 +54,19 @@ pub struct Answered {
 }
 
 impl Client {
-    /// The calendar item `id` (an Omamail id) names, with its notes, people, reminder and link, and
-    /// for an invitation whether a cancellation of it waits in the Inbox.
+    /// The calendar item `id` (an Omamail id) names, with its notes, people, reminder and link, for
+    /// an invitation whether a cancellation of it waits in the Inbox, and for an event of a series
+    /// what the series is (two reads the detail can do without).
     pub async fn event_detail(&mut self, id: &str) -> Result<EventDetail, &'static str> {
-        let mut found = self.detail(&ids::decode(id)?, true).await?;
+        let wire = ids::decode(id)?;
+        let mut found = self.detail(&wire, true).await?;
+        let mut inbox = None;
         if !found.elsewhere && found.incoming() && !found.item.cancelled {
-            found.cancellation = self.pending_cancellation(&found).await.unwrap_or_default();
+            inbox = self.cancellations().await.ok();
+            found.cancellation = verdict(inbox.as_deref().unwrap_or_default(), &found);
+        }
+        if !found.elsewhere && found.item.is_series() {
+            found.series = self.series_of(&wire, &found, inbox).await;
         }
         Ok(found)
     }
@@ -65,14 +79,30 @@ impl Client {
         wire: &str,
         may_reduce: bool,
     ) -> Result<EventDetail, &'static str> {
+        self.read_detail(wire, may_reduce, soap::event_detail).await
+    }
+
+    /// `detail` of the master of the series the event `wire` belongs to, with its rule and zone.
+    pub(super) async fn master(
+        &mut self,
+        wire: &str,
+        may_reduce: bool,
+    ) -> Result<EventDetail, &'static str> {
+        self.read_detail(wire, may_reduce, soap::master_detail)
+            .await
+    }
+
+    async fn read_detail(
+        &mut self,
+        wire: &str,
+        may_reduce: bool,
+        read: fn(&str, bool) -> String,
+    ) -> Result<EventDetail, &'static str> {
         let request = soap::get_calendar_folder();
         let calendar = self.call(&request, true, view::folder_id).await?;
-        let (found, reduced) = match self
-            .call(&soap::event_detail(wire, true), true, answer::detail)
-            .await
-        {
+        let (found, reduced) = match self.call(&read(wire, true), true, answer::detail).await {
             Err(SERVER) if may_reduce => {
-                let plain = soap::event_detail(wire, false);
+                let plain = read(wire, false);
                 (self.call(&plain, true, answer::detail).await?, true)
             }
             found => (found?, false),
@@ -83,23 +113,16 @@ impl Client {
         Ok(found)
     }
 
-    /// What the `MeetingCancellation`s among the Inbox's newest say of the item of `detail`.
-    async fn pending_cancellation(
-        &mut self,
-        detail: &EventDetail,
-    ) -> Result<Cancelled, &'static str> {
+    /// The `MeetingCancellation`s among the Inbox's newest.
+    pub(super) async fn cancellations(&mut self) -> Result<Vec<Cancellation>, &'static str> {
         let request = soap::find_cancellations();
-        let found = self.call(&request, true, answer::cancellations).await?;
-        Ok(found
-            .iter()
-            .map(|message| message.is_for(detail))
-            .max()
-            .unwrap_or_default())
+        self.call(&request, true, answer::cancellations).await
     }
 
-    /// Answers the invitation `id` names, if it is one the owner may answer and is still at
-    /// `change_key`. `send` false asks the server to keep the answer and mail nobody; `remove`, for a
-    /// sent decline of a single item, also takes the meeting off the calendar, as Outlook does.
+    /// Answers the invitation `id` names, or with `series` the whole series it belongs to, if it is one
+    /// the owner may answer and is still at `change_key`. `send` false asks the server to keep the
+    /// answer and mail nobody; `remove`, for a sent decline of a single item or a whole series, also
+    /// takes the meeting off the calendar, as Outlook does.
     pub async fn respond(
         &mut self,
         id: &str,
@@ -107,21 +130,33 @@ impl Client {
         reply: Answer,
         send: bool,
         remove: bool,
+        series: bool,
     ) -> Result<Answered, &'static str> {
         let wire = ids::decode(id)?;
         // Judged before the connection is touched: the request, as it would go.
-        let request = soap::respond(&wire, change_key, reply, send)?;
+        soap::respond(&wire, change_key, reply, send)?;
         if remove && (reply != Answer::Decline || !send) {
             return Err("invalid_params");
         }
-        let mut current = self.detail(&wire, false).await?;
+        let mut current = match series {
+            true => self.master(&wire, false).await?,
+            false => self.detail(&wire, false).await?,
+        };
         if current.elsewhere {
             return Err(LOCKED);
         }
-        if current.incoming() && !current.item.cancelled {
-            current.cancellation = self.pending_cancellation(&current).await?;
+        if (current.incoming() || current.series_incoming()) && !current.item.cancelled {
+            let inbox = self.cancellations().await?;
+            current.cancellation = match series {
+                true => series_cancelled(&inbox, &current),
+                false => verdict(&inbox, &current),
+            };
         }
-        if !current.invitation() {
+        let invitation = match series {
+            true => current.series_invitation(),
+            false => current.invitation(),
+        };
+        if !invitation {
             return Err(NOT_INVITATION);
         }
         // Without a key nothing says it is the version the caller drew.
@@ -132,24 +167,28 @@ impl Client {
             return Err(CONFLICT);
         }
         // An answer to one event of a series leaves the series where it is.
-        if remove && (current.item.kind != "single" || current.item.recurring) {
+        if remove && !series && (current.item.kind != "single" || current.item.recurring) {
             return Err(LOCKED);
         }
+        // The answer goes to the item that was read: for a series, its master.
+        let target = if series { &current.item.id } else { &wire };
+        let request = soap::respond(target, change_key, reply, send)?;
         let (new_id, new_key) = self
             .exchange(&request, false, |node| view::written(node, "CreateItem"))
             .await
             .map_err(failure)?
             .map_err(refusal)?;
         let written = written(&new_id, new_key, None);
-        let removed = match remove {
-            true => Some(self.remove_declined(&current.item).await),
-            false => None,
+        let removed = match (remove, series) {
+            (false, _) => None,
+            (true, false) => Some(self.remove_declined(&current.item).await),
+            (true, true) => Some(self.remove_declined_series(&current.item, &new_id).await),
         };
         Ok(Answered { written, removed })
     }
 
-    /// After the owner's decline: whether the meeting is off the calendar. Where the server left it
-    /// (the same `UID` and start, a single meeting the owner declined) it is deleted, nobody told.
+    /// After the owner's decline: whether the meeting is off the calendar. Where the server left it (the
+    /// same `UID` and start, a single meeting the owner declined) it is deleted, nobody told.
     async fn remove_declined(&mut self, item: &CalendarItem) -> bool {
         if item.uid.is_empty() {
             return false;
@@ -167,18 +206,64 @@ impl Client {
         let Some(left) = left else {
             return true;
         };
-        if !left.meeting || left.response != "decline" || left.private || left.change_key.is_empty()
-        {
+        if !left.meeting || left.response != "decline" || left.private {
             return false;
         }
+        self.delete_left(&left).await
+    }
+
+    /// After the owner's decline of all of a series: whether it is off the calendar, as far as reads
+    /// can tell. Microsoft says the entire series goes with its master, so the master is looked for by
+    /// its own id and by the id the answer gave the item (`answered`, the server's, when it named one),
+    /// whatever became of any one event: gone, or in another folder (Deleted Items), it is off; still on
+    /// the calendar as a master of the same `UID` the owner declined, it is deleted, nobody told. A read
+    /// that fails, or anything else found, is not called off.
+    async fn remove_declined_series(&mut self, master: &CalendarItem, answered: &str) -> bool {
+        let mut ids = vec![master.id.clone()];
+        if !answered.is_empty() && answered != master.id {
+            ids.push(answered.to_owned());
+        }
+        for id in ids {
+            let found = match self.detail(&id, false).await {
+                Err(NOT_FOUND) => continue,
+                Err(_) => return false,
+                Ok(found) if found.elsewhere => continue,
+                Ok(found) => found.item,
+            };
+            let declined = found.kind == "master" && found.response == "decline";
+            if !declined || found.uid.is_empty() || found.uid != master.uid {
+                return false;
+            }
+            if !self.delete_left(&found).await {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Deletes what a decline left on the calendar, nobody told; whether the server confirmed it.
+    async fn delete_left(&mut self, left: &CalendarItem) -> bool {
         let Ok(request) = soap::delete_appointment(&left.id, &left.change_key) else {
             return false;
         };
-        let deleted = self
-            .call(&request, false, |node| {
-                decode::outcomes(node, "DeleteItem", 1)
-            })
-            .await;
-        matches!(deleted.as_deref(), Ok([Ok(())]))
+        self.delete_item(&request).await.is_ok()
+    }
+}
+
+/// What the cancellations say of the item of `detail`, the strongest deciding.
+pub(super) fn verdict(inbox: &[Cancellation], detail: &EventDetail) -> Cancelled {
+    let said = inbox.iter().map(|message| message.is_for(detail));
+    said.max().unwrap_or_default()
+}
+
+/// What the cancellations say of the series whose master is `master` as a whole: only one that names
+/// no event cancels all of it (one event cancelled leaves the rest to answer).
+pub(super) fn series_cancelled(inbox: &[Cancellation], master: &EventDetail) -> Cancelled {
+    let whole = |message: &Cancellation| {
+        message.occurrence.is_none() && message.is_for_series(&master.item)
+    };
+    match inbox.iter().any(whole) {
+        true => Cancelled::Yes,
+        false => Cancelled::No,
     }
 }

@@ -26,6 +26,14 @@
 //!   says what `MyResponseType` says: anybody else's `ResponseType` is "only relevant to a meeting
 //!   organizer's calendar item", so on an invitation it says nothing, and the answer never claims it
 //!   does (`unknown`).
+//! - **A member of a series says what the series is** (`series`: how it repeats, in bounded words,
+//!   read from its master; the master's version, which a write to all of it names; whether all of it
+//!   may be changed or answered, judged on the master) and is locked by the rule for a series
+//!   (`EventDetail::screen_lock`). The master read is one the detail can do without: when it fails the
+//!   series is "Repeats" and nothing is offered for all of it. `canRemoveSeries` says the event is a
+//!   removable one of a series its organizer cancelled, which `exchange.meetingRemove` with `scope`
+//!   `series` takes off whole, and `cancelledEvents` how many of its events they cancelled one by one
+//!   (0 for the series as a whole).
 //! - **An answer is the one call that mails a person, and only the organizer of the invitation.**
 //!   `send` is required, so no default decides whether somebody is mailed; `remove` goes only with a
 //!   sent decline. Like every write it takes no `requestToken`, waits for its turn only while its
@@ -34,11 +42,11 @@
 use futures_util::FutureExt;
 use serde_json::{Value, json};
 
-use super::calendar::target;
+use super::calendar::{scope, target};
 use super::ews::{
-    Answer, Attendee, Cancelled, EventDetail, Lock, Party, respond as answer_request,
+    Answer, Attendee, Cancelled, EventDetail, Lock, Party, Scope, Series, respond as answer_request,
 };
-use super::{INVALID, account, fields, ids, text, token, write::turn};
+use super::{INVALID, account, fields, ids, text, token, write::turn, zone};
 
 pub async fn detail(params: &Value) -> Result<Value, &'static str> {
     let map = fields(params, &["accountId", "id", "requestToken"])?;
@@ -46,10 +54,12 @@ pub async fn detail(params: &Value) -> Result<Value, &'static str> {
     ids::validate(&id)?;
     let account = account(map)?;
     let owner = ids::account(&account)?.to_owned();
+    // The zone this computer is in, which says whether the time of every event may change here.
+    let zone = zone::known();
     super::account::read(&account, token(map)?, move |client| {
         async move {
             let found = client.event_detail(&id).await?;
-            reply(&found, &owner).ok_or("exchange_invalid_response")
+            reply(&found, &owner, zone).ok_or("exchange_invalid_response")
         }
         .boxed()
     })
@@ -59,9 +69,22 @@ pub async fn detail(params: &Value) -> Result<Value, &'static str> {
 pub async fn respond(params: &Value) -> Result<Value, &'static str> {
     let map = fields(
         params,
-        &["accountId", "id", "changeKey", "response", "send", "remove"],
+        &[
+            "accountId",
+            "id",
+            "changeKey",
+            "response",
+            "send",
+            "remove",
+            "scope",
+        ],
     )?;
     let (id, key) = target(map)?;
+    // One event is answered by its own id, as ever: the one thing a scope says here is all of them.
+    let series = match scope(map)? {
+        Some(Scope::Occurrence) => return Err(INVALID),
+        scope => scope == Some(Scope::Series),
+    };
     let reply = Answer::parse(text(map, "response")?).ok_or(INVALID)?;
     let flag = |name| map.get(name).map(|value| value.as_bool().ok_or(INVALID));
     let send = flag("send").ok_or(INVALID)??;
@@ -75,7 +98,7 @@ pub async fn respond(params: &Value) -> Result<Value, &'static str> {
     let mut lease = turn(&account(map)?).await?;
     let answered = lease
         .client()
-        .respond(&id, &key, reply, send, remove)
+        .respond(&id, &key, reply, send, remove, series)
         .await?;
     let mut done = json!({
         "id": answered.written.id,
@@ -110,17 +133,53 @@ fn attendee(found: &Attendee, response: &str, owner: &str) -> Value {
     })
 }
 
+/// What is said of the series an event belongs to; `null` for an event of none and for a private one.
+fn series(detail: &EventDetail, owner: &str, zone: Option<&str>) -> Value {
+    if !detail.item.is_series() || detail.item.private {
+        return Value::Null;
+    }
+    let mut unread = Series::default();
+    unread.repeat.text = "Repeats".to_owned();
+    let found = detail.series.as_ref().unwrap_or(&unread);
+    let master = &found.master;
+    // The people a change or a cancellation of all of it tells: the master's, which an event's own
+    // list (an exception's) may not be.
+    let people: Vec<Value> = master
+        .attendees
+        .iter()
+        .map(|who| attendee(who, master.item.response, owner))
+        .collect();
+    let lock = found.lock(owner);
+    json!({
+        "text": found.repeat.text,
+        "kind": found.repeat.kind,
+        "key": found.key,
+        "editable": lock.is_none(),
+        "lock": lock.map_or("", Lock::code),
+        "timeEditable": lock.is_none() && found.time_editable(zone),
+        "canRespond": found.can_respond,
+        "attendees": people,
+        "attendeesCut": master.attendees_cut,
+        // Events changed on their own (the master's `ModifiedOccurrences`, at most one past the bound),
+        // which a change of the time of every event undoes.
+        "exceptions": master.modified.len(),
+    })
+}
+
 /// The detail as the answer lists it; `None` for an item whose id the codec does not take.
-pub fn reply(detail: &EventDetail, owner: &str) -> Option<Value> {
+pub fn reply(detail: &EventDetail, owner: &str, zone: Option<&str>) -> Option<Value> {
     let item = &detail.item;
     // Outside the default calendar nothing is written from here, whatever the item is; a meeting the
-    // owner organises is unlocked as a meeting, which the screen tells by `meeting`.
-    let lock = match detail.elsewhere {
-        true => Some(Lock::Unknown),
-        false if item.meeting => detail.organiser_lock(owner),
-        false => item.lock(),
-    };
+    // owner organises is unlocked as a meeting, which the screen tells by `meeting`; an event of a
+    // series is judged by the rule for a series.
+    let lock = detail.screen_lock(owner);
     let private = item.private;
+    // A removable event of a series its organizer cancelled: all of it may go in one call.
+    let removal = detail
+        .series
+        .as_ref()
+        .and_then(|found| found.removal)
+        .filter(|_| !private && detail.removal().is_some());
     let people: Vec<Value> = match private {
         true => Vec::new(),
         false => detail
@@ -160,7 +219,10 @@ pub fn reply(detail: &EventDetail, owner: &str) -> Option<Value> {
         "cancelled": item.cancelled || detail.cancellation == Cancelled::Yes,
         "unplacedCancellation": !item.cancelled && detail.cancellation == Cancelled::Unplaced,
         "canRemove": detail.removal().is_some(),
+        "canRemoveSeries": removal.is_some(),
+        "cancelledEvents": removal.unwrap_or(0),
         "kind": item.kind,
+        "series": series(detail, owner, zone),
         "canRespond": detail.invitation(),
         "editable": lock.is_none(),
         "lock": lock.map_or("", Lock::code),

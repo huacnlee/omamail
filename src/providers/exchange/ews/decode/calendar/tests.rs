@@ -211,3 +211,93 @@ fn a_read_for_a_write_counts_the_people_and_a_write_answers_its_id_and_key() {
     // A server that echoes nothing still did what it was asked.
     assert_eq!(made(""), (String::new(), String::new()));
 }
+
+#[test]
+fn a_masters_rule_is_said_in_words_and_what_has_no_name_here_is_only_its_kind() {
+    let said = |pattern: &str, range: &str| {
+        let rule = format!("<t:Recurrence>{pattern}{range}</t:Recurrence>");
+        let zone =
+            r#"<t:StartTimeZone Id="W. Europe Standard Time"><t:Periods/></t:StartTimeZone>"#;
+        let item = one(&format!("{rule}{zone}"));
+        assert_eq!(item.zone, "W. Europe Standard Time");
+        item.repeat.unwrap()
+    };
+    let numbered = "<t:NumberedRecurrence><t:StartDate>2026-10-29+02:00</t:StartDate><t:NumberOfOccurrences>4</t:NumberOfOccurrences></t:NumberedRecurrence>";
+    let open = "<t:NoEndRecurrence><t:StartDate>2026-10-29</t:StartDate></t:NoEndRecurrence>";
+    let weekly = "<t:WeeklyRecurrence><t:Interval>2</t:Interval><t:DaysOfWeek>Thursday Monday</t:DaysOfWeek></t:WeeklyRecurrence>";
+    let found = said(weekly, numbered);
+    assert_eq!(
+        (found.kind, found.text.as_str()),
+        ("weekly", "Every 2 weeks on Monday and Thursday, 4 times")
+    );
+    assert_eq!(found.start, NaiveDate::from_ymd_opt(2026, 10, 29));
+    for (pattern, words) in [
+        (
+            "<t:DailyRecurrence><t:Interval>1</t:Interval></t:DailyRecurrence>",
+            "Every day",
+        ),
+        (
+            "<t:AbsoluteMonthlyRecurrence><t:Interval>1</t:Interval><t:DayOfMonth>29</t:DayOfMonth></t:AbsoluteMonthlyRecurrence>",
+            "Every month on day 29",
+        ),
+        (
+            "<t:RelativeMonthlyRecurrence><t:Interval>3</t:Interval><t:DaysOfWeek>Thursday</t:DaysOfWeek><t:DayOfWeekIndex>Last</t:DayOfWeekIndex></t:RelativeMonthlyRecurrence>",
+            "Every 3 months on the last Thursday",
+        ),
+        (
+            "<t:AbsoluteYearlyRecurrence><t:DayOfMonth>29</t:DayOfMonth><t:Month>October</t:Month></t:AbsoluteYearlyRecurrence>",
+            "Every year on 29 October",
+        ),
+        // A weekday this client has no name for, a number out of bounds, a pattern of no name here.
+        (
+            "<t:RelativeMonthlyRecurrence><t:Interval>1</t:Interval><t:DaysOfWeek>Weekday</t:DaysOfWeek><t:DayOfWeekIndex>First</t:DayOfWeekIndex></t:RelativeMonthlyRecurrence>",
+            "Repeats monthly",
+        ),
+        (
+            "<t:DailyRecurrence><t:Interval>5000</t:Interval></t:DailyRecurrence>",
+            "Repeats daily",
+        ),
+        (
+            "<t:RegeneratingRecurrence><t:Interval>1</t:Interval></t:RegeneratingRecurrence>",
+            "Repeats",
+        ),
+    ] {
+        assert_eq!(said(pattern, open).text, words);
+    }
+    // A zone that cannot be written back is no zone; a single item has no rule.
+    let odd = one(r#"<t:StartTimeZone Id="Vienna&quot;/&gt;"/>"#);
+    assert!(odd.zone.is_empty() && odd.repeat.is_none());
+}
+
+#[test]
+fn an_event_of_a_plain_series_is_written_through_a_scope_and_a_meeting_series_by_its_organizer() {
+    let occurrence = "<t:CalendarItemType>Occurrence</t:CalendarItemType><t:MyResponseType>Organizer</t:MyResponseType>";
+    let item = one(occurrence);
+    assert_eq!(
+        (item.lock(), item.series_lock(), item.screen_lock()),
+        (Some(Lock::Recurring), None, None)
+    );
+    // A single item is never taken for an event of a series, nor an unknown kind for either.
+    let single = one(
+        "<t:CalendarItemType>Single</t:CalendarItemType><t:MyResponseType>Organizer</t:MyResponseType>",
+    );
+    assert_eq!(single.series_lock(), Some(Lock::Unknown));
+    let unknown = one("<t:CalendarItemType>Weekly</t:CalendarItemType>");
+    assert_eq!(
+        (unknown.lock(), unknown.series_lock()),
+        (Some(Lock::Unknown), Some(Lock::Unknown))
+    );
+    let meeting = one(&format!("{occurrence}<t:IsMeeting>true</t:IsMeeting>"));
+    assert_eq!(
+        (
+            meeting.series_lock(),
+            meeting.meeting_lock(true),
+            meeting.meeting_lock(false)
+        ),
+        (Some(Lock::Meeting), None, Some(Lock::Recurring))
+    );
+    let theirs = one(
+        "<t:CalendarItemType>Occurrence</t:CalendarItemType><t:IsMeeting>true</t:IsMeeting><t:MyResponseType>Accept</t:MyResponseType>",
+    );
+    assert_eq!(theirs.screen_lock(), Some(Lock::Meeting));
+}

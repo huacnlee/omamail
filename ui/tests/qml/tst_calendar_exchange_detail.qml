@@ -229,5 +229,17 @@ Item {
       answer(1, ExchangeEvents.withDetail(drawn, detail("m", "k2", { title: "Moved", response: "organizer", editable: true, lock: "" })))
       compare([fixture.composed.length, fixture.updates, fixture.lastError], [1, 0, Calendar.CONFLICT])
     }
+
+    function test_a_dragged_event_of_a_series_is_never_written_and_opens_the_editor_to_say_which_part() {
+      var plain = { meeting: false, response: "organizer", editable: true, lock: "", kind: "occurrence" }
+      var drawn = listed([row("s", "k1", plain)])[0]
+      var later = drawn.start.ms + 3600000
+      view.reschedule(drawn, later, drawn.end.ms + 3600000)
+      compare([fixture.updates, fixture.pending.length], [0, 1], "a drop cannot say this event or all of them")
+      var series = { text: "Every day", kind: "daily", key: "s9", editable: true, canRespond: false }
+      answer(0, ExchangeEvents.withDetail(drawn, detail("s", "k1", { meeting: false, response: "organizer", editable: true,
+        lock: "", kind: "occurrence", canRespond: false, attendees: [], series: series })))
+      compare([fixture.composed.length, fixture.updates, fixture.composed[0].editingEvent.seriesEditable], [1, 0, true])
+    }
   }
 }

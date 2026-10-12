@@ -343,11 +343,12 @@ Item {
         compare(field("event-send-confirm").opened, false, cases[i][2])
         compare(field("event-save-error").text, cases[i][2])
       }
-      // A repeating new event with guests is refused as a series, not asked about.
+      // A repeat the server cannot be told is refused in its own words, not asked about.
       createdSpy.clear()
-      compare(controller.reachRequest(sourceId, null, fields({ guestEmails: "ada@example.org", recurrence: { enabled: true } })), null)
-      compare(controller.createEvent(sourceId, fields({ guestEmails: "ada@example.org", recurrence: { enabled: true, frequency: "weekly", interval: "1", count: "" } })), false)
-      compare(createdSpy.signalArguments[0][1], "A repeating event on an Exchange calendar is made in Outlook")
+      var yearly = { enabled: true, frequency: "YEARLY", interval: "2", count: "" }
+      compare(controller.reachRequest(sourceId, null, fields({ guestEmails: "ada@example.org", recurrence: yearly })), null)
+      compare(controller.createEvent(sourceId, fields({ guestEmails: "ada@example.org", recurrence: yearly })), false)
+      compare(createdSpy.signalArguments[0][1], "A yearly repeat is every year")
       compare(mailService.requests.length, 0)
     }
 

@@ -38,16 +38,23 @@ tokio::task_local! {
 
 /// The Windows id of the zone this computer is in, or `UTC` when it is not one this knows.
 pub(super) fn local() -> &'static str {
+    known().unwrap_or(UTC)
+}
+
+/// The Windows id of the zone this computer is in, `None` when it is not one this knows (an empty
+/// test zone says that too). A single event can do without it; a repeating one cannot, because the
+/// server repeats it on the wall of the zone it was made in, and one made in UTC would move an hour
+/// when the clocks change: a computer whose zone is not known makes no series.
+pub(super) fn known() -> Option<&'static str> {
     #[cfg(test)]
     if let Ok(zone) = TEST_ZONE.try_with(|zone| *zone) {
-        return zone;
+        return Some(zone).filter(|zone| !zone.is_empty());
     }
     iana_name(
         std::env::var("TZ").ok().as_deref(),
         std::fs::read_link("/etc/localtime").ok().as_deref(),
     )
     .and_then(|name| windows(&name))
-    .unwrap_or(UTC)
 }
 
 /// The IANA name of a zone from the `TZ` variable (`Europe/Vienna`, or `:Europe/Vienna`, or a path

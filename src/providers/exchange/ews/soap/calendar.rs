@@ -66,11 +66,25 @@
 //!
 //! The appointment builders share the item's shape with these (`create_item`, `update_item`), keep
 //! `SendToNone`, and refuse a change that names people: that would be a meeting.
+//!
+//! **A repeating event is made in the owner's zone, named twice** ("Create a recurring series", "Time
+//! zones and EWS", the Recurrence and pattern pages). The server expands a series in the zone it was
+//! made in, so a weekly 03:00 made in UTC would move an hour when the clocks change. `Start` and `End`
+//! stay UTC instants with their `Z` (or days, for whole days), and the zone is the request's
+//! `TimeZoneContext` and the item's `StartTimeZone` and `EndTimeZone`, which Table 2 names as the
+//! creation time zone of an appointment. The `Recurrence` follows the attendee lists and precedes the
+//! zones, where the schema lists them. A change of the time of day of every event is a clock time on
+//! the series' first day (`When::Wall`) with the series' own zone, never an instant, so it holds across
+//! a change of the clocks. A master is read through one of its events (`RecurringMasterItemId`, "the
+//! identifiers of one of its related occurrence items") with its rule and its zone.
 
-use chrono::{DateTime, Datelike, NaiveDate, SecondsFormat};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, SecondsFormat};
 
 use super::{envelope, envelope_in, esc, field};
 use crate::providers::exchange::guests::{self, Guests};
+use crate::providers::exchange::recurrence::{
+    DAYS, End, MONTHS, Pattern, Recurrence, WEEKS, day_name, plausible_first_day,
+};
 
 const INVALID: &str = "invalid_params";
 const CALENDAR: &str = r#"<t:DistinguishedFolderId Id="calendar"/>"#;
@@ -84,6 +98,8 @@ pub const MAX_LOCATION_BYTES: usize = 500;
 pub const MAX_NOTES_BYTES: usize = 32 * 1024;
 /// The longest an appointment may last, so a mistyped year is a refusal and not an event.
 const MAX_SPAN_DAYS: i64 = 366;
+/// The longest time of day every event of a series may be given.
+pub const MAX_SPAN_MINUTES: u32 = 366 * 24 * 60;
 /// Real change keys are about 40 characters; the bound only stops a forged one.
 const MAX_CHANGE_KEY: usize = 200;
 /// Four weeks, the longest reminder Outlook sets.
@@ -121,13 +137,69 @@ const DETAIL: &str = "item:ParentFolderId item:Subject item:Sensitivity item:Bod
 const DETAIL_OPTIONAL: &str = "calendar:IsOrganizer calendar:JoinOnlineMeetingUrl \
     calendar:RecurrenceId";
 
-/// When an appointment happens, in the two forms the server keeps one in.
+/// When an appointment happens: in the two forms the server keeps one in, or (for every event of a
+/// series) a time of day.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum When {
     /// Unix milliseconds; whole seconds are written.
     Timed { start_ms: i64, end_ms: i64 },
     /// The first day and the day after the last.
     AllDay { first: NaiveDate, after: NaiveDate },
+    /// Every event of a series at this time of day for this many minutes, in the zone it recurs in:
+    /// no time at all until the client puts it on the series' first day (`on`).
+    Clock { start: NaiveTime, minutes: u32 },
+    /// A clock time on a day, read in the zone the request names.
+    Wall {
+        start: NaiveDateTime,
+        end: NaiveDateTime,
+    },
+}
+
+impl When {
+    /// A `Clock` put on `day`; any other time as it is.
+    pub fn on(self, day: NaiveDate) -> When {
+        match self {
+            When::Clock { start, minutes } => {
+                let start = day.and_time(start);
+                let end = start + chrono::Duration::minutes(minutes.into());
+                When::Wall { start, end }
+            }
+            other => other,
+        }
+    }
+
+    /// The time as a builder can judge it before the series is read: on a day, any day.
+    pub fn judged(self) -> When {
+        self.on(NaiveDate::from_ymd_opt(2000, 1, 3).unwrap_or_default())
+    }
+}
+
+/// The part of a series a write is for: one event of it (an occurrence, which an update makes an
+/// exception) or all of them (the master).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Occurrence,
+    Series,
+}
+
+impl Scope {
+    pub fn parse(word: &str) -> Option<Scope> {
+        match word {
+            "occurrence" => Some(Scope::Occurrence),
+            "series" => Some(Scope::Series),
+            _ => None,
+        }
+    }
+
+    /// Whether an item of `kind` is what a write naming `scope` is for: an event of a series for one
+    /// event, the master for all of them, anything for none (the lock then decides).
+    pub fn names(scope: Option<Scope>, kind: &str) -> bool {
+        match scope {
+            None => true,
+            Some(Scope::Occurrence) => matches!(kind, "occurrence" | "exception"),
+            Some(Scope::Series) => kind == "master",
+        }
+    }
 }
 
 /// A new personal appointment. `notes` is the body as plain text; `reminder` the minutes before
@@ -139,6 +211,8 @@ pub struct Appointment {
     pub notes: Option<String>,
     pub reminder: Option<u32>,
     pub when: When,
+    /// How it repeats, for the first event of a series; made in the owner's zone, which it recurs in.
+    pub recurrence: Option<Recurrence>,
 }
 
 /// What a change does with an appointment's reminder.
@@ -279,15 +353,41 @@ pub fn get_calendar_folder() -> String {
 /// `GetItem` of one calendar item (its EWS id, checked by `ids::decode`) for its detail view, the
 /// body as text; `optional` asks for the Exchange 2013 properties too.
 pub fn event_detail(id: &str, optional: bool) -> String {
-    let extra = if optional {
-        fields(DETAIL_OPTIONAL)
-    } else {
-        String::new()
-    };
+    let item = format!(r#"<t:ItemId Id="{}"/>"#, esc(id));
+    detail_read(&item, optional, "")
+}
+
+/// The same read of the master of the series the event `id` belongs to (`RecurringMasterItemId`),
+/// with what only a master says: its rule and the zone it recurs in.
+pub fn master_detail(id: &str, optional: bool) -> String {
+    let item = format!(r#"<t:RecurringMasterItemId OccurrenceId="{}"/>"#, esc(id));
+    detail_read(
+        &item,
+        optional,
+        "calendar:Recurrence calendar:StartTimeZone calendar:ModifiedOccurrences",
+    )
+}
+
+/// `GetItem` of the people on the exceptions of a series (the ids its master's `ModifiedOccurrences`
+/// lists), in one request: the three lists and nothing else.
+pub fn exception_people(ids: &[String]) -> String {
+    let items: String = ids
+        .iter()
+        .map(|id| format!(r#"<t:ItemId Id="{}"/>"#, esc(id)))
+        .collect();
     envelope(&format!(
-        r#"<m:GetItem><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:BodyType>Text</t:BodyType><t:AdditionalProperties>{}{extra}</t:AdditionalProperties></m:ItemShape><m:ItemIds><t:ItemId Id="{}"/></m:ItemIds></m:GetItem>"#,
+        r#"<m:GetItem><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:AdditionalProperties>{}</t:AdditionalProperties></m:ItemShape><m:ItemIds>{items}</m:ItemIds></m:GetItem>"#,
+        fields("calendar:RequiredAttendees calendar:OptionalAttendees calendar:Resources")
+    ))
+}
+
+fn detail_read(item: &str, optional: bool, more: &str) -> String {
+    let extra = if optional { DETAIL_OPTIONAL } else { "" };
+    envelope(&format!(
+        r#"<m:GetItem><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape><t:BodyType>Text</t:BodyType><t:AdditionalProperties>{}{}{}</t:AdditionalProperties></m:ItemShape><m:ItemIds>{item}</m:ItemIds></m:GetItem>"#,
         fields(DETAIL),
-        esc(id)
+        fields(more),
+        fields(extra)
     ))
 }
 
@@ -354,8 +454,8 @@ fn text(value: &str) -> String {
     esc(value).replace('\r', "&#13;")
 }
 
-/// `Start` and `End` as a calendar item holds them: instants from 1970 on with their `Z`, or days
-/// with no zone, running forwards, in four-digit years, lasting at most a year.
+/// `Start` and `End` as a calendar item holds them: instants from 1970 on with their `Z`, or days or
+/// clock times with no zone, running forwards, in four-digit years, lasting at most a year.
 fn times(when: &When) -> Result<(String, String), &'static str> {
     let fits = match *when {
         When::Timed { start_ms, end_ms } => {
@@ -369,6 +469,13 @@ fn times(when: &When) -> Result<(String, String), &'static str> {
             let days = (after - first).num_days();
             first.year() >= 1970 && after.year() <= 9999 && (1..=MAX_SPAN_DAYS).contains(&days)
         }
+        When::Wall { start, end } => {
+            let span = (end - start).num_seconds();
+            start.year() >= 1970
+                && end.year() <= 9999
+                && (1..=MAX_SPAN_DAYS * 86_400).contains(&span)
+        }
+        When::Clock { .. } => false,
     };
     if !fits {
         return Err(INVALID);
@@ -379,15 +486,97 @@ fn times(when: &When) -> Result<(String, String), &'static str> {
             let day = |date: NaiveDate| date.format("%Y-%m-%dT00:00:00").to_string();
             Ok((day(first), day(after)))
         }
+        When::Wall { start, end } => {
+            let wall = |at: NaiveDateTime| at.format("%Y-%m-%dT%H:%M:%S").to_string();
+            Ok((wall(start), wall(end)))
+        }
+        When::Clock { .. } => Err(INVALID),
     }
 }
 
-/// The zone a request names: the owner's for a day, none for instants.
+/// The zone a request names: the owner's for a day, the series' for a clock time, none for instants.
 fn zone_for<'a>(when: &When, zone: &'a str) -> Result<Option<&'a str>, &'static str> {
     match when {
         When::Timed { .. } => Ok(None),
-        When::AllDay { .. } if crate::providers::exchange::zone::is_id(zone) => Ok(Some(zone)),
-        When::AllDay { .. } => Err(INVALID),
+        _ => checked_zone(zone).map(Some),
+    }
+}
+
+fn checked_zone(zone: &str) -> Result<&str, &'static str> {
+    match crate::providers::exchange::zone::is_id(zone) {
+        true => Ok(zone),
+        false => Err(INVALID),
+    }
+}
+
+/// The `Recurrence` of a new series: one pattern element and one range element, each with its
+/// children in the order its page lists them. Dates have no zone: the day of the first event in the
+/// zone of the series, as Microsoft's update example writes `StartDate`. `FirstDayOfWeek` is written
+/// only for every second week or more, where it decides which days go together, and then as Monday.
+/// The caller has checked the rule (`check_series`).
+fn recurrence(rule: &Recurrence) -> String {
+    let leaf = |name: &str, value: &str| format!("<t:{name}>{value}</t:{name}>");
+    let every = |n: &u32| leaf("Interval", &n.to_string());
+    let on = |weekday, week: &usize| {
+        leaf("DaysOfWeek", day_name(weekday)) + &leaf("DayOfWeekIndex", WEEKS[*week])
+    };
+    let month = |m: &u32| leaf("Month", MONTHS[*m as usize - 1]);
+    let (name, inner) = match &rule.pattern {
+        Pattern::Daily(n) => ("DailyRecurrence", every(n)),
+        Pattern::Weekly(n, days) => {
+            let names: Vec<&str> = days.iter().map(|day| day_name(*day)).collect();
+            let first = if *n > 1 {
+                leaf("FirstDayOfWeek", DAYS[0])
+            } else {
+                String::new()
+            };
+            let inner = every(n) + &leaf("DaysOfWeek", &names.join(" ")) + &first;
+            ("WeeklyRecurrence", inner)
+        }
+        Pattern::Monthly(n, day) => (
+            "AbsoluteMonthlyRecurrence",
+            every(n) + &leaf("DayOfMonth", &day.to_string()),
+        ),
+        Pattern::MonthlyBy(n, weekday, week) => {
+            ("RelativeMonthlyRecurrence", every(n) + &on(*weekday, week))
+        }
+        Pattern::Yearly(m, day) => (
+            "AbsoluteYearlyRecurrence",
+            leaf("DayOfMonth", &day.to_string()) + &month(m),
+        ),
+        Pattern::YearlyBy(m, weekday, week) => {
+            ("RelativeYearlyRecurrence", on(*weekday, week) + &month(m))
+        }
+    };
+    let (range, end) = match rule.end {
+        End::Never => ("NoEndRecurrence", String::new()),
+        End::Until(day) => ("EndDateRecurrence", leaf("EndDate", &day.to_string())),
+        End::Count(n) => (
+            "NumberedRecurrence",
+            leaf("NumberOfOccurrences", &n.to_string()),
+        ),
+    };
+    let start = leaf("StartDate", &rule.start.to_string());
+    format!(
+        "<t:Recurrence><t:{name}>{inner}</t:{name}><t:{range}>{start}{end}</t:{range}></t:Recurrence>"
+    )
+}
+
+/// A rule this event can be the first of: within its bounds, the first event on the rule's first day
+/// (a day is that day; an instant is within a day of it, all a zone can move it) and on the rule, and
+/// no event longer than the shortest gap between two.
+fn check_series(rule: &Recurrence, when: &When) -> Result<(), &'static str> {
+    let (on_day, minutes) = match *when {
+        When::AllDay { first, after } => (first == rule.start, (after - first).num_minutes()),
+        When::Timed { start_ms, end_ms } => (
+            plausible_first_day(rule.start, start_ms),
+            (end_ms.div_euclid(1000) - start_ms.div_euclid(1000)) / 60,
+        ),
+        _ => (false, 0),
+    };
+    match on_day && rule.in_range() && rule.starts_on_pattern() && rule.holds(minutes) {
+        true => Ok(()),
+        false => Err(INVALID),
     }
 }
 
@@ -458,6 +647,17 @@ fn create_item(
     }
     let (start, end) = times(&item.when)?;
     let all_day = matches!(item.when, When::AllDay { .. });
+    // A series is made in the zone it recurs in, named twice, after the people.
+    let (named, series) = match &item.recurrence {
+        Some(rule) => {
+            check_series(rule, &item.when)?;
+            let zone = checked_zone(zone)?;
+            let id = esc(zone);
+            let zones = format!(r#"<t:StartTimeZone Id="{id}"/><t:EndTimeZone Id="{id}"/>"#);
+            (Some(zone), recurrence(rule) + &zones)
+        }
+        None => (zone_for(&item.when, zone)?, String::new()),
+    };
     let body = item.notes.as_deref().map_or_else(String::new, |notes| {
         format!(r#"<t:Body BodyType="Text">{}</t:Body>"#, text(notes))
     });
@@ -477,13 +677,13 @@ fn create_item(
             + &attendees("OptionalAttendees", &guests.optional)
     });
     Ok(envelope_in(
-        zone_for(&item.when, zone)?,
+        named,
         &format!(
             concat!(
                 r#"<m:CreateItem SendMeetingInvitations="{}"><m:SavedItemFolderId>{}</m:SavedItemFolderId>"#,
                 "<m:Items><t:CalendarItem><t:Subject>{}</t:Subject>{}{}",
                 "<t:Start>{}</t:Start><t:End>{}</t:End><t:IsAllDayEvent>{}</t:IsAllDayEvent>",
-                "<t:LegacyFreeBusyStatus>{}</t:LegacyFreeBusyStatus>{}{}</t:CalendarItem></m:Items></m:CreateItem>"
+                "<t:LegacyFreeBusyStatus>{}</t:LegacyFreeBusyStatus>{}{}{}</t:CalendarItem></m:Items></m:CreateItem>"
             ),
             invitations,
             CALENDAR,
@@ -495,7 +695,8 @@ fn create_item(
             all_day,
             if all_day { "Free" } else { "Busy" },
             location,
-            people
+            people,
+            series
         ),
     ))
 }
@@ -604,9 +805,12 @@ fn update_item(
     if let Some(when) = &change.when {
         let (start, end) = times(when)?;
         named = zone_for(when, zone)?;
-        let all_day = named.is_some();
-        let flag = format!("<t:IsAllDayEvent>{all_day}</t:IsAllDayEvent>");
-        updates += &set("calendar:IsAllDayEvent", &flag);
+        // A clock time of a series moves its time of day, never what kind of event it is.
+        if !matches!(when, When::Wall { .. }) {
+            let all_day = matches!(when, When::AllDay { .. });
+            let flag = format!("<t:IsAllDayEvent>{all_day}</t:IsAllDayEvent>");
+            updates += &set("calendar:IsAllDayEvent", &flag);
+        }
         if let Some(zone) = named {
             let id = esc(zone);
             let start_zone = format!(r#"<t:StartTimeZone Id="{id}"/>"#);
