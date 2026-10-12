@@ -195,6 +195,10 @@ pub const ALL: &[&str] = &[
     "exchange.sendAs",
     "exchange.invalidate",
     "exchange.cancel",
+    "exchange.calendarEvents",
+    "exchange.calendarCreate",
+    "exchange.calendarUpdate",
+    "exchange.calendarDelete",
 ];
 
 pub fn available() -> Vec<&'static str> {

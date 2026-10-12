@@ -151,6 +151,7 @@ test-js:
 	node ui/tests/test_calendar_cache.js
 	node ui/tests/test_calendar_feed.js
 	node ui/tests/test_calendar_sources.js
+	node ui/tests/test_calendar_exchange.js
 	node ui/tests/test_calendar_reminders.js
 	node ui/tests/test_calendar_palette.js
 	node ui/tests/test_bar_preview.js

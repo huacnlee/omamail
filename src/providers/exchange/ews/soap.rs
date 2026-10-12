@@ -6,6 +6,8 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::{DateTime, SecondsFormat};
 use quick_xml::escape::escape;
 
+pub mod calendar;
+
 /// The lowest `ExchangeVersionType` with `item:Preview`, `item:Flag` and `SuppressReadReceipts`.
 const VERSION: &str = "Exchange2013_SP1";
 
@@ -61,16 +63,28 @@ fn esc(text: &str) -> std::borrow::Cow<'_, str> {
 }
 
 fn envelope(body: &str) -> String {
+    envelope_in(None, body)
+}
+
+/// `envelope` with a `TimeZoneContext` naming a Windows zone id, the zone the server reads the
+/// request's zoneless times in (`calendar`). The caller has checked the id (`zone::is_id`).
+fn envelope_in(zone: Option<&str>, body: &str) -> String {
+    let context = zone.map_or_else(String::new, |zone| {
+        format!(
+            r#"<t:TimeZoneContext><t:TimeZoneDefinition Id="{}"/></t:TimeZoneContext>"#,
+            esc(zone)
+        )
+    });
     format!(
         concat!(
             r#"<?xml version="1.0" encoding="utf-8"?><soap:Envelope"#,
             r#" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/""#,
             r#" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages""#,
             r#" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">"#,
-            r#"<soap:Header><t:RequestServerVersion Version="{}"/></soap:Header>"#,
+            r#"<soap:Header><t:RequestServerVersion Version="{}"/>{}</soap:Header>"#,
             "<soap:Body>{}</soap:Body></soap:Envelope>"
         ),
-        VERSION, body
+        VERSION, context, body
     )
 }
 

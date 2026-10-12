@@ -58,6 +58,7 @@ function calendarProvider(raw) {
   var provider = trimmed(account.provider).toLowerCase()
   if (provider === "gmail" || provider === "") return "google"
   if (provider === "outlook") return "microsoft"
+  if (provider === "exchange") return "exchange"
   if (provider !== "imap") return ""
   var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()
   var email = trimmed(account.email).toLowerCase()

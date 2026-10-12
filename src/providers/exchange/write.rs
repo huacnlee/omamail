@@ -243,7 +243,7 @@ pub(super) async fn send_within(params: &Value, total: Duration) -> Result<Value
 
 /// The account's turn for a change, waited for only while a write could still start after it (its
 /// whole request ending by the deadline); a change that never got it wrote nothing.
-async fn turn(account: &str) -> Result<account::Lease, &'static str> {
+pub(super) async fn turn(account: &str) -> Result<account::Lease, &'static str> {
     let deadline = account::deadline(account::TOTAL);
     let last_start = deadline
         .checked_sub(super::ews::clock(super::ews::DEADLINE))
