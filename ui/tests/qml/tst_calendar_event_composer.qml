@@ -118,6 +118,78 @@ Item {
       compare(eventController.createdFields.recurrence.enabled, false)
     }
 
+    function modesOf() {
+      var flow = findChild(composer, "event-reminder-choices")
+      var found = []
+      for (var i = 0; i < flow.children.length; i++)
+        if (flow.children[i].objectName !== undefined && flow.children[i].objectName.indexOf("event-reminder-") === 0)
+          found.push(flow.children[i].objectName.substring("event-reminder-".length) + (flow.children[i].selected ? "*" : ""))
+      return found.join(" ")
+    }
+
+    // The choices drawn with a check mark: the fill alone must never say which one is chosen.
+    function checksOf() {
+      var flow = findChild(composer, "event-reminder-choices")
+      var found = []
+      for (var i = 0; i < flow.children.length; i++)
+        if (flow.children[i].objectName !== undefined && flow.children[i].objectName.indexOf("event-reminder-") === 0
+            && flow.children[i].iconName === "check")
+          found.push(flow.children[i].objectName.substring("event-reminder-".length))
+      return found.join(" ")
+    }
+
+    // An Exchange appointment takes a reminder of its own: none or minutes before it, and no calendar default,
+    // which that calendar has not got; the form's "default" is shown as none. Google keeps its choices.
+    function test_an_exchange_appointment_offers_a_reminder_of_none_or_minutes_and_not_a_default() {
+      var groups = JSON.parse(JSON.stringify(initialGroups))
+      groups[0].calendars[0].kind = "exchange"
+      eventController.writableSourceGroups = groups
+      composer.begin()
+      compare(findChild(composer, "event-reminder-choices").visible, true)
+      compare(modesOf(), "none* custom", "a new appointment has no reminder unless one is asked for")
+      compare(checksOf(), "none")
+      findChild(composer, "event-title-field").text = "Dentist"
+      findChild(composer, "event-reminder-custom").clicked()
+      compare(checksOf(), "custom")
+      findChild(composer, "event-reminder-minutes").text = "30"
+      composer.submit("all")
+      compare([eventController.createdFields.reminderMode, eventController.createdFields.reminderMinutes].join(), "custom,30")
+      eventController.eventWriting = false
+      composer.close()
+      composer.beginEdit("google:me@example.com", { exchangeId: "one", exchangeKey: "k", sourceId: "google:me@example.com",
+        summary: "Existing", reminderMinutes: 20, start: { ms: Date.now() }, end: { ms: Date.now() + 3600000 } })
+      compare(modesOf(), "preserve* none custom")
+      compare(findChild(composer, "event-reminder-minutes").text, "20", "custom starts from its own reminder")
+      composer.close()
+      var google = JSON.parse(JSON.stringify(initialGroups))
+      google[0].calendars[0].kind = "google"
+      eventController.writableSourceGroups = google
+      composer.begin()
+      compare(modesOf(), "default* none custom")
+      compare(checksOf(), "default")
+    }
+
+    // An Exchange calendar takes appointments: no repeat, and notes when one is made but no field for
+    // them when it is edited (they are not read, so the field would show them empty and replace them).
+    function test_an_exchange_appointment_has_no_repeat_and_notes_only_when_it_is_made() {
+      var groups = JSON.parse(JSON.stringify(initialGroups))
+      groups[0].calendars[0].kind = "exchange"
+      eventController.writableSourceGroups = groups
+      composer.begin()
+      findChild(composer, "event-title-field").text = "Dentist"
+      findChild(composer, "event-description-field").text = "Bring the card"
+      compare(findChild(composer, "event-repeat-selector").visible, false)
+      composer.recurring = true
+      composer.submit("all")
+      compare(eventController.createdFields.recurrence.enabled, false)
+      compare(eventController.createdFields.description, "Bring the card")
+      eventController.eventWriting = false
+      composer.close()
+      composer.beginEdit("google:me@example.com", { exchangeId: "one", exchangeKey: "k", sourceId: "google:me@example.com",
+        summary: "Existing", start: { ms: Date.now() }, end: { ms: Date.now() + 3600000 } })
+      compare(findChild(composer, "event-description-field").parent.visible, false)
+    }
+
     function test_guest_suggestions_reuse_mail_contacts_without_submitting() {
       var groups = JSON.parse(JSON.stringify(initialGroups))
       groups[0].calendars[0].kind = "google"

@@ -47,6 +47,7 @@ fn key(params: &serde_json::Map<String, Value>) -> Result<CredentialKey, &'stati
         ),
         "imap-password" => ("imap", CredentialKind::ImapPassword),
         "jmap-secret" => ("jmap", CredentialKind::JmapSecret),
+        "exchange-password" => ("exchange", CredentialKind::ExchangePassword),
         "calendar-password" => ("caldav", CredentialKind::CalendarPassword),
         _ => return Err("invalid_params"),
     };
@@ -208,6 +209,8 @@ mod tests {
             json!({"kind":"shell-command","accountId":"imap:a@example.org"}),
             json!({"kind":"imap-password","accountId":"imap:a@example.org","clientId":"forged"}),
             json!({"kind":"imap-password","accountId":"imap:a@example.org\n"}),
+            json!({"kind":"exchange-password","accountId":"imap:a@example.org"}),
+            json!({"kind":"exchange-password","accountId":"exchange:a@example.org","clientId":"forged"}),
             json!({"kind":"calendar-password","accountId":"source\0id"}),
             json!({"kind":"google-refresh-token","accountId":"a@example.org"}),
             json!({"kind":"google-refresh-token","accountId":"a@example.org","clientId":"client","nativeAttributes":[]}),
@@ -246,6 +249,10 @@ mod tests {
             (
                 json!({"kind":"jmap-secret","accountId":"jmap:a@example.org"}),
                 "jmap",
+            ),
+            (
+                json!({"kind":"exchange-password","accountId":"exchange:a@example.org"}),
+                "exchange",
             ),
             (
                 json!({"kind":"calendar-password","accountId":"source-id"}),

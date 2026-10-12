@@ -299,6 +299,7 @@ Item {
 
     Text {
       id: badge
+      objectName: "mailbox-entry-badge"
       visible: entry.count > 0 && !root.collapsed && !entry.showsNumber
       anchors.right: fold.visible ? fold.left : parent.right
       anchors.rightMargin: fold.visible ? Style.space(2) : Style.space(8)

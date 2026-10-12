@@ -437,7 +437,7 @@ function eventsFromGoogle(payload, sourceId) {
 function eventKey(event) {
   if (!event) return ""
   return String(event.sourceId || "") + "\n" + String(event.googleId || event.graphId
-    || String(event.uid || "") + "\n" + String(event.recurrenceIdMs || event.start && event.start.ms || ""))
+    || event.exchangeId || String(event.uid || "") + "\n" + String(event.recurrenceIdMs || event.start && event.start.ms || ""))
 }
 
 // ------------------------------------------------------------- Microsoft
@@ -541,6 +541,10 @@ function graphEventBody(fields, allDay) {
   }
   return body
 }
+
+// What a write that finds the event changed since it was drawn says, for every provider that
+// notices (Google's revision, an Exchange change key).
+var CONFLICT = "This event changed elsewhere. Refresh and try again."
 
 function graphResponseError(status, responseText) {
   var payload = null
@@ -708,6 +712,21 @@ function googleEventPatch(fields, allDay, existingAllDay) {
   return body
 }
 
+// The addresses of a guest field: separated by commas, semicolons or line breaks, at most 200, each one
+// plain enough to be an address. `emails` keeps what was typed, each once (ignoring case) and in order.
+function guestList(text) {
+  var typed = String(text).split(/[,;\n]/).map(function(email) { return email.trim() }).filter(function(email) { return email !== "" })
+  if (typed.length > 200 || typed.some(function(email) { return !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email) }))
+    return { ok: false, error: "Enter valid guest email addresses separated by commas" }
+  var seen = {}, emails = []
+  for (var i = 0; i < typed.length; i++) {
+    if (seen[typed[i].toLowerCase()]) continue
+    seen[typed[i].toLowerCase()] = true
+    emails.push(typed[i])
+  }
+  return { ok: true, emails: emails }
+}
+
 function googleOptions(body, fields, source, existing) {
   var next = JSON.parse(JSON.stringify(body))
   if (existing && fields.changeRecurrence === true) {
@@ -724,17 +743,14 @@ function googleOptions(body, fields, source, existing) {
     next.end.timeZone = zone
   }
   if (fields.guestEmails !== undefined) {
-    var emails = String(fields.guestEmails).split(/[,;\n]/).map(function(email) { return email.trim() }).filter(function(email) { return email !== "" })
-    if (emails.length > 200 || emails.some(function(email) { return !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email) }))
-      return { ok: false, error: "Enter valid guest email addresses separated by commas" }
-    var seen = {}, previous = existing && Array.isArray(existing.attendees) ? existing.attendees : []
+    var guests = guestList(fields.guestEmails)
+    if (!guests.ok) return guests
+    var previous = existing && Array.isArray(existing.attendees) ? existing.attendees : []
     next.attendees = []
-    for (var i = 0; i < emails.length; i++) {
-      var email = emails[i].toLowerCase()
-      if (seen[email]) continue
-      seen[email] = true
+    for (var i = 0; i < guests.emails.length; i++) {
+      var email = guests.emails[i].toLowerCase()
       var matched = previous.filter(function(attendee) { return String(attendee.email || "").toLowerCase() === email })
-      next.attendees.push(matched.length ? matched[0] : { email: emails[i] })
+      next.attendees.push(matched.length ? matched[0] : { email: guests.emails[i] })
     }
   }
   if (fields.transparency === "opaque" || fields.transparency === "transparent") next.transparency = fields.transparency
@@ -833,13 +849,16 @@ function timedLayout(events, day) {
 function attendeeRows(event) {
   return (event && Array.isArray(event.attendees) ? event.attendees : []).map(function(attendee) {
     var status = String(attendee.responseStatus || attendee.partstat || attendee.status && attendee.status.response || "needsAction").toLowerCase()
+    // An Exchange copy of somebody else's invitation says nothing of how the others answered, and the
+    // organizer's own line is their invitation, not an answer.
     var label = status === "accepted" ? "Accepted" : status === "declined" ? "Declined"
-      : status === "tentative" || status === "tentativelyaccepted" ? "Maybe" : "Awaiting reply"
+      : status === "tentative" || status === "tentativelyaccepted" ? "Maybe"
+      : status === "organizer" ? "Organizer" : status === "unknown" ? "Invited" : "Awaiting reply"
     var email = String(attendee.email || attendee.emailAddress && attendee.emailAddress.address || "")
     var name = String(attendee.displayName || attendee.name || attendee.emailAddress && attendee.emailAddress.name || email || "Guest")
     return { name: name, email: email, label: label,
-      symbol: label === "Accepted" ? "✓" : label === "Declined" ? "×" : "?",
-      optional: attendee.optional === true, self: attendee.self === true }
+      symbol: label === "Accepted" || label === "Organizer" ? "✓" : label === "Declined" ? "×" : label === "Invited" ? "·" : "?",
+      optional: attendee.optional === true, resource: attendee.resource === true, self: attendee.self === true }
   })
 }
 
@@ -882,7 +901,7 @@ function createEvent(fields, nowMs) {
   if (!recurrence.ok) return recurrence
   var uid = "omamail-" + Math.floor(Number(nowMs) || Date.now())
   var result = {
-    ok: true, uid: uid,
+    ok: true, uid: uid, fields: checked, allDay: fields.allDay === true,
     ics: veventLines(uid, 0, Number(nowMs) || Date.now(), checked, recurrence.rule, fields.allDay === true).join("\r\n"),
     google: googleEventBody(checked, fields.allDay === true),
     graph: graphEventBody(checked, fields.allDay === true),
@@ -933,6 +952,9 @@ function deleteRequest(event, source, canReadSeries) {
     choices.push({ value: "all", label: "Delete and notify guests" })
   } else {
     if (series) message = "Every occurrence of this series will be deleted."
+    // An Exchange appointment is moved to Deleted Items, and nobody is told.
+    if (!!source && source.kind === "exchange")
+      message = "This appointment moves to Deleted Items. Nobody is told."
     choices.push({ value: "all", label: "Delete" })
   }
   return { kind: "event", name: String(value.summary || "Untitled event"), message: message, choices: choices }
@@ -941,7 +963,14 @@ function deleteRequest(event, source, canReadSeries) {
 function writeRefusal(source, event, operation) {
   if (!source) return "Choose a calendar"
   if (source.readOnly === true) return "This calendar is read-only"
-  if (operation === "reschedule" && source.kind !== "google")
+  // An Exchange event says for itself whether it is a plain appointment (`lockReason`, the backend's
+  // decision, made again before the write), and carries the version a write has to name. Dragging
+  // writes through the editor's own call, so an appointment moves exactly as the editor moves it.
+  if (source.kind === "exchange" && event) {
+    if (event.lockReason) return String(event.lockReason)
+    if (String(event.exchangeKey || "") === "") return "Refresh this event before changing it"
+  }
+  if (operation === "reschedule" && source.kind !== "google" && source.kind !== "exchange")
     return "Open the event editor to change its time"
   if (source.kind === "google" && event && event.eventType === "fromGmail" && operation !== "delete")
     return "Google does not allow changing the time or details of events created from Gmail"
@@ -981,7 +1010,7 @@ function updateEvent(fields, existing, nowMs) {
     ["DTSTAMP", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY",
       "DESCRIPTION", "LOCATION"])
   return {
-    ok: true, uid: uid,
+    ok: true, uid: uid, fields: checked, allDay: allDay,
     ics: rewritten !== "" ? rewritten
       : veventLines(uid, sequence, stampMs, checked, "", allDay).join("\r\n"),
     google: googleEventPatch(checked, allDay, !!(event.start && event.start.allDay)),
