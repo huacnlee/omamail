@@ -54,6 +54,84 @@ test("Language uses the system locale unless a short dictionary code overrides i
   assert.equal(rules.resolveLanguage("", "C"), "", "an unsupported system locale never reaches Sonnet")
 })
 
+test("Windows expand whole words, preserve offsets and cap hostile tokens", () => {
+  const r = spelling()
+  deepEqual(r.wordWindow("hello mispelled here ", 8, 12), { start: 6, end: 15 })
+  const text = "wrod ".repeat(20000)
+  const window = r.wordWindow(text, 0, text.length)
+  assert.ok(window.end - window.start <= r.MAX_WINDOW_CHARACTERS)
+  assert.equal(text[window.end - 1], " ")
+  const hostile = "a".repeat(100000) + " wrod "
+  const seen = []
+  r.misspelledRanges(hostile, w => { seen.push(w); return true })
+  assert.equal(seen.length, 0, "a huge token never reaches the native checker")
+  r.misspelledRanges("a".repeat(129) + " wrod ", w => { seen.push(w); return true })
+  assert.deepEqual(seen, ["wrod"], "an over-budget token is skipped, not split")
+  deepEqual(r.misspelledRanges("a".repeat(129) + "\nwrod ", () => true), [{ start: 130, end: 134 }])
+})
+
+test("Quoted lines skip lookup including an initial window in the middle of a quote", () => {
+  const r = spelling()
+  const text = "wrod \n  > mispelled wrod \n\t> more wrod \nunquoted "
+  const seen = []
+  const ranges = r.misspelledRanges(text, w => { seen.push(w); return true })
+  assert.deepEqual(seen, ["wrod", "unquoted"])
+  assert.equal(ranges.length, 2)
+  assert.equal(r.quotedAt(text, text.indexOf("mispelled")), true)
+  assert.equal(r.quotedAt(text, text.indexOf("unquoted")), false)
+  const window = r.wordWindow(text, text.indexOf("mispelled") + 2, text.indexOf("more") + 2)
+  const pass = r.createPass(text, window, 0, text.length, 1)
+  while (!pass.done) r.advancePass(pass, () => { throw Error("quote reached checker") }, () => 0)
+})
+
+test("Range, token, character and deterministic time budgets yield without losing work", () => {
+  const r = spelling()
+  const text = "wrod ".repeat(10000)
+  const window = r.wordWindow(text, 0, text.length)
+  const pass = r.createPass(text, window, 0, text.length, 7)
+  const paint = []
+  r.advancePass(pass, () => true, () => 0, range => paint.push(range))
+  assert.equal(pass.ranges.length, r.MAX_SLICE_WORDS)
+  assert.equal(pass.done, false)
+  let clock = 0
+  const timed = r.createPass(text, window, 0, text.length, 7)
+  r.advancePass(timed, () => true, () => { clock += 4; return clock })
+  assert.equal(timed.ranges.length, 1)
+  while (!pass.done) r.advancePass(pass, () => true, () => 0)
+  assert.equal(pass.ranges.length, r.MAX_UNDERLINE_RANGES)
+  const blank = r.createPass(" ".repeat(20000), { start: 0, end: 20000 }, 0, 20000, 0)
+  r.advancePass(blank, () => true, () => 0)
+  assert.equal(blank.done, false)
+  assert.ok(blank.index <= r.MAX_SLICE_CHARACTERS)
+  const narrow = r.createPass(text, window, 1000, 1100, 0)
+  while (!narrow.done) r.advancePass(narrow, () => true, () => 0)
+  assert.ok(narrow.ranges.length > 0)
+  assert.ok(narrow.ranges.every(x => x.start >= 1000 && x.end <= 1100))
+})
+
+test("Cached verdicts avoid repeat queries, are bounded and invalidate with the session", () => {
+  const r = spelling()
+  const session = load("compose/SpellingSession.js")
+  let count = 0
+  let cache = r.createCache()
+  const checker = () => { count++; return true }
+  assert.equal(r.cachedVerdict(cache, "__proto__", checker), true)
+  assert.equal(r.cachedVerdict(cache, "__proto__", checker), true)
+  assert.equal(count, 1)
+  let notifications = 0
+  const adapter = { resetCache() { cache = r.createCache() }, checkerChanged() { notifications++ } }
+  session.subscribe(adapter)
+  session.changed()
+  assert.equal(notifications, 1)
+  r.cachedVerdict(cache, "__proto__", checker)
+  assert.equal(count, 2, "Ignore and language notifications discard stale verdicts")
+  for (let i = 0; i <= r.MAX_CACHE_WORDS; i++) r.cachedVerdict(cache, "w" + i, checker)
+  assert.ok(cache.size <= r.MAX_CACHE_WORDS)
+  session.unsubscribe(adapter)
+  session.changed()
+  assert.equal(notifications, 1)
+})
+
 test("Underlines cover every visual line of a word and descending caret positions", () => {
   const rules = spelling()
   const positions = [

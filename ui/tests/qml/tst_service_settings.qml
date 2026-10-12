@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 import "../../account/Unified.js" as Unified
+import "../../compose/Spelling.js" as Spelling
 
 Item {
   width: 400
@@ -164,7 +165,7 @@ Item {
     function test_spelling_defaults_on_and_persists_changes() {
       mailService.applySettings({})
       compare(mailService.spellingEnabled, true)
-      compare(mailService.spellingLanguage, Qt.locale().name)
+      compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
 
       mailService.setSpellingEnabled(false)
       compare(mailService.spellingEnabled, false)
@@ -183,11 +184,11 @@ Item {
       for (var i = 0; i < 5; i++) {
         var values = ["../x", "en_US\n", "en_US\u0000", "éé", "x".repeat(500)]
         mailService.applySettings({ spellingLanguage: values[i] })
-        compare(mailService.spellingLanguage, Qt.locale().name)
+        compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
       }
       mailService.setSpellingLanguage("")
       compare(shellStore.updatedEntry.spellingLanguage, "")
-      compare(mailService.spellingLanguage, Qt.locale().name)
+      compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
     }
 
     // The probe loads Sonnet through the same adapter the composer uses; it

@@ -45,6 +45,15 @@ Item {
   readonly property string status: !enabled ? "disabled"
                                             : (available ? "ready" : "no-dictionary")
 
+  property var verdictCache: Spelling.createCache()
+  function resetCache() { verdictCache = Spelling.createCache() }
+  function isMisspelled(word) {
+    if (!available || !enabled) return false
+    return Spelling.cachedVerdict(verdictCache, word, function(value) {
+      return highlighter.isWordMisspelled(value)
+    })
+  }
+
   signal checkerChanged()
   Component.onCompleted: {
     Session.subscribe(adapter)
@@ -89,11 +98,12 @@ Item {
   function misspelledRanges(text) {
     if (!available || !enabled) return []
     return Spelling.misspelledRanges(text, function(word) {
-      return highlighter.isWordMisspelled(word)
+      return adapter.isMisspelled(word)
     })
   }
 
   function applySettings() {
+    resetCache()
     // The request is attempted even when the previous one reverted: a later
     // successful call is the only way back from a missing dictionary, and
     // guarding on the prior result would leave the switch unrecoverable.

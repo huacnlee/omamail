@@ -874,7 +874,7 @@ Column {
         objectName: "spellingLanguagePolicy"
         width: parent.width
         text: "Checking spelling in "
-          + Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name)
+          + (Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name) || Qt.locale().name)
           + (root.service && Spelling.decodeSettings(root.service.settings).language !== ""
             ? " (set in settings)." : " (system language).")
         color: root.dimColor
@@ -894,7 +894,7 @@ Column {
         visible: !!root.service && !root.service.spellingAvailable
         text: root.service && root.service.spellingStatus === "no-module"
           ? "Spell-checking is unavailable: install the Sonnet QML module, then restart Omamail."
-          : "The " + Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name)
+          : "The " + (Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name) || Qt.locale().name)
             + " dictionary is not installed. Install the matching Hunspell "
             + "dictionary package (hunspell-<language>, for example hunspell-de), then restart Omamail."
         color: root.accentColor

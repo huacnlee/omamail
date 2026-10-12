@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../../components" as Omamail
+import "../../compose/Spelling.js" as Spelling
 
 // The real composer attaches the optional spelling adapter to its body
 // document, does not change the draft while checking, and unloads cleanly when
@@ -78,6 +79,91 @@ Item {
       compose.contentDirection = ""
       compose.spellingEnabled = true
       compose.spellingLanguage = "en_US"
+      named(compose, "compose-body").contentY = 0
+    }
+
+    function readyAdapter() {
+      tryVerify(function() { return compose.spellingAdapter !== null || compose.spellingStatus === "no-module" }, 3000)
+      if (!compose.spellingAvailable) { skip("spelling unavailable (" + compose.spellingStatus + ")"); return null }
+      return compose.spellingAdapter
+    }
+
+    function test_long_body_only_paints_visible_bounded_ranges_and_scrolls_to_end() {
+      if (!readyAdapter()) return
+      var body = named(compose, "compose-body-editor")
+      var flick = named(compose, "compose-body")
+      body.text = "mispelled ".repeat(10000)
+      flick.contentY = 0
+      compose.refreshSpellingRanges()
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done }, 5000)
+      verify(compose.spellingDelegateCount > 0)
+      verify(compose.spellingDelegateCount <= Spelling.MAX_UNDERLINE_RANGES)
+      verify(compose.spellingRanges.length <= Spelling.MAX_UNDERLINE_RANGES)
+      verify(compose.spellingWindow.end - compose.spellingWindow.start <= Spelling.MAX_WINDOW_CHARACTERS)
+      for (var i = 0; i < compose.spellingRanges.length; i++) {
+        var box = body.positionToRectangle(compose.spellingRanges[i].start)
+        verify(box.y >= flick.contentY && box.y < flick.contentY + flick.height)
+      }
+      verify(compose.spellingRanges[compose.spellingRanges.length - 1].end < body.text.length / 2)
+      flick.contentY = flick.contentHeight - flick.height
+      tryVerify(function() {
+        return compose.spellingRanges.length > 0
+          && compose.spellingRanges[compose.spellingRanges.length - 1].end > 99000
+      }, 5000)
+      verify(compose.spellingDelegateCount <= Spelling.MAX_UNDERLINE_RANGES)
+      verify(compose.spellingRanges[0].start > 90000)
+    }
+
+    function test_revision_change_abandons_an_incomplete_pass_before_it_can_paint() {
+      var adapter = readyAdapter()
+      if (!adapter) return
+      var body = named(compose, "compose-body-editor")
+      body.text = "mispelled ".repeat(10000)
+      compose.refreshSpellingRanges()
+      compose.processSpellingSlice()
+      var oldPass = compose.spellingPass
+      verify(oldPass && !oldPass.done, "long work yields to the next tick")
+      body.insert(0, "correct ")
+      compare(compose.spellingDelegateCount, 0)
+      compare(compose.spellingRanges.length, 0)
+      compare(compose.spellingPass, null)
+      // Even an explicitly delivered stale continuation cannot paint.
+      compose.spellingPass = oldPass
+      compose.processSpellingSlice()
+      compare(compose.spellingDelegateCount, 0)
+      compare(compose.spellingPass, null)
+    }
+
+    function test_quoted_reply_lines_never_reach_the_checker() {
+      var adapter = readyAdapter()
+      if (!adapter) return
+      var body = named(compose, "compose-body-editor")
+      body.text = ("> mispelled wrod \n").repeat(6000)
+      adapter.resetCache()
+      compose.refreshSpellingRanges()
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done }, 5000)
+      compare(adapter.verdictCache.size, 0)
+      compare(compose.spellingDelegateCount, 0)
+      body.cursorPosition = 4
+      body.forceActiveFocus()
+      compare(compose.openSpellingAtCaret(), false)
+    }
+
+    function test_suggestions_inspect_a_word_outside_the_processed_window_on_demand() {
+      if (!readyAdapter()) return
+      var body = named(compose, "compose-body-editor")
+      body.text = "correct ".repeat(12500) + "mispelled "
+      named(compose, "compose-body").contentY = 0
+      compose.refreshSpellingRanges()
+      var firstWindowEnd = compose.spellingWindow.end
+      body.cursorPosition = body.text.length - 5
+      body.forceActiveFocus()
+      verify(body.cursorPosition > firstWindowEnd)
+      verify(compose.openSpellingAtCaret())
+      var menu = named(compose, "compose-text-menu")
+      compare(menu.spellingWord, "mispelled")
+      verify(menu.spellingSuggestions.length > 0)
+      menu.close()
     }
 
     function test_body_adapter_attaches_and_checking_does_not_mutate() {

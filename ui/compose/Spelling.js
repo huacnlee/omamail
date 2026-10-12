@@ -2,29 +2,124 @@
 
 // Spelling presentation rules shared by the composer and optional adapter.
 // Positions are UTF-16 offsets, matching Qt's text document API.
-function misspelledRanges(text, isMisspelled) {
-  var ranges = []
-  if (!text) return ranges
+var MAX_WINDOW_CHARACTERS = 20000
+var MAX_UNDERLINE_RANGES = 400
+var MAX_WORD_CHARACTERS = 128
+var MAX_CACHE_WORDS = 4096
+var SLICE_MILLISECONDS = 8
+var MAX_SLICE_WORDS = 12
+var MAX_SLICE_CHARACTERS = 512
+
+// Do not split a token at a window edge or traverse an arbitrarily long word.
+// If expansion cannot fit the cap, skip that token rather than check a fragment.
+function wordWindow(text, start, end) {
   var length = text.length
-  var index = 0
-  while (index < length) {
-    if (!isWordChar(text.charAt(index))) { index += 1; continue }
-    var start = index
-    while (index < length && isWordChar(text.charAt(index))) index += 1
-    var end = index
-    // Nothing follows: this is the word still being typed. Earlier finished
-    // words have already been collected, so stop.
-    if (end >= length) break
-    var wordStart = start
-    var wordEnd = end
-    while (wordStart < wordEnd && isApostrophe(text.charAt(wordStart))) wordStart += 1
-    while (wordEnd > wordStart && isApostrophe(text.charAt(wordEnd - 1))) wordEnd -= 1
-    if (wordEnd > wordStart) {
-      var word = text.substring(wordStart, wordEnd)
-      if (isMisspelled(word)) ranges.push({ start: wordStart, end: wordEnd })
+  var from = Math.max(0, Math.min(length, Math.floor(start)))
+  var to = Math.max(from, Math.min(length, Math.ceil(end)))
+  var walked = 0
+  while (from > 0 && isWordChar(text.charAt(from - 1)) && walked < MAX_WORD_CHARACTERS) {
+    from -= 1; walked += 1
+  }
+  if (from > 0 && isWordChar(text.charAt(from - 1))) {
+    from = Math.max(0, Math.min(length, Math.floor(start)))
+    while (from < length && isWordChar(text.charAt(from)) && from - start < MAX_WORD_CHARACTERS) from += 1
+  }
+  to = Math.min(to, from + MAX_WINDOW_CHARACTERS)
+  var originalEnd = to
+  while (to < length && isWordChar(text.charAt(to))
+      && to - originalEnd < MAX_WORD_CHARACTERS && to - from < MAX_WINDOW_CHARACTERS) to += 1
+  if (to < length && isWordChar(text.charAt(to))) {
+    while (to > from && isWordChar(text.charAt(to - 1))) to -= 1
+  }
+  return { start: from, end: to }
+}
+
+// Find the containing paragraph with the native string search, then examine
+// only its bounded indentation. No quoted words reach the dictionary checker.
+function quotedAt(text, position) {
+  var at = text.lastIndexOf("\n", Math.max(0, position) - 1) + 1
+  var first = at
+  while (at < text.length && (text.charAt(at) === " " || text.charAt(at) === "\t")
+      && at - first < MAX_WORD_CHARACTERS) at += 1
+  return text.charAt(at) === ">" || text.charAt(at) === " " || text.charAt(at) === "\t"
+}
+
+function createPass(text, window, visibleStart, visibleEnd, revision) {
+  return { text: text.substring(window.start, window.end), offset: window.start,
+    index: 0, documentLength: text.length, quoted: quotedAt(text, window.start),
+    lineStart: false, visibleStart: visibleStart, visibleEnd: visibleEnd,
+    revision: revision, ranges: [], skipLong: window.start > 0
+      && isWordChar(text.charAt(window.start - 1)) && isWordChar(text.charAt(window.start)),
+    done: window.end <= window.start }
+}
+
+function nextWord(pass, limit) {
+  var text = pass.text
+  while (pass.index < text.length && pass.index < limit) {
+    var ch = text.charAt(pass.index)
+    if (ch === "\n") {
+      pass.index += 1; pass.lineStart = true; pass.quoted = false; pass.skipLong = false; continue
+    }
+    if (pass.lineStart) {
+      if (ch === " " || ch === "\t") { pass.index += 1; continue }
+      pass.quoted = ch === ">"; pass.lineStart = false
+    }
+    if (pass.skipLong) {
+      if (isWordChar(ch)) { pass.index += 1; continue }
+      pass.skipLong = false
+    }
+    if (pass.quoted || !isWordChar(ch)) { pass.index += 1; continue }
+    var start = pass.index
+    while (pass.index < text.length && isWordChar(text.charAt(pass.index))
+        && pass.index - start <= MAX_WORD_CHARACTERS) pass.index += 1
+    var end = pass.index
+    if (pass.offset + end >= pass.documentLength) continue // unfinished final word
+    if (end - start > MAX_WORD_CHARACTERS) { pass.skipLong = true; continue }
+    while (start < end && isApostrophe(text.charAt(start))) start += 1
+    while (end > start && isApostrophe(text.charAt(end - 1))) end -= 1
+    if (end > start) return { start: pass.offset + start, end: pass.offset + end,
+      word: text.substring(start, end) }
+  }
+  return null
+}
+
+// The injected clock makes the time rule deterministic in tests. `paint` runs
+// inside the same slice so native geometry and delegate creation share its budget.
+function advancePass(pass, isMisspelled, clock, paint) {
+  var began = clock()
+  var count = 0
+  var limit = pass.index + MAX_SLICE_CHARACTERS
+  while (!pass.done && count < MAX_SLICE_WORDS && clock() - began < SLICE_MILLISECONDS) {
+    var range = nextWord(pass, limit)
+    if (!range) { pass.done = pass.index >= pass.text.length; break }
+    count += 1
+    if (isMisspelled(range.word) && range.end > pass.visibleStart && range.start < pass.visibleEnd) {
+      var stored = { start: range.start, end: range.end }
+      if (paint && paint(stored) === false) continue
+      pass.ranges.push(stored)
+      if (pass.ranges.length >= MAX_UNDERLINE_RANGES) pass.done = true
     }
   }
-  return ranges
+  return pass.done
+}
+
+function createCache() { return { words: ({}), size: 0 } }
+function cachedVerdict(cache, word, check) {
+  // Prefixing keeps arbitrary words such as __proto__ away from object keys.
+  var key = "$" + word
+  if (Object.prototype.hasOwnProperty.call(cache.words, key)) return cache.words[key]
+  if (cache.size >= MAX_CACHE_WORDS) { cache.words = ({}); cache.size = 0 }
+  var verdict = check(word)
+  cache.words[key] = verdict; cache.size += 1
+  return verdict
+}
+
+// Small-text helper for non-visual callers; production uses incremental passes.
+function misspelledRanges(text, isMisspelled) {
+  var window = wordWindow(text, 0, text.length)
+  var pass = createPass(text, window, window.start, window.end, 0)
+  while (!pass.done) advancePass(pass, isMisspelled, function() { return 0 }, null)
+  return pass.ranges
 }
 
 function isWordChar(character) {

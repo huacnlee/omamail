@@ -13,5 +13,8 @@ function unsubscribe(adapter) {
 
 function changed() {
   var current = adapters.slice()
-  for (var i = 0; i < current.length; i++) current[i].checkerChanged()
+  for (var i = 0; i < current.length; i++) {
+    current[i].resetCache()
+    current[i].checkerChanged()
+  }
 }
