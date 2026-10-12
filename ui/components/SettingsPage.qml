@@ -33,6 +33,8 @@ Column {
   signal openCalendarRequested()
   signal calendarSignInRequested(int index)
 
+  readonly property string spellingLanguage: Spelling.resolveLanguage(
+    service ? service.spellingLanguage : "", Qt.locale().name)
   readonly property var accounts: service ? service.accountSummaries : []
   // A separate list on purpose: accountSummaries carries live mailbox state and
   // is replaced on a poll, which would rebuild the field being typed in.
@@ -873,8 +875,10 @@ Column {
       Text {
         objectName: "spellingLanguagePolicy"
         width: parent.width
-        text: "Checking spelling in "
-          + (Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name) || Qt.locale().name)
+        id: spellingLanguagePolicy
+        text: root.spellingLanguage === ""
+          ? "No system language is set; choose one with the spellingLanguage setting."
+          : "Checking spelling in " + root.spellingLanguage
           + (root.service && Spelling.decodeSettings(root.service.settings).language !== ""
             ? " (set in settings)." : " (system language).")
         color: root.dimColor
@@ -891,10 +895,14 @@ Column {
       Text {
         objectName: "spellingNeedsSetup"
         width: parent.width
-        visible: !!root.service && !root.service.spellingAvailable
-        text: root.service && root.service.spellingStatus === "no-module"
+        visible: !!root.service && root.service.spellingEnabled !== false
+          && !root.service.spellingAvailable && root.service.spellingStatus !== "loading"
+        text: root.service && root.service.standalone === true
+          ? "Spell-checking is not available in this build."
+          : root.service && root.service.spellingStatus === "no-module"
           ? "Spell-checking is unavailable: install the Sonnet QML module, then restart Omamail."
-          : "The " + (Spelling.resolveLanguage(root.service ? root.service.spellingLanguage : "", Qt.locale().name) || Qt.locale().name)
+          : root.spellingLanguage === "" ? spellingLanguagePolicy.text
+          : "The " + root.spellingLanguage
             + " dictionary is not installed. Install the matching Hunspell "
             + "dictionary package (hunspell-<language>, for example hunspell-de), then restart Omamail."
         color: root.accentColor

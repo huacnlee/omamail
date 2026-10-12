@@ -13,11 +13,11 @@ Item {
   readonly property string language: Spelling.resolveLanguage(languageOverride, Qt.locale().name)
   readonly property bool available: probe.status === Loader.Ready
     && probe.item !== null && probe.item.available
-  readonly property string status: probe.status === Loader.Error
-    ? "no-module" : (probe.item ? probe.item.status : "loading")
+  readonly property string status: !enabledRequest ? "disabled" : (probe.status === Loader.Error
+    ? "no-module" : (probe.item ? probe.item.status : "loading"))
   // Sonnet enumerates dictionaries once per process. Installing one requires
   // restarting Omamail; a new adapter alone cannot discover it.
-  Loader { id: probe; source: "SpellcheckAdapter.qml" }
+  Loader { id: probe; active: root.enabledRequest; source: "SpellcheckAdapter.qml" }
   Binding {
     target: probe.item
     property: "language"

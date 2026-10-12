@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
+import "../../components" as Components
 import "../../account/Unified.js" as Unified
 import "../../compose/Spelling.js" as Spelling
 
@@ -30,6 +31,18 @@ Item {
     id: scopedMailService
     shell: shellStore
     manifest: ({ id: "omamail" })
+  }
+
+  Components.SettingsPage {
+    id: page
+    width: parent.width
+    service: mailService
+    calendarController: null
+    textColor: Qt.rgba(1, 1, 1, 1)
+    dimColor: Qt.rgba(0.6, 0.6, 0.6, 1)
+    accentColor: Qt.rgba(1, 0.5, 0, 1)
+    urgentColor: Qt.rgba(1, 0.5, 0, 1)
+    panelFontFamily: "sans"
   }
 
   TestCase {
@@ -191,9 +204,56 @@ Item {
       compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
     }
 
+    function test_spelling_setup_guidance_data() {
+      return [
+        { tag: "plugin-module", standalone: false, status: "no-module", enabled: true, message: "install the Sonnet QML module" },
+        { tag: "plugin-dictionary", standalone: false, status: "no-dictionary", enabled: true, message: "The en_US dictionary is not installed" },
+        { tag: "standalone-module", standalone: true, status: "no-module", enabled: true, message: "Spell-checking is not available in this build." },
+        { tag: "standalone-dictionary", standalone: true, status: "no-dictionary", enabled: true, message: "Spell-checking is not available in this build." },
+        { tag: "off", standalone: false, status: "disabled", enabled: false, message: "" },
+        { tag: "loading", standalone: false, status: "loading", enabled: true, message: "" }
+      ]
+    }
+    function test_spelling_setup_guidance(data) {
+      try {
+        page.service = { standalone: data.standalone, spellingEnabled: data.enabled,
+          spellingStatus: data.status, spellingAvailable: false, spellingLanguage: "en_US",
+          settings: { spellingLanguage: "en_US" }, accountSummaries: [] }
+        var notice = findChild(page, "spellingNeedsSetup")
+        compare(notice.visible, data.message !== "")
+        if (data.message !== "") verify(notice.text.indexOf(data.message) >= 0)
+      } finally { page.service = mailService }
+    }
+    function test_unset_system_language_guidance() {
+      if (Spelling.validLanguage(Qt.locale().name)) { skip("requires C/POSIX system locale"); return }
+      mailService.applySettings({ spellingLanguage: "" })
+      compare(mailService.spellingLanguage, "")
+      compare(findChild(page, "spellingLanguagePolicy").text,
+        "No system language is set; choose one with the spellingLanguage setting.")
+      compare(findChild(page, "spellingNeedsSetup").text.indexOf("The C dictionary"), -1)
+    }
+
+    function test_spelling_off_unloads_the_probe_and_hides_setup_warning() {
+      mailService.applySettings({ spellingEnabled: false })
+      compare(mailService.spellingStatus, "disabled")
+      compare(mailService.spellingAvailable, false)
+      var state = null
+      for (var i = 0; i < mailService.children.length; i++) {
+        if (mailService.children[i].enabledRequest !== undefined) state = mailService.children[i]
+      }
+      verify(state)
+      var probe = state.children[0]
+      compare(probe.active, false)
+      compare(probe.item, null)
+      compare(probe.status, Loader.Null)
+      compare(findChild(page, "spellingNeedsSetup").visible, false)
+      mailService.applySettings({})
+    }
+
     // The probe loads Sonnet through the same adapter the composer uses; it
     // settles into one concrete status on any machine rather than hanging.
     function test_spelling_availability_settles_to_a_known_status() {
+      mailService.applySettings({})
       tryVerify(function() {
         var status = mailService.spellingStatus
         return status === "ready" || status === "no-dictionary" || status === "no-module"
