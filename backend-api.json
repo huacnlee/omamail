@@ -198,6 +198,8 @@
     "exchange.sendAs",
     "exchange.invalidate",
     "exchange.cancel",
+    "exchange.calendars",
+    "exchange.calendarShared",
     "exchange.calendarEvents",
     "exchange.calendarEvent",
     "exchange.calendarCreate",
@@ -2283,6 +2285,237 @@
       }
     },
     {
+      "name": "Exchange calendars refuse unknown fields before any lookup",
+      "method": "exchange.calendars",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "unexpected": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendars for an unregistered mailbox names no credential",
+      "method": "exchange.calendars",
+      "params": {
+        "accountId": "exchange:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange shared calendar refuses an address that is not one before any lookup",
+      "method": "exchange.calendarShared",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "mailbox": "Ada <ada@example.org>"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange shared calendar refuses the mailbox's own address before any lookup",
+      "method": "exchange.calendarShared",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "mailbox": "Contract@Example.org"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange shared calendar for an unregistered mailbox names no credential",
+      "method": "exchange.calendarShared",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "mailbox": "colleague@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange calendar events refuse a calendar reference that is not one before any lookup",
+      "method": "exchange.calendarEvents",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "startMs": 1790000000000,
+        "endMs": 1790086400000,
+        "calendar": "AAAAAANFUWS2LJNFUWS2LJNFUWS2LJNFUWS2LJNFUWS2LJNFUWS2LJNFUWS2LJNFUWSQ"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar events refuse a reference naming the mailbox's own address before any lookup",
+      "method": "exchange.calendarEvents",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "startMs": 1790000000000,
+        "endMs": 1790086400000,
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq:contract@example.org"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar events of another calendar for an unregistered mailbox names no credential",
+      "method": "exchange.calendarEvents",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "startMs": 1790000000000,
+        "endMs": 1790086400000,
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq:colleague@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange calendar event of another calendar for an unregistered mailbox names no credential",
+      "method": "exchange.calendarEvent",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq:colleague@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange calendar create in another calendar for an unregistered mailbox names no credential",
+      "method": "exchange.calendarCreate",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "title": "x",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange calendar update of every event of another calendar is locked before any lookup",
+      "method": "exchange.calendarUpdate",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "title": "x",
+        "scope": "series",
+        "startClock": "10:15",
+        "durationMinutes": 45,
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "exchange_calendar_locked"
+      }
+    },
+    {
+      "name": "Exchange calendar respond in another calendar is locked before any lookup",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "accept",
+        "send": true,
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq:colleague@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "exchange_calendar_locked"
+      }
+    },
+    {
+      "name": "Exchange meeting create in another calendar is locked before any lookup",
+      "method": "exchange.meetingCreate",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "requiredAttendees": [
+          "ada@example.org"
+        ],
+        "sendInvitations": true,
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "title": "x",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "exchange_calendar_locked"
+      }
+    },
+    {
+      "name": "Exchange meeting create in another calendar still requires sendInvitations before any lookup",
+      "method": "exchange.meetingCreate",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "requiredAttendees": [
+          "ada@example.org"
+        ],
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "title": "x",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange meeting remove in another calendar is locked before any lookup",
+      "method": "exchange.meetingRemove",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq:colleague@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "exchange_calendar_locked"
+      }
+    },
+    {
+      "name": "Exchange calendar delete in another mailbox's calendar is locked before any lookup",
+      "method": "exchange.calendarDelete",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "calendar": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq:colleague@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "exchange_calendar_locked"
+      }
+    },
+    {
       "name": "credential kind exchange-password refuses a client id before native access",
       "method": "credentials.get",
       "params": {
@@ -2493,6 +2726,8 @@
       "exchange.sendAs",
       "exchange.invalidate",
       "exchange.cancel",
+      "exchange.calendars",
+      "exchange.calendarShared",
       "exchange.calendarEvents",
       "exchange.calendarEvent",
       "exchange.calendarCreate",
@@ -2568,7 +2803,23 @@
       "Exchange meeting remove refuses an unknown scope before any lookup",
       "Exchange meeting remove of every event takes no word that people are mailed before any lookup",
       "Exchange meeting remove of every event for an unregistered mailbox names no credential",
-      "Exchange meeting remove of one event for an unregistered mailbox names no credential"
+      "Exchange meeting remove of one event for an unregistered mailbox names no credential",
+      "Exchange calendars refuse unknown fields before any lookup",
+      "Exchange calendars for an unregistered mailbox names no credential",
+      "Exchange shared calendar refuses an address that is not one before any lookup",
+      "Exchange shared calendar refuses the mailbox's own address before any lookup",
+      "Exchange shared calendar for an unregistered mailbox names no credential",
+      "Exchange calendar events refuse a calendar reference that is not one before any lookup",
+      "Exchange calendar events refuse a reference naming the mailbox's own address before any lookup",
+      "Exchange calendar events of another calendar for an unregistered mailbox names no credential",
+      "Exchange calendar event of another calendar for an unregistered mailbox names no credential",
+      "Exchange calendar create in another calendar for an unregistered mailbox names no credential",
+      "Exchange calendar update of every event of another calendar is locked before any lookup",
+      "Exchange calendar respond in another calendar is locked before any lookup",
+      "Exchange meeting create in another calendar is locked before any lookup",
+      "Exchange meeting create in another calendar still requires sendInvitations before any lookup",
+      "Exchange meeting remove in another calendar is locked before any lookup",
+      "Exchange calendar delete in another mailbox's calendar is locked before any lookup"
     ]
   }
 }

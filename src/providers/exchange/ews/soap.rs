@@ -7,6 +7,7 @@ use chrono::{DateTime, SecondsFormat};
 use quick_xml::escape::escape;
 
 pub mod calendar;
+pub mod folders;
 
 /// The lowest `ExchangeVersionType` with `item:Preview`, `item:Flag` and `SuppressReadReceipts`.
 const VERSION: &str = "Exchange2013_SP1";

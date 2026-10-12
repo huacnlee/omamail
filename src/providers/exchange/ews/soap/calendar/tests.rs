@@ -258,7 +258,7 @@ fn no_request_can_mail_anybody_or_name_a_person_whatever_it_is_given() {
     };
     let requests = [
         calendar_view(0, 1000, 1, true).unwrap(),
-        get_appointment("AAMk"),
+        get_appointment("AAMk", false),
         create_appointment(&item, VIENNA).unwrap(),
         update_appointment("AAMk", "K", &change, VIENNA).unwrap(),
         delete_appointment("AAMk", "K").unwrap(),

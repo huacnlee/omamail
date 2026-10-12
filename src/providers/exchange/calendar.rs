@@ -1,8 +1,16 @@
-//! The mailbox's default calendar: `exchange.calendarEvents` reads a range, and
-//! `exchange.calendarCreate`, `exchange.calendarUpdate` and `exchange.calendarDelete` write personal
-//! appointments (`ews::client::calendar` makes the requests and decides what a failure proves).
+//! The calendar: `exchange.calendarEvents` reads a range, and `exchange.calendarCreate`,
+//! `exchange.calendarUpdate` and `exchange.calendarDelete` write personal appointments
+//! (`ews::client::calendar` makes the requests and decides what a failure proves).
 //!
 //! Rules a change must not break:
+//!
+//! - **The calendar is the mailbox's default one unless the request names another** (`calendar`, the
+//!   reference `exchange.calendars` or `exchange.calendarShared` gave, `folders`). Another is read by its
+//!   folder after the server has said the user may read it, and each event in it is locked unless its own
+//!   rights let them modify it (`CalendarItem::other_lock`, `calendar`); a meeting there is locked
+//!   whoever organises it, and a private item is masked exactly as in the default calendar. A write
+//!   there is asked of the server again (`ews::client::calendar`); all of a series is never written
+//!   there (one event at a time), and nothing is deleted in another mailbox's calendar.
 //!
 //! - **Nothing is mailed, ever, and only a plain appointment is written**: a single item with nobody
 //!   else on it that its owner made. Each event of a range says whether it is one (`editable`, and
@@ -53,32 +61,44 @@ use futures_util::FutureExt;
 use serde_json::{Map, Value, json};
 
 use super::ews::{
-    Appointment, CalendarChange, CalendarItem, Edit, Lock, MAX_CURSOR_MS, MAX_ENTRIES,
+    Appointment, Calendar, CalendarChange, CalendarItem, Edit, Lock, MAX_CURSOR_MS, MAX_ENTRIES,
     MAX_SPAN_MINUTES, Reminder, Scope, When, Written, create_appointment, is_change_key,
     update_appointment,
 };
 use super::recurrence::{self, Recurrence};
-use super::{INVALID, account, fields, ids, text, token, write::turn, zone};
+use super::{INVALID, account, fields, folders, ids, text, token, write::turn, zone};
 
 /// This computer's zone is not one a series could be made in, so none is made.
 const ZONE_UNKNOWN: &str = "exchange_calendar_zone_unknown";
+const LOCKED: &str = "exchange_calendar_locked";
 
 /// The widest range one request may ask for (a month grid is 42 days).
 const MAX_RANGE_MS: i64 = 100 * 86_400_000;
 const HALF_DAY_MS: i64 = 12 * 3_600_000;
 
 pub async fn events(params: &Value) -> Result<Value, &'static str> {
-    let map = fields(params, &["accountId", "startMs", "endMs", "requestToken"])?;
+    let map = fields(
+        params,
+        &["accountId", "startMs", "endMs", "calendar", "requestToken"],
+    )?;
     let (start_ms, end_ms) = (instant(map, "startMs")?, instant(map, "endMs")?);
     if end_ms <= start_ms || end_ms - start_ms > MAX_RANGE_MS {
         return Err(INVALID);
     }
-    super::account::read(&account(map)?, token(map)?, move |client| {
+    let account = account(map)?;
+    let calendar = folders::calendar(map, &account)?;
+    super::account::read(&account, token(map)?, move |client| {
         async move {
             let found = client
-                .calendar_events(start_ms, end_ms, MAX_ENTRIES)
+                .calendar_events(start_ms, end_ms, MAX_ENTRIES, &calendar)
                 .await?;
-            let events: Vec<Value> = found.items.iter().filter_map(event).collect();
+            // In any calendar but the default one, the server's word for what the user may do to each
+            // item; a server that gave none grants none.
+            let listed = |item: &CalendarItem| match found.other {
+                false => event(item),
+                true => event_with(item, item.other_lock(item.rights.unwrap_or_default())),
+            };
+            let events: Vec<Value> = found.items.iter().filter_map(listed).collect();
             Ok(json!({"events": events, "truncated": found.truncated}))
         }
         .boxed()
@@ -101,14 +121,18 @@ pub async fn create(params: &Value) -> Result<Value, &'static str> {
             "startDate",
             "endDate",
             "recurrence",
+            "calendar",
         ],
     )?;
     let item = appointment(map)?;
     create_appointment(&item, zone::UTC)?;
+    let account = account(map)?;
+    let calendar = folders::calendar(map, &account)?;
     // An unregistered mailbox is answered before this computer's zone is judged.
-    let mut lease = turn(&account(map)?).await?;
+    let mut lease = turn(&account).await?;
     let zone = zone_of(&item)?;
-    let written = lease.client().create_appointment(&item, zone).await?;
+    let client = lease.client();
+    let written = client.create_appointment(&item, zone, &calendar).await?;
     Ok(reply(&written))
 }
 
@@ -130,6 +154,7 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
             "scope",
             "startClock",
             "durationMinutes",
+            "calendar",
         ],
     )?;
     let (id, key) = target(map)?;
@@ -145,22 +170,46 @@ pub async fn update(params: &Value) -> Result<Value, &'static str> {
     if whole != CalendarChange::default() {
         update_appointment("A", &key, &whole, zone::UTC)?;
     }
-    let mut lease = turn(&account(map)?).await?;
+    let account = account(map)?;
+    let calendar = one_at_a_time(folders::calendar(map, &account)?, scope)?;
+    let mut lease = turn(&account).await?;
     let zone = zone_of_change(&edit)?;
     let client = lease.client();
     let written = client
-        .change_appointment(&id, &key, &edit, zone, scope)
+        .change_appointment(&id, &key, &edit, zone, scope, &calendar)
         .await?;
     Ok(reply(&written))
 }
 
 pub async fn delete(params: &Value) -> Result<Value, &'static str> {
-    let map = fields(params, &["accountId", "id", "changeKey", "scope"])?;
+    let map = fields(
+        params,
+        &["accountId", "id", "changeKey", "scope", "calendar"],
+    )?;
     let (id, key) = target(map)?;
     let scope = scope(map)?;
-    let mut lease = turn(&account(map)?).await?;
-    lease.client().delete_appointment(&id, &key, scope).await?;
+    let account = account(map)?;
+    let calendar = one_at_a_time(folders::calendar(map, &account)?, scope)?;
+    // A delete moves the item to Deleted Items, which a share of another mailbox's calendar need not
+    // reach: none is made there.
+    if calendar.is_shared() {
+        return Err(LOCKED);
+    }
+    let mut lease = turn(&account).await?;
+    let client = lease.client();
+    client
+        .delete_appointment(&id, &key, scope, &calendar)
+        .await?;
     Ok(json!({"deleted": true}))
+}
+
+/// Outside the default calendar a series is written one event at a time (`ews::client::calendar`):
+/// all of it is `exchange_calendar_locked`, said before anything is looked up.
+fn one_at_a_time(calendar: Calendar, scope: Option<Scope>) -> Result<Calendar, &'static str> {
+    match scope == Some(Scope::Series) && !calendar.is_default() {
+        true => Err(LOCKED),
+        false => Ok(calendar),
+    }
 }
 
 pub(super) fn reply(written: &Written) -> Value {
@@ -333,9 +382,14 @@ pub(super) fn target(map: &Map<String, Value>) -> Result<(String, String), &'sta
     Ok((id.to_owned(), key.to_owned()))
 }
 
-/// One item as the answer lists it; `None` for a cancelled one, and for one whose id the codec
-/// refuses or whose days cannot be held.
+/// One item of the default calendar as the answer lists it (`event_with`).
 pub fn event(item: &CalendarItem) -> Option<Value> {
+    event_with(item, item.screen_lock())
+}
+
+/// One item as the answer lists it, locked for `lock`; `None` for a cancelled one, and for one whose id
+/// the codec refuses or whose days cannot be held. A private item is masked whatever calendar it is in.
+fn event_with(item: &CalendarItem, lock: Option<Lock>) -> Option<Value> {
     if item.cancelled {
         return None;
     }
@@ -348,7 +402,6 @@ pub fn event(item: &CalendarItem) -> Option<Value> {
             item.organizer.as_str(),
         )
     };
-    let lock = item.screen_lock();
     let mut event = json!({
         "id": ids::encode(&item.id).ok()?,
         "changeKey": item.change_key,

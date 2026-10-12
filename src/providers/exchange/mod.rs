@@ -18,6 +18,7 @@ mod calendar;
 mod check;
 mod detail;
 mod ews;
+mod folders;
 mod guests;
 mod ids;
 mod meeting;
@@ -64,6 +65,8 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
         "exchange.send" => Box::pin(write::send(params)).await,
         "exchange.saveDraft" => Box::pin(write::save_draft(params)).await,
         "exchange.deleteDraft" => Box::pin(write::delete_draft(params)).await,
+        "exchange.calendars" => Box::pin(folders::calendars(params)).await,
+        "exchange.calendarShared" => Box::pin(folders::shared(params)).await,
         "exchange.calendarEvents" => Box::pin(calendar::events(params)).await,
         "exchange.calendarEvent" => Box::pin(detail::detail(params)).await,
         "exchange.calendarCreate" => Box::pin(calendar::create(params)).await,

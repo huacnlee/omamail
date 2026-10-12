@@ -79,8 +79,9 @@ pub struct EventDetail {
     pub position: Option<i64>,
     /// What the Inbox's cancellations say of this meeting. Not part of a `GetItem`: the client looks.
     pub cancellation: Cancelled,
-    /// The item is not in the mailbox's default calendar folder, so nothing is written to it from
-    /// here: an answer no more than a change. Not part of a `GetItem`: the client compares.
+    /// The item is not in the calendar folder the read named (the mailbox's default one unless the call
+    /// named another), so nothing is written to it from here: an answer no more than a change. Not part
+    /// of a `GetItem`: the client compares.
     pub elsewhere: bool,
     /// Read without the Exchange 2013 properties, which an answer's read cannot go without: an answer
     /// from this screen would always fail, so none is offered. Not part of a `GetItem`.
@@ -200,6 +201,16 @@ impl EventDetail {
         } else {
             item.lock()
         }
+    }
+
+    /// What a screen is told of an item of a calendar that is not the mailbox's default one
+    /// (`CalendarItem::other_lock`), by the item's own rights, which the read asked for; an item the read
+    /// did not find in the folder named is locked.
+    pub fn other_lock(&self) -> Option<Lock> {
+        if self.elsewhere {
+            return Some(Lock::Unknown);
+        }
+        self.item.other_lock(self.item.rights.unwrap_or_default())
     }
 
     /// Why the owner may not change or cancel this meeting as its organizer from here, `None` when

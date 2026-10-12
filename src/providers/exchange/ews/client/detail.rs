@@ -1,14 +1,16 @@
 //! An event's detail, and the owner's answer to an invitation, which is decided on a detail read.
 //!
-//! **The detail read** is the default calendar's folder id and one `GetItem`, reads like any other.
-//! For a detail view, a server that answers the `GetItem` with an error it has no name for is asked
-//! once more without the Exchange 2013 properties; nothing is remembered, and the detail says it was
-//! read so (`reduced`), which offers no answer. An answer never takes that reduced read: it fails with
-//! the first read's code and sends nothing. An item that is not a calendar item, or has
-//! no start or end, is `exchange_message_not_found`; one that is not in the default calendar folder
-//! is said to be elsewhere and nothing is written to it from here, the rule of an appointment's
-//! write (`calendar`). For an invitation the Inbox is also looked at for a cancellation of the same
-//! meeting, a second read the detail can do without (it then says nothing of one).
+//! **The detail read** is the folder id of the calendar named (the default one unless the call named
+//! another, `Client::home`) and one `GetItem`, reads like any other; in another mailbox the item's
+//! rights are asked with it. For a detail view, a server that answers the `GetItem` with an error it
+//! has no name for is asked once more without the Exchange 2013 properties; nothing is remembered, and
+//! the detail says it was read so (`reduced`), which offers no answer. An answer never takes that
+//! reduced read: it fails with the first read's code and sends nothing. An item that is not a calendar
+//! item, or has no start or end, is `exchange_message_not_found`; one that is not in the folder named
+//! is said to be elsewhere and nothing is written to it from here, the rule of an appointment's write
+//! (`calendar`). For an invitation of the default calendar the Inbox is also looked at for a
+//! cancellation of the same meeting, a second read the detail can do without (it then says nothing of
+//! one); an item of any other calendar is read for nothing else.
 //!
 //! **An answer is the one thing this provider mails to somebody who asked for it**, the organizer,
 //! so it is two requests and the first decides whether the second is sent:
@@ -40,6 +42,7 @@ use super::super::decode::NOT_FOUND;
 use super::super::decode::calendar::{self as view, CalendarItem};
 use super::super::decode::detail::{self as answer, Cancellation, Cancelled, EventDetail};
 use super::super::soap::calendar::{self as soap, Answer, MAX_ENTRIES};
+use super::super::soap::folders::Calendar;
 use super::Client;
 use super::calendar::{CONFLICT, LOCKED, SERVER, Written, failure, refusal, written};
 use crate::providers::exchange::ids;
@@ -56,10 +59,20 @@ pub struct Answered {
 impl Client {
     /// The calendar item `id` (an Omamail id) names, with its notes, people, reminder and link, for
     /// an invitation whether a cancellation of it waits in the Inbox, and for an event of a series
-    /// what the series is (two reads the detail can do without).
-    pub async fn event_detail(&mut self, id: &str) -> Result<EventDetail, &'static str> {
+    /// what the series is (two reads the detail can do without). In a calendar that is not the
+    /// mailbox's default one the item is read for nothing else, and in another mailbox with the
+    /// signed-in user's rights over it: the owner's Inbox says nothing of that calendar's meetings, and
+    /// nothing of a series there is written but one event at a time.
+    pub async fn event_detail(
+        &mut self,
+        id: &str,
+        calendar: &Calendar,
+    ) -> Result<EventDetail, &'static str> {
         let wire = ids::decode(id)?;
-        let mut found = self.detail(&wire, true).await?;
+        let mut found = self.read_detail(&wire, true, false, calendar).await?;
+        if !calendar.is_default() {
+            return Ok(found);
+        }
         let mut inbox = None;
         if !found.elsewhere && found.incoming() && !found.item.cancelled {
             inbox = self.cancellations().await.ok();
@@ -79,7 +92,8 @@ impl Client {
         wire: &str,
         may_reduce: bool,
     ) -> Result<EventDetail, &'static str> {
-        self.read_detail(wire, may_reduce, soap::event_detail).await
+        self.read_detail(wire, may_reduce, false, &Calendar::Default)
+            .await
     }
 
     /// `detail` of the master of the series the event `wire` belongs to, with its rule and zone.
@@ -88,18 +102,25 @@ impl Client {
         wire: &str,
         may_reduce: bool,
     ) -> Result<EventDetail, &'static str> {
-        self.read_detail(wire, may_reduce, soap::master_detail)
+        self.read_detail(wire, may_reduce, true, &Calendar::Default)
             .await
     }
 
+    /// The detail read of the item `wire` (with `master`, of the master of its series) in the folder
+    /// `calendar` names: an item found anywhere else is said to be `elsewhere`.
     async fn read_detail(
         &mut self,
         wire: &str,
         may_reduce: bool,
-        read: fn(&str, bool) -> String,
+        master: bool,
+        calendar: &Calendar,
     ) -> Result<EventDetail, &'static str> {
-        let request = soap::get_calendar_folder();
-        let calendar = self.call(&request, true, view::folder_id).await?;
+        let read = match (master, calendar.is_default()) {
+            (true, _) => soap::master_detail,
+            (false, false) => soap::event_detail_rights,
+            (false, true) => soap::event_detail,
+        };
+        let home = self.home(calendar).await?;
         let (found, reduced) = match self.call(&read(wire, true), true, answer::detail).await {
             Err(SERVER) if may_reduce => {
                 let plain = read(wire, false);
@@ -108,7 +129,7 @@ impl Client {
             found => (found?, false),
         };
         let mut found = found.ok_or(NOT_FOUND)?;
-        found.elsewhere = found.item.folder != calendar;
+        found.elsewhere = found.item.folder != home.id;
         found.reduced = reduced;
         Ok(found)
     }

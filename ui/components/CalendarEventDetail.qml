@@ -48,7 +48,7 @@ Rectangle {
   // carries only a RECURRENCE-ID, but its href is the series' shared file —
   // and an href that resolves outside the source's own origin is refused by
   // the same rule the controller applies before any credential is read.
-  readonly property bool canDelete: !!root.source && !!event
+  readonly property bool deletable: !!root.source && !!event
     && root.source.readOnly !== true
     && (root.source.kind === "google" ? String(event.googleId || "") !== ""
       : root.source.kind === "microsoft" ? String(event.graphId || "") !== ""
@@ -59,7 +59,11 @@ Rectangle {
         && Number(event.recurrenceIdMs || 0) <= 0
         && String(event.source && event.source.recurrenceId || "") === ""
         && Calendar.caldavEventUrl(root.source.url, event) !== "")
-  readonly property bool canWrite: canDelete && Calendar.writeRefusal(source, event) === ""
+  // In another person's calendar an event may be changed by the rights the server gives it, and is never deleted
+  // from here: the reason is said where the button would be.
+  readonly property bool sharedDelete: deletable && ExchangeEvents.otherMailbox(root.source)
+  readonly property bool canDelete: deletable && !sharedDelete
+  readonly property bool canWrite: deletable && Calendar.writeRefusal(source, event) === ""
   readonly property color eventColor: calendarPalette.colorFor(
     source ? source.colorKey : "accent")
   readonly property string meetingLink: httpLink(event ? event.meetLink : "")
@@ -457,6 +461,18 @@ Rectangle {
             font.pixelSize: Style.font.caption
           }
         }
+      }
+
+      Text {
+        objectName: "event-delete-reason"
+        width: parent.width
+        visible: root.sharedDelete
+        text: ExchangeEvents.SHARED_DELETE
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
       }
 
       Text {

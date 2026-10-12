@@ -24,6 +24,7 @@ use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime};
 use super::super::soap::calendar::{
     MAX_LOCATION_BYTES, MAX_REMINDER_MINUTES, MAX_TITLE_BYTES, is_change_key,
 };
+use super::folders::{Rights, effective_rights};
 use super::{Rej, each, first_item, id_attr, messages};
 use crate::providers::exchange::ews::xml::Node;
 use crate::providers::exchange::recurrence::{
@@ -78,6 +79,9 @@ pub struct CalendarItem {
     pub repeat: Option<Repeat>,
     /// The Windows id of the zone a master recurs in (`StartTimeZone`), empty when not given.
     pub zone: String,
+    /// What the signed-in user may do to this item (`EffectiveRights`), when the read asked: only a read
+    /// of an item in another mailbox does, where the server alone knows whether it is theirs to change.
+    pub rights: Option<Rights>,
 }
 
 /// Why an item is not one this client may change; `code` is what `exchange.calendarEvents` says.
@@ -97,6 +101,8 @@ pub enum Lock {
     /// all of it is not changed or cancelled from here, because what the server mails for the master
     /// to people on one event alone is not documented.
     ExceptionGuests,
+    /// The calendar does not let the signed-in user change events in it.
+    Calendar,
     Unknown,
 }
 
@@ -111,6 +117,7 @@ impl Lock {
             Lock::Room => "room",
             Lock::Guests => "guests",
             Lock::ExceptionGuests => "exceptionGuests",
+            Lock::Calendar => "calendar",
             Lock::Unknown => "unknown",
         }
     }
@@ -189,6 +196,18 @@ impl CalendarItem {
             true => self.meeting_lock(self.is_series()),
             false => self.plain_lock(self.is_series()),
         }
+    }
+
+    /// The lock of an item in a calendar that is not the mailbox's default one, where `rights` are what
+    /// the signed-in user may do to it: its own `EffectiveRights`, which Microsoft says are "the client's
+    /// rights based on the permission settings for the item" (a folder's Modify says what may be done to
+    /// the folder, and a share may let somebody change all of its items, or only their own). Only a plain appointment, or one event of a plain series,
+    /// is ever written there: a meeting is locked whoever organises it (meetings are the default
+    /// calendar's, `folders::default_only`). Then the calendar's word: without the right to modify, it is
+    /// locked.
+    pub fn other_lock(&self, rights: Rights) -> Option<Lock> {
+        self.plain_lock(self.is_series())
+            .or_else(|| (!rights.modify).then_some(Lock::Calendar))
     }
 }
 
@@ -383,6 +402,7 @@ pub(super) fn item(node: &Node) -> Result<Option<CalendarItem>, Rej> {
             .filter(|id| zone::is_id(id))
             .unwrap_or_default()
             .to_owned(),
+        rights: effective_rights(node),
     }))
 }
 

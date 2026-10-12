@@ -11,8 +11,16 @@
 //! are the part of the shape a server might refuse: when the first answer is a server error the
 //! read is asked once more without them, and goes on that way (nothing is remembered).
 //!
-//! A write to an existing item is read first, and the read decides whether it is sent: the default
-//! calendar's folder id, then a `GetItem` with the folder and the attendee lists a view cannot show,
+//! **A calendar other than the default one** is named by its folder (`soap::folders::Calendar`) and asked
+//! of the server first (`Client::home`, its `EffectiveRights`): a range is read only where the user may
+//! read, and each item of it carries its own rights; an appointment is made only where they may read and
+//! make things; an item is changed only when its own rights (asked on the read before the write) say they
+//! may modify it, and deleted only in the owner's own mailbox and only when they say they may delete it
+//! (in another mailbox a delete moves the item to a folder the share need not reach, so none is made).
+//! There a series is written one event at a time.
+//!
+//! A write to an existing item is read first, and the read decides whether it is sent: the folder id of
+//! the calendar named, then a `GetItem` with the folder and the attendee lists a view cannot show,
 //! refused as `exchange_calendar_locked` unless it is a plain appointment of that folder
 //! (`CalendarItem::lock`, made again on what the server holds now, so an appointment somebody has
 //! made into a meeting since is never written and no invitation, update or cancellation can follow),
@@ -45,6 +53,7 @@ use super::super::decode::{self, Rej};
 use chrono::NaiveDate;
 
 use super::super::soap::calendar::{self as soap, Appointment, Change, Reminder, Scope, When};
+use super::super::soap::folders::Calendar;
 use super::{Client, Failed};
 use crate::providers::exchange::ids;
 
@@ -64,6 +73,8 @@ pub struct CalendarEvents {
     pub items: Vec<CalendarItem>,
     /// The read stopped before the server said it had given the last item.
     pub truncated: bool,
+    /// Read from a calendar other than the mailbox's default one: each item carries its own rights.
+    pub other: bool,
 }
 
 /// What a change of an appointment asks for; `None` leaves that part as the server has it, so a
@@ -196,19 +207,27 @@ pub(super) fn written(id: &str, change_key: String, asked: Option<&str>) -> Writ
 }
 
 impl Client {
-    /// The items of the mailbox's own calendar between two instants (milliseconds), a series as its
-    /// occurrences, cancelled ones included, `page` (1 to 100) to an answer.
+    /// The items of the calendar `calendar` names between two instants (milliseconds), a series as its
+    /// occurrences, cancelled ones included, `page` (1 to 100) to an answer. A calendar that is not the
+    /// mailbox's default one is read by its folder after the server has said the user may read it, and
+    /// the answer carries what they may do there.
     pub async fn calendar_events(
         &mut self,
         start_ms: i64,
         end_ms: i64,
         page: usize,
+        calendar: &Calendar,
     ) -> Result<CalendarEvents, &'static str> {
-        soap::calendar_view(start_ms, end_ms, page, true)?;
+        let at = calendar.place();
+        soap::calendar_view_in(start_ms, end_ms, page, true, at)?;
+        let other = !calendar.is_default();
+        if other && !self.home(calendar).await?.rights.read {
+            return Err(decode::DENIED);
+        }
         let (mut items, mut seen) = (Vec::new(), HashSet::new());
         let (mut from, mut optional, mut done) = (start_ms, true, false);
         for asked in 0..MAX_ANSWERS {
-            let view = |from, optional| soap::calendar_view(from, end_ms, page, optional);
+            let view = |from, optional| soap::calendar_view_in(from, end_ms, page, optional, at);
             let found = match self
                 .call(&view(from, optional)?, true, answer::calendar_view)
                 .await
@@ -245,16 +264,27 @@ impl Client {
         Ok(CalendarEvents {
             items,
             truncated: !done,
+            other,
         })
     }
 
-    /// Creates one appointment in the `calendar` folder; `zone` is the Windows id a day is made in.
+    /// Creates one appointment in the calendar `calendar` names; `zone` is the Windows id a day is made
+    /// in. Any calendar but the default one is first asked of the server, and is written to only if the
+    /// signed-in user may read it and make things in it: otherwise `exchange_calendar_locked`, nothing
+    /// sent.
     pub async fn create_appointment(
         &mut self,
         item: &Appointment,
         zone: &str,
+        calendar: &Calendar,
     ) -> Result<Written, &'static str> {
-        let request = soap::create_appointment(item, zone)?;
+        let request = soap::create_appointment_in(item, zone, calendar.place())?;
+        if !calendar.is_default() {
+            let rights = self.home(calendar).await?.rights;
+            if !(rights.read && rights.create) {
+                return Err(LOCKED);
+            }
+        }
         let (id, key) = self
             .exchange(&request, false, |node| answer::written(node, "CreateItem"))
             .await
@@ -273,6 +303,7 @@ impl Client {
         wanted: &Edit,
         zone: &str,
         scope: Option<Scope>,
+        calendar: &Calendar,
     ) -> Result<Written, &'static str> {
         let wire = ids::decode(id)?;
         let whole = Change {
@@ -289,7 +320,12 @@ impl Client {
         if whole != Change::default() {
             soap::update_appointment(&wire, change_key, &whole, zone)?;
         }
-        let (current, target) = self.plain_appointment(&wire, change_key, scope).await?;
+        let aim = Aim {
+            scope,
+            calendar,
+            delete: false,
+        };
+        let (current, target) = self.plain_appointment(&wire, change_key, &aim).await?;
         let mut change = changes(&current, wanted);
         if let Some(when @ When::Clock { minutes, .. }) = change.when {
             change.when = Some(when.on(series_day(&current, zone, minutes)?));
@@ -318,10 +354,16 @@ impl Client {
         id: &str,
         change_key: &str,
         scope: Option<Scope>,
+        calendar: &Calendar,
     ) -> Result<(), &'static str> {
         let wire = ids::decode(id)?;
         soap::delete_appointment(&wire, change_key)?;
-        let (_, target) = self.plain_appointment(&wire, change_key, scope).await?;
+        let aim = Aim {
+            scope,
+            calendar,
+            delete: true,
+        };
+        let (_, target) = self.plain_appointment(&wire, change_key, &aim).await?;
         self.delete_item(&soap::delete_appointment(&target, change_key)?)
             .await
     }
@@ -339,25 +381,33 @@ impl Client {
     }
 
     /// The item a write is for as the server holds it, and the id the write goes to: a plain
-    /// appointment of the default calendar folder (resolved by its distinguished name, as the view
-    /// reads it), one event of a plain series, or the master of one (read through the event the caller
-    /// names and written by its own id), at `change_key`. A delete names no `ConflictResolution`, so
-    /// this read is its version check. Nothing has been written when this fails.
+    /// appointment of the calendar folder `aim` names (the default one resolved by its distinguished
+    /// name, as the view reads it, any other by its id), one event of a plain series, or the master of
+    /// one (read through the event the caller names and written by its own id), at `change_key`. A
+    /// delete names no `ConflictResolution`, so this read is its version check. Outside the default
+    /// calendar a series is written one event at a time, nothing is deleted in another mailbox, and the
+    /// item is read with the signed-in user's rights over it and written only when they include modifying
+    /// it (deleting it, for a delete): the server decides, and an answer that names none grants none.
+    /// Nothing has been written when this fails.
     async fn plain_appointment(
         &mut self,
         wire: &str,
         change_key: &str,
-        scope: Option<Scope>,
+        aim: &Aim<'_>,
     ) -> Result<(CalendarItem, String), &'static str> {
+        let (scope, calendar) = (aim.scope, aim.calendar);
+        let other = !calendar.is_default();
+        if other && scope == Some(Scope::Series) || aim.delete && calendar.is_shared() {
+            return Err(LOCKED);
+        }
         let (item, elsewhere) = if scope == Some(Scope::Series) {
             let master = self.master(wire, false).await?;
             (Some(master.item), master.elsewhere)
         } else {
-            let calendar = soap::get_calendar_folder();
-            let calendar = self.call(&calendar, true, answer::folder_id).await?;
-            let request = soap::get_appointment(wire);
+            let home = self.home(calendar).await?;
+            let request = soap::get_appointment(wire, other);
             let item = self.call(&request, true, answer::appointment).await?;
-            let elsewhere = item.as_ref().is_some_and(|item| item.folder != calendar);
+            let elsewhere = item.as_ref().is_some_and(|item| item.folder != home.id);
             (item, elsewhere)
         };
         let item = item.ok_or(LOCKED)?;
@@ -372,6 +422,15 @@ impl Client {
         if lock.is_some() || elsewhere {
             return Err(LOCKED);
         }
+        let rights = item.rights.unwrap_or_default();
+        let allowed = if aim.delete {
+            rights.delete
+        } else {
+            rights.modify
+        };
+        if other && !allowed {
+            return Err(LOCKED);
+        }
         if item.change_key.is_empty() {
             return Err("exchange_invalid_response");
         }
@@ -384,4 +443,12 @@ impl Client {
         };
         Ok((item, target))
     }
+}
+
+/// What a write to an existing item is aimed at: the part of a series, the calendar it is in, and whether
+/// it is a delete (which needs the right to delete rather than to modify).
+pub(super) struct Aim<'a> {
+    pub scope: Option<Scope>,
+    pub calendar: &'a Calendar,
+    pub delete: bool,
 }
