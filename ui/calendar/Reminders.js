@@ -15,6 +15,8 @@ function candidates(events, sources) {
     if (!Sources.nativeCalendarFeatures(source) || source.remindersEnabled !== true || !event.start || !event.end
         || event.status === "CANCELLED") continue
     var accountAddress = String(source.accountId || source.username || "").replace(/^[^:@]+:/, "").toLowerCase()
+    // An Exchange invitation the owner declined (the list carries the owner's answer, not the people).
+    if (event.myResponse === "decline") continue
     if ((event.attendees || []).some(function(attendee) {
       var own = attendee.self === true || (accountAddress !== "" && String(attendee.email || "").toLowerCase() === accountAddress)
       return own && (attendee.responseStatus === "declined" || attendee.partstat === "DECLINED"
@@ -37,7 +39,9 @@ function candidates(events, sources) {
       if (seen[key]) continue
       seen[key] = true
       out.push({ key: key, occurrence: occurrence, due: Number(event.start.ms) - minutes * 60000,
-        start: Number(event.start.ms), end: Number(event.end.ms), eventId: String(event.googleId || event.uid || ""),
+        // An event that ends as it starts (Exchange has them) lasts, for the ledger, the minute in which a
+        // reminder is on time: it skips one whose end has passed, so an at-start one would never come.
+        start: Number(event.start.ms), end: Math.max(Number(event.end.ms), Number(event.start.ms) + 60000), eventId: String(event.googleId || event.exchangeId || event.uid || ""),
         sourceId: String(source.id), title: String(event.summary || "Event"), accountId: String(source.accountId || "") })
     }
   }

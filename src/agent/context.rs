@@ -326,6 +326,7 @@ fn validate_ids(provider: &str, ids: &[String]) -> Result<()> {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
             "jmap" => id.len() <= 1024,
+            "exchange" => crate::providers::exchange::validate_message_id(id).is_ok(),
             _ => false,
         };
         if !valid {

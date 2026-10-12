@@ -115,6 +115,32 @@ Item {
       compare(moved.count, 0)
       fixture.events = original
     }
+    // An Exchange appointment is resized through the editor's own update; one the backend locked, or
+    // one with no version to name, starts no gesture.
+    function test_an_exchange_appointment_is_resized_and_a_locked_one_is_not() {
+      var original = fixture.events
+      var plain = { sourceId: "personal", exchangeId: "x1", exchangeKey: "k1", lockReason: "", uid: "appt",
+        summary: "Dentist", start: { ms: original[0].start.ms }, end: { ms: original[0].end.ms } }
+      fixture.sourceKind = "exchange"
+      var locked = JSON.parse(JSON.stringify(plain))
+      locked.lockReason = "Meeting with other people: change it in Outlook"
+      var keyless = JSON.parse(JSON.stringify(plain))
+      keyless.exchangeKey = ""
+      var cases = [[plain, 1], [locked, 0], [keyless, 0]]
+      for (var i = 0; i < cases.length; i++) {
+        moved.clear()
+        view.pendingGesture = null
+        fixture.events = [cases[i][0]]
+        wait(0)
+        var drag = findChild(view, "calendar-event-drag-appt")
+        mousePress(drag, drag.width / 2, drag.height - 2)
+        mouseMove(drag, drag.width / 2, drag.height + 35, 20)
+        mouseRelease(drag, drag.width / 2, drag.height + 35)
+        compare(moved.count, cases[i][1], "case " + i)
+      }
+      verify(moved.count === 0 && view.pendingGesture === null)
+      fixture.events = original
+    }
     function test_resize_changes_only_the_end() {
       var drag = findChild(view, "calendar-event-drag-meeting")
       verify(drag !== null)

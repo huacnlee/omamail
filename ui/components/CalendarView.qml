@@ -164,11 +164,14 @@ Item {
       var key = Calendar.eventKey(root.detailEvent)
       var matches = root.controller.events.filter(function(event) { return Calendar.eventKey(event) === key })
       if (matches.length === 1) {
-        if (String(matches[0].etag || "") !== String(root.detailEvent.etag || "")) root.activateEvent(matches[0])
+        // A new version of an Exchange event is a new change key, which is also what its detail is read for.
+        if (String(matches[0].etag || "") !== String(root.detailEvent.etag || "")
+            || String(matches[0].exchangeKey || "") !== String(root.detailEvent.exchangeKey || ""))
+          root.activateEvent(matches[0])
       }
       else if (!root.controller.loading) {
         var source = root.controller.findSource(root.detailEvent.sourceId)
-        if (!source || source.enabled !== false) root.closeDetail()
+        if ((!source || source.enabled !== false) && !root.reopenAnswered()) root.closeDetail()
       }
     }
     function onLoadingChanged() {
@@ -176,7 +179,8 @@ Item {
       var source = root.controller.findSource(root.detailEvent.sourceId)
       if (source && source.enabled === false) return
       var key = Calendar.eventKey(root.detailEvent)
-      if (!root.controller.events.some(function(event) { return Calendar.eventKey(event) === key })) root.closeDetail()
+      if (!root.controller.events.some(function(event) { return Calendar.eventKey(event) === key })
+          && !root.reopenAnswered()) root.closeDetail()
     }
   }
 
@@ -214,6 +218,10 @@ Item {
     detailLoading = false
     detailError = ""
     var source = controller && typeof controller.findSource === "function" ? controller.findSource(event.sourceId) : null
+    if (!alreadyDetailed && source && source.kind === "exchange" && String(event.exchangeId || "") !== "") {
+      readExchangeDetail(source, event, serial)
+      return
+    }
     if (alreadyDetailed || !source || source.kind !== "google" || !controller.service
         || controller.service.backendCanGoogleCalendars !== true) return
     detailLoading = true
@@ -230,6 +238,34 @@ Item {
     })
   }
 
+  // What an Exchange event holds beyond the list is read when it is opened; it is drawn from the list meanwhile.
+  function readExchangeDetail(source, event, serial) {
+    detailLoading = true
+    controller.exchangeDetail(source, event, function(merged, error) {
+      if (serial !== root.detailReadSerial || !root.detailEvent
+          || Calendar.eventKey(root.detailEvent) !== Calendar.eventKey(event)) return
+      root.detailLoading = false
+      if (error) { root.detailError = error; return }
+      root.detailEvent = merged
+      // Newer than the list it came from: the screen is read again rather than written over.
+      if (merged.stale === true) { root.detailError = Calendar.CONFLICT; root.refresh() }
+    })
+  }
+
+  // An answer can give the item a new id on the server: the same event (its identity and start) is opened
+  // again from the list read after it.
+  function reopenAnswered() {
+    if (!detailEvent || String(detailEvent.exchangeId || "") === "" || !controller) return false
+    var found = controller.events.filter(function(event) {
+      return String(event.exchangeId || "") !== "" && event.sourceId === detailEvent.sourceId
+        && event.uid === detailEvent.uid && !!event.start && !!detailEvent.start
+        && event.start.ms === detailEvent.start.ms
+    })
+    if (found.length !== 1) return false
+    activateEvent(found[0])
+    return true
+  }
+
   // Escape's first answer while the busy-day preview is up.
   function dismissPreview() {
     if (!monthOverflow.opened) return false
@@ -239,7 +275,10 @@ Item {
     return true
   }
 
-  function closeDetail() { detailReadSerial++; detailLoading = false; detailError = ""; waitingForEvent = false; detailEvent = null }
+  function closeDetail() {
+    detailReadSerial++; detailLoading = false; detailError = ""; waitingForEvent = false; detailEvent = null
+    if (controller && controller.answeredKey !== undefined) controller.answeredKey = ""
+  }
 
   function reschedule(event, startMs, endMs) {
     if (!controller || !event || !event.start || !event.end) return
