@@ -738,6 +738,11 @@ fn every_method() -> Vec<(&'static str, Value)> {
             "calendarDelete",
             json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K"}),
         ),
+        ("calendarEvent", json!({"accountId": ACCOUNT, "id": id(1)})),
+        (
+            "calendarRespond",
+            json!({"accountId": ACCOUNT, "id": id(1), "changeKey": "K", "response": "accept", "send": true}),
+        ),
     ]
 }
 
@@ -843,6 +848,7 @@ async fn a_mailbox_another_call_holds_makes_no_call_wait_past_its_deadline() {
             "calendarCreate",
             "calendarUpdate",
             "calendarDelete",
+            "calendarRespond",
         ]
         .contains(&method)
         {

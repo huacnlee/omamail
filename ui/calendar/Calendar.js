@@ -856,13 +856,16 @@ function timedLayout(events, day) {
 function attendeeRows(event) {
   return (event && Array.isArray(event.attendees) ? event.attendees : []).map(function(attendee) {
     var status = String(attendee.responseStatus || attendee.partstat || attendee.status && attendee.status.response || "needsAction").toLowerCase()
+    // An Exchange copy of somebody else's invitation says nothing of how the others answered, and the
+    // organizer's own line is their invitation, not an answer.
     var label = status === "accepted" ? "Accepted" : status === "declined" ? "Declined"
-      : status === "tentative" || status === "tentativelyaccepted" ? "Maybe" : "Awaiting reply"
+      : status === "tentative" || status === "tentativelyaccepted" ? "Maybe"
+      : status === "organizer" ? "Organizer" : status === "unknown" ? "Invited" : "Awaiting reply"
     var email = String(attendee.email || attendee.emailAddress && attendee.emailAddress.address || "")
     var name = String(attendee.displayName || attendee.name || attendee.emailAddress && attendee.emailAddress.name || email || "Guest")
     return { name: name, email: email, label: label,
-      symbol: label === "Accepted" ? "✓" : label === "Declined" ? "×" : "?",
-      optional: attendee.optional === true, self: attendee.self === true }
+      symbol: label === "Accepted" || label === "Organizer" ? "✓" : label === "Declined" ? "×" : label === "Invited" ? "·" : "?",
+      optional: attendee.optional === true, resource: attendee.resource === true, self: attendee.self === true }
   })
 }
 

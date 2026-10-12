@@ -822,7 +822,7 @@ Column {
     SectionHeading { text: "REMINDERS"; bottomPadding: Style.space(2) }
     SettingRow {
       title: "Desktop reminders"
-      detail: "Shown while Omamail is running, even with its window closed. Google calendars only."
+      detail: "Shown while Omamail is running, even with its window closed. Google and Exchange calendars only."
       ToggleSwitch {
         objectName: "calendar-reminders-enabled"
         checked: !!root.service && root.service.calendarRemindersEnabled === true
@@ -878,7 +878,8 @@ Column {
           width: Style.space(200)
           showLabel: false
           value: root.reminderMode(reminderRow.modelData)
-          options: [{ value: "off", label: "Off" }, { value: "google", label: "Google event reminders" },
+          options: [{ value: "off", label: "Off" },
+            { value: "google", label: reminderRow.modelData.kind === "exchange" ? "Exchange event reminders" : "Google event reminders" },
             { value: "custom", label: "Custom timing" }]
           foreground: root.textColor
           accent: root.accentColor

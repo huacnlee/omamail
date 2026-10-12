@@ -237,6 +237,22 @@ Item {
       compare(findChild(settings, "calendar-discover-exchange").text, "Sign in...")
     }
 
+    // The server's own reminders are raised like Google's, so the calendar has a reminder row that says whose
+    // reminders those are.
+    function test_an_exchange_calendar_has_a_reminder_row_that_names_its_own_reminders() {
+      mailService.accountSummaries = [{ id: "exchange:alice@example.org", email: "alice@example.org",
+        provider: "exchange", calendarProvider: "exchange", signedIn: true }]
+      calendarController.sourceList = ({ version: 1, sources: [{ id: "exchange:exchange:alice@example.org",
+        kind: "exchange", name: "alice@example.org", accountId: "exchange:alice@example.org", enabled: true,
+        colorKey: "accent", remindersEnabled: true, reminderMinutes: -1 }] })
+      wait(1)
+      var mode = findChild(settings, "calendar-reminder-mode")
+      verify(mode !== null)
+      compare(mode.value, "google", "the server's own reminders, until a fixed timing is chosen")
+      compare(mode.options.map(function(option) { return option.label }).join(),
+        "Off,Exchange event reminders,Custom timing")
+    }
+
     // An Exchange calendar whose mailbox is gone says what it was, and can be removed.
     function test_an_orphaned_exchange_calendar_is_named_as_exchange() {
       calendarController.sourceList = ({ version: 1, sources: [{ id: "exchange:exchange:gone@example.org",

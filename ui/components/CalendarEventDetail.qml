@@ -4,6 +4,7 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 import "../calendar/Calendar.js" as Calendar
+import "../calendar/ExchangeEvents.js" as ExchangeEvents
 import "../message/Html.js" as Html
 
 Rectangle {
@@ -51,9 +52,8 @@ Rectangle {
     && root.source.readOnly !== true
     && (root.source.kind === "google" ? String(event.googleId || "") !== ""
       : root.source.kind === "microsoft" ? String(event.graphId || "") !== ""
-      // An Exchange event is deleted only when the backend said it is a plain appointment.
-      : root.source.kind === "exchange" ? String(event.exchangeId || "") !== ""
-        && String(event.lockReason || "") === ""
+      // An Exchange event says what deleting it is: an appointment, or an invitation declined (and so left).
+      : root.source.kind === "exchange" ? ExchangeEvents.deleteKind(event) !== ""
       : String(event.href || "") !== "" && String(event.recurrenceRule || "") === ""
         && Number(event.recurrenceIdMs || 0) <= 0
         && String(event.source && event.source.recurrenceId || "") === ""
@@ -73,6 +73,25 @@ Rectangle {
   readonly property string mapLink: locationIsPlace
     ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(locationText) : ""
   readonly property string providerLink: httpLink(event ? event.href : "")
+  // What only an Exchange event brings: its organizer and reminder (read with the detail), and whether the owner
+  // may answer it, with the three answers the mail card offers.
+  readonly property bool isExchange: !!root.source && root.source.kind === "exchange"
+  readonly property string organizerText: isExchange && ExchangeEvents.organizerShown(event, root.source.accountId)
+    ? String(event.organizer.displayName || event.organizer.email || "") : ""
+  readonly property string reminderText: isExchange && event ? ExchangeEvents.reminderText(event.reminderMinutes) : ""
+  readonly property bool canAnswer: isExchange && !!event && event.canRespond === true
+  // An answer, a decline or any other change on its way: the controller sends no answer beside one.
+  readonly property bool answering: !!root.controller && (root.controller.responding === true
+    || root.controller.eventWriting === true || root.controller.creatingEvent === true)
+  // Said only when it is certain; a doubt is said as one (`ExchangeEvents.withDetail`).
+  readonly property string cancelledText: !isExchange || !event ? ""
+    : event.cancelledByOrganizer === true ? "The organizer cancelled this meeting."
+    : event.cancellationUnplaced === true ? "An event of this meeting was cancelled; answer it in Outlook." : ""
+  readonly property bool answerSent: isExchange && !!event && !!root.controller
+    && String(root.controller.answeredKey || "") !== ""
+    && root.controller.answeredKey === ExchangeEvents.stableKey(event)
+  readonly property string deleteLabel: isExchange && ExchangeEvents.deleteKind(event) === "decline"
+    ? (event.exchangeKind === "single" ? "Decline and remove..." : "Decline...") : "Delete..."
 
   color: root.backgroundColor
 
@@ -138,7 +157,7 @@ Rectangle {
       CalendarReminderPanel {
         width: parent.width
         service: root.controller ? root.controller.service : null
-        eventKey: root.event ? String(root.event.sourceId || "") + "\n" + String(root.event.googleId || root.event.uid || "") : ""
+        eventKey: root.event ? String(root.event.sourceId || "") + "\n" + String(root.event.googleId || root.event.exchangeId || root.event.uid || "") : ""
         textColor: root.textColor
         dimColor: root.dimColor
         accentColor: root.accentColor
@@ -213,6 +232,48 @@ Rectangle {
         }
       }
 
+      RsvpRow {
+        objectName: "event-rsvp"
+        visible: root.canAnswer
+        response: root.canAnswer ? ExchangeEvents.answerOf(root.event.myResponse) : ""
+        sending: root.answering
+        declineLabel: "No..."
+        textColor: root.textColor
+        accentColor: root.accentColor
+        dimColor: root.dimColor
+        panelFontFamily: root.panelFontFamily
+        onAnswered: function(answer) {
+          if (!root.controller) return
+          // No also takes the meeting off the calendar and tells the organizer: it asks first.
+          if (answer === "declined") root.deleteRequested(String(root.event.sourceId || ""), root.event)
+          else root.controller.respondToInvitation(String(root.event.sourceId || ""), root.event, answer)
+        }
+      }
+
+      Text {
+        objectName: "event-cancelled"
+        width: parent.width
+        visible: root.cancelledText !== ""
+        text: root.cancelledText
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.body
+      }
+
+      Text {
+        objectName: "event-answer-sent"
+        width: parent.width
+        visible: root.answerSent
+        text: "Your answer was sent to the organizer"
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
       Row {
         visible: String(root.event && root.event.location || "") !== ""
         width: parent.width
@@ -234,6 +295,42 @@ Rectangle {
           wrapMode: Text.WrapAnywhere
           textFormat: Text.PlainText
         }
+      }
+
+      Row {
+        objectName: "event-organizer"
+        visible: root.organizerText !== ""
+        width: parent.width
+        spacing: Style.space(8)
+
+        ActionIcon {
+          anchors.verticalCenter: parent.verticalCenter
+          name: "people"
+          iconSize: Style.font.icon
+          color: root.dimColor
+        }
+
+        Text {
+          width: parent.width - Style.space(28)
+          text: "Organizer · " + root.organizerText
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.WrapAnywhere
+          textFormat: Text.PlainText
+        }
+      }
+
+      Text {
+        objectName: "event-reminder"
+        width: parent.width
+        visible: root.reminderText !== ""
+        text: "Reminder · " + root.reminderText
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
       }
 
       Text {
@@ -345,6 +442,18 @@ Rectangle {
         textFormat: Text.PlainText
       }
 
+      Text {
+        objectName: "event-notes-cut"
+        width: parent.width
+        visible: !!root.event && root.event.notesCut === true
+        text: "Only the start of the notes is shown"
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
       Column {
         width: parent.width
         spacing: Style.space(8)
@@ -395,6 +504,7 @@ Rectangle {
                 Text {
                   width: parent.width
                   text: modelData.label + (modelData.optional ? " · Optional" : "")
+                    + (modelData.resource ? " · Resource" : "")
                     + (modelData.email && modelData.email !== modelData.name ? " · " + modelData.email : "")
                   textFormat: Text.PlainText
                   wrapMode: Text.Wrap
@@ -474,7 +584,9 @@ Rectangle {
         IconTextButton {
           visible: root.canDelete
           objectName: "event-delete"
-          text: "Delete..."
+          text: root.deleteLabel
+          // A decline is an answer: not while another is on its way.
+          enabled: !(root.answering && ExchangeEvents.deleteKind(root.event) === "decline")
           iconName: "trash"
           foreground: root.textColor
           accent: root.urgentColor

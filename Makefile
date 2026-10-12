@@ -44,7 +44,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/MessageReader.qml \
 	ui/components/ConversationRail.qml \
 	ui/components/ReaderNotice.qml \
-	ui/components/InviteCard.qml \
+	ui/components/InviteCard.qml ui/components/RsvpRow.qml \
 	ui/components/SwitcherSearch.qml \
 	ui/components/AccountNameField.qml \
 	ui/components/SenderNameField.qml \

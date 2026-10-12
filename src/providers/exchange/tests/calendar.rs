@@ -7,6 +7,7 @@ use crate::providers::exchange::ews::CalendarItem;
 use crate::providers::exchange::ews::tests::calendar::{
     Cal, cal_id, operation, script, secs, store,
 };
+use crate::providers::exchange::ews::tests::detail::INVITED;
 use crate::providers::exchange::zone::TEST_ZONE;
 
 fn ms(text: &str) -> i64 {
@@ -51,6 +52,22 @@ async fn calendar_requests_are_refused_before_any_account_credential_or_socket_i
         ["calendarUpdate", {"id": id, "changeKey": key, "title": "x", "requestToken": "t"}],
         ["calendarDelete", {"id": id, "changeKey": ""}],
         ["calendarDelete", {"id": id, "changeKey": key, "scope": "series"}],
+        ["calendarCreate", {"reminderMinutes": 40_321}],
+        ["calendarCreate", {"reminderMinutes": -1}],
+        ["calendarCreate", {"reminderMinutes": 1.5}],
+        ["calendarCreate", {"reminderMinutes": "15"}],
+        ["calendarUpdate", {"id": id, "changeKey": key, "title": "x", "reminderMinutes": -2}],
+        ["calendarEvent", {"id": "NOT-CANONICAL"}],
+        ["calendarEvent", {"id": id, "unexpected": true}],
+        ["calendarEvent", {"id": id, "requestToken": ""}],
+        ["calendarRespond", {"id": id, "changeKey": key, "response": "accept"}],
+        ["calendarRespond", {"id": id, "changeKey": key, "response": "accept", "send": "true"}],
+        ["calendarRespond", {"id": id, "changeKey": key, "response": "maybe", "send": true}],
+        ["calendarRespond", {"id": id, "changeKey": "a b", "response": "accept", "send": true}],
+        ["calendarRespond", {"id": id, "changeKey": key, "response": "accept", "send": true, "remove": true}],
+        ["calendarRespond", {"id": id, "changeKey": key, "response": "decline", "send": false, "remove": true}],
+        ["calendarRespond", {"id": id, "changeKey": key, "response": "decline", "send": true, "remove": 1}],
+        ["calendarRespond", {"id": id, "changeKey": key, "response": "accept", "send": true, "requestToken": "t"}],
     ]);
     for case in table.as_array().unwrap() {
         let method = case[0].as_str().unwrap();
@@ -327,4 +344,147 @@ async fn an_appointment_is_made_changed_and_deleted_in_the_owners_zone_and_a_mee
         })
         .collect();
     assert_eq!(zones, [None, Some("W. Europe Standard Time")]);
+}
+
+#[tokio::test]
+async fn a_detail_says_who_the_owner_is_and_masks_what_is_private_and_an_answer_says_what_it_did() {
+    if isolated() {
+        return;
+    }
+    let at = |n, title| Cal::new(n, title, "2026-10-07T13:00:00Z", "2026-10-07T14:00:00Z");
+    let people = concat!(
+        r#"<t:Body BodyType="Text">Agenda</t:Body>"#,
+        "<t:JoinOnlineMeetingUrl>https://meet.example.org/j/7</t:JoinOnlineMeetingUrl>",
+        "<t:RequiredAttendees><t:Attendee><t:Mailbox><t:Name>Ada</t:Name><t:EmailAddress>ADA@example.org</t:EmailAddress></t:Mailbox>",
+        "<t:ResponseType>Accept</t:ResponseType></t:Attendee><t:Attendee><t:Mailbox><t:Name>Cy</t:Name>",
+        "<t:EmailAddress>cy@example.org</t:EmailAddress></t:Mailbox><t:ResponseType>Accept</t:ResponseType></t:Attendee></t:RequiredAttendees>",
+    );
+    let mut invited = at(1, "Planning").with(people).with(INVITED);
+    invited.reminder = Some(15);
+    let mut private = at(2, "Salary review")
+        .with("<t:Sensitivity>Private</t:Sensitivity>")
+        .with(people)
+        .with(INVITED);
+    (private.location, private.reminder) = ("Clinic".into(), Some(5));
+    // The same invitation, but in a folder that is not the default calendar.
+    let elsewhere = at(0, "Planning")
+        .with(r#"<t:ParentFolderId Id="elsewhere"/>"#)
+        .with(people)
+        .with(INVITED);
+    let items = vec![invited, private, elsewhere];
+    let w = world(Offer::Basic, Some(PASSWORD), script(store(items))).await;
+    let read = |n| {
+        rpc(
+            "calendarEvent",
+            json!({"accountId": ACCOUNT, "id": cal_id(n)}),
+        )
+    };
+    let expected = json!({"id": cal_id(1), "changeKey": "CK1v1", "title": "Planning", "location": "",
+        "allDay": false, "startMs": ms("2026-10-07T13:00:00Z"), "endMs": ms("2026-10-07T14:00:00Z"),
+        "notes": "Agenda", "notesCut": false, "organizer": {"name": "Bob", "email": "bob@example.org"},
+        // The owner's line is what the owner's own item says; on an invitation anybody else's says nothing.
+        "attendees": [
+            {"name": "Ada", "email": "ADA@example.org", "kind": "required", "response": "none", "self": true},
+            {"name": "Cy", "email": "cy@example.org", "kind": "required", "response": "unknown", "self": false}],
+        "attendeesCut": false, "response": "none", "reminderMinutes": 15,
+        "joinUrl": "https://meet.example.org/j/7", "sensitivity": "normal", "meeting": true,
+        "recurring": false, "cancelled": false, "unplacedCancellation": false, "kind": "single", "canRespond": true,
+        "editable": false, "lock": "meeting"});
+    assert_eq!(read(1).await.unwrap(), expected);
+    let outside = read(0).await.unwrap();
+    let said = ["editable", "lock", "canRespond"].map(|key| outside[key].clone());
+    assert_eq!(
+        json!(said),
+        json!([false, "unknown", false]),
+        "locked outside the calendar"
+    );
+    let masked = read(2).await.unwrap();
+    let shown = [
+        "title",
+        "location",
+        "notes",
+        "organizer",
+        "attendees",
+        "joinUrl",
+        "reminderMinutes",
+        "canRespond",
+    ];
+    let shown = shown.map(|key| masked[key].clone());
+    assert_eq!(
+        json!(shown),
+        json!(["Private", "", "", null, [], "", null, false])
+    );
+    for secret in [
+        "Salary",
+        "Clinic",
+        "Agenda",
+        "cy@",
+        "meet.example",
+        PASSWORD,
+        LOGIN,
+    ] {
+        assert!(!masked.to_string().contains(secret), "{secret}");
+    }
+    let accept = json!({"accountId": ACCOUNT, "id": cal_id(1), "changeKey": "CK1v1", "response": "accept", "send": true});
+    let done = rpc("calendarRespond", accept).await.unwrap();
+    let named = json!({"id": cal_id(3), "changeKey": "CK3v1", "response": "accept", "sent": true});
+    assert_eq!(
+        done, named,
+        "the item the server re-created, and no word of a removal not asked for"
+    );
+    let decline = json!({"accountId": ACCOUNT, "id": cal_id(3), "changeKey": "CK3v1", "response": "decline", "send": true, "remove": true});
+    let done = rpc("calendarRespond", decline).await.unwrap();
+    assert_eq!(
+        (&done["response"], &done["removed"]),
+        (&json!("decline"), &json!(true))
+    );
+    let private = json!({"accountId": ACCOUNT, "id": cal_id(2), "changeKey": "CK2v1", "response": "accept", "send": true});
+    let refused = rpc("calendarRespond", private).await;
+    assert_eq!(refused.err(), Some("exchange_calendar_not_invitation"));
+    assert_eq!(w.fake.log.count("CreateItem"), 2);
+}
+
+#[tokio::test]
+async fn a_detail_keeps_the_guests_answers_on_the_owners_meeting_and_says_a_doubt_as_one() {
+    if isolated() {
+        return;
+    }
+    let at = |n, title| Cal::new(n, title, "2026-10-07T13:00:00Z", "2026-10-07T14:00:00Z");
+    let guests = concat!(
+        "<t:IsMeeting>true</t:IsMeeting><t:RequiredAttendees><t:Attendee><t:Mailbox><t:Name>Cy</t:Name>",
+        "<t:EmailAddress>cy@example.org</t:EmailAddress></t:Mailbox><t:ResponseType>Accept</t:ResponseType>",
+        "</t:Attendee></t:RequiredAttendees>",
+    );
+    // The owner's own meeting (the item says `MyResponseType` Organizer): a guest's answer is theirs.
+    let organised = at(1, "Review").with(guests);
+    // An event of a series that does not say where it sits, while another event of it is cancelled.
+    let unplaced = Cal {
+        uid: Some(7),
+        ..at(2, "Standup")
+            .with("<t:CalendarItemType>Occurrence</t:CalendarItemType>")
+            .with(INVITED)
+    };
+    let shared = store(vec![organised, unplaced]);
+    let named = (
+        "uid-7@example.org".into(),
+        Some("2026-10-14T13:00:00Z".into()),
+    );
+    shared.lock().unwrap().cancelled = vec![named];
+    let _w = world(Offer::Basic, Some(PASSWORD), script(shared.clone())).await;
+    let read = |n| {
+        rpc(
+            "calendarEvent",
+            json!({"accountId": ACCOUNT, "id": cal_id(n)}),
+        )
+    };
+    let own = read(1).await.unwrap();
+    let answers = (&own["response"], &own["attendees"][0]["response"]);
+    assert_eq!(answers, (&json!("organizer"), &json!("accept")));
+    let doubt = read(2).await.unwrap();
+    let said = ["cancelled", "unplacedCancellation", "canRespond"].map(|key| doubt[key].clone());
+    assert_eq!(
+        json!(said),
+        json!([false, true, false]),
+        "a doubt is no certainty"
+    );
 }

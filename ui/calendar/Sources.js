@@ -281,7 +281,9 @@ function withExchangeAccounts(list, accountSummaries) {
       // Never read back from the file: a saved stamp must not hide Edit and Delete.
       readOnly: false,
       colorKey: saved ? saved.colorKey : Palette.defaultKey(id),
-      remindersEnabled: false, reminderMinutes: -1, preferred: false
+      // The server's own reminders raise the desktop's, like a Google calendar's, until turned off.
+      remindersEnabled: saved ? saved.remindersEnabled : true,
+      reminderMinutes: saved ? saved.reminderMinutes : -1, preferred: false
     })
   }
   return next
@@ -493,10 +495,11 @@ function writable(source) {
   return !!source && source.readOnly !== true
 }
 
-// The redesigned views are shared; deep integration is currently Google-only.
-// Other providers retain their existing basic create/edit/delete paths.
+// The redesigned views are shared; deep integration is Google through its API and an Exchange mailbox
+// through its backend methods. Both take desktop reminders: the event's own, which an Exchange event
+// carries as the minutes the server has for it. Other providers retain their basic paths.
 function nativeCalendarFeatures(source) {
-  return !!source && source.kind === "google"
+  return !!source && (source.kind === "google" || source.kind === "exchange")
 }
 
 // The picker groups with the read-only calendars left out, and a group left

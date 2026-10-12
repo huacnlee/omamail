@@ -2,12 +2,15 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../../calendar" as Omamail
 import "../../calendar/Calendar.js" as Calendar
+import "../../calendar/ExchangeEvents.js" as ExchangeEvents
 import "../../components" as Views
 
 // An on-premises Exchange mailbox's calendar through the real controller: where it comes from, how it
-// is asked for and how a failure is told, and that a plain appointment can be made, changed and
-// deleted and nothing else can, by every path that offers a write.
+// is asked for and how a failure is told, that a plain appointment can be made, changed and deleted
+// and nothing else can, by every path that offers a write, and that an invitation is answered with
+// the version its detail was read at, a decline only after the person was asked.
 Item {
+  id: top
   width: 600
   height: 500
   SystemPalette { id: palette }
@@ -268,6 +271,156 @@ Item {
       detail = createTemporaryObject(detailComponent, this, { controller: marked, event: event })
       compare(detail.canDelete || detail.canWrite, false)
       compare(controller.writableSourceGroups.length, 1, "the composer and the agent are offered it")
+    }
+
+    // An invitation as the list draws it, and the detail of it read when it is opened.
+    function invited() {
+      var event = loaded([row({ id: "i1", uid: "u-i1", title: "Planning", editable: false, lock: "meeting",
+        meeting: true, response: "none", kind: "single" })])[0]
+      mailService.answers["exchange.calendarEvent"] = { error: null, result: { id: "i1", changeKey: "k2",
+        title: "Planning", location: "", allDay: false, startMs: 1790000000000, endMs: 1790003600000,
+        notes: "Agenda", notesCut: false, organizer: { name: "Bob", email: "bob@example.org" },
+        attendees: [{ name: "Alice", email: "alice@example.org", kind: "required", response: "none", self: true }],
+        attendeesCut: false, response: "none", reminderMinutes: 10, joinUrl: "", sensitivity: "normal",
+        meeting: true, recurring: false, cancelled: false, kind: "single", canRespond: true,
+        editable: false, lock: "meeting" } }
+      var merged = null
+      controller.exchangeDetail(controller.findSource(sourceId), event, function(found, error) { merged = found })
+      compare(JSON.stringify(mailService.requests.pop()), JSON.stringify({ method: "exchange.calendarEvent",
+        params: { accountId: "exchange:alice@example.org", id: "i1" } }))
+      return merged
+    }
+
+    function test_yes_and_maybe_answer_at_once_with_the_details_version_and_the_list_is_read_again() {
+      var event = invited()
+      compare([event.canRespond, event.answerKey, event.exchangeKey, event.description].join(), "true,k2,k1,Agenda")
+      mailService.answers["exchange.calendarRespond"] = { error: null, result: { id: "i9", changeKey: "k3",
+        response: "accept", sent: true } }
+      compare(controller.respondToInvitation(sourceId, event, "declined"), false, "No asks first")
+      compare(controller.respondToInvitation(sourceId, event, "accepted"), true)
+      compare(JSON.stringify(mailService.requests[0].params), JSON.stringify({ accountId: "exchange:alice@example.org",
+        id: "i1", changeKey: "k2", response: "accept", send: true }))
+      compare(sent(), ["exchange.calendarRespond", "exchange.calendarEvents"])
+      compare([controller.responding, controller.answeredKey === ExchangeEvents.stableKey(event)].join(), "false,true")
+      // What is not answerable here, or while something else is written, sends nothing.
+      mailService.requests = []
+      var plain = loaded([row()])[0]
+      compare(controller.respondToInvitation(sourceId, plain, "accepted"), false)
+      var keyless = JSON.parse(JSON.stringify(event))
+      keyless.answerKey = ""
+      compare(controller.respondToInvitation(sourceId, keyless, "accepted"), false)
+      controller.eventWriting = true
+      compare(controller.respondToInvitation(sourceId, event, "tentative"), false)
+      controller.eventWriting = false
+      compare(mailService.requests.length, 0)
+      // An answer whose fate is not known says so, and nothing is read or sent behind it.
+      controller.answeredKey = ""
+      mailService.answers["exchange.calendarRespond"] = { result: null, error: { code: -32000, message: "exchange_calendar_unconfirmed" } }
+      compare(controller.respondToInvitation(sourceId, event, "tentative"), true)
+      compare(controller.lastError, "The server did not confirm your answer. Look at your calendar before answering again")
+      compare([sent().join(), controller.answeredKey].join(), "exchange.calendarRespond,")
+    }
+
+    function test_no_is_a_decline_the_person_confirms_that_takes_the_meeting_off_the_calendar() {
+      var event = invited()
+      var request = controller.deleteRequest(sourceId, event)
+      compare([request.title, request.dismiss, request.focus, request.choices[0].label].join("|"),
+        "Decline \"Planning\"?|Keep meeting|dismiss|Decline and remove")
+      compare(request.message, "This tells the organizer you decline. The meeting is removed from your calendar.")
+      mailService.answers["exchange.calendarRespond"] = { error: null, result: { id: "", changeKey: "",
+        response: "decline", sent: true, removed: true } }
+      compare(controller.confirmDelete(request), true)
+      compare(JSON.stringify(mailService.requests[0].params), JSON.stringify({ accountId: "exchange:alice@example.org",
+        id: "i1", changeKey: "k2", response: "decline", send: true, remove: true }))
+      compare(deletedSpy.signalArguments[0][0], true)
+      // Not beside another answer on its way.
+      mailService.requests = []
+      deletedSpy.clear()
+      controller.responding = true
+      compare(controller.deleteEvent(sourceId, event), false)
+      compare(deletedSpy.signalArguments[0][1], "Another answer is still being sent")
+      controller.responding = false
+      compare(mailService.requests.length, 0)
+      // An invitation as the list drew it, before its detail said it may be answered, cannot be declined.
+      mailService.requests = []
+      deletedSpy.clear()
+      var listed = loaded([row({ id: "i1", editable: false, lock: "meeting" })])[0]
+      compare(controller.deleteEvent(sourceId, listed), false)
+      compare(deletedSpy.signalArguments[0][1], "Meeting with other people: change it in Outlook")
+      compare(mailService.requests.length, 0)
+    }
+
+    function test_a_reminder_goes_with_a_new_appointment_and_an_edit_names_it_only_when_chosen() {
+      loaded([])
+      compare(controller.createEvent(sourceId, { title: "Dentist", startMs: 1790000000000, endMs: 1790001800000,
+        reminderMode: "custom", reminderMinutes: "1e2", recurrence: { enabled: false } }), false)
+      compare(createdSpy.signalArguments[0][1], "Reminder minutes must be a whole number from 0 to 40320")
+      compare(controller.createEvent(sourceId, { title: "Dentist", startMs: 1790000000000, endMs: 1790001800000,
+        reminderMode: "custom", reminderMinutes: "15", recurrence: { enabled: false } }), true)
+      compare(mailService.requests[0].params.reminderMinutes, 15)
+      var events = loaded([row({ reminderMinutes: 15 })])
+      compare(events[0].reminders.overrides[0].minutes, 15, "what the desktop reminders read")
+      var modes = [["none", -1], ["preserve", undefined]]
+      for (var i = 0; i < modes.length; i++) {
+        mailService.requests = []
+        compare(controller.updateEvent(sourceId, events[0], { title: "Dentist", location: "", reminderMode: modes[i][0],
+          startMs: events[0].start.ms, endMs: events[0].end.ms, allDay: false }), true)
+        compare(mailService.requests[0].params.reminderMinutes, modes[i][1], modes[i][0])
+      }
+    }
+
+    function test_the_detail_panel_draws_what_the_detail_read_and_answers_through_the_controller() {
+      var event = invited()
+      event.notesCut = true
+      var calls = []
+      var answering = { availableSources: controller.availableSources, service: mailService, responding: false,
+        answeredKey: ExchangeEvents.stableKey(event),
+        respondToInvitation: function(id, value, answer) { calls.push(answer); return true } }
+      var detail = createTemporaryObject(detailComponent, top, { controller: answering, event: event })
+      var shown = ["event-rsvp", "event-organizer", "event-reminder", "event-notes-cut", "event-answer-sent", "event-cancelled"]
+      compare(shown.map(function(name) { return findChild(detail, name).visible }).join(), "true,true,true,true,true,false")
+      compare(findChild(detail, "rsvp-declined").text, "No...", "No asks first")
+      compare(findChild(detail, "event-reminder").text, "Reminder · 10 minutes before")
+      compare([detail.canDelete, detail.canWrite, findChild(detail, "event-delete").text].join(), "true,false,Decline and remove...")
+      var asked = []
+      detail.deleteRequested.connect(function(id, value) { asked.push(value.exchangeId) })
+      findChild(detail, "rsvp-tentative").clicked()
+      findChild(detail, "rsvp-declined").clicked()
+      compare([calls.join(), asked.join()].join("|"), "tentative|i1")
+      // While an answer is on its way, the decline waits too.
+      var busy = Object.assign({}, answering, { responding: true })
+      var waiting = createTemporaryObject(detailComponent, top, { controller: busy, event: event })
+      compare([findChild(waiting, "event-delete").enabled, findChild(waiting, "rsvp-tentative").enabled].join(), "false,false")
+      // And while a decline (a write) is on its way, every answer waits.
+      var declining = Object.assign({}, answering, { eventWriting: true })
+      waiting = createTemporaryObject(detailComponent, top, { controller: declining, event: event })
+      compare(["rsvp-accepted", "rsvp-tentative", "rsvp-declined", "event-delete"].map(function(name) {
+        return findChild(waiting, name).enabled }).join(), "false,false,false,false")
+      // Somebody else's meeting says who may change it, under the answers.
+      compare(findChild(detail, "event-lock-reason").text, "Only its organizer can change this meeting.")
+      // A meeting its organizer cancelled is said to be, and offers no answer.
+      var cancelled = JSON.parse(JSON.stringify(event))
+      cancelled.canRespond = false
+      cancelled.cancelledByOrganizer = true
+      detail = createTemporaryObject(detailComponent, top, { controller: answering, event: cancelled })
+      compare([findChild(detail, "event-cancelled").visible, findChild(detail, "event-rsvp").visible].join(), "true,false")
+      compare(findChild(detail, "event-cancelled").text, "The organizer cancelled this meeting.")
+      // Another event of the series was cancelled and this one does not say whether it is that one.
+      var doubt = JSON.parse(JSON.stringify(event))
+      doubt.canRespond = false
+      doubt.cancellationUnplaced = true
+      detail = createTemporaryObject(detailComponent, top, { controller: answering, event: doubt })
+      compare([findChild(detail, "event-cancelled").visible, findChild(detail, "event-rsvp").visible].join(), "true,false")
+      compare(findChild(detail, "event-cancelled").text, "An event of this meeting was cancelled; answer it in Outlook.")
+      // The owner's own appointment does not name the owner as its organizer.
+      var own = { sourceId: sourceId, exchangeId: "a1", exchangeKey: "k1", lockReason: "", summary: "Dentist",
+        myResponse: "organizer", attendees: [], organizer: { displayName: "Alice", email: "alice@example.org" },
+        start: { ms: 1000, allDay: false }, end: { ms: 2000, allDay: false } }
+      detail = createTemporaryObject(detailComponent, top, { controller: answering, event: own })
+      compare(findChild(detail, "event-organizer").visible, false)
+      var listed = loaded([row({ id: "i1", editable: false, lock: "meeting" })])[0]
+      detail = createTemporaryObject(detailComponent, top, { controller: controller, event: listed })
+      compare([findChild(detail, "event-rsvp").visible, detail.canDelete].join(), "false,false")
     }
   }
 }

@@ -16,6 +16,7 @@
 mod account;
 mod calendar;
 mod check;
+mod detail;
 mod ews;
 mod ids;
 mod query;
@@ -61,9 +62,11 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
         "exchange.saveDraft" => Box::pin(write::save_draft(params)).await,
         "exchange.deleteDraft" => Box::pin(write::delete_draft(params)).await,
         "exchange.calendarEvents" => Box::pin(calendar::events(params)).await,
+        "exchange.calendarEvent" => Box::pin(detail::detail(params)).await,
         "exchange.calendarCreate" => Box::pin(calendar::create(params)).await,
         "exchange.calendarUpdate" => Box::pin(calendar::update(params)).await,
         "exchange.calendarDelete" => Box::pin(calendar::delete(params)).await,
+        "exchange.calendarRespond" => Box::pin(detail::respond(params)).await,
         "exchange.sendAs" => {
             let account = account(fields(params, &["accountId"])?)?;
             let address = ids::account(&account)?;

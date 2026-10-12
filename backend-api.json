@@ -199,9 +199,11 @@
     "exchange.invalidate",
     "exchange.cancel",
     "exchange.calendarEvents",
+    "exchange.calendarEvent",
     "exchange.calendarCreate",
     "exchange.calendarUpdate",
     "exchange.calendarDelete",
+    "exchange.calendarRespond",
     "m365.signInBegin",
     "m365.signInPoll",
     "m365.signOut",
@@ -1573,6 +1575,135 @@
       }
     },
     {
+      "name": "Exchange calendar create refuses a reminder past four weeks before any lookup",
+      "method": "exchange.calendarCreate",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "title": "x",
+        "allDay": false,
+        "startMs": 1790000000000,
+        "endMs": 1790001800000,
+        "reminderMinutes": 40321
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar event refuses unknown fields before any lookup",
+      "method": "exchange.calendarEvent",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "unexpected": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar event refuses an item id that is not canonical before any lookup",
+      "method": "exchange.calendarEvent",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "NOT-CANONICAL"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar event for an unregistered mailbox names no credential",
+      "method": "exchange.calendarEvent",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Exchange calendar respond refuses unknown fields before any lookup",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "accept",
+        "send": true,
+        "unexpected": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar respond requires send before any lookup",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "accept"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar respond refuses an answer that is not accept tentative or decline before any lookup",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "maybe",
+        "send": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar respond refuses to remove after an accept before any lookup",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:contract@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "accept",
+        "send": true,
+        "remove": true
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Exchange calendar respond for an unregistered mailbox names no credential",
+      "method": "exchange.calendarRespond",
+      "params": {
+        "accountId": "exchange:absent@example.org",
+        "id": "aaaaaanfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuws2ljnfuwsq",
+        "changeKey": "DwAAABYAAAB0001",
+        "response": "decline",
+        "send": false
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
       "name": "credential kind exchange-password refuses a client id before native access",
       "method": "credentials.get",
       "params": {
@@ -1784,9 +1915,11 @@
       "exchange.invalidate",
       "exchange.cancel",
       "exchange.calendarEvents",
+      "exchange.calendarEvent",
       "exchange.calendarCreate",
       "exchange.calendarUpdate",
-      "exchange.calendarDelete"
+      "exchange.calendarDelete",
+      "exchange.calendarRespond"
     ],
     "cases": [
       "Exchange provider rules snapshot",
@@ -1807,6 +1940,15 @@
       "Exchange calendar create for an unregistered mailbox names no credential",
       "Exchange calendar update for an unregistered mailbox names no credential",
       "Exchange calendar delete for an unregistered mailbox names no credential",
+      "Exchange calendar create refuses a reminder past four weeks before any lookup",
+      "Exchange calendar event refuses unknown fields before any lookup",
+      "Exchange calendar event refuses an item id that is not canonical before any lookup",
+      "Exchange calendar event for an unregistered mailbox names no credential",
+      "Exchange calendar respond refuses unknown fields before any lookup",
+      "Exchange calendar respond requires send before any lookup",
+      "Exchange calendar respond refuses an answer that is not accept tentative or decline before any lookup",
+      "Exchange calendar respond refuses to remove after an accept before any lookup",
+      "Exchange calendar respond for an unregistered mailbox names no credential",
       "credential kind exchange-password refuses a client id before native access",
       "mail action refuses archive for Exchange before any server call"
     ]

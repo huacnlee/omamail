@@ -40,6 +40,7 @@ use super::{
 use crate::providers::exchange::ids;
 
 pub mod calendar;
+pub mod detail;
 
 const UNAUTHORIZED: &str = "exchange_unauthorized";
 /// Two streams in a row lost their sign-in before a request: something in between keeps dropping it.
