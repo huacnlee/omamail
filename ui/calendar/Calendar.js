@@ -731,6 +731,21 @@ function googleEventPatch(fields, allDay, existingAllDay) {
   return body
 }
 
+// The addresses of a guest field: separated by commas, semicolons or line breaks, at most 200, each one
+// plain enough to be an address. `emails` keeps what was typed, each once (ignoring case) and in order.
+function guestList(text) {
+  var typed = String(text).split(/[,;\n]/).map(function(email) { return email.trim() }).filter(function(email) { return email !== "" })
+  if (typed.length > 200 || typed.some(function(email) { return !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email) }))
+    return { ok: false, error: "Enter valid guest email addresses separated by commas" }
+  var seen = {}, emails = []
+  for (var i = 0; i < typed.length; i++) {
+    if (seen[typed[i].toLowerCase()]) continue
+    seen[typed[i].toLowerCase()] = true
+    emails.push(typed[i])
+  }
+  return { ok: true, emails: emails }
+}
+
 function googleOptions(body, fields, source, existing) {
   var next = JSON.parse(JSON.stringify(body))
   if (existing && fields.changeRecurrence === true) {
@@ -747,17 +762,14 @@ function googleOptions(body, fields, source, existing) {
     next.end.timeZone = zone
   }
   if (fields.guestEmails !== undefined) {
-    var emails = String(fields.guestEmails).split(/[,;\n]/).map(function(email) { return email.trim() }).filter(function(email) { return email !== "" })
-    if (emails.length > 200 || emails.some(function(email) { return !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email) }))
-      return { ok: false, error: "Enter valid guest email addresses separated by commas" }
-    var seen = {}, previous = existing && Array.isArray(existing.attendees) ? existing.attendees : []
+    var guests = guestList(fields.guestEmails)
+    if (!guests.ok) return guests
+    var previous = existing && Array.isArray(existing.attendees) ? existing.attendees : []
     next.attendees = []
-    for (var i = 0; i < emails.length; i++) {
-      var email = emails[i].toLowerCase()
-      if (seen[email]) continue
-      seen[email] = true
+    for (var i = 0; i < guests.emails.length; i++) {
+      var email = guests.emails[i].toLowerCase()
       var matched = previous.filter(function(attendee) { return String(attendee.email || "").toLowerCase() === email })
-      next.attendees.push(matched.length ? matched[0] : { email: emails[i] })
+      next.attendees.push(matched.length ? matched[0] : { email: guests.emails[i] })
     }
   }
   if (fields.transparency === "opaque" || fields.transparency === "transparent") next.transparency = fields.transparency

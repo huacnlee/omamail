@@ -60,7 +60,11 @@ impl Client {
     /// The detail read, and with `may_reduce` once more without the Exchange 2013 properties when a
     /// server refused the first with an error it has no name for; and whether the item is outside
     /// the default calendar.
-    async fn detail(&mut self, wire: &str, may_reduce: bool) -> Result<EventDetail, &'static str> {
+    pub(super) async fn detail(
+        &mut self,
+        wire: &str,
+        may_reduce: bool,
+    ) -> Result<EventDetail, &'static str> {
         let request = soap::get_calendar_folder();
         let calendar = self.call(&request, true, view::folder_id).await?;
         let (found, reduced) = match self

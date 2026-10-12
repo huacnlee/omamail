@@ -1,3 +1,4 @@
+use super::calendar::Lock;
 use super::*;
 use crate::providers::exchange::ews::decode::envelope;
 use crate::providers::exchange::ews::tests::fake;
@@ -230,11 +231,11 @@ fn a_cancellation_is_for_the_meeting_of_its_uid_or_else_the_item_it_names() {
     };
     let listed = found(&format!(
         concat!(
-            r#"<t:MeetingCancellation><t:ItemId Id="M1"/><t:UID> u-1 </t:UID></t:MeetingCancellation>"#,
+            r#"<t:MeetingCancellation><t:ItemId Id="M1" ChangeKey="CK1"/><t:UID> u-1 </t:UID></t:MeetingCancellation>"#,
             r#"<t:Message><t:ItemId Id="M2"/><t:UID>u-2</t:UID></t:Message>"#,
             r#"<t:MeetingCancellation><t:ItemId Id="M3"/><t:UID>{}</t:UID>"#,
             r#"<t:AssociatedCalendarItemId Id="AAMk"/></t:MeetingCancellation>"#,
-            r#"<t:MeetingCancellation><t:ItemId Id="M4"/><t:UID>u-4</t:UID>"#,
+            r#"<t:MeetingCancellation><t:ItemId Id="M4" ChangeKey="a b"/><t:UID>u-4</t:UID>"#,
             "<t:RecurrenceId>2026-10-05T07:00:00Z</t:RecurrenceId></t:MeetingCancellation>",
             r#"<t:MeetingCancellation><t:ItemId Id="M5"/><t:UID>u-1</t:UID>"#,
             "<t:IsOutOfDate>true</t:IsOutOfDate></t:MeetingCancellation>"
@@ -256,6 +257,14 @@ fn a_cancellation_is_for_the_meeting_of_its_uid_or_else_the_item_it_names() {
     assert_eq!(shown, expected, "a uid too long is none");
     let dated: Vec<bool> = listed.iter().map(|c| c.out_of_date).collect();
     assert_eq!(dated, [false, false, false, true]);
+    // The message itself, which a removal names: a key a request could not carry is none.
+    let message: Vec<(&str, &str)> = listed
+        .iter()
+        .map(|c| (c.id.as_str(), c.change_key.as_str()))
+        .collect();
+    assert_eq!(message, [("M1", "CK1"), ("M3", ""), ("M4", ""), ("M5", "")]);
+    let nameless = "<t:MeetingCancellation><t:UID>u-5</t:UID></t:MeetingCancellation>";
+    assert_eq!(found(nameless).err(), Some(Rej::INVALID));
     let item = |uid: &str, id: &str, kind: &'static str, position: Option<i64>| EventDetail {
         item: CalendarItem {
             uid: uid.into(),
@@ -291,8 +300,7 @@ fn a_cancellation_is_for_the_meeting_of_its_uid_or_else_the_item_it_names() {
     let both = Cancellation {
         uid: "u-1".into(),
         associated: "AAMk".into(),
-        occurrence: None,
-        out_of_date: false,
+        ..Cancellation::default()
     };
     assert_eq!(both.is_for(&item("u-2", "AAMk", "single", None)), no);
     assert_eq!(
@@ -305,4 +313,141 @@ fn a_cancellation_is_for_the_meeting_of_its_uid_or_else_the_item_it_names() {
     assert_eq!(position(original), Some(at));
     let both = format!("<t:RecurrenceId>2026-10-06T07:00:00Z</t:RecurrenceId>{original}");
     assert_eq!(position(&both), Some(at + 86_400_000));
+}
+
+/// A meeting the owner sent with somebody on it; `inner` comes first and overrides it.
+const MINE: &str = concat!(
+    "<t:MyResponseType>Organizer</t:MyResponseType><t:AppointmentState>1</t:AppointmentState>",
+    "<t:IsOrganizer>true</t:IsOrganizer><t:ResponseObjects><t:CancelCalendarItem/></t:ResponseObjects>",
+    "<t:RequiredAttendees><t:Attendee><t:Mailbox><t:EmailAddress>ada@example.org</t:EmailAddress>",
+    "</t:Mailbox></t:Attendee></t:RequiredAttendees>",
+);
+
+#[test]
+fn only_a_meeting_whose_every_signal_says_the_owner_organises_it_is_organised() {
+    let mine = |inner: &str| one(&format!("{inner}{MINE}"));
+    let found = mine("");
+    assert!(found.organised("me@example.org"));
+    // The list leaves it editable as a meeting; the appointment's rule never does.
+    assert_eq!(
+        (found.item.screen_lock(), found.item.lock()),
+        (None, Some(Lock::Meeting))
+    );
+    let room = format!(
+        "<t:Resources><t:Attendee>{}</t:Attendee></t:Resources>",
+        mailbox("Room", "room@example.org")
+    );
+    let crowd = format!(
+        "<t:OptionalAttendees>{}</t:OptionalAttendees>",
+        format!("<t:Attendee>{}</t:Attendee>", mailbox("", "p@example.org")).repeat(201)
+    );
+    for veto in [
+        "<t:AppointmentState>3</t:AppointmentState>",
+        "<t:IsOrganizer>false</t:IsOrganizer>",
+        "<t:MyResponseType>Accept</t:MyResponseType>",
+        "<t:ResponseObjects><t:AcceptItem/></t:ResponseObjects>",
+        "<t:IsCancelled>true</t:IsCancelled>",
+        "<t:Sensitivity>Private</t:Sensitivity>",
+        "<t:CalendarItemType>Occurrence</t:CalendarItemType>",
+        "<t:IsRecurring>true</t:IsRecurring>",
+        "<t:IsMeeting>false</t:IsMeeting>",
+        "<t:RequiredAttendees/>",
+        &room,
+        &crowd,
+    ] {
+        assert!(!mine(veto).organised("me@example.org"), "{veto}");
+    }
+    // What a screen is told: a room, people not all read, or the meeting's own signals.
+    let owner = "me@example.org";
+    let nameless = "<t:RequiredAttendees><t:Attendee><t:Mailbox><t:Name>Dee</t:Name></t:Mailbox></t:Attendee></t:RequiredAttendees>";
+    let alone = format!(
+        "<t:RequiredAttendees><t:Attendee>{}</t:Attendee></t:RequiredAttendees>",
+        mailbox("Me", "ME@example.org")
+    );
+    let said = [
+        &room[..],
+        &crowd,
+        nameless,
+        &alone,
+        "<t:IsOrganizer>false</t:IsOrganizer>",
+    ]
+    .map(|inner| mine(inner).organiser_lock(owner));
+    let codes = [
+        Lock::Room,
+        Lock::Guests,
+        Lock::Guests,
+        Lock::Meeting,
+        Lock::Meeting,
+    ]
+    .map(Some);
+    assert_eq!(said, codes, "the owner alone is nobody to tell");
+    assert_eq!(
+        mine(&room).item.screen_lock(),
+        Some(Lock::Room),
+        "on the list too"
+    );
+    let elsewhere = EventDetail {
+        elsewhere: true,
+        ..mine("")
+    };
+    assert!(
+        !elsewhere.organised("me@example.org"),
+        "meetings are the default calendar's alone"
+    );
+    let reduced = EventDetail {
+        reduced: true,
+        ..mine("")
+    };
+    assert!(
+        !reduced.organised("me@example.org"),
+        "a change's own read is never the reduced one"
+    );
+}
+
+#[test]
+fn a_received_single_meeting_is_removable_only_once_cancelled_or_declined() {
+    assert_eq!(one("").removal(), None, "an answer is owed first");
+    let waiting = EventDetail {
+        cancellation: Cancelled::Yes,
+        ..one("")
+    };
+    assert_eq!(waiting.removal(), Some("cancelled"));
+    // A doubt about one event of a series removes nothing, and a read without the 2013 properties
+    // decides nothing.
+    let doubt = EventDetail {
+        cancellation: Cancelled::Unplaced,
+        ..one("")
+    };
+    let reduced = EventDetail {
+        reduced: true,
+        ..waiting.clone()
+    };
+    assert_eq!((doubt.removal(), reduced.removal()), (None, None));
+    let flagged = "<t:IsCancelled>true</t:IsCancelled>";
+    assert_eq!(one(flagged).removal(), Some("cancelled"));
+    // A flag may come with the owner's answer lost, never with the organizer's own.
+    let lost = format!("{flagged}<t:MyResponseType>Unknown</t:MyResponseType>");
+    assert_eq!(one(&lost).removal(), Some("cancelled"));
+    let own = format!("{flagged}<t:MyResponseType>Organizer</t:MyResponseType>");
+    assert_eq!(one(&own).removal(), None);
+    let declined = "<t:MyResponseType>Decline</t:MyResponseType>";
+    assert_eq!(one(declined).removal(), Some("declined"));
+    for veto in [
+        "<t:CalendarItemType>Occurrence</t:CalendarItemType>",
+        "<t:IsRecurring>true</t:IsRecurring>",
+        "<t:IsOrganizer>true</t:IsOrganizer>",
+        "<t:AppointmentState>1</t:AppointmentState>",
+        "<t:Sensitivity>Private</t:Sensitivity>",
+    ] {
+        let found = EventDetail {
+            cancellation: Cancelled::Yes,
+            ..one(&format!("{veto}{flagged}"))
+        };
+        assert_eq!(found.removal(), None, "{veto}");
+    }
+    let elsewhere = EventDetail {
+        elsewhere: true,
+        ..one(flagged)
+    };
+    assert_eq!(elsewhere.removal(), None);
 }

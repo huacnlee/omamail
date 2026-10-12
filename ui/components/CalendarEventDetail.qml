@@ -52,7 +52,8 @@ Rectangle {
     && root.source.readOnly !== true
     && (root.source.kind === "google" ? String(event.googleId || "") !== ""
       : root.source.kind === "microsoft" ? String(event.graphId || "") !== ""
-      // An Exchange event says what deleting it is: an appointment, or an invitation declined (and so left).
+      // An Exchange event says what deleting it is: an appointment, a meeting the owner cancels, an invitation
+      // declined (and so left), a meeting its organizer cancelled taken off the calendar.
       : root.source.kind === "exchange" ? ExchangeEvents.deleteKind(event) !== ""
       : String(event.href || "") !== "" && String(event.recurrenceRule || "") === ""
         && Number(event.recurrenceIdMs || 0) <= 0
@@ -90,8 +91,14 @@ Rectangle {
   readonly property bool answerSent: isExchange && !!event && !!root.controller
     && String(root.controller.answeredKey || "") !== ""
     && root.controller.answeredKey === ExchangeEvents.stableKey(event)
-  readonly property string deleteLabel: isExchange && ExchangeEvents.deleteKind(event) === "decline"
-    ? (event.exchangeKind === "single" ? "Decline and remove..." : "Decline...") : "Delete..."
+  // What the button at the foot of an Exchange event does, in its own words; every one of them asks first.
+  readonly property string deleteLabel: {
+    var kind = isExchange ? ExchangeEvents.deleteKind(event) : ""
+    return kind === "cancel" ? "Cancel meeting..." : kind === "remove" ? "Remove from calendar..."
+      : kind === "decline" ? (event.exchangeKind === "single" ? "Decline and remove..." : "Decline...") : "Delete..."
+  }
+  // A meeting its organizer cancelled that can be taken off the calendar here: the state is the reason.
+  readonly property bool removable: isExchange && !!event && event.cancelledByOrganizer === true && event.canRemove === true
 
   color: root.backgroundColor
 
@@ -410,7 +417,7 @@ Rectangle {
       Text {
         objectName: "event-lock-reason"
         width: parent.width
-        visible: !!root.event && String(root.event.lockReason || "") !== ""
+        visible: !!root.event && String(root.event.lockReason || "") !== "" && !root.removable
         text: String(root.event && root.event.lockReason || "")
         textFormat: Text.PlainText
         wrapMode: Text.Wrap

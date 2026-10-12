@@ -151,7 +151,7 @@ assert.strictEqual(accounts.calendarProvider({ provider: "jmap", email: "ada@exa
 // ---------------------------------------------------------------- what may be written
 
 const [source] = sources.withExchangeAccounts(sources.emptyList(), summaries).sources
-for (const [code, sentence] of [["meeting", "Meeting with other people: change it in Outlook"],
+for (const [code, sentence] of [["meeting", "This meeting can only be changed in Outlook"],
   ["recurring", "Repeating event: change it in Outlook"], ["cancelled", "Cancelled meeting: change it in Outlook"],
   ["foreign", "Somebody else's invitation: change it in Outlook"],
   ["private", "Private event, shown without its details: change it in Outlook"],
@@ -299,7 +299,7 @@ const detailOf = (extra) => Object.assign({ id: "i1", changeKey: "key-2", title:
   // A lock is the stricter of the two reads; a detail with no version cannot be answered.
   const plain = drawn([timed()])[0]
   assert.strictEqual(exchange.withDetail(plain, detailOf({ title: "Standup", location: "Room 4", canRespond: false,
-    editable: false, lock: "meeting", meeting: false })).lockReason, "Meeting with other people: change it in Outlook")
+    editable: false, lock: "meeting", meeting: false })).lockReason, "This meeting can only be changed in Outlook")
   assert.strictEqual(exchange.withDetail(event, detailOf({ changeKey: "" })).canRespond, false)
   assert.strictEqual(exchange.withDetail(event, { title: 5 }), null)
   // An answer is sent with the detail's version, and only Yes and Maybe go without asking.
@@ -333,7 +333,7 @@ const detailOf = (extra) => Object.assign({ id: "i1", changeKey: "key-2", title:
     drawn([timed({ editable: false, lock: "recurring", meeting: true, response: "accept" })])[0].lockReason,
     drawn([timed({ editable: false, lock: "meeting", meeting: true, response: "organizer" })])[0].lockReason,
     drawn([timed({ editable: false, lock: "recurring", meeting: false, response: "organizer" })])[0].lockReason],
-    [INVITED, INVITED, INVITED, "Meeting with other people: change it in Outlook", "Repeating event: change it in Outlook"])
+    [INVITED, INVITED, INVITED, "This meeting can only be changed in Outlook", "Repeating event: change it in Outlook"])
   // Cancelled: the owner's own answer is no longer shown, and the reminder only where it still comes (a meeting
   // the server flags cancelled is left out of the list the reminders are read from).
   const cancelled = exchange.withDetail(event, detailOf({ cancelled: true, canRespond: false,
@@ -368,5 +368,99 @@ for (const [code, sentence] of [["exchange_calendar_conflict", "This invitation 
   assert.strictEqual(exchange.respondError({ code: -32000, message: code }), sentence, code)
 }
 assert.strictEqual(exchange.detailError({ code: -32601, message: "Method not found" }), "Update the mail backend to see this event's details")
+
+// ---------------------------------------------------------------- meetings with other people
+
+{
+  const ACCOUNT = "exchange:alice@example.org"
+  // Each address once, in the order typed; nothing the backend would refuse, and not the owner's own.
+  deepEqual(exchange.guestList("bob@example.org; cy@example.org,\nBOB@example.org", ACCOUNT),
+    { ok: true, emails: ["bob@example.org", "cy@example.org"] })
+  for (const typed of ["Bob <bob@example.org>", "bob@example", "a..b@example.org", "x".repeat(65) + "@example.org"])
+    deepEqual(exchange.guestList(typed, ACCOUNT), { ok: false, error: exchange.GUEST_WORDS }, typed)
+  deepEqual(exchange.guestList("Alice@Example.org", ACCOUNT), { ok: false, error: exchange.OWN_ADDRESS })
+  // A meeting the owner organises is editable from the list as a meeting, but its people are the detail's: until
+  // they are read it can be neither cancelled nor changed, because the question could not name them.
+  const listed = drawn([timed({ id: "m1", title: "Lunch", meeting: true, response: "organizer", kind: "single" })])[0]
+  deepEqual([listed.exchangeMeeting, listed.lockReason, exchange.deleteKind(listed)], [true, "", ""])
+  const people = [{ name: "Alice", email: "alice@example.org", kind: "required", response: "organizer", self: true },
+    { name: "Bob", email: "bob@example.org", kind: "required", response: "accept", self: false },
+    { name: "Cy", email: "cy@example.org", kind: "optional", response: "none", self: false },
+    { name: "Room 4", email: "room@example.org", kind: "resource", response: "accept", self: false }]
+  const mine = exchange.withDetail(listed, detailOf({ id: "m1", title: "Lunch", location: "Room 4", attendees: people,
+    response: "organizer", canRespond: false, editable: true, lock: "", changeKey: "key-1" }))
+  deepEqual(exchange.peopleOf(mine).map(who => who.email), ["bob@example.org", "cy@example.org"], "not the owner or a room")
+  assert.strictEqual(exchange.guestText(mine), "bob@example.org, cy@example.org")
+  // A list that crossed a signal on Qt 6.12 is a sequence, not an array: it reads the same.
+  const sequence = { length: 2, 0: people[1], 1: people[0] }
+  deepEqual(exchange.peopleOf({ attendees: sequence }).map(who => who.email), ["bob@example.org"])
+  assert.strictEqual(exchange.deleteKind(mine), "cancel")
+  const cancel = exchange.deleteRequest(mine)
+  deepEqual([cancel.title, cancel.message, cancel.dismiss, cancel.focus, cancel.choices],
+    ["Cancel \"Lunch\"?", "This cancels the meeting for 2 people: bob@example.org, cy@example.org. Each of them is sent a cancellation.",
+      "Keep meeting", "dismiss", [{ value: "all", label: "Cancel meeting for 2 people" }]])
+  // One guest is told in the singular.
+  const alone = exchange.deleteRequest(Object.assign({}, mine, { attendees: [people[1]] }))
+  assert.strictEqual(alone.message, "This cancels the meeting for 1 person: bob@example.org. They are sent a cancellation.")
+  deepEqual(exchange.cancelParams("a", mine), { accountId: "a", id: "m1", changeKey: "key-1", sendCancellations: true })
+  // Saving asks first, naming the people; a form that reaches nobody asks nothing.
+  const asked = exchange.reachRequest(ACCOUNT, null, { title: "Lunch", guestEmails: "bob@example.org, cy@example.org" })
+  deepEqual([asked.title, asked.message, asked.dismiss, asked.focus, asked.choices[0].label],
+    ["Invite 2 people to \"Lunch\"?", "This sends an invitation to 2 people: bob@example.org, cy@example.org.",
+      "Keep editing", "dismiss", "Send invitation to 2 people"])
+  // What the write refuses asks nothing, so its own words come first: not an address, the owner, nobody, a series.
+  for (const typed of ["", "  ", "not an address", "alice@example.org"])
+    assert.strictEqual(exchange.reachRequest(ACCOUNT, null, { title: "Lunch", guestEmails: typed }), null, typed)
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, null, { title: "Lunch", guestEmails: "bob@example.org",
+    recurrence: { enabled: true } }), null, "a repeating event is made in Outlook")
+  const form = (extra) => Object.assign({ title: "Lunch", location: "Room 4", description: "", allDay: false,
+    startMs: mine.start.ms, endMs: mine.end.ms }, extra)
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, drawn([timed()])[0], form({ guestEmails: "bob@example.org" })), null,
+    "an appointment stays one")
+  for (const quiet of [form({ reminderMode: "custom", reminderMinutes: "15" }), form({ guestEmails: " " })])
+    assert.strictEqual(exchange.reachRequest(ACCOUNT, mine, quiet), null, "the reminder alone tells nobody; nobody is refused")
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, mine, form({ title: "Lunch, moved" })).message,
+    "This tells 2 people the meeting changed: bob@example.org, cy@example.org.")
+  // Whoever is taken off is named apart: told they were removed, not that the meeting changed.
+  const off = exchange.reachRequest(ACCOUNT, mine, form({ guestEmails: "BOB@example.org, d@example.org" }))
+  deepEqual([off.message, off.choices[0].label, off.dismiss],
+    ["This tells 2 people the meeting changed: BOB@example.org, d@example.org. It tells cy@example.org they were removed.",
+      "Send to 3 people", "Keep editing"])
+  // The same people in another order or case are no change: nothing is asked and nothing named.
+  assert.strictEqual(exchange.reachRequest(ACCOUNT, mine, form({ guestEmails: "CY@example.org, bob@example.org" })), null)
+  deepEqual([exchange.changedGuests(mine, ["cy@example.org", "BOB@example.org"]),
+    exchange.changedGuests(mine, ["cy@example.org"]), exchange.changedGuests(mine, null)], [null, ["cy@example.org"], null])
+  deepEqual([exchange.meetingMails({ accountId: "a", id: "m", changeKey: "k", sendUpdates: true, reminderMinutes: 15 }),
+    exchange.meetingMails({ accountId: "a", id: "m", changeKey: "k", sendUpdates: true, title: "x" })], [false, true])
+  // A meeting of the owner's the backend locks says what it locks on.
+  deepEqual(["room", "guests"].map(lock => exchange.lockReason({ editable: false, lock: lock, meeting: true, response: "organizer" })),
+    ["A meeting with a room: change it in Outlook", "Not every guest's address could be read: change it in Outlook"])
+  assert.strictEqual(exchange.whoText(["a@x.org", "b@x.org", "c@x.org", "d@x.org", "e@x.org"]), "a@x.org, b@x.org, c@x.org and 2 more")
+  // What is sent: the word that people are mailed, and the people only when the field changed, the optional kept so.
+  const built = { fields: { title: "Lunch", location: "", description: "", start: 1, end: 2 }, allDay: false, reminderMinutes: undefined }
+  const made = exchange.meetingCreateParams("a", built, ["bob@example.org"])
+  deepEqual([made.requiredAttendees, made.sendInvitations], [["bob@example.org"], true])
+  const kept = exchange.meetingUpdateParams("a", mine, built, null)
+  deepEqual([kept.sendUpdates, "requiredAttendees" in kept, "optionalAttendees" in kept], [true, false, false])
+  const moved = exchange.meetingUpdateParams("a", mine, built, ["CY@example.org", "d@example.org"])
+  deepEqual([moved.requiredAttendees, moved.optionalAttendees], [["d@example.org"], ["CY@example.org"]])
+  // A meeting its organizer cancelled, or one the owner declined, leaves the calendar with nobody told.
+  const gone = exchange.withDetail(invitation(), detailOf({ cancelled: true, canRemove: true, canRespond: false }))
+  deepEqual([gone.cancelledByOrganizer, exchange.deleteKind(gone), exchange.deleteRefusal(source, gone)], [true, "remove", ""])
+  deepEqual([exchange.deleteRequest(gone).message, exchange.deleteRequest(gone).choices[0].label],
+    ["The organizer cancelled this meeting. Nobody is told.", "Remove from calendar"])
+  deepEqual(exchange.removeParams("a", gone), { accountId: "a", id: "i1", changeKey: "key-2" })
+  const declined = exchange.withDetail(invitation(), detailOf({ response: "decline", canRemove: true }))
+  deepEqual([declined.cancelledByOrganizer, exchange.deleteKind(declined), exchange.deleteRequest(declined).message],
+    [false, "remove", "You declined this meeting. Nobody is told."])
+  assert.strictEqual(exchange.withDetail(invitation(), detailOf({ title: "Moved", canRemove: true })).canRemove, false, "stale")
+}
+for (const [code, sentence] of [
+  ["exchange_calendar_unconfirmed", "The server did not confirm it, and the guests may have been told. Look at your calendar and Sent Items before trying again"],
+  ["exchange_calendar_locked", "Only a meeting you organise can be changed here: change it in Outlook"],
+  ["exchange_calendar_not_removable", "That meeting is neither cancelled nor declined, so it is not removed from here. Decline it to remove it"],
+  ["invalid_params", "That meeting cannot be sent as it is. Check its title, dates, times and guest addresses"]]) {
+  assert.strictEqual(exchange.meetingError({ code: -32000, message: code }), sentence, code)
+}
 
 console.log("calendar exchange: ok")

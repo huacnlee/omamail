@@ -123,7 +123,7 @@ Item {
         summary: "Dentist", start: { ms: original[0].start.ms }, end: { ms: original[0].end.ms } }
       fixture.sourceKind = "exchange"
       var locked = JSON.parse(JSON.stringify(plain))
-      locked.lockReason = "Meeting with other people: change it in Outlook"
+      locked.lockReason = "This meeting can only be changed in Outlook"
       var keyless = JSON.parse(JSON.stringify(plain))
       keyless.exchangeKey = ""
       var cases = [[plain, 1], [locked, 0], [keyless, 0]]

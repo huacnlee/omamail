@@ -16,10 +16,12 @@
 //!   compares with what it drew (version keys are not comparable across a view and a read for an
 //!   occurrence of a series), and `editable` and `lock` from `CalendarItem::lock` on this fresh read,
 //!   which can see the people the list could not (an item outside the default calendar folder is
-//!   locked, as an appointment's write is). `canRespond` is `EventDetail::invitation`, so a detail
+//!   locked, as an appointment's write is), and a meeting the owner organises is unlocked as a meeting
+//!   when `EventDetail::organised` says so. `canRespond` is `EventDetail::invitation`, so a detail
 //!   read without the Exchange 2013 properties offers no answer, which would always fail. `cancelled`
 //!   is said only when it is certain; `unplacedCancellation` says one event of the meeting was
-//!   cancelled and this one does not say whether it is that event.
+//!   cancelled and this one does not say whether it is that event. `canRemove` is
+//!   `EventDetail::removal` (`exchange.meetingRemove`).
 //! - The owner is told from the other people by their address (the account's), and the owner's line
 //!   says what `MyResponseType` says: anybody else's `ResponseType` is "only relevant to a meeting
 //!   organizer's calendar item", so on an invitation it says nothing, and the answer never claims it
@@ -111,9 +113,11 @@ fn attendee(found: &Attendee, response: &str, owner: &str) -> Value {
 /// The detail as the answer lists it; `None` for an item whose id the codec does not take.
 pub fn reply(detail: &EventDetail, owner: &str) -> Option<Value> {
     let item = &detail.item;
-    // Outside the default calendar nothing is written from here, whatever the item is.
+    // Outside the default calendar nothing is written from here, whatever the item is; a meeting the
+    // owner organises is unlocked as a meeting, which the screen tells by `meeting`.
     let lock = match detail.elsewhere {
         true => Some(Lock::Unknown),
+        false if item.meeting => detail.organiser_lock(owner),
         false => item.lock(),
     };
     let private = item.private;
@@ -155,6 +159,7 @@ pub fn reply(detail: &EventDetail, owner: &str) -> Option<Value> {
         "recurring": item.recurring,
         "cancelled": item.cancelled || detail.cancellation == Cancelled::Yes,
         "unplacedCancellation": !item.cancelled && detail.cancellation == Cancelled::Unplaced,
+        "canRemove": detail.removal().is_some(),
         "kind": item.kind,
         "canRespond": detail.invitation(),
         "editable": lock.is_none(),

@@ -247,11 +247,12 @@ TestCase {
     return page()
   }
 
-  // The confirmation the window asks before it removes a mailbox.
+  // The confirmation the window asks before it removes a mailbox: the one holding a request, since the window
+  // has other questions of the same shape (the calendar editor's, before it sends to guests).
   function removalDialog() {
     function walk(item) {
       if (!item) return null
-      if (typeof item.openFor === "function" && item.request !== undefined && item.opened !== undefined) return item
+      if (typeof item.openFor === "function" && !!item.request && item.opened !== undefined) return item
       var values = item.children || []
       for (var i = 0; i < values.length; i++) {
         var found = walk(values[i])

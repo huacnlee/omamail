@@ -235,18 +235,54 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
             }
             "FindItem" if soap.body.contains("IPM.Schedule.Meeting.Canceled") => {
                 let stale = store.stale.clone();
-                let one = |(uid, event): &(String, Option<String>)| {
+                let one = |(at, (uid, event)): (usize, &(String, Option<String>))| {
                     let event = event.as_ref().map_or_else(String::new, |at| {
                         format!("<t:RecurrenceId>{at}</t:RecurrenceId>")
                     });
                     let old = stale.contains(uid);
                     format!(
-                        r#"<t:MeetingCancellation><t:ItemId Id="{}"/><t:UID>{uid}</t:UID>{event}<t:IsOutOfDate>{old}</t:IsOutOfDate></t:MeetingCancellation>"#,
-                        ews(999)
+                        r#"<t:MeetingCancellation><t:ItemId Id="{}" ChangeKey="CKm{at}"/><t:UID>{uid}</t:UID>{event}<t:IsOutOfDate>{old}</t:IsOutOfDate></t:MeetingCancellation>"#,
+                        ews(900 + at as u16)
                     )
                 };
-                let found: Vec<String> = store.cancelled.iter().map(one).collect();
+                let found: Vec<String> = store.cancelled.iter().enumerate().map(one).collect();
                 Out::Xml(fake::find(&found, true, found.len()))
+            }
+            // A cancellation's message processed: its meeting leaves the calendar, and so does it.
+            "CreateItem" if request.at(&["Items", "RemoveItem"]).is_some() => {
+                let id = request
+                    .at(&["Items", "RemoveItem", "ReferenceItemId"])
+                    .unwrap();
+                let at = (0..store.cancelled.len()).find(|at| {
+                    id.attr("Id") == Some(ews(900 + *at as u16).as_str())
+                        && id.attr("ChangeKey") == Some(format!("CKm{at}").as_str())
+                });
+                let Some(at) = at else {
+                    return refused("CreateItem", "ErrorItemNotFound");
+                };
+                let (uid, _) = store.cancelled.remove(at);
+                store
+                    .items
+                    .retain(|cal| format!("uid-{}@example.org", cal.uid.unwrap_or(cal.n)) != uid);
+                Out::Xml(response("CreateItem", &[ok("CreateItem", "<m:Items/>")]))
+            }
+            // The organizer's cancellation: the meeting leaves the organizer's calendar.
+            "CreateItem" if request.at(&["Items", "CancelCalendarItem"]).is_some() => {
+                let id = request
+                    .at(&["Items", "CancelCalendarItem", "ReferenceItemId"])
+                    .unwrap();
+                let at = store
+                    .items
+                    .iter()
+                    .position(|cal| Some(ews(cal.n).as_str()) == id.attr("Id"));
+                let Some(at) = at else {
+                    return refused("CreateItem", "ErrorItemNotFound");
+                };
+                if id.attr("ChangeKey") != Some(store.items[at].key().as_str()) {
+                    return refused("CreateItem", "ErrorIrresolvableConflict");
+                }
+                store.items.remove(at);
+                Out::Xml(response("CreateItem", &[ok("CreateItem", "<m:Items/>")]))
             }
             "FindItem" => {
                 let optional = soap.body.contains("StartWallClock");
@@ -319,8 +355,32 @@ pub fn script(store: Shared) -> impl Fn(&Soap) -> Out + Send + Sync + 'static {
                 let text = |name: &str| item.text_at(&[name]).unwrap_or("").to_owned();
                 let n = store.items.iter().map(|cal| cal.n).max().unwrap_or(0) + 1;
                 let all_day = text("IsAllDayEvent") == "true";
+                // A meeting keeps its people, as a read lists them.
+                let list = |name: &str| {
+                    let people = item.child(name)?.children("Attendee").into_iter();
+                    let one = |a: &xml::Node| {
+                        let address = a.text_at(&["Mailbox", "EmailAddress"]).unwrap_or("");
+                        format!(
+                            "<t:Attendee><t:Mailbox><t:EmailAddress>{}</t:EmailAddress></t:Mailbox></t:Attendee>",
+                            escape(address)
+                        )
+                    };
+                    Some(format!(
+                        "<t:{name}>{}</t:{name}>",
+                        people.map(one).collect::<String>()
+                    ))
+                };
+                let lists: String = ["RequiredAttendees", "OptionalAttendees"]
+                    .iter()
+                    .filter_map(|name| list(name))
+                    .collect();
                 let cal = Cal {
                     n,
+                    extra: if lists.is_empty() {
+                        lists
+                    } else {
+                        format!("<t:IsMeeting>true</t:IsMeeting>{lists}")
+                    },
                     subject: text("Subject"),
                     location: text("Location"),
                     start: written_time(&text("Start"), zone),

@@ -22,6 +22,13 @@
 // `withDetail`, in the shapes the Google detail already draws. Yes and Maybe answer an invitation at
 // once; No is the delete's confirmation (`deleteKind`), because it also takes the meeting off the
 // calendar. The minutes of an event's reminder are `reminders`, which the desktop reminders read.
+//
+// A meeting with other people is the one thing here that reaches somebody who has not asked to be told,
+// so nothing below builds such a request without the caller's `confirmedSend` and the words that tell the
+// person who will be reached (`reachRequest`, `deleteRequest`); the backend refuses without its own
+// confirming member as well, and this is the second place that says no. The owner creates, changes and
+// cancels a meeting they organise (`exchangeMeeting` with no lock) and takes a meeting its organizer cancelled,
+// or one they declined, off the calendar (`deleteKind` says which).
 
 var DAY = /^(\d{4})-(\d{2})-(\d{2})$/
 
@@ -41,7 +48,10 @@ function localMidnight(text) {
 }
 
 var LOCKS = {
-  meeting: "Meeting with other people: change it in Outlook",
+  meeting: "This meeting can only be changed in Outlook",
+  // The owner's own meeting, which the backend locks for what it carries: a room, or people not all read.
+  room: "A meeting with a room: change it in Outlook",
+  guests: "Not every guest's address could be read: change it in Outlook",
   recurring: "Repeating event: change it in Outlook",
   cancelled: "Cancelled meeting: change it in Outlook",
   foreign: "Somebody else's invitation: change it in Outlook",
@@ -115,7 +125,7 @@ function eventsFromExchange(payload, sourceId) {
       attendees: [], start: moment(start, allDay), end: moment(end, allDay),
       // For the desktop reminders (an invitation the owner declined raises none) and the detail.
       reminderMinutes: reminder, reminders: reminderPolicy(reminder), myResponse: String(item.response || ""),
-      canRespond: false, notesCut: false,
+      canRespond: false, notesCut: false, canRemove: false,
       recurrence: "", meetLink: "", sourceId: String(sourceId || ""), href: "", source: null
     })
   }
@@ -280,6 +290,7 @@ function withDetail(event, detail) {
   // Another event of its series was cancelled and this one does not say whether it is that one: a doubt, said
   // as one, and not answered from here.
   merged.cancellationUnplaced = received && !merged.cancelledByOrganizer && detail.unplacedCancellation === true
+  merged.canRemove = detail.canRemove === true && !stale && merged.answerKey !== ""
   var locked = lockReason(detail)
   if (locked !== "") merged.lockReason = locked
   if (stale) merged.stale = true
@@ -319,12 +330,17 @@ function declineParams(accountId, event) {
   return params
 }
 
-// What deleting this event is: "" when it may not be, `appointment` (a personal one, nobody told) or `decline`
-// (an invitation: the organizer is told, and it leaves the calendar).
+// What deleting this event is: "" when it may not be, `appointment` (a personal one, nobody told), `remove`
+// (the organizer cancelled it, or the owner declined it: nobody told), `decline` (an invitation: the organizer
+// is told, and it leaves the calendar) or `cancel` (a meeting the owner organises: everybody on it is told). A
+// meeting whose people were not read is not cancelled from here: the question could not say who.
 function deleteKind(event) {
   if (!event || String(event.exchangeId || "") === "") return ""
+  if (event.canRemove === true) return "remove"
   if (event.canRespond === true) return "decline"
-  return String(event.lockReason || "") === "" ? "appointment" : ""
+  if (String(event.lockReason || "") !== "") return ""
+  if (event.exchangeMeeting === true) return peopleOf(event).length > 0 ? "cancel" : ""
+  return "appointment"
 }
 
 // Why a delete is refused, or "".
@@ -333,7 +349,7 @@ function deleteRefusal(source, event) {
   if (source.readOnly === true) return "This calendar is read-only"
   var kind = deleteKind(event)
   if (kind === "") return String(event && event.lockReason || "") || LOCKS.unknown
-  var key = kind === "decline" ? event.answerKey : event.exchangeKey
+  var key = kind === "decline" || kind === "remove" ? event.answerKey : event.exchangeKey
   return String(key || "") === "" ? "Refresh this event before changing it" : ""
 }
 
@@ -341,14 +357,32 @@ function deleteRefusal(source, event) {
 // it again, and the way out with the focus, so a second Enter sends nothing. null for an appointment, whose own
 // words (`Calendar.deleteRequest`) stand.
 function deleteRequest(event) {
-  if (deleteKind(event) !== "decline") return null
-  var name = String(event.summary || "Untitled event")
+  var kind = deleteKind(event)
+  var name = String(event && event.summary || "Untitled event")
+  if (kind === "cancel") {
+    var emails = peopleOf(event).map(function(who) { return String(who.email) })
+    var count = peopleText(emails.length)
+    return confirmation(name, "Cancel \"" + name + "\"?", "This cancels the meeting for " + count + ": "
+      + whoText(emails) + ". " + (emails.length === 1 ? "They are" : "Each of them is") + " sent a cancellation.",
+      "Cancel meeting for " + count)
+  }
+  if (kind === "remove")
+    return confirmation(name, "Remove \"" + name + "\" from your calendar?", event.cancelledByOrganizer === true
+      ? "The organizer cancelled this meeting. Nobody is told." : "You declined this meeting. Nobody is told.",
+      "Remove from calendar")
+  if (kind !== "decline") return null
   var single = String(event.exchangeKind || "") === "single"
-  return { kind: "event", name: name, title: "Decline \"" + name + "\"?",
-    message: single ? "This tells the organizer you decline. The meeting is removed from your calendar."
+  return confirmation(name, "Decline \"" + name + "\"?",
+    single ? "This tells the organizer you decline. The meeting is removed from your calendar."
       : "This tells the organizer you decline this event. It stays on your calendar, declined.",
-    dismiss: "Keep meeting", focus: "dismiss",
-    choices: [{ value: "all", label: single ? "Decline and remove" : "Decline" }] }
+    single ? "Decline and remove" : "Decline")
+}
+
+// A question that reaches people, or takes something off the calendar: its title, the sentence that names who is
+// reached, one button that says it again, and the way out with the focus, so a second Enter sends nothing.
+function confirmation(name, title, message, label, dismiss) {
+  return { kind: "event", name: name, title: title, message: message, dismiss: dismiss || "Keep meeting",
+    focus: "dismiss", choices: [{ value: "all", label: label }] }
 }
 
 // What a failed answer says. It never says "try again" for an unconfirmed one: the organizer may have been told.
@@ -392,3 +426,164 @@ function errorText(error) {
 // Said beside the events that were read when the range held more than one read may carry: the
 // calendar shows what it has and not that it is whole.
 var TRUNCATED = "Only part of this range could be read, so some events are not shown"
+
+// ------------------------------------------------------------------ meetings with other people
+
+// What a guest address may be: the backend's own rule (`guests.rs`), so a typo is caught in the form's words
+// and not as a refused request. One @, printable ASCII, dots only between the characters of a name, a domain
+// of at least two labels of letters, digits and hyphens.
+var ADDRESS = /^[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+(\.[A-Za-z0-9!#$%&'*+\/=?^_\x60{|}~-]+)*@([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/
+
+var GUEST_WORDS = "Enter valid guest email addresses separated by commas"
+var OWN_ADDRESS = "Leave your own address out of the guests: you are already on the meeting"
+var NO_GUESTS = "A meeting needs at least one guest. To end it, cancel it"
+var UNCONFIRMED_SEND = "Confirm what is sent to the guests first"
+var PEOPLE_UNKNOWN = "Open the meeting again to see who is on it"
+
+// The mailbox's own address, from the account id (`exchange:alice@example.org`).
+function ownAddress(accountId) {
+  return String(accountId || "").replace(/^exchange:/, "").toLowerCase()
+}
+
+// The people typed into a guest field: `{ ok, emails }`, each address once in the order typed, or the
+// sentence for a field that is not a list of addresses. The mailbox's own address is refused, as the backend
+// refuses it: an invitation to oneself is nobody's intention.
+function guestList(text, accountId) {
+  var typed = Calendar.guestList(text)
+  if (!typed.ok) return typed
+  var own = ownAddress(accountId)
+  for (var i = 0; i < typed.emails.length; i++) {
+    var email = typed.emails[i]
+    var local = email.substring(0, email.lastIndexOf("@"))
+    if (email.length > 254 || local.length > 64 || !ADDRESS.test(email)) return { ok: false, error: GUEST_WORDS }
+    if (email.toLowerCase() === own) return { ok: false, error: OWN_ADDRESS }
+  }
+  return typed
+}
+
+// The people on a meeting other than the owner and any room, as its detail read them: who a question names
+// when it says who will be told. An event whose detail was not read has none. The list is walked by its
+// length, so it reads the same after crossing a signal, where Qt 6.12 hands it over as a sequence.
+function peopleOf(event) {
+  var all = event && event.attendees, out = []
+  var count = all && typeof all.length === "number" ? all.length : 0
+  for (var i = 0; i < count; i++) {
+    var who = all[i] || {}
+    if (who.self !== true && who.resource !== true && String(who.email || "") !== "") out.push(who)
+  }
+  return out
+}
+
+// What the guest field holds for a meeting being changed: everybody but the owner, who cannot name themselves.
+function guestText(event) {
+  return peopleOf(event).map(function(who) { return String(who.email) }).join(", ")
+}
+
+// The people as the typed list makes them: whoever was optional stays optional, everybody else is required.
+function meetingPeople(event, emails) {
+  var optional = {}
+  peopleOf(event).forEach(function(who) { if (who.optional === true) optional[String(who.email).toLowerCase()] = true })
+  var required = [], extra = []
+  emails.forEach(function(email) { (optional[email.toLowerCase()] === true ? extra : required).push(email) })
+  return { required: required, optional: extra }
+}
+
+// A new meeting: the appointment's own fields, who is invited, and the word that the invitations are sent.
+function meetingCreateParams(accountId, built, emails) {
+  var params = createParams(accountId, built)
+  params.requiredAttendees = emails
+  params.sendInvitations = true
+  return params
+}
+
+// A change of a meeting the owner organises, the people named only when the field changed (`emails` null
+// leaves them), and the word that the update is sent to everybody on it.
+function meetingUpdateParams(accountId, event, built, emails) {
+  var params = updateParams(accountId, event, built)
+  params.sendUpdates = true
+  if (emails) {
+    var people = meetingPeople(event, emails)
+    params.requiredAttendees = people.required
+    params.optionalAttendees = people.optional
+  }
+  return params
+}
+
+function cancelParams(accountId, event) {
+  return { accountId: String(accountId || ""), id: String(event.exchangeId || ""),
+    changeKey: String(event.exchangeKey || ""), sendCancellations: true }
+}
+
+// Taking a cancelled or declined meeting off the calendar names the detail's own version.
+function removeParams(accountId, event) {
+  return { accountId: String(accountId || ""), id: String(event.exchangeId || ""),
+    changeKey: String(event.answerKey || "") }
+}
+
+function peopleText(count) { return count === 1 ? "1 person" : count + " people" }
+
+// "ada@example.org, bob@example.org and 3 more": the first few, so a long list is still named.
+function whoText(emails) {
+  var shown = emails.slice(0, 3).join(", ")
+  return emails.length > 3 ? shown + " and " + (emails.length - 3) + " more" : shown
+}
+
+// Whether a change of a meeting tells its people: anything it names but the owner's own reminder, which the
+// backend writes telling nobody.
+function meetingMails(params) {
+  for (var key in params)
+    if (["accountId", "id", "changeKey", "sendUpdates", "reminderMinutes"].indexOf(key) < 0) return true
+  return false
+}
+
+// The guests a field names, or null when they are the people already on the meeting, in any order or case: the
+// backend compares the same way and writes nothing for them, so nothing is asked about and nothing named.
+function changedGuests(event, emails) {
+  if (!emails) return null
+  function key(list) { return list.map(function(email) { return String(email).toLowerCase() }).sort().join("\n") }
+  return key(peopleOf(event).map(function(who) { return who.email })) === key(emails) ? null : emails
+}
+
+// What saving a form tells people, as the question the owner answers first, or null when it tells nobody (an
+// appointment, a change of the owner's reminder alone) or the write will refuse it and say why (an address that
+// is not one, a meeting left with nobody, a repeating new event). `event` is the meeting being changed, null for a
+// new event; `fields` is what the composer holds (`guestEmails` undefined for a guest field nobody changed).
+function reachRequest(accountId, event, fields) {
+  var name = String(fields && fields.title || event && event.summary || "Untitled event")
+  var typed = fields && fields.guestEmails !== undefined ? guestList(fields.guestEmails, accountId) : null
+  if (typed && (!typed.ok || typed.emails.length === 0)) return null
+  if (!event) {
+    if (!typed || fields.recurrence && fields.recurrence.enabled === true) return null
+    var count = peopleText(typed.emails.length)
+    return confirmation(name, "Invite " + count + " to \"" + name + "\"?",
+      "This sends an invitation to " + count + ": " + whoText(typed.emails) + ".", "Send invitation to " + count,
+      "Keep editing")
+  }
+  if (event.exchangeMeeting !== true) return null
+  var built = Calendar.updateEvent(fields, event, Date.now())
+  var guests = typed ? changedGuests(event, typed.emails) : null
+  if (!built.ok || !meetingMails(meetingUpdateParams(accountId, event, built, guests))) return null
+  var told = peopleOf(event).map(function(who) { return String(who.email) })
+  var wanted = guests || told
+  var kept = wanted.map(function(email) { return email.toLowerCase() })
+  var removed = told.filter(function(email) { return kept.indexOf(email.toLowerCase()) < 0 })
+  var message = "This tells " + peopleText(wanted.length) + " the meeting changed: " + whoText(wanted) + "."
+  if (removed.length > 0) message += " It tells " + whoText(removed) + " they were removed."
+  var label = removed.length > 0 ? "Send to " + peopleText(wanted.length + removed.length)
+    : "Send update to " + peopleText(wanted.length)
+  return confirmation(name, "Update \"" + name + "\"?", message, label, "Keep editing")
+}
+
+// What a failed meeting write says. One that is not confirmed never says "try again": the people may have been
+// told, and a second would tell them again.
+function meetingError(error) {
+  var code = Protocol.errorCode(error)
+  if (code === "exchange_calendar_unconfirmed")
+    return "The server did not confirm it, and the guests may have been told. Look at your calendar and Sent Items before trying again"
+  if (code === "exchange_calendar_locked") return "Only a meeting you organise can be changed here: change it in Outlook"
+  if (code === "exchange_calendar_not_removable")
+    return "That meeting is neither cancelled nor declined, so it is not removed from here. Decline it to remove it"
+  if (code === "Invalid params" || code === "invalid_params")
+    return "That meeting cannot be sent as it is. Check its title, dates, times and guest addresses"
+  return writeError(error)
+}
