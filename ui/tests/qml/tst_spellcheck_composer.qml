@@ -140,6 +140,54 @@ Item {
       compare(compose.spellingPass, null)
     }
 
+    function test_reply_addresses_and_links_are_not_underlined_but_adjacent_typos_are() {
+      if (!readyAdapter()) return
+      var body = named(compose, "compose-body-editor")
+      body.text = "On Fri, Sam Rivera <sam@example.com> wrote: shedule https://x.y/recieve?teh=wrod#shedule. "
+      compose.refreshSpellingRanges()
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      var typo = body.text.indexOf("shedule")
+      var address = body.text.indexOf("sam@example.com")
+      var link = body.text.indexOf("https:")
+      var found = false
+      for (var i = 0; i < compose.spellingRanges.length; i++) {
+        var range = compose.spellingRanges[i]
+        if (range.start === typo) found = true
+        verify(range.end <= address || range.start >= address + 15)
+        verify(range.end <= link)
+      }
+      verify(found, "a real prose typo on the same line still has an underline")
+      var before = body.text
+      var box = body.positionToRectangle(address + 1)
+      mouseClick(body, box.x + 2, box.y + box.height / 2, Qt.RightButton)
+      var menu = named(compose, "compose-text-menu")
+      tryCompare(menu, "opened", true)
+      compare(menu.spellingMisspelled, false)
+      compare(menu.spellingSuggestions.length, 0)
+      compare(menu.ignoreWordRow.visible, false)
+      menu.close()
+      body.cursorPosition = link + 14
+      body.forceActiveFocus()
+      keyClick(Qt.Key_Period, Qt.ControlModifier)
+      wait(20)
+      compare(menu.opened, false, "Ctrl+. has no correction menu for a link")
+      compare(compose.openSpellingAtCaret(), false)
+      compare(body.text, before)
+    }
+
+    function test_non_prose_never_warms_the_dictionary_cache() {
+      var adapter = readyAdapter()
+      if (!adapter) return
+      var body = named(compose, "compose-body-editor")
+      body.text = "<sam@example.com> https://x.y/recieve?teh=wrod#shedule www.x.y/wrod mailto:sam "
+      adapter.resetCache()
+      compose.refreshSpellingRanges()
+      tryVerify(function() { return compose.spellingPass && compose.spellingPass.done })
+      compare(adapter.verdictCache.size, 0)
+      compare(compose.spellingRanges.length, 0)
+      compare(compose.spellingDelegateCount, 0)
+    }
+
     function test_quoted_reply_lines_never_reach_the_checker() {
       var adapter = readyAdapter()
       if (!adapter) return

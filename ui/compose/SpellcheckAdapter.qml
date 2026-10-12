@@ -22,6 +22,8 @@ Item {
   // highlighter by destroying the adapter (unload its Loader), not by clearing
   // this.
   property var document: null
+  // Read plain text only on inspection, not through a whole-body change binding.
+  property var editor: null
   // `enabled` is reused from Item rather than redeclared: the adapter is
   // non-visual, so this keeps the fixed interface name without shadowing
   // QQuickItem.enabled (which qmllint rejects). The owning Loader is inactive
@@ -68,6 +70,8 @@ Item {
   function inspect(position) {
     if (!available || document === null) return { word: "", misspelled: false, suggestions: [] }
     var at = Math.max(0, Math.floor(position))
+    if (editor !== null && Spelling.nonProseAt(editor.text, at))
+      return { word: "", misspelled: false, suggestions: [] }
     var list = highlighter.suggestions(at, 5)
     return {
       word: String(highlighter.wordUnderMouse),

@@ -2116,6 +2116,7 @@ DropArea {
     onLoaded: {
       if (!item) return
       item.document = bodyEdit.textDocument
+      item.editor = bodyEdit
       item.enabled = root.spellingEnabled
       root.refreshSpellingRanges()
     }

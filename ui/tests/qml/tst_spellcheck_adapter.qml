@@ -25,6 +25,7 @@ Item {
     source: "../../compose/SpellcheckAdapter.qml"
     onLoaded: {
       item.document = edit.textDocument
+      item.editor = edit
       item.enabled = true
       item.language = "en_US"
     }
@@ -81,6 +82,25 @@ Item {
       if (!a) return
       compare(a.available, true)
       compare(a.status, "ready")
+    }
+
+    function test_inspection_skips_non_prose_and_follows_edits() {
+      var a = adapter()
+      if (!a) return
+      var chunks = ["sam@example.com", "first.last+tag@sub.example.co.uk",
+        "https://x.y/recieve?teh=wrod#shedule", "www.x.y/wrod", "mailto:sam", "wrod-".repeat(10000)]
+      for (var i = 0; i < chunks.length; i++) {
+        edit.text = "<" + chunks[i] + "> mispelled "
+        var at = edit.text.indexOf("@")
+        if (at < 0) at = edit.text.indexOf("wrod")
+        if (at < 0) at = 1
+        var info = a.inspect(at)
+        compare(info.misspelled, false)
+        compare(info.suggestions.length, 0)
+        compare(a.inspect(edit.text.indexOf("mispelled")).misspelled, true)
+      }
+      edit.text = "mispelled "
+      compare(a.inspect(2).misspelled, true, "non-prose does not poison later inspection")
     }
 
     function test_inspect_word_misspelling_and_suggestions() {

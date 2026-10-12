@@ -29,6 +29,88 @@ test("Ranges keep UTF-16 offsets, apostrophes, combining marks and repeated word
   deepEqual(rules.misspelledRanges("'' ’ 😀 ", wrong), [])
 })
 
+test("Email chunks skip every token without dictionary calls", () => {
+  const r = spelling()
+  for (const address of ["sam@example.com", "first.last+tag@sub.example.co.uk", "élise@exemple.fr"]) {
+    for (const wrap of [["", ""], ["<", ">"], ["(", ")"], ["[", "]"], ['"', '"'], ["'", "'"], [",", ";"]]) {
+      const text = "shedule " + wrap[0] + address + wrap[1] + " recieve "
+      const seen = []
+      const ranges = r.misspelledRanges(text, word => { seen.push(word); return true })
+      assert.deepEqual(seen, ["shedule", "recieve"])
+      deepEqual(ranges, [{ start: 0, end: 7 }, { start: text.indexOf("recieve"), end: text.indexOf("recieve") + 7 }])
+      assert.equal(r.nonProseAt(text, text.indexOf(address)), true)
+    }
+  }
+})
+
+test("Link chunks skip schemes, mailto, www and misspelled paths/query/fragment", () => {
+  const r = spelling()
+  for (const link of ["http://x.y/recieve", "https://x.y/recieve?teh=wrod#shedule",
+    "ftp://x.y/wrod", "file:///recieve", "a+b.c-d://wrod", "HTTPS://x.y/wrod",
+    "www.x.y/recieve", "mailto:sam", "mailto:sam@example.com"]) {
+    for (const suffix of [" ", ". ", ", ", "; "]) {
+      const text = "shedule (" + link + ")" + suffix + "recieve "
+      const seen = []
+      r.misspelledRanges(text, word => { seen.push(word); return true })
+      assert.deepEqual(seen, ["shedule", "recieve"], text)
+      assert.equal(r.nonProseAt(text, text.indexOf(link)), true)
+    }
+  }
+  deepEqual(r.misspelledRanges("see https://x.y/recieve. ", w => w !== "see"), [])
+})
+
+test("Incomplete @ and non-link prefixes do not suppress prose", () => {
+  const r = spelling()
+  for (const text of ["@ noon ", "me@ ", "@me ", "me@.noon ", "1http://wrod ", "http:wrod "]) {
+    assert.equal(r.nonProseAt(text, text.indexOf(" ") - 1), false, text)
+    const seen = []
+    r.misspelledRanges(text, word => { seen.push(word); return true })
+    assert.ok(seen.length > 0, text)
+  }
+  const seen = []
+  r.misspelledRanges("Thanks shedule, sam@example.com ", word => { seen.push(word); return true })
+  assert.deepEqual(seen, ["Thanks", "shedule"])
+})
+
+test("Non-prose spans survive window edges and caret ends", () => {
+  const r = spelling()
+  const text = "https://x.y/recieve?teh=wrod#shedule sam@example.com recieve "
+  for (const word of ["recieve", "teh", "wrod", "shedule", "sam", "example", "com"]) {
+    const at = text.indexOf(word)
+    for (const position of [at, at + word.length]) assert.equal(r.nonProseAt(text, position), true)
+    const window = r.wordWindow(text, at, at + word.length)
+    const pass = r.createPass(text, window, at, at + word.length, 0)
+    while (!pass.done) r.advancePass(pass, () => { throw Error("window fragment reached dictionary") }, () => 0)
+  }
+  assert.equal(r.nonProseAt(text, text.lastIndexOf("recieve")), false)
+})
+
+test("Overlong chunks are skipped with bounded scans and skipped words still yield", () => {
+  const r = spelling()
+  const cap = r.MAX_CHUNK_CHARACTERS
+  const chunk = "wrod-".repeat(20000)
+  for (const at of [0, 100, 50000, chunk.length - 1]) {
+    let reads = 0
+    const input = { length: chunk.length, charAt: index => { reads++; return chunk.charAt(index) } }
+    assert.equal(r.nonProseAt(input, at), true)
+    assert.ok(reads <= cap + 8, "the cap bounds character reads even in a huge chunk")
+  }
+  const exact = "-".repeat(cap - 4) + "wrod"
+  assert.equal(r.nonProseAt(exact + " ", cap - 2), false)
+  assert.equal(r.nonProseAt("-" + exact + " ", cap - 1), true)
+  const text = chunk + " shedule "
+  const window = { start: chunk.length - 40, end: text.length }
+  const pass = r.createPass(text, window, 0, text.length, 0)
+  const seen = []
+  while (!pass.done) r.advancePass(pass, w => { seen.push(w); return true }, () => 0)
+  assert.deepEqual(seen, ["shedule"])
+  const repeated = "sam@example.com ".repeat(10000)
+  const bounded = r.createPass(repeated, r.wordWindow(repeated, 0, repeated.length), 0, repeated.length, 0)
+  r.advancePass(bounded, () => { throw Error("address reached dictionary") }, () => 0)
+  assert.equal(bounded.done, false)
+  assert.ok(bounded.index <= r.MAX_SLICE_CHARACTERS)
+})
+
 test("Settings default to enabled system language and only explicit false disables checking", () => {
   const rules = spelling()
   for (const settings of [null, {}, { spellingEnabled: "no" }, { spellingEnabled: 0 }]) {

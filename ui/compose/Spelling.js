@@ -5,6 +5,7 @@
 var MAX_WINDOW_CHARACTERS = 20000
 var MAX_UNDERLINE_RANGES = 400
 var MAX_WORD_CHARACTERS = 128
+var MAX_CHUNK_CHARACTERS = 256
 var MAX_CACHE_WORDS = 4096
 var SLICE_MILLISECONDS = 8
 var MAX_SLICE_WORDS = 12
@@ -44,8 +45,37 @@ function quotedAt(text, position) {
   return text.charAt(at) === ">" || text.charAt(at) === " " || text.charAt(at) === "\t"
 }
 
+// A bounded chunk rule, not URL parsing: none of its word fragments are prose.
+// Retain the document string in a pass so window edges cannot hide a prefix/@.
+function nonProseAt(text, position) {
+  var at = Math.max(0, Math.min(text.length, Math.floor(position)))
+  if ((at === text.length || chunkDelimiter(text.charAt(at)))
+      && at > 0 && isWordChar(text.charAt(at - 1))) at -= 1
+  if (at === text.length || chunkDelimiter(text.charAt(at))) return false
+  var from = at
+  var to = at
+  while (from > 0 && !chunkDelimiter(text.charAt(from - 1))) {
+    if (at - from >= MAX_CHUNK_CHARACTERS) return true
+    from -= 1
+  }
+  while (to < text.length && !chunkDelimiter(text.charAt(to))) {
+    if (to - from >= MAX_CHUNK_CHARACTERS) return true
+    to += 1
+  }
+  var chunk = text.substring(from, to)
+  if (/^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|mailto:|www\.)/i.test(chunk)) return true
+  var email = chunk.indexOf("@")
+  while (email >= 0) {
+    if (isWordChar(chunk.charAt(email - 1)) && isWordChar(chunk.charAt(email + 1))) return true
+    email = chunk.indexOf("@", email + 1)
+  }
+  return false
+}
+
+function chunkDelimiter(character) { return /[\s<>()\[\]"',;]/.test(character) }
+
 function createPass(text, window, visibleStart, visibleEnd, revision) {
-  return { text: text.substring(window.start, window.end), offset: window.start,
+  return { documentText: text, text: text.substring(window.start, window.end), offset: window.start,
     index: 0, documentLength: text.length, quoted: quotedAt(text, window.start),
     lineStart: false, visibleStart: visibleStart, visibleEnd: visibleEnd,
     revision: revision, ranges: [], skipLong: window.start > 0
@@ -93,6 +123,7 @@ function advancePass(pass, isMisspelled, clock, paint) {
     var range = nextWord(pass, limit)
     if (!range) { pass.done = pass.index >= pass.text.length; break }
     count += 1
+    if (nonProseAt(pass.documentText, range.start)) continue
     if (isMisspelled(range.word) && range.end > pass.visibleStart && range.start < pass.visibleEnd) {
       var stored = { start: range.start, end: range.end }
       if (paint && paint(stored) === false) continue
