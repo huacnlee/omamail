@@ -309,8 +309,10 @@ pub(super) fn validate_size(
 ) -> Result<()> {
     if (provider == Provider::Hey && encoded_len > 16 * 1024 * 1024 * 4 / 3)
         || (provider == Provider::Jmap && encoded_len > 24 * 1024 * 1024)
-        || (matches!(provider, Provider::Imap | Provider::Outlook)
-            && decoded_len > crate::message::MAX_MESSAGE)
+        || (matches!(
+            provider,
+            Provider::Imap | Provider::Outlook | Provider::M365
+        ) && decoded_len > crate::message::MAX_MESSAGE)
     {
         return Err("message_too_large");
     }

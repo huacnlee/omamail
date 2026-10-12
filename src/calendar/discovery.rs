@@ -26,7 +26,9 @@ fn account_id(params: &Value) -> Result<&str, &'static str> {
         .get("accountId")
         .and_then(Value::as_str)
         .filter(|value| {
-            (value.starts_with("outlook:") || value.starts_with("imap:"))
+            (value.starts_with("outlook:")
+                || value.starts_with("imap:")
+                || value.starts_with("m365:"))
                 && value.len() <= 1024
                 && !value.chars().any(|c| c.is_control() || c.is_whitespace())
         })
@@ -77,8 +79,9 @@ pub(super) async fn response_body(mut response: Response) -> Result<String, &'st
 }
 
 async fn microsoft(account: &str) -> Result<Value, &'static str> {
-    crate::auth::settings("outlook", account)?;
-    let token = crate::auth::access_token("outlook", account, "graph").await?;
+    // A Microsoft 365 mailbox keeps its Graph token under its own sign-in (one code for mail and
+    // calendar); an Outlook one asks its Graph resource of the Outlook refresh token.
+    let token = crate::auth::graph_token(account).await?;
     microsoft_with_client(super::client()?, account, &token).await
 }
 
@@ -599,7 +602,7 @@ async fn icloud(account: &str) -> Result<Value, &'static str> {
 pub async fn discover(params: &Value) -> Result<Value, &'static str> {
     let account = account_id(params)?.to_owned();
     tokio::time::timeout(std::time::Duration::from_secs(27), async {
-        if account.starts_with("outlook:") {
+        if account.starts_with("outlook:") || account.starts_with("m365:") {
             microsoft(&account).await
         } else {
             icloud(&account).await
@@ -654,6 +657,10 @@ mod tests {
         assert_eq!(
             account_id(&json!({"accountId":"outlook:person@example.org"})),
             Ok("outlook:person@example.org")
+        );
+        assert_eq!(
+            account_id(&json!({"accountId":"m365:person@example.org"})),
+            Ok("m365:person@example.org")
         );
         for value in [
             json!({}),

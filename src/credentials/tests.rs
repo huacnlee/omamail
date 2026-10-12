@@ -298,3 +298,42 @@ fn credentials_native_linux_retains_legacy_attribute_scopes() {
     );
     cleanup.0.delete().unwrap();
 }
+
+#[test]
+fn m365_refresh_tokens_are_their_own_kind_bound_to_account_and_client() {
+    let m365 = |provider: &str, account: &str, client: &str| {
+        let kind = CredentialKind::M365RefreshToken {
+            client_id: client.into(),
+        };
+        key(provider, account, kind)
+    };
+    let good = m365("m365", "m365:A@example.org", "client");
+    let attributes = good.attributes().unwrap();
+    assert_eq!(attributes.get("kind").unwrap(), "m365-refresh-token");
+    assert_eq!(attributes.get("account").unwrap(), "m365:a@example.org");
+    assert_eq!(attributes.get("client-id").unwrap(), "client");
+    // Neither another client's item nor Outlook's is this one.
+    let other = m365("m365", "m365:a@example.org", "other")
+        .native_id()
+        .unwrap();
+    let outlook = key(
+        "outlook",
+        "outlook:a@example.org",
+        CredentialKind::OutlookRefreshToken {
+            client_id: "client".into(),
+        },
+    );
+    let id = good.native_id().unwrap();
+    assert!(id != other && id != outlook.native_id().unwrap());
+    for bad in [
+        m365("outlook", "m365:a@example.org", "client"),
+        m365("m365", "outlook:a@example.org", "client"),
+        m365("m365", "m365:a b@example.org", "client"),
+        m365("m365", "m365:a@example.org", ""),
+    ] {
+        assert!(
+            matches!(NativeStore.get(&bad), Err(Error::InvalidKey)),
+            "{bad:?}"
+        );
+    }
+}

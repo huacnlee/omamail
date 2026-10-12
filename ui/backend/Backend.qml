@@ -97,7 +97,8 @@ Item {
     // Snapshot the payload now, just as an immediately written request did.
     // The caller may reuse or mutate its model while this frame is waiting.
     var entry = { id: id, frame: Wire.request(id, method, params),
-      callback: done, operation: operation, cancelled: false }
+      callback: done, operation: operation, cancelled: false,
+      budget: requestBudget(operation, params) }
     queued.push(entry)
     drainRequests()
     var handle = { withdraw: function() {
@@ -113,6 +114,24 @@ Item {
     return handle
   }
 
+  // How long a sent frame may wait for its answer.
+  function requestBudget(operation, params) {
+    if (operation === "agent.context") return 65000
+    // An IMAP frame is a whole conversation — connect, login, SELECT, then
+    // one command per 4 096-UID window — on a server that charges about
+    // half a second per command, so it outlives the backend's own call
+    // budget (CALL_BUDGET in src/providers/imap/mod.rs) instead of killing
+    // the process while the server is still answering.
+    if (operation.indexOf("imap.") === 0) return 180000
+    // A Microsoft 365 message body is up to 24 MiB and is given a minute on the wire.
+    // Everything else, including a header listing, keeps the 30 second wait.
+    var account = params ? String(params.accountId || "") : ""
+    if (operation === "m365.read" || operation === "m365.attachment") return 90000
+    if (operation === "m365.messages" && params && params.full === true) return 90000
+    if (operation === "reader.open" && account.indexOf("m365:") === 0) return 90000
+    return 30000
+  }
+
   // Only sent frames occupy a slot or start their request deadline. New work
   // joins the tail even from a response callback, so a busy account cannot
   // repeatedly jump ahead of the other accounts already waiting.
@@ -123,13 +142,7 @@ Item {
       while (queued.length > 0 && Object.keys(pending).length < 64 && connected) {
         var entry = queued.shift()
         var next = Object.assign({}, pending)
-        var timeout = entry.operation === "agent.context" ? 65000 : 30000
-        // An IMAP frame is a whole conversation — connect, login, SELECT, then
-        // one command per 4 096-UID window — on a server that charges about
-        // half a second per command, so it outlives the backend's own call
-        // budget (CALL_BUDGET in src/providers/imap/mod.rs) instead of killing
-        // the process while the server is still answering.
-        if (entry.operation.indexOf("imap.") === 0) timeout = 180000
+        var timeout = entry.budget || 30000
         entry.deadline = Date.now() + timeout
         next[entry.id] = entry
         pending = next

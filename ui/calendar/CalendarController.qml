@@ -595,7 +595,7 @@ Item {
       if (error) {
         reason = notifyConsent(error) ? Microsoft.graphConsentMessage()
           : error.message === "calendar_conflict" ? "This event changed elsewhere. Refresh and try again."
-          : Calendar.nativeRequestError(String(source && source.kind || ""))
+          : Calendar.nativeRequestError(String(source && source.kind || ""), source && source.accountId, error)
       }
       callback(result, reason)
     })

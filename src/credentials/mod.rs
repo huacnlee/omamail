@@ -27,6 +27,7 @@ pub enum CredentialKind {
     OutlookRefreshToken { client_id: String },
     ImapPassword,
     JmapSecret,
+    M365RefreshToken { client_id: String },
     CalendarPassword,
 }
 
@@ -153,6 +154,7 @@ impl CredentialKey {
             CredentialKind::OutlookRefreshToken { .. } => ("outlook", "outlook-refresh-token"),
             CredentialKind::ImapPassword => ("imap", "imap-password"),
             CredentialKind::JmapSecret => ("jmap", "jmap-secret"),
+            CredentialKind::M365RefreshToken { .. } => ("m365", "m365-refresh-token"),
             CredentialKind::CalendarPassword => ("caldav", "calendar-password"),
         };
         if self.provider != provider {
@@ -177,7 +179,8 @@ impl CredentialKey {
             attrs.insert("account".into(), self.account_id.to_lowercase());
         }
         if let CredentialKind::GoogleRefreshToken { client_id }
-        | CredentialKind::OutlookRefreshToken { client_id } = &self.kind
+        | CredentialKind::OutlookRefreshToken { client_id }
+        | CredentialKind::M365RefreshToken { client_id } = &self.kind
         {
             metadata(client_id)?;
             attrs.insert("client-id".into(), client_id.clone());

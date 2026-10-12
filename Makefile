@@ -10,11 +10,13 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
 	ui/providers/OutlookAuth.qml \
+	ui/providers/M365Auth.qml ui/providers/M365Client.qml \
 	ui/providers/ImapAuth.qml ui/providers/ImapClient.qml \
 	ui/providers/HeyAuth.qml ui/providers/HeyClient.qml \
 	ui/providers/JmapAuth.qml ui/providers/JmapClient.qml ui/providers/JmapPush.qml \
 	ui/components/ImapSetupPage.qml \
 	ui/components/OutlookSetupPage.qml \
+	ui/components/M365SetupPage.qml \
 	ui/components/JmapSetupPage.qml \
 	ui/components/HeySetupPage.qml \
 	ui/components/ProviderPicker.qml \
@@ -74,6 +76,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/CalendarPalette.qml \
 	ui/components/ConfirmDeleteDialog.qml \
 	ui/components/SetupPage.qml \
+	ui/components/SetupPages.qml \
 	ui/components/ShortcutHelp.qml \
 	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml ui/calendar/CalendarReminders.qml ui/calendar/CalendarReminderInbox.qml \
 	ui/components/CalendarView.qml \
@@ -168,6 +171,7 @@ test-js:
 	node ui/tests/test_aliases.js
 	node ui/tests/test_menu.js
 	node ui/tests/test_provider.js
+	node ui/tests/test_m365.js
 	node ui/tests/test_imap.js
 	node ui/tests/test_jmap.js
 	node ui/tests/test_jmap_threads.js

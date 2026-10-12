@@ -550,10 +550,29 @@ function graphResponseError(status, responseText) {
   return detail !== "" ? "Microsoft Graph answered: " + detail : "Microsoft Graph answered " + status
 }
 
+var M365_SIGN_IN_AGAIN = ["auth_signed_out", "calendar_auth_refused", "auth_client_missing",
+  "auth_client_invalid", "auth_refresh_failed", "auth_secret_invalid"]
+
+var M365_CONSENT = "Microsoft calendar request failed. An administrator has to approve this app for your "
+  + "organization. Then sign in to this mailbox again"
+
 // Keep native backend diagnostics private while giving each provider an
 // actionable recovery path. This deliberately does not depend on backend
 // error-message semantics, so it remains compatible with the pinned API.
-function nativeRequestError(kind) {
+function nativeRequestError(kind, accountId, error) {
+  // A Microsoft 365 mailbox has one sign-in for mail and calendar: nothing to
+  // check in Settings, and no second permission to grant. A sign-in that is
+  // missing, refused, unreadable or made for an app ID that is gone is one to
+  // sign in again for, as on the mail side; this API knows its codes. Consent is
+  // an administrator's to give, in words of the calendar's own: the mail side's
+  // advice about the page a code is entered on is no use to a refresh.
+  if (kind === "microsoft" && String(accountId || "").indexOf("m365:") === 0) {
+    var code = error && typeof error === "object" ? String(error.message || "") : ""
+    if (code === "auth_consent_required") return M365_CONSENT
+    return M365_SIGN_IN_AGAIN.indexOf(code) >= 0
+      ? "Microsoft calendar request failed. Sign in to this mailbox again"
+      : "Microsoft calendar request failed. Try again in a moment"
+  }
   if (kind === "microsoft")
     return "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again"
   if (kind === "google")
