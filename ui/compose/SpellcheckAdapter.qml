@@ -33,13 +33,9 @@ Item {
   // Availability is about the *requested* language, and it is computed after
   // `setCurrentLanguage` rather than bound to `spellCheckerFound`.
   //
-  // When the requested dictionary is missing, Sonnet keeps the prior language
-  // and leaves `spellCheckerFound` true, so asking for `zz_ZZ` while `en_US` is
-  // installed would still read as ready. The accepted language is
-  // `currentLanguage`; comparing it with the request is what says "no
-  // dictionary for this one". The backing property is assigned in
-  // `applySettings` because `currentLanguage` does not notify, so a binding
-  // would hold a stale answer after the revert.
+  // On a missing dictionary Sonnet sets spellCheckerFound false, restores the
+  // previous language and returns without emitting currentLanguageChanged.
+  // Read both properties imperatively after the call, not through a binding.
   property bool requestedLanguageAvailable: false
   readonly property bool available: requestedLanguageAvailable
   // "ready", "disabled", or "no-dictionary". A missing module is reported by
