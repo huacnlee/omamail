@@ -208,6 +208,68 @@ Item {
       compare(calendarController.removedId, "icloud:orphan")
     }
 
+    // An Exchange mailbox lists its calendar under its own row, like the other mailboxes, with nothing to
+    // find and no hint to add a mailbox; signed out, the row offers to sign in.
+    function test_an_exchange_calendar_is_listed_under_its_mailbox() {
+      mailService.accountSummaries = [{ id: "exchange:alice@example.org", email: "alice@example.org",
+        provider: "exchange", calendarProvider: "exchange", signedIn: true }]
+      calendarController.sourceList = ({ version: 1, sources: [{ id: "exchange:exchange:alice@example.org",
+        kind: "exchange", name: "alice@example.org", accountId: "exchange:alice@example.org", enabled: true,
+        colorKey: "accent" }] })
+      wait(1)
+      var texts = []
+      function collect(item) {
+        if (!item) return
+        if (item.visible && item.text !== undefined) texts.push(String(item.text))
+        if (item.visible && item.detail !== undefined) texts.push(String(item.detail))
+        for (var i = 0; i < item.children.length; i++) collect(item.children[i])
+      }
+      collect(settings)
+      verify(texts.indexOf("Exchange · 1 calendar") >= 0, JSON.stringify(texts))
+      verify(texts.indexOf("Other calendars") < 0, "nothing is left over")
+      verify(!texts.some(function(text) { return text.indexOf("mailbox to connect its calendars") >= 0 }))
+      compare(findChild(settings, "calendar-discover-exchange").visible, false)
+      var summaries = JSON.parse(JSON.stringify(mailService.accountSummaries))
+      summaries[0].signedIn = false
+      mailService.accountSummaries = summaries
+      wait(1)
+      compare(findChild(settings, "calendar-discover-exchange").visible, true)
+      compare(findChild(settings, "calendar-discover-exchange").text, "Sign in...")
+    }
+
+    // The server's own reminders are raised like Google's, so the calendar has a reminder row that says whose
+    // reminders those are.
+    function test_an_exchange_calendar_has_a_reminder_row_that_names_its_own_reminders() {
+      mailService.accountSummaries = [{ id: "exchange:alice@example.org", email: "alice@example.org",
+        provider: "exchange", calendarProvider: "exchange", signedIn: true }]
+      calendarController.sourceList = ({ version: 1, sources: [{ id: "exchange:exchange:alice@example.org",
+        kind: "exchange", name: "alice@example.org", accountId: "exchange:alice@example.org", enabled: true,
+        colorKey: "accent", remindersEnabled: true, reminderMinutes: -1 }] })
+      wait(1)
+      var mode = findChild(settings, "calendar-reminder-mode")
+      verify(mode !== null)
+      compare(mode.value, "google", "the server's own reminders, until a fixed timing is chosen")
+      compare(mode.options.map(function(option) { return option.label }).join(),
+        "Off,Exchange event reminders,Custom timing")
+    }
+
+    // An Exchange calendar whose mailbox is gone says what it was, and can be removed.
+    function test_an_orphaned_exchange_calendar_is_named_as_exchange() {
+      calendarController.sourceList = ({ version: 1, sources: [{ id: "exchange:exchange:gone@example.org",
+        kind: "exchange", name: "gone@example.org", accountId: "exchange:gone@example.org", enabled: true,
+        colorKey: "accent" }] })
+      wait(1)
+      var details = []
+      function collect(item) {
+        if (!item) return
+        if (item.objectName === "calendar-source-detail") details.push(item)
+        for (var i = 0; i < item.children.length; i++) collect(item.children[i])
+      }
+      collect(settings)
+      compare(details.length, 1)
+      compare(details[0].text, "Exchange · Mailbox removed")
+    }
+
     function test_old_backend_does_not_offer_discovery() {
       mailService.accountSummaries = [{ id: "imap:person@icloud.com",
         email: "person@icloud.com", calendarProvider: "icloud", signedIn: true }]

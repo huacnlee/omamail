@@ -267,6 +267,27 @@ mod tests {
     }
 
     #[test]
+    fn an_at_start_reminder_of_an_event_that_ends_as_it_starts_comes_in_its_minute() {
+        // The calendar gives such an event the minute an on-time reminder has (`Reminders.js`); one
+        // that ended a millisecond after its start would be skipped by the poll half a minute late.
+        let root = fixture_root("point");
+        for (end, expected) in [(2_000_001, 0), (2_060_000, 1)] {
+            let candidate = json!({"key":format!("point\n{end}"), "occurrence":"point", "start":2000000,
+                "end":end, "due":2000000, "eventId":"point", "sourceId":"calendar",
+                "accountId":"synthetic", "title":"Point"});
+            let poll = json!({"operation":"poll","now":2030000,"lastCheck":1990000,
+                "candidates":[candidate]});
+            let result = call_at(&root, &poll).unwrap();
+            assert_eq!(
+                result["notifications"].as_array().unwrap().len(),
+                expected,
+                "{end}"
+            );
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn claims_are_durable_and_snooze_never_replays_an_ended_event() {
         let root = fixture_root("durable");
         let candidate = json!({"key":"occurrence\n10", "occurrence":"occurrence", "start":2000000,
