@@ -5,6 +5,7 @@
 
 use serde_json::{Map, Value, json};
 pub mod domain;
+pub mod exchange;
 pub mod gmail;
 pub mod gmail_credentials;
 pub mod gmail_http;
@@ -110,6 +111,13 @@ const PROVIDERS: &[Provider] = &[
         ],
     },
     Provider {
+        id: "exchange",
+        name: "Exchange",
+        summary: "On-premises Exchange, for a server that offers no IMAP.",
+        auth: "password",
+        capabilities: &["star", "batch", "search", "send"],
+    },
+    Provider {
         id: "imap",
         name: "IMAP",
         summary: "Any standard mailbox — Fastmail, iCloud, Zoho, your own server.",
@@ -176,6 +184,23 @@ mod tests {
             assert!(can(provider, "move", &Value::Null));
         }
         assert!(!can("jmap", "move", &Value::Null));
+        // Exchange has no plain archive folder, labels, threads or web view: only what EWS can do.
+        for operation in [
+            "move",
+            "labels",
+            "manageLabels",
+            "threads",
+            "conversations",
+            "archive",
+            "spam",
+            "web",
+            "webBox",
+        ] {
+            assert!(!can("exchange", operation, &Value::Null));
+        }
+        for operation in ["star", "batch", "search", "send"] {
+            assert!(can("exchange", operation, &Value::Null));
+        }
         assert!(!can("unknown", "send", &Value::Null));
         assert!(!can("gmail", "unknown", &Value::Null));
         assert!(can(" GMAIL ", "send", &Value::Null));
@@ -204,7 +229,7 @@ mod tests {
                 .iter()
                 .map(|p| p["id"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            ["gmail", "outlook", "hey", "jmap", "imap"]
+            ["gmail", "outlook", "hey", "jmap", "exchange", "imap"]
         );
         for provider in providers {
             assert_eq!(

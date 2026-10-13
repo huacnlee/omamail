@@ -1393,6 +1393,354 @@
   },
   {
     "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "role:inbox"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "role:trash"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "role:inbox"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": " hello ",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:hello"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": " hello ",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:hello"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": " hello ",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:hello"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "from:a@example.org subject:\"hello world\" plain",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:from:a@example.org subject:\"hello world\" plain"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "from:a@example.org subject:\"hello world\" plain",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:from:a@example.org subject:\"hello world\" plain"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "from:a@example.org subject:\"hello world\" plain",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:from:a@example.org subject:\"hello world\" plain"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "to: \"quoted mail\" *word*",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:to: \"quoted mail\" *word*"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "to: \"quoted mail\" *word*",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:to: \"quoted mail\" *word*"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "to: \"quoted mail\" *word*",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:to: \"quoted mail\" *word*"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "from:***",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:from:***"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "from:***",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:from:***"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "from:***",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:from:***"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "folder:INBOX",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:folder:INBOX"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "folder:INBOX",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:folder:INBOX"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "folder:INBOX",
+      "defaultQuery": "in:inbox"
+    },
+    "expected": "text:folder:INBOX"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "labelQuery",
+      "value": ""
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webMessageUrl",
+      "value": ""
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webBoxUrl",
+      "value": ""
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "labelQuery",
+      "value": " Old Mail "
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webMessageUrl",
+      "value": " Old Mail "
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webBoxUrl",
+      "value": " Old Mail "
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "labelQuery",
+      "value": "é\"\\folder"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webMessageUrl",
+      "value": "é\"\\folder"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webBoxUrl",
+      "value": "é\"\\folder"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "labelQuery",
+      "value": "123:456"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webMessageUrl",
+      "value": "123:456"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "webBoxUrl",
+      "value": "123:456"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "from",
+      "value": ""
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "to",
+      "value": ""
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "from",
+      "value": "a@example.org"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "to",
+      "value": "a@example.org"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "from",
+      "value": "a b"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "to",
+      "value": "a b"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "from",
+      "value": "a\"b"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "addressQuery",
+      "field": "to",
+      "value": "a\"b"
+    },
+    "expected": ""
+  },
+  {
+    "params": {
       "provider": "imap",
       "operation": "query",
       "mailbox": "inbox",
@@ -2092,6 +2440,96 @@
   {
     "params": {
       "provider": "jmap",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "",
+      "defaultQuery": "  "
+    },
+    "expected": "role:inbox"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "",
+      "defaultQuery": "subject:\"custom\""
+    },
+    "expected": "subject:\"custom\""
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "",
+      "defaultQuery": "folder:Projects UNSEEN"
+    },
+    "expected": "folder:Projects UNSEEN"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "inbox",
+      "search": "",
+      "defaultQuery": "  "
+    },
+    "expected": "role:inbox"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "",
+      "defaultQuery": "subject:\"custom\""
+    },
+    "expected": "role:trash"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "",
+      "defaultQuery": "folder:Projects UNSEEN"
+    },
+    "expected": "role:trash"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "trash",
+      "search": "",
+      "defaultQuery": "  "
+    },
+    "expected": "role:trash"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "",
+      "defaultQuery": "subject:\"custom\""
+    },
+    "expected": "role:inbox"
+  },
+  {
+    "params": {
+      "provider": "exchange",
+      "operation": "query",
+      "mailbox": "missing",
+      "search": "",
+      "defaultQuery": "folder:Projects UNSEEN"
+    },
+    "expected": "role:inbox"
+  },
+  {
+    "params": {
+      "provider": "exchange",
       "operation": "query",
       "mailbox": "missing",
       "search": "",

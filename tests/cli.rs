@@ -162,7 +162,8 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
                 {"provider":"gmail","email":"gmail@example.org"},
                 {"provider":"imap","email":"imap@example.org","imap":{"username":"imap@example.org","imapHost":"127.0.0.1","imapPort":imap_port,"insecure":true,"testPlaintext":true}},
                 {"provider":"jmap","email":"jmap@example.org","jmap":{"sessionUrl":"https://localhost:9/session","username":"jmap@example.org"}},
-                {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}}
+                {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}},
+                {"provider":"exchange","email":"exchange@example.org","exchange":{"ewsUrl":"https://localhost:9/EWS/Exchange.asmx","username":"exchange@example.org","authScheme":"ntlm"}}
             ]
         })
         .to_string(),
@@ -403,6 +404,16 @@ fn malformed_provider_action_previews_refuse_without_credentials_or_writes() {
         ("imap:imap@example.org", "0:INBOX"),
         ("outlook:outlook@example.org", "4294967296:INBOX"),
         ("outlook:outlook@example.org", "1:"),
+        // Exchange ids are canonical lower-case base32 of 8 to 150 bytes.
+        ("exchange:exchange@example.org", "1:INBOX"),
+        (
+            "exchange:exchange@example.org",
+            "MV4GG2DBNZTWKLLJMQWTAMJSGM2DKNRXHA4Q",
+        ),
+        (
+            "exchange:exchange@example.org",
+            "mv4gg2dbnztwklljmqwtamjsgm2dknrxha4r",
+        ),
     ] {
         for operation in ["read", "trash"] {
             let output = root_mail(
@@ -522,6 +533,7 @@ fn configured_list_failures_do_not_repair_registry_metadata() {
         ("imap:imap@example.org", Some("auth_signed_out")),
         ("jmap:jmap@example.org", Some("auth_signed_out")),
         ("outlook:outlook@example.org", Some("auth_signed_out")),
+        ("exchange:exchange@example.org", Some("auth_signed_out")),
     ] {
         let output = call_mail_list(&fixture.0, account);
         assert!(!output.status.success(), "{account}: {output:?}");
@@ -565,6 +577,11 @@ fn configured_read_failures_do_not_repair_registry_metadata() {
         (
             "outlook:outlook@example.org",
             "7:INBOX",
+            Some("auth_signed_out"),
+        ),
+        (
+            "exchange:exchange@example.org",
+            "mv4gg2dbnztwklljmqwtamjsgm2dknrxha4q",
             Some("auth_signed_out"),
         ),
     ] {

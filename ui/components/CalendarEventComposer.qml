@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../calendar/Calendar.js" as Calendar
+import "../calendar/ExchangeEvents.js" as ExchangeEvents
 import "../compose/Recipients.js" as Recipients
 
 Rectangle {
@@ -50,6 +51,20 @@ Rectangle {
   readonly property var chosenSource: controller && typeof controller.findSource === "function"
     ? controller.findSource(selectedSourceId) : null
   property string recurrenceFrequency: "WEEKLY"
+  // An Exchange repeat beyond its interval and count: the days of a week (the first event's weekday until the
+  // person picks), whether a month follows its date or its weekday, and a last day (`untilField`).
+  property var repeatDays: []
+  property bool repeatDaysTouched: false
+  property string repeatBy: "date"
+  // Which part of a repeating Exchange series an edit is for: this event, or all of them.
+  property string editScope: "occurrence"
+  readonly property bool editingSeries: editing && editingEvent.isSeries === true
+  readonly property bool seriesScope: editingSeries && editScope === "series"
+  // The guests of all of a repeating meeting are its series' people, which one event's own need not be.
+  onEditScopeChanged: if (editingSeries && editingEvent.exchangeMeeting === true) {
+    originalGuestText = ExchangeEvents.guestText(editingEvent, editScope)
+    guestsField.text = originalGuestText
+  }
   // Set while an existing event is being changed rather than a new one made.
   // Calendar changes select a transfer destination; they are committed on Save.
   property var editingEvent: null
@@ -61,6 +76,34 @@ Rectangle {
   // would save the event without them, so the controls are not offered.
   readonly property bool googleWrites: !!chosenSource && chosenSource.kind === "google"
     && !!controller && !!controller.service && controller.service.backendCanGoogleCalendars === true
+  // A repeating event is made on the calendars that take a rule from this form: not a Microsoft one
+  // (Graph spells a series another way). An Exchange one takes what Microsoft's schema can say
+  // (`ExchangeEvents.repeatRule`); its repeat is not changed after it is made.
+  readonly property bool repeats: !!chosenSource && chosenSource.kind !== "microsoft"
+  // An Exchange appointment's notes are not read, so the editor has no field that would show them
+  // empty and replace them: they are written when it is made, and left alone after.
+  readonly property bool notesShown: !(editing && !!chosenSource && chosenSource.kind === "exchange")
+  // An Exchange appointment takes a reminder of its own (none, or minutes before the start) and no calendar
+  // default, which it has not got: the buttons say so and "default" reads as none.
+  readonly property bool exchangeReminders: !!chosenSource && chosenSource.kind === "exchange"
+  readonly property string shownReminderMode: exchangeReminders && reminderMode === "default" ? "none" : reminderMode
+  // Guests of an Exchange event are mailed an invitation (new) or told of a change (a meeting the owner organises):
+  // saving asks the owner first (`sendConfirm`). Only a new event and a meeting have a guest field.
+  // Whether saving the form as it stands opens the question: the controller's own decision, so a form that
+  // reaches nobody (a reminder alone) or that the write refuses first says so on its button without "...".
+  readonly property bool reachesPeople: exchangeReminders && !!controller && typeof controller.reachRequest === "function"
+    && !!formNow && controller.reachRequest(editing ? editingSourceId : selectedSourceId, editingEvent, formNow) !== null
+  readonly property var formNow: opened ? formFields("all") : null
+  // Meetings are the Exchange mailbox's own default calendar's: one found beside it, or shared by another
+  // mailbox, takes personal appointments and has no guest field.
+  readonly property bool exchangeMeetings: exchangeReminders && !ExchangeEvents.otherCalendar(chosenSource)
+  // Whether the form has a guest field: on Exchange a new event or a meeting the owner organises, on a
+  // calendar that takes meetings; on Google a new event or one the owner organises.
+  readonly property bool guestsOffered: exchangeReminders
+    ? exchangeMeetings && (!editing || editingEvent.exchangeMeeting === true)
+    : !editing || (!!editingEvent.organizer && editingEvent.organizer.self === true)
+  // The fields of a save held for the owner's answer.
+  property var pendingFields: null
   readonly property bool guestUpdate: editing && googleWrites
     && !!editingEvent.organizer && editingEvent.organizer.self === true
     && ((Array.isArray(editingEvent.attendees) && editingEvent.attendees.some(function(attendee) { return attendee.self !== true }))
@@ -119,6 +162,8 @@ Rectangle {
   component EditorField: TextField {
     id: input
     font.pixelSize: Style.font.bodySmall
+    // A field that cannot be typed in looks it, whatever the shell's style draws for one.
+    opacity: enabled ? 1 : 0.5
     onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealField, input)
   }
 
@@ -241,6 +286,7 @@ Rectangle {
     createMeet = false
     originalGuestText = ""
     guestsField.text = ""
+    pendingFields = null
     reminderMode = "default"
     reminderField.text = "10"
     availability = "opaque"
@@ -257,6 +303,11 @@ Rectangle {
     notesField.text = ""
     intervalField.text = "1"
     countField.text = ""
+    untilField.text = ""
+    repeatDays = []
+    repeatDaysTouched = false
+    repeatBy = "date"
+    editScope = "occurrence"
     recurring = false
     recurrenceFrequency = "WEEKLY"
     resultText.text = ""
@@ -306,10 +357,14 @@ Rectangle {
     editingEvent = event
     allDay = !!(event.start && event.start.allDay)
     createMeet = false
-    originalGuestText = (event.attendees || []).map(function(attendee) { return String(attendee.email || "") }).filter(function(email) { return email !== "" }).join(", ")
+    // An Exchange meeting's field names everybody but the owner, who cannot name themselves there.
+    originalGuestText = String(event.exchangeId || "") !== "" ? ExchangeEvents.guestText(event)
+      : (event.attendees || []).map(function(attendee) { return String(attendee.email || "") }).filter(function(email) { return email !== "" }).join(", ")
+    pendingFields = null
     guestsField.text = originalGuestText
     reminderMode = "preserve"
-    reminderField.text = "10"
+    // An Exchange appointment's own reminder is where "Custom" starts from.
+    reminderField.text = event.reminderMinutes >= 0 ? String(event.reminderMinutes) : "10"
     availability = event.transparency || "opaque"
     eventVisibility = event.visibility || "default"
     timeZoneField.text = String(event.timeZone || "")
@@ -328,6 +383,11 @@ Rectangle {
     notesField.text = String(event.description || "")
     intervalField.text = "1"
     countField.text = ""
+    untilField.text = ""
+    repeatDays = []
+    repeatDaysTouched = false
+    repeatBy = "date"
+    editScope = "occurrence"
     recurring = false
     resultText.text = ""
     selectedSourceId = editingSourceId
@@ -458,14 +518,45 @@ Rectangle {
     })
   }
 
+  // A weekday of a weekly Exchange repeat is on when the person picked it, or until they pick when the event
+  // starts on it; the last one on stays on.
+  function dayOn(name) {
+    return repeatDaysTouched ? repeatDays.indexOf(name) >= 0 : name === ExchangeEvents.weekdayOf(dateRange.startMs)
+  }
+
+  function toggleDay(name) {
+    var days = repeatDaysTouched ? repeatDays.slice() : [ExchangeEvents.weekdayOf(dateRange.startMs)]
+    var at = days.indexOf(name)
+    if (at < 0) days.push(name)
+    else if (days.length > 1) days.splice(at, 1)
+    repeatDays = days
+    repeatDaysTouched = true
+  }
+
   function submit(sendUpdates) {
     if (!controller) return
     // Create, update and delete share one controller write slot. Do not mark
     // this form pending unless that slot is free: otherwise an older write's
     // completion could be mistaken for this form's and close it.
     if (controller.creatingEvent || controller.eventWriting || loadingSeries || transferring || transferNeedsRefresh) return
-    if (!dateRange.ok) return
-    var fields = {
+    var fields = formFields(sendUpdates)
+    if (!fields) return
+    // What reaches other people is asked about first, in words that name them; nothing is sent before the
+    // answer, and the controller refuses a send that was not asked about (`confirmedSend`).
+    var ask = typeof controller.reachRequest === "function"
+      ? controller.reachRequest(editing ? editingSourceId : selectedSourceId, editingEvent, fields) : null
+    if (ask) {
+      pendingFields = fields
+      sendConfirm.openFor(ask)
+      return
+    }
+    dispatch(fields, false)
+  }
+
+  // What the form holds, as a write takes it; null while its dates do not make a range.
+  function formFields(sendUpdates) {
+    if (!dateRange.ok) return null
+    return {
       title: titleField.text,
       allDay: allDay,
       startMs: dateRange.startMs,
@@ -477,22 +568,46 @@ Rectangle {
       destinationSourceId: selectedSourceId,
       sendUpdates: sendUpdates === "none" ? "none" : "all",
       timeZone: timeZoneField.text.trim(),
-      guestEmails: !editing || guestsField.text !== originalGuestText ? guestsField.text : undefined,
+      // A guest field that is not shown (an Exchange calendar that takes no meetings) says nothing.
+      guestEmails: exchangeReminders && !guestsOffered ? undefined
+        : !editing || guestsField.text !== originalGuestText ? guestsField.text : undefined,
       transparency: !editing || availabilityChanged ? availability : undefined,
       visibility: !editing || visibilityChanged ? eventVisibility : undefined,
       reminderMode: reminderMode,
       reminderMinutes: reminderField.text,
       changeRecurrence: changeRecurrence,
+      scope: editingSeries ? editScope : undefined,
       recurrence: {
-        enabled: recurring && !!chosenSource && chosenSource.kind !== "microsoft",
+        enabled: recurring && repeats,
         frequency: recurrenceFrequency,
         interval: intervalField.text,
-        count: countField.text
+        count: countField.text,
+        until: untilField.text,
+        days: repeatDaysTouched ? repeatDays : [],
+        by: repeatBy
       }
     }
+  }
+
+  function dispatch(fields, confirmed) {
+    fields.confirmedSend = confirmed === true
+    pendingFields = null
     writePending = true
     if (editing) controller.updateEvent(editingSourceId, editingEvent, fields)
     else controller.createEvent(selectedSourceId, fields)
+  }
+
+  ConfirmDeleteDialog {
+    id: sendConfirm
+    objectName: "event-send-confirm"
+    textColor: root.textColor
+    dimColor: root.dimColor
+    dangerColor: root.accentColor
+    popupBackgroundColor: root.backgroundColor
+    popupBorderColor: Style.normalBorderFor(root.textColor, root.accentColor)
+    panelFontFamily: root.panelFontFamily
+    // The held form is what goes, not anything the question carried back.
+    onConfirmed: function(request) { if (root.pendingFields) root.dispatch(root.pendingFields, true) }
   }
 
   CalendarPalette {
@@ -537,7 +652,8 @@ Rectangle {
       }
 
       Text {
-        text: root.editing && root.editingEvent.recurringEventId ? "Edit this occurrence"
+        text: root.editingSeries ? (root.seriesScope ? "Edit all events" : "Edit this event")
+          : root.editing && root.editingEvent.recurringEventId ? "Edit this occurrence"
           : root.editing && root.editingEvent.recurrence ? "Edit entire series"
           : root.editing ? "Edit event" : "Create event"
         color: root.textColor
@@ -545,6 +661,42 @@ Rectangle {
         font.pixelSize: Style.font.heading
         font.bold: true
         textFormat: Text.PlainText
+      }
+
+      // An event of a repeating Exchange series is changed as this event or, where the backend said so, all of them.
+      FieldLabel { visible: root.editingSeries; text: ExchangeEvents.repeatLine(root.editingEvent) }
+      Flow {
+        objectName: "event-scope"
+        visible: root.editingSeries
+        width: parent.width
+        spacing: Style.space(6)
+        Repeater {
+          model: root.editingSeries && root.editingEvent.seriesEditable === true ? ["occurrence", "series"] : ["occurrence"]
+          IconTextButton {
+            required property string modelData
+            objectName: "event-scope-" + modelData
+            text: modelData === "series" ? "All events" : "This event"
+            selected: root.editScope === modelData
+            iconName: selected ? "check" : ""
+            foreground: root.textColor
+            accent: root.accentColor
+            fontFamily: root.panelFontFamily
+            enabled: !root.writePending
+            onClicked: root.editScope = modelData
+          }
+        }
+      }
+      Text {
+        objectName: "event-series-lock"
+        width: parent.width
+        visible: root.editingSeries && root.editingEvent.seriesEditable !== true && text !== ""
+        text: root.editingSeries && String(root.editingEvent.seriesLockReason || "") !== ""
+          ? "Only this event can be changed here. " + root.editingEvent.seriesLockReason : ""
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
       }
 
       FieldLabel { text: "Calendar" }
@@ -702,6 +854,7 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
+        visible: root.notesShown
         FieldLabel { text: "Description" }
         EditorField {
           id: notesField
@@ -727,6 +880,8 @@ Rectangle {
       }
 
       IconTextButton {
+        // Every event of a series keeps its kind and its days: only its time of day changes.
+        enabled: !root.seriesScope
         text: root.allDay ? "✓ All day" : "All day"
         selected: root.allDay
         foreground: root.textColor
@@ -743,6 +898,7 @@ Rectangle {
         EditorField {
           id: dateField
           objectName: "event-start-date-field"
+          enabled: !root.seriesScope
           width: parent.width - (startField.visible ? startField.width + parent.spacing : 0)
           foreground: root.textColor
           font.family: root.panelFontFamily
@@ -753,6 +909,7 @@ Rectangle {
           id: startField
           objectName: "event-start-time-field"
           visible: !root.editingAllDay
+          enabled: !root.seriesScope || root.editingEvent.seriesTimeEditable === true
           width: Style.space(120)
           foreground: root.textColor
           font.family: root.panelFontFamily
@@ -766,6 +923,7 @@ Rectangle {
         EditorField {
           id: endDateField
           objectName: "event-end-date-field"
+          enabled: !root.seriesScope
           width: parent.width - (endField.visible ? endField.width + parent.spacing : 0)
           foreground: root.textColor
           font.family: root.panelFontFamily
@@ -775,11 +933,39 @@ Rectangle {
           id: endField
           objectName: "event-end-time-field"
           visible: !root.editingAllDay
+          enabled: !root.seriesScope || root.editingEvent.seriesTimeEditable === true
           width: Style.space(120)
           foreground: root.textColor
           font.family: root.panelFontFamily
           placeholderText: "End"
         }
+      }
+
+      // Every event of a series keeps its own day, and its time where it cannot be changed from here.
+      Text {
+        objectName: "event-series-when"
+        width: parent.width
+        visible: root.seriesScope
+        text: root.seriesScope ? ExchangeEvents.seriesWhenLine(root.editingEvent) : ""
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      // A new time of every event undoes the events changed on their own, which is said before it is saved.
+      Text {
+        objectName: "event-series-exceptions"
+        width: parent.width
+        visible: text !== ""
+        text: root.seriesScope && root.dateRange.ok ? ExchangeEvents.exceptionsLine(root.editingEvent,
+          { scope: root.editScope, allDay: root.allDay, startMs: root.dateRange.startMs, endMs: root.dateRange.endMs }) : ""
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
       }
 
       Text {
@@ -829,13 +1015,17 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
-        visible: root.googleWrites
+        objectName: "event-guests-column"
+        // An Exchange form shows the column only with its guest field: an appointment's has nothing in it.
+        visible: root.googleWrites || root.exchangeReminders && root.guestsOffered
         FieldLabel { text: "Guests"; visible: guestsField.visible }
         EditorField {
           id: guestsField
           objectName: "event-guests-field"
           width: parent.width
-          visible: !root.editing || (!!root.editingEvent.organizer && root.editingEvent.organizer.self === true)
+          // The guests of a repeating meeting are its series'.
+          enabled: !(root.editingSeries && root.editScope === "occurrence")
+          visible: root.guestsOffered
           placeholderText: "Guest email addresses, separated by commas"
           foreground: root.textColor
           accent: root.accentColor
@@ -864,6 +1054,7 @@ Rectangle {
         }
         IconTextButton {
           objectName: "event-more-options"
+          visible: root.googleWrites
           text: "More options..."
           selected: root.advancedOptionsOpen
           foreground: root.textColor
@@ -874,7 +1065,7 @@ Rectangle {
         Column {
           width: parent.width
           spacing: Style.space(6)
-          visible: root.advancedOptionsOpen
+          visible: root.advancedOptionsOpen && root.googleWrites
           FieldLabel { text: "Time zone for repeating events" }
           EditorField {
             id: timeZoneField
@@ -909,17 +1100,28 @@ Rectangle {
             onChosen: function(value) { root.eventVisibility = value; root.visibilityChanged = true }
           }
         }
+      }
+
+      Column {
+        width: parent.width
+        spacing: Style.space(6)
+        visible: root.googleWrites || root.exchangeReminders
         FieldLabel { text: "Event reminders" }
         Flow {
+          objectName: "event-reminder-choices"
           width: parent.width
           spacing: Style.space(6)
           Repeater {
-            model: root.editing ? ["preserve", "default", "none", "custom"] : ["default", "none", "custom"]
+            model: root.exchangeReminders ? (root.editing ? ["preserve", "none", "custom"] : ["none", "custom"])
+              : root.editing ? ["preserve", "default", "none", "custom"] : ["default", "none", "custom"]
             IconTextButton {
               required property string modelData
+              objectName: "event-reminder-" + modelData
               text: modelData === "preserve" ? "Keep existing" : modelData === "default" ? "Calendar default"
                 : modelData === "none" ? "None" : "Custom reminder"
-              selected: root.reminderMode === modelData
+              selected: root.shownReminderMode === modelData
+              // The fill alone must never carry the choice: a theme can put it close to the normal one.
+              iconName: root.shownReminderMode === modelData ? "check" : ""
               foreground: root.textColor
               accent: root.accentColor
               fontFamily: root.panelFontFamily
@@ -933,6 +1135,7 @@ Rectangle {
           spacing: Style.space(8)
           EditorField {
             id: reminderField
+            objectName: "event-reminder-minutes"
             width: Style.space(80)
             placeholderText: "Minutes"
             foreground: root.textColor
@@ -952,7 +1155,7 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
-        visible: (!root.editing && !!root.chosenSource && root.chosenSource.kind !== "microsoft")
+        visible: (!root.editing && root.repeats)
           || (root.editing && !root.editingEvent.recurringEventId && root.googleWrites)
         FieldLabel { text: "Repeat" }
         EventOption {
@@ -973,7 +1176,7 @@ Rectangle {
 
       Column {
         width: parent.width
-        visible: root.recurring && !!root.chosenSource && root.chosenSource.kind !== "microsoft" && (!root.editing || root.changeRecurrence)
+        visible: root.recurring && root.repeats && (!root.editing || root.changeRecurrence)
         spacing: Style.space(8)
 
         Row {
@@ -981,6 +1184,9 @@ Rectangle {
           spacing: Style.space(8)
 
           Column {
+            // A year has no interval in Microsoft's schema: an Exchange yearly repeat is every year.
+            objectName: "event-repeat-interval"
+            visible: !(root.exchangeReminders && root.recurrenceFrequency === "YEARLY")
             width: (parent.width - parent.spacing) * 0.5
             spacing: Style.space(4)
 
@@ -1030,6 +1236,7 @@ Rectangle {
 
             EditorField {
               id: countField
+              objectName: "event-repeat-count"
               width: parent.width
               foreground: root.textColor
               font.family: root.panelFontFamily
@@ -1037,6 +1244,50 @@ Rectangle {
               inputMethodHints: Qt.ImhDigitsOnly
             }
           }
+        }
+
+        // What only an Exchange repeat has: the days of a week, a month by its date or its weekday, and a last day.
+        Flow {
+          objectName: "event-repeat-days"
+          visible: root.exchangeReminders && root.recurrenceFrequency !== "DAILY" && root.recurrenceFrequency !== "YEARLY"
+          width: parent.width
+          spacing: Style.space(6)
+          Repeater {
+            model: root.recurrenceFrequency === "WEEKLY" ? ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+              : ["date", "weekday"]
+            IconTextButton {
+              required property string modelData
+              readonly property bool weekly: root.recurrenceFrequency === "WEEKLY"
+              objectName: "event-repeat-" + modelData
+              text: weekly ? modelData.charAt(0).toUpperCase() + modelData.substring(1, 3)
+                : ExchangeEvents.repeatChoices(root.dateRange.startMs || Date.now())[modelData]
+              selected: weekly ? root.dayOn(modelData) : root.repeatBy === modelData
+              iconName: selected ? "check" : ""
+              foreground: root.textColor
+              accent: root.accentColor
+              fontFamily: root.panelFontFamily
+              onClicked: if (weekly) root.toggleDay(modelData); else root.repeatBy = modelData
+            }
+          }
+        }
+
+        Text {
+          visible: root.exchangeReminders
+          text: "Or repeat until (optional)"
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          textFormat: Text.PlainText
+        }
+        EditorField {
+          id: untilField
+          objectName: "event-repeat-until"
+          visible: root.exchangeReminders
+          width: parent.width
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          placeholderText: "YYYY-MM-DD"
+          Accessible.name: "Repeat until"
         }
       }
 
@@ -1075,8 +1326,9 @@ Rectangle {
         text: {
           var busy = root.controller
             && (root.controller.creatingEvent || root.controller.eventWriting)
-          if (root.editing) return busy ? "Saving" : root.guestUpdate ? "Send update" : "Save changes"
-          return busy ? "Creating" : "Create event"
+          if (root.editing) return busy ? "Saving" : root.guestUpdate ? "Send update"
+            : root.reachesPeople ? "Save changes..." : "Save changes"
+          return busy ? "Creating" : root.reachesPeople ? "Create event..." : "Create event"
         }
         iconName: root.editing ? "check" : "plus"
         // The Enter action: accent edge and text, not a solid fill.
