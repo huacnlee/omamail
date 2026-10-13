@@ -121,6 +121,7 @@ test-js:
 	node app/tests/test_shell_theme.js
 	node ui/tests/test_bar_bridge.js
 	node ui/tests/test_backend_wire.js
+	node ui/tests/test_backend_plain.js
 	node ui/tests/test_backend_queue.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js

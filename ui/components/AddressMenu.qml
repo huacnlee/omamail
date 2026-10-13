@@ -3,6 +3,7 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "Menu.js" as Menu
+import "../backend/Plain.js" as Plain
 
 // The menu an address opens on a right-click in the reader's header: copy
 // it, or find the mail from it or to it. A line with several addresses asks
@@ -37,7 +38,10 @@ Item {
   function openAt(list, sceneX, sceneY) {
     var rows = []
     var seen = {}
-    var given = Array.isArray(list) ? list : []
+    // The list comes through the reader's `addressMenuRequested` signal,
+    // which on Qt 6.12 hands it over as a sequence: made plain, it is a list.
+    var given = Plain.plain(list)
+    if (!Array.isArray(given)) given = []
     for (var i = 0; i < given.length; i++) {
       var email = String(given[i] && given[i].email ? given[i].email : "").trim()
       if (email === "" || seen[email]) continue

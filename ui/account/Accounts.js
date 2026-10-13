@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Aliases.js" as Aliases
+.import "../backend/Plain.js" as Plain
 
 // The list of Gmail accounts and which one the window is showing. One account
 // was the original design; several is a list plus a selection, and every rule
@@ -519,13 +520,16 @@ function idList(value) {
 }
 
 // The watched list replaced whole: what a rename or a move leaves it as,
-// once the ids it held have followed the folders they named.
+// once the ids it held have followed the folders they named. They arrive
+// through the account's `monitoredMigrated` signal, so they are made plain
+// first: read as nothing, they emptied every watch on the account and wrote
+// that to disk.
 function setMonitored(list, id, labelIds) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)
   if (at < 0) return next
   var entry = makeAccount(next.accounts[at])
-  entry.monitored = idList(labelIds)
+  entry.monitored = idList(Plain.plain(labelIds))
   next.accounts[at] = entry
   return next
 }
