@@ -100,7 +100,9 @@ QtObject {
     var n = Number(value) * spacingScale
     return n <= 0 ? 0 : Math.max(1, Math.round(n))
   }
-  function withAlpha(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
+  // controlColor answers a [controls] colour with the "#rrggbb" string
+  // shell.toml wrote; Qt.rgba over its .r was black, Qt.alpha reads it.
+  function withAlpha(color, alpha) { return Qt.alpha(color, alpha) }
   function mix(first, second, amount) {
     var n = Math.max(0, Math.min(1, Number(amount)))
     return Qt.rgba(first.r * (1 - n) + second.r * n,
