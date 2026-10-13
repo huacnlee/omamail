@@ -888,6 +888,8 @@ assert.strictEqual(frozen(accounts.replaceAt(cidActive, -1, account("x@example.c
   // One header line: a pasted break or tab becomes a space, never a header
   // the send would refuse.
   assert.strictEqual(accounts.senderNameText("Jane\r\nExample\t\u0007"), "Jane Example")
+assert.strictEqual(accounts.senderNameText("Jane\u0085Example\u009f"), "Jane Example",
+  "a C1 control is a control too, and the backend refuses a name with one")
 }
 
 // Only the mailboxes with no server to name the sender take it from here.
