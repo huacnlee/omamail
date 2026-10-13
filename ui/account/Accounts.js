@@ -566,11 +566,11 @@ function namesSender(provider) {
   return id === "imap" || id === "outlook"
 }
 
-// One header line, so a pasted line break or tab becomes a space instead of a
-// name the send would refuse.
+// One header line, so a pasted line break, tab or other control character
+// (C1 included) becomes a space instead of a name the send would refuse.
 function senderNameText(value) {
   return trimmed(String(value === undefined || value === null ? "" : value)
-    .replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/ {2,}/g, " "))
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/ {2,}/g, " "))
 }
 
 function setSenderName(list, id, text) {

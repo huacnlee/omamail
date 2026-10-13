@@ -70,12 +70,10 @@ fn display(email: &str, name: &str) -> String {
     if name.is_empty() {
         return email.into();
     }
-    let name = if name.chars().any(|c| "\"\\,;<>@():[]".contains(c)) {
-        format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
-    } else {
-        name.to_owned()
-    };
-    format!("{name} <{email}>")
+    format!(
+        "{} <{email}>",
+        crate::message::compose::quoted_phrase(name, false)
+    )
 }
 
 fn parsed(value: &str) -> Result<Vec<(String, String)>> {
