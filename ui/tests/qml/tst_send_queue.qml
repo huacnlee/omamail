@@ -26,9 +26,11 @@ Item {
     property var successes: []
     property var failures: []
     property var removed: []
+    property int kept: 0
     function reportSendSuccess(result, id) { successes = successes.concat([id]) }
     function reportSendFailure(message, id) { failures = failures.concat([id]) }
     function sentDraftRemoved(id) { removed = removed.concat([id]) }
+    function draftKept() { kept++ }
     function note(message) {}
     function deliver(payload) { throw new Error("UI must never deliver mail") }
   }
@@ -41,7 +43,7 @@ Item {
       queue.parked = []; queue.submitted = ({}); queue.handled = ({}); queue.revision = -1
       queue.deliveryStates = ({})
       queue.undoBusy = false; queue.undoPending = null; queue.uncertain = ({}); queue.serverEntries = []; queue.arm(); backend.calls = []
-      account.successes = []; account.failures = []; account.removed = []; account.sending = false
+      account.successes = []; account.failures = []; account.removed = []; account.kept = 0; account.sending = false
     }
     function snapshot(revision, entries) { return {accountId: account.accountId, revision: revision, entries: entries} }
     function entry(id, state) { return {id: id, state: state, order: 1, queuedAt: Date.now(), dueAt: Date.now() + 10000} }
@@ -104,6 +106,19 @@ Item {
       queue.apply(snapshot(3,[sent]));queue.apply(snapshot(2,[entry("send1","queued")]))
       compare(queue.parked.length,0);compare(account.successes.length,1);compare(account.removed[0],"draft1")
       queue.apply(snapshot(4,[sent]));compare(account.successes.length,1)
+    }
+    // A draft the server kept after the send (HEY always, the others when
+    // removing it failed) and a draft whose send was undone are still drafts.
+    function test_a_draft_still_on_the_server_is_reported_kept() {
+      var sent=entry("send1","sent");sent.draftId="draft1";sent.result={warning:"Sent, but a follow-up operation failed"}
+      queue.apply(snapshot(1,[sent]))
+      compare(account.removed,[]);compare(account.kept,1)
+      var plain=entry("send2","sent");plain.result={}
+      queue.apply(snapshot(2,[plain]));compare(account.kept,1,"a send from no draft names none")
+      queue.apply(snapshot(3,[entry("send3","queued")]))
+      verify(queue.undoLatest(function(){}))
+      backend.calls[0].callback({id:"send3",snapshot:snapshot(4,[entry("send3","cancelled")])},null)
+      compare(account.kept,2)
     }
     function test_lost_enqueue_acknowledgement_does_not_claim_failure_or_retry() {
       verify(queue.park({raw:"private"},"lost",1))
