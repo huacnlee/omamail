@@ -2194,6 +2194,7 @@ Item {
   // guards are reachable and not only the transport's own error.
   function reportSendFailure(error, sendId) {
     fail(error)
+    draftList.reload()
     // A zero-delay send can be rejected synchronously by a provider before
     // ComposeView has returned from service.send() and parked its accepted
     // draft. Cross the event-loop boundary so every terminal signal observes
@@ -2217,13 +2218,11 @@ Item {
   }
 
   function sentDraftRemoved(draftId) {
-    if (Model.indexById(messages, draftId) >= 0) {
-      messages = Model.removeById(messages, draftId)
-      rememberList()
-    }
-    if (selectedId === draftId) clearSelection()
+    draftList.drop(draftId, cacheKey)
     refreshCounts()
   }
+
+  function draftKept() { draftList.reload() }
 
   function deliverPending() { return sendQueue.deliverAll() }
 
@@ -2231,6 +2230,11 @@ Item {
 
   SendQueue {
     id: sendQueue
+    account: root
+  }
+
+  DraftList {
+    id: draftList
     account: root
   }
 
@@ -2303,18 +2307,13 @@ Item {
       }
       var child = root.api.saveDraft(payload, function(saved, error) {
       if (handle.aborted || account !== root.accountId) return
+      if (!error) draftList.saved(composeFields.draftId)
       if (typeof callback === "function") callback(saved, error)
       // The Drafts list on screen is what the server had before the save: the
       // copy replaced is gone there and the new one is not yet listed, so
       // a list left as it was showed both — the old row until the next poll,
       // and a second row for every save. Read it again from the server now.
-      if (!error && root && root.mailboxKey === "drafts") {
-        root.listSerial++
-        root.nextPageToken = ""
-        root.loadMessages(false, true, "")
-      } else if (!error && root) {
-        root.refreshCounts()
-      }
+      if (!error && root && !draftList.reload()) root.refreshCounts()
       })
       if (child) handle.children.push(child)
     })
@@ -2390,6 +2389,7 @@ Item {
       draftId: String(values.draftId || "")
     })
     var account = accountId
+    var draftsKey = cacheKey
     if (!backend) { reportSendFailure("Mail backend is unavailable", id); return "" }
     backend.call("message.compose", {fields: composeFields}, function(payload, error) {
       if (account !== root.accountId) return
@@ -2397,6 +2397,7 @@ Item {
       payload.draftId = String(values.draftId || "")
       payload.sendId = id
       if (!sendQueue.park(payload, id, order)) root.reportSendFailure("Could not queue this message", id)
+      else draftList.drop(payload.draftId, draftsKey)
     })
     return id
   }
