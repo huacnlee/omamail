@@ -64,6 +64,14 @@ Item {
       sidebar.collapsed = false
     }
 
+    function test_the_calendar_entry_follows_whether_one_is_connected() {
+      verify(textItem(sidebar, "Calendar").visible, "shown by default")
+      sidebar.calendarAvailable = false
+      var hidden = textItem(sidebar, "Calendar")
+      verify(hidden === null || !hidden.visible, "hidden with nothing connected")
+      sidebar.calendarAvailable = true
+    }
+
     function test_the_chevron_folds_without_opening() {
       var folds = named(sidebar, "fold", [])
       compare(folds.length, 1, "only the parent carries a chevron")
