@@ -364,6 +364,16 @@ function forAccount(list, accountId) {
   return next
 }
 
+// Whether the window should offer a calendar at all. Nothing connected means
+// the view is an empty grid that cannot hold an event, since every write needs
+// a source. A list that has not been read yet still counts as having one: the
+// entry must not vanish and reappear while the file loads. A disabled source
+// still counts, because the calendar is where it is turned back on.
+function hasNone(loaded, list) {
+  return loaded === true
+    && !(list && Array.isArray(list.sources) && list.sources.length > 0)
+}
+
 function providerLabel(kind) {
   var value = trimmed(kind).toLowerCase()
   if (value === "google" || value === "gmail") return "Google"

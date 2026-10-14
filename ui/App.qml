@@ -310,6 +310,10 @@ Item {
   readonly property string currentView: page === "reader" ? "reader"
     : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
   readonly property bool calendarVisible: currentView === "calendar"
+  // With no calendar connected anywhere the view cannot hold an event, so the
+  // window stops offering it; Settings still adds one.
+  readonly property bool calendarAvailable: !(service && service.noCalendars === true)
+  onCalendarAvailableChanged: if (!calendarAvailable && calendarVisible) backToList()
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
@@ -491,8 +495,7 @@ Item {
     if (payload.messageId) Qt.callLater(function() {
       root.openMessage(String(payload.messageId))
     })
-    if (payload.view === "calendar") {
-      showCalendar()
+    if (payload.view === "calendar" && showCalendar()) {
       Qt.callLater(function() {
         calendarView.showEvent(String(payload.eventId || ""), Number(payload.eventStart || 0))
       })
@@ -611,8 +614,10 @@ Item {
   }
 
   function showCalendar() {
+    if (!calendarAvailable) return false
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
+    return true
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -1066,16 +1071,12 @@ Item {
     if (id === "switchAccount") return accountSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
-      else {
-        showCalendar()
-        calendarView.refresh()
-      }
+      else if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "mailView") return backToList()
     if (id === "calendarView") {
-      showCalendar()
-      calendarView.refresh()
+      if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "toggleSidebar") return toggleSidebar()
@@ -1811,6 +1812,7 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          calendarAvailable: root.calendarAvailable
           menuLabelPath: labelMenu.opened && !!root.service
             && labelMenu.accountId === root.service.activeAccountId ? labelMenu.labelPath : ""
           service: root.service
@@ -1822,8 +1824,7 @@ Item {
           numbersVisible: focusScope.ctrlHeld
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
-            root.showCalendar()
-            calendarView.refresh()
+            if (root.showCalendar()) calendarView.refresh()
           }
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
@@ -2364,8 +2365,7 @@ Item {
                 Qt.callLater(function() { if (root.service) root.service.signIn() })
               }
               onOpenCalendarRequested: {
-                root.showCalendar()
-                calendarView.refresh()
+                if (root.showCalendar()) calendarView.refresh()
               }
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
@@ -2669,6 +2669,7 @@ Item {
         id: appMenu
         objectName: "app-menu"
         anchors.fill: parent
+        calendarAvailable: root.calendarAvailable
         textColor: root.foreground
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
@@ -2685,8 +2686,7 @@ Item {
           if (root.service) root.service.selectMailbox("inbox")
         }
         onCalendarRequested: {
-          root.showCalendar()
-          calendarView.refresh()
+          if (root.showCalendar()) calendarView.refresh()
         }
         onSetupRequested: root.openSettings()
         onSwitchAccountRequested: accountSwitcher.openCentered()

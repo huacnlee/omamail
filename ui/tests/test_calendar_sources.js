@@ -359,3 +359,22 @@ assert.strictEqual(namedMicrosoft.sources[0].name, "Work appointments",
   assert.strictEqual(sources.errorLabel({ id: "caldav:team", kind: "caldav" }, accounts), "caldav:team")
   assert.strictEqual(sources.errorLabel(null, accounts), "Calendar")
 }
+
+// The window hides its calendar only once the list is known to be empty.
+{
+  assert.strictEqual(sources.hasNone(true, sources.emptyList()), true,
+    "nothing connected anywhere hides the calendar")
+  assert.strictEqual(sources.hasNone(false, sources.emptyList()), false,
+    "an unread list keeps the entry rather than flashing it away")
+  assert.strictEqual(sources.hasNone(true, null), true)
+  const disabled = sources.add(sources.emptyList(), {
+    id: "caldav:off", kind: "caldav", name: "Off",
+    url: "https://calendar.example/off/", username: "me", enabled: false
+  })
+  assert.strictEqual(sources.hasNone(true, disabled), false,
+    "a disabled calendar is still turned back on from the calendar")
+  const google = sources.withGoogleAccounts(sources.emptyList(),
+    [{ id: "one@gmail.com", email: "one@gmail.com", provider: "gmail", signedIn: true }])
+  assert.strictEqual(sources.hasNone(true, google), false,
+    "a Google mailbox brings its own calendar")
+}

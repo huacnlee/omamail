@@ -74,6 +74,9 @@ Item {
   property bool eventWriting: false
   readonly property var availableSources: Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+  // Every account's calendars, not just this mailbox's: the entry hides only
+  // when no account has one and nothing was added in Settings.
+  readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView

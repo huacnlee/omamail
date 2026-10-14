@@ -26,6 +26,7 @@ Item {
   // Only the standalone host owns the application process. A plugin menu
   // must never offer to terminate the shell that loaded it.
   property bool canQuit: false
+  property bool calendarAvailable: true
   readonly property bool opened: menu.opened
 
   // Positioned against the window rather than a button, and flipped when it
@@ -146,7 +147,9 @@ Item {
       }
       MenuRow {
         id: calendarRow
+        objectName: "app-menu-calendar"
         text: "Calendar"
+        visible: root.calendarAvailable
         onActivated: { menu.close(); root.calendarRequested() }
       }
       MenuSeparatorLine {
