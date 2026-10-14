@@ -9,10 +9,13 @@ Item {
     property var calls: []
     property var pendingStop: null
     property bool failWatch: false
+    property bool deferWatch: false
+    property var pendingWatches: []
     signal notification(string method, var params)
     function call(method, params, callback) {
       calls = calls.concat([{method:method, params:params}])
       if (method === "mail.unwatch") pendingStop = callback
+      else if (method === "mail.watch" && deferWatch) pendingWatches = pendingWatches.concat([callback])
       else callback(null, method === "mail.watch" && failWatch ? {message:"temporary"} : null)
     }
   }
@@ -33,6 +36,8 @@ Item {
       backend.ready = true
       backend.calls = []
       backend.failWatch = false
+      backend.deferWatch = false
+      backend.pendingWatches = []
       sync.accountId = "a@example.org"
       sync.intervalSec = 120
       sync.pageSize = 25
@@ -95,6 +100,63 @@ Item {
       compare(backend.calls[backend.calls.length - 2].method, "mail.watch")
       compare(backend.calls[backend.calls.length - 1].method, "mail.check")
       verify(sync.registrationKey !== "")
+    }
+    function answerWatch(index, error) {
+      var answer = backend.pendingWatches[index]
+      answer(error ? null : {accountId:"a@example.org",sequence:index + 1,estimate:0,messages:[],error:""}, error || null)
+    }
+    function test_check_waits_for_the_watch_to_answer() {
+      backend.deferWatch = true
+      sync.enabled = true
+      sync.check()
+      compare(backend.calls.length, 1)
+      compare(backend.calls[0].method, "mail.watch")
+      compare(backend.pendingWatches.length, 1)
+      answerWatch(0)
+      sync.check()
+      compare(backend.calls.length, 2)
+      compare(backend.calls[1].method, "mail.check")
+    }
+    function test_check_waits_for_a_reconnected_backend_to_register() {
+      sync.enabled = true
+      sync.reconcile()
+      backend.deferWatch = true
+      backend.ready = false
+      backend.ready = true
+      var count = backend.calls.length
+      compare(backend.calls[count - 1].method, "mail.watch")
+      sync.check()
+      compare(backend.calls.length, count)
+      answerWatch(0)
+      sync.check()
+      compare(backend.calls.length, count + 1)
+      compare(backend.calls[count].method, "mail.check")
+    }
+    function test_superseded_watch_answer_does_not_allow_checks() {
+      backend.deferWatch = true
+      sync.enabled = true
+      sync.reconcile()
+      sync.pageSize = 50
+      sync.reconcile()
+      compare(backend.pendingWatches.length, 2)
+      answerWatch(0)
+      var count = backend.calls.length
+      sync.check()
+      compare(backend.calls.length, count)
+      answerWatch(1)
+      sync.check()
+      compare(backend.calls.length, count + 1)
+      compare(backend.calls[count].method, "mail.check")
+    }
+    function test_failed_pending_watch_registers_again_instead_of_checking() {
+      backend.deferWatch = true
+      sync.enabled = true
+      sync.reconcile()
+      answerWatch(0, {message:"temporary"})
+      var count = backend.calls.length
+      sync.check()
+      compare(backend.calls.length, count + 1)
+      compare(backend.calls[count].method, "mail.watch")
     }
   }
 }

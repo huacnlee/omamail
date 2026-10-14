@@ -13,6 +13,9 @@ Item {
   property var registeredBackend: null
   property string registeredAccount: ""
   property string registrationKey: ""
+  // A check sent before mail.watch answers may fail with mail_watch_unknown and
+  // is not needed, as a new watch checks at once.
+  property bool registered: false
   property bool unregistering: false
   property int epoch: 0
   property real sequence: 0
@@ -30,6 +33,7 @@ Item {
     registeredBackend = null
     registeredAccount = ""
     registrationKey = ""
+    registered = false
     sequence = 0
     epoch++
     if (oldBackend && oldBackend.ready && oldAccount) {
@@ -55,6 +59,7 @@ Item {
     registeredBackend = backend
     registeredAccount = accountId
     registrationKey = key
+    registered = false
     var mine = ++epoch
     backend.call("mail.watch", { accountId: accountId, query: query, intervalSec: intervalSec, pageSize: pageSize }, function(result, error) {
       if (mine !== root.epoch) return
@@ -63,6 +68,7 @@ Item {
         if (root.enabled && root.backend && root.backend.ready) retryTimer.restart()
         return
       }
+      root.registered = true
       root.accept(result)
     })
   }
@@ -76,7 +82,7 @@ Item {
 
   function check() {
     reconcile()
-    if (!registeredBackend || !registeredBackend.ready || !registrationKey) return
+    if (!registeredBackend || !registeredBackend.ready || !registered) return
     registeredBackend.call("mail.check", { accountId: registeredAccount }, function() {})
   }
 
