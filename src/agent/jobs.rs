@@ -308,6 +308,9 @@ pub fn read_job(store: &Store, id: &str) -> Result<Value> {
     if let Some(model) = v.get("model") {
         super::provider::validate_model(model.as_str().ok_or("agent_invalid_model")?)?;
     }
+    if let Some(inference) = v.get("inferenceProvider") {
+        super::provider::validate_model(inference.as_str().ok_or("agent_invalid_model")?)?;
+    }
     for k in ["sessionId", "resume"] {
         if let Some(x) = v.get(k) {
             let s = text(x)?;
@@ -549,7 +552,12 @@ async fn default_provider() -> Result<Provider> {
     Provider::parse(std::str::from_utf8(&out.stdout).unwrap_or("").trim())
         .ok_or("agent_choose_claude")
 }
-fn new_job(context: Value, mut provider: Provider, mut model: String) -> Result<Value> {
+fn new_job(
+    context: Value,
+    mut provider: Provider,
+    mut model: String,
+    mut inference: String,
+) -> Result<Value> {
     let store = Store::open()?;
     let existing = list(&store)?;
     let mut history = vec![];
@@ -584,6 +592,7 @@ fn new_job(context: Value, mut provider: Provider, mut model: String) -> Result<
         }
         provider = Provider::of_job(&job)?;
         model = job["model"].as_str().unwrap_or("").to_owned();
+        inference = job["inferenceProvider"].as_str().unwrap_or("").to_owned();
         if job["canContinue"] != true {
             return Err("agent_parent_not_ready");
         }
@@ -736,6 +745,7 @@ fn new_job(context: Value, mut provider: Provider, mut model: String) -> Result<
         "progress": "Starting..."
     });
     job["model"] = json!(model);
+    job["inferenceProvider"] = json!(inference);
     job["displayVersion"] = json!(2);
     if !resume.is_empty() {
         job["sessionId"] = json!(resume);
@@ -832,6 +842,13 @@ pub async fn call(method: &str, params: &Value) -> Result<Value> {
             .unwrap_or("")
             .to_owned();
         super::provider::validate_model(&model)?;
+        let inference = params
+            .get("inferenceProvider")
+            .map(|value| value.as_str().ok_or("agent_invalid_model"))
+            .transpose()?
+            .unwrap_or("")
+            .to_owned();
+        super::provider::validate_model(&inference)?;
         let raw = params.get("payload").ok_or("agent_context_required")?;
         let v = if let Some(s) = raw.as_str() {
             if s.len() > INPUT_LIMIT {
@@ -852,12 +869,12 @@ pub async fn call(method: &str, params: &Value) -> Result<Value> {
                 None => default_provider().await?,
             }
         } else {
-            if selected.is_some() || !model.is_empty() {
+            if selected.is_some() || !model.is_empty() || !inference.is_empty() {
                 return Err("agent_continuation_override");
             }
             Provider::Claude
         }; // new_job reads the parent's provider under the store lock.
-        return tokio::task::spawn_blocking(move || new_job(context, provider, model))
+        return tokio::task::spawn_blocking(move || new_job(context, provider, model, inference))
             .await
             .map_err(|_| "agent_worker_failed")?;
     }
@@ -999,7 +1016,7 @@ fn bounded_projection_jobs(jobs: &[Value]) -> Result<()> {
                 "resultReady" | "canContinue" | "stopUnconfirmed" => {
                     value.as_bool().ok_or("agent_invalid_jobs")?;
                 }
-                "model" => {
+                "model" | "inferenceProvider" => {
                     super::provider::validate_model(value.as_str().ok_or("agent_invalid_jobs")?)?;
                 }
                 "messageIds" => {

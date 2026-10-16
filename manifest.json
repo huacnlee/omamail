@@ -52,7 +52,8 @@
       "showBarIcon": true,
       "suggestEvents": false,
       "aiAgent": "System default",
-      "aiModel": ""
+      "aiModel": "",
+      "aiInferenceProvider": ""
     },
     "schema": [
       {
@@ -115,16 +116,23 @@
         "key": "aiAgent",
         "type": "enum",
         "label": "AI agent",
-        "options": ["System default", "OpenCode", "Codex", "Claude"],
+        "options": ["System default", "OpenCode", "Codex", "Claude", "Hermes"],
         "defaultValue": "System default",
-        "description": "Agent for new mail chats and calendar suggestions. System default follows Omarchy; unsupported defaults disable AI. Changing the selection starts fresh chats and keeps previous chats read-only. Requires backend API 6."
+        "description": "Agent for new mail chats and calendar suggestions. System default follows Omarchy; unsupported defaults disable AI. Changing the selection starts fresh chats and keeps previous chats read-only. Requires backend API 6. Hermes requires backend API 8."
       },
       {
         "key": "aiModel",
         "type": "string",
         "label": "AI model (optional)",
         "defaultValue": "",
-        "description": "Leave blank for the selected agent's default model. OpenCode takes provider/model or provider/model#variant; Codex and Claude take their model names. Changing the model starts fresh chats and keeps previous chats read-only. Requires backend API 6."
+        "description": "Leave blank for the selected agent's default model. OpenCode takes provider/model or provider/model#variant; Codex and Claude take model names. A blank Hermes model uses model.default from the Hermes config. Changing the model starts fresh chats and keeps previous chats read-only. Requires backend API 6."
+      },
+      {
+        "key": "aiInferenceProvider",
+        "type": "string",
+        "label": "Hermes provider (optional)",
+        "defaultValue": "",
+        "description": "Inference provider passed to Hermes as --provider, for example xai-oauth. Leave blank to use model.provider from the Hermes config (~/.hermes/config.yaml, or HERMES_HOME). Hermes itself still ignores the rest of that file. Changing it starts fresh chats. Requires backend API 8."
       },
       {
         "key": "suggestEvents",

@@ -31,6 +31,13 @@ class NativeBridge(legacy.Bridge):
         self.env['OMAMAIL_TEST_ARTIFACTS'] = str(self.artifacts)
         self.env['HOME'] = str(self.root)
         self.env['CODEX_HOME'] = str(self.root/'codex')
+        hermes = self.root / '.hermes'
+        hermes.mkdir()
+        (hermes / 'config.yaml').write_text(
+            'mcp_servers:\n  mail:\n    command: sendmail\n'
+            'model:\n  provider: "xai-oauth" # saved\n  default: grok-4.7\n'
+            '  extra:\n    provider: ignored\n'
+        )
 
     def tool(self, name, body):
         if name == 'opencode':
@@ -448,7 +455,7 @@ emit({'type':'result','subtype':'success','result':'','session_id':'11111111-222
         self.assertEqual(self.call('list',options={'paged':True,'offset':32})['jobs'],[])
 
     def test_crashed_worker_cannot_race_a_new_native_turn(self):
-        for provider in ('claude','opencode','codex'):
+        for provider in ('claude','opencode','codex','hermes'):
             with self.subTest(provider=provider):
                 self.tool('omarchy-default-agent', 'print('+repr(provider)+')')
                 if provider!='claude': self.provider_agent(provider)
@@ -485,11 +492,11 @@ emit({'type':'result','subtype':'success','result':'','session_id':'11111111-222
 
     def test_provider_status_never_starts_an_agent_or_creates_a_job(self):
         marker = self.root/'agent-started'
-        for provider in ('claude','codex','opencode'):
+        for provider in ('claude','codex','opencode','hermes'):
             self.tool(provider, 'from pathlib import Path\nPath('+repr(str(marker))+').touch()')
-        for selected in ('', 'unsupported', 'codex', 'opencode', 'claude'):
+        for selected in ('', 'unsupported', 'codex', 'opencode', 'claude', 'hermes'):
             self.tool('omarchy-default-agent', 'print('+repr(selected)+')')
-            supported = selected in ('claude','codex','opencode')
+            supported = selected in ('claude','codex','opencode','hermes')
             self.assertEqual(self.call('status'), {'available':supported,'provider':selected if supported else ''})
             self.assertFalse(marker.exists())
             self.assertFalse(list(self.store.glob('*/job.json')))
@@ -531,7 +538,7 @@ else:
                 self.assertEqual(marker.exists(),exit_code==0)
                 self.assertNotIn('HIDDEN',json.dumps(shown))
 
-    def provider_agent(self, provider, suffix=''):
+    def provider_agent(self, provider, suffix='', session=None):
         prelude = legacy.PRELUDE.replace(
             "Path(ident,'cwd.txt').write_text(str(Path.cwd()))\nos.chdir(ident)",
             "observed=Path(os.environ['OMAMAIL_TEST_ARTIFACTS'])/ident\nobserved.mkdir(exist_ok=True)\nobserved.joinpath('cwd.txt').write_text(str(Path.cwd()))\nos.chdir(observed)"
@@ -544,6 +551,16 @@ else:
                 {'type':'tool_use','part':{'state':{'input':'HIDDEN tool','output':'HIDDEN result'}}},
                 {'type':'text','sessionID':'ses_test123','part':{'id':'part1','type':'text','text':answer}},
                 {'type':'step_finish','part':{'reason':'stop'}}]
+        elif provider == 'hermes':
+            session = session or ('local-' + 'ab' * 32)
+            events = [
+                {'type':'system','subtype':'init','session_id':'','model':'grok-4.7'},
+                {'type':'text','text':'Hello '},
+                {'type':'tool_use','name':'terminal','input':'HIDDEN tool','tool_call_id':'call-1'},
+                {'type':'text','text':'مرحبا'},
+                {'type':'result','session_id':session,'exit_code':0,'text':answer,
+                 'tokens':{'input':1,'output':2,'total':3,'cache_read':0,'cache_write':0},
+                 'duration_ms':4}]
         else:
             events = [
                 {'type':'thread.started','thread_id':legacy.SESSION},
@@ -551,10 +568,17 @@ else:
                 {'type':'item.completed','item':{'type':'reasoning','text':'HIDDEN reasoning'}},
                 {'type':'item.completed','item':{'id':'item1','type':'agent_message','text':answer}},
                 {'type':'turn.completed'}]
+        if provider == 'hermes':
+            banner = 'print(' + repr('Session: ' + session) + ', flush=True)\n'
+            emitted = [events[0], events[1]]
+            head = '\n'.join('emit('+repr(e)+')' for e in emitted)
+            tail = '\n'.join('emit('+repr(e)+')' for e in events[2:])
+            self.tool(provider, prelude + '\n' + head + '\n' + banner + tail + '\n' + suffix)
+            return
         self.tool(provider, prelude + '\n' + '\n'.join('emit('+repr(e)+')' for e in events) + '\n' + suffix)
 
     def test_native_providers_and_models_survive_default_changes_and_continue_sessions(self):
-        for provider in ('opencode','codex'):
+        for provider in ('opencode','codex','hermes'):
             with self.subTest(provider=provider):
                 self.provider_agent(provider)
                 self.tool('omarchy-default-agent', f'print({provider!r})')
@@ -570,7 +594,24 @@ else:
                 self.assertEqual(projection.returncode,0,projection.stdout or projection.stderr)
                 self.assertEqual(json.loads(projection.stdout)['result']['byMessage']['1:INBOX']['provider'],provider)
                 self.assertNotIn('HIDDEN', json.dumps(shown))
-                self.assertNotIn('--model', json.loads((self.artifacts/ident/'argv.json').read_text()))
+                argv = json.loads((self.artifacts/ident/'argv.json').read_text())
+                if provider == 'hermes':
+                    self.assertEqual(shown['job']['model'], '')
+                    self.assertEqual(shown['job']['inferenceProvider'], '')
+                    self.assertEqual(argv[argv.index('--provider')+1], 'xai-oauth')
+                    self.assertEqual(argv[argv.index('--model')+1], 'grok-4.7')
+                    self.assertNotIn('--resume', argv)
+                    self.assertIn('--query-file', argv)
+                    self.assertIn('--ignore-user-config', argv)
+                    self.assertIn('--ignore-rules', argv)
+                    self.assertEqual(argv[argv.index('-t')+1], 'todo')
+                    for banned in ('-z', '--yolo', '--continue', '--pass-session-id', 'latest', 'sendmail', 'ignored'):
+                        self.assertNotIn(banned, argv)
+                    supplied = (self.artifacts/ident/'stdin.txt').read_text()
+                    self.assertIn('plain text', supplied)
+                    self.assertNotIn('propose_draft', supplied)
+                else:
+                    self.assertNotIn('--model', argv)
                 self.tool('omarchy-default-agent', 'raise SystemExit("must not resolve default for an override or continuation")')
                 selected = self.call('new', value={'messageId':'synthetic','prompt':'SECRET-PROMPT'},
                                      options={'provider':provider,'model':'fixture/model#variant'})['id']
@@ -588,12 +629,18 @@ else:
                 self.assertEqual(argv[argv.index('--model')+1], 'fixture/model#variant')
                 if provider == 'opencode':
                     self.assertEqual(argv[argv.index('--session')+1],selected_job['job']['sessionId'])
+                elif provider == 'hermes':
+                    self.assertEqual(argv[argv.index('--provider')+1], 'xai-oauth')
+                    self.assertEqual(argv[argv.index('--resume')+1], result['job']['sessionId'])
+                    for banned in ('-z', '--yolo', '--continue', '--pass-session-id', 'latest'):
+                        self.assertNotIn(banned, argv)
                 else:
                     self.assertIn('resume',argv)
-                self.assertIn(result['job']['sessionId'] if provider == 'opencode' else legacy.SESSION, argv)
+                expected = result['job']['sessionId'] if provider in ('opencode','hermes') else legacy.SESSION
+                self.assertIn(expected, argv)
                 self.assertIn('"prompt":"Follow-up"', (self.artifacts/child/'stdin.txt').read_text())
                 self.assertNotIn('SECRET-', (self.artifacts/selected/'argv.json').read_text())
-                for options in ({'provider':'claude'},{'model':'different'}):
+                for options in ({'provider':'claude'},{'model':'different'},{'inferenceProvider':'other'}):
                     self.assertEqual(self.call('new', value={'parent':selected,'prompt':'p'}, options=options, ok=False), 'agent_continuation_override')
                 # Provider-specific session checks protect persisted identities too.
                 saved = self.store/selected/'job.json'
@@ -610,12 +657,79 @@ else:
                                ({'provider':['opencode']},'agent_invalid_provider'),
                                ({'model':'--auto'},'agent_invalid_model'),
                                ({'model':'a\nb'},'agent_invalid_model'),
-                               ({'model':{}},'agent_invalid_model')]:
+                               ({'model':{}},'agent_invalid_model'),
+                               ({'inferenceProvider':'--bad'},'agent_invalid_model'),
+                               ({'inferenceProvider':{}},'agent_invalid_model')]:
             self.assertEqual(self.call('new', value={'messageId':'synthetic','prompt':'p'}, options=options, ok=False), error)
         self.assertEqual(list(self.store.glob('*/job.json')), before)
 
+    def test_hermes_config_flags_local_session_and_missing_endpoint(self):
+        session = 'local-' + 'cd' * 32
+        self.provider_agent('hermes', session=session)
+        self.tool('omarchy-default-agent', 'print("hermes")')
+        ident = self.new()
+        shown = self.wait(ident)
+        self.assertEqual(shown['job']['state'], 'done', shown)
+        self.assertEqual(shown['job']['sessionId'], session)
+        argv = json.loads((self.artifacts/ident/'argv.json').read_text())
+        self.assertEqual(argv[argv.index('--provider')+1], 'xai-oauth')
+        self.assertEqual(argv[argv.index('--model')+1], 'grok-4.7')
+        chosen = self.call('new', value={'messageId':'synthetic','prompt':'SECRET-PROMPT'},
+                           options={'provider':'hermes','model':'grok-4','inferenceProvider':'openrouter'})['id']
+        self.ids.append(chosen)
+        chosen_job = self.wait(chosen)
+        self.assertEqual(chosen_job['job']['state'], 'done', chosen_job)
+        self.assertEqual(chosen_job['job']['model'], 'grok-4')
+        self.assertEqual(chosen_job['job']['inferenceProvider'], 'openrouter')
+        chosen_argv = json.loads((self.artifacts/chosen/'argv.json').read_text())
+        self.assertEqual(chosen_argv[chosen_argv.index('--provider')+1], 'openrouter')
+        self.assertEqual(chosen_argv[chosen_argv.index('--model')+1], 'grok-4')
+        self.assertNotIn('xai-oauth', chosen_argv)
+        child = self.call('new', value={'parent':ident,'prompt':'Follow-up'})['id']
+        self.ids.append(child)
+        continued = self.wait(child)
+        self.assertEqual(continued['job']['state'], 'done', continued)
+        resumed = json.loads((self.artifacts/child/'argv.json').read_text())
+        self.assertEqual(resumed[resumed.index('--resume')+1], session)
+        self.assertEqual(resumed[resumed.index('--provider')+1], 'xai-oauth')
+        self.assertNotIn('SECRET-', json.dumps(resumed))
+
+        marker = self.root/'hermes-started'
+        self.tool('hermes', 'from pathlib import Path\nPath(' + repr(str(marker)) + ').touch()\n')
+        (self.root/'.hermes'/'config.yaml').write_text('model:\n  provider: "--bad"\n  default: "$(touch)"\n')
+        rejected = self.new()
+        failed = self.wait(rejected)
+        self.assertEqual(failed['job']['state'], 'failed', failed)
+        self.assertIn('Settings', failed['job']['error'])
+        self.assertNotIn('--bad', failed['job']['error'])
+        self.assertNotIn('touch', failed['job']['error'])
+        self.assertFalse(marker.exists())
+        self.assertFalse((self.artifacts/rejected/'argv.json').exists())
+
+        empty = self.root/'empty-hermes'
+        empty.mkdir()
+        self.env['HERMES_HOME'] = str(empty)
+        missing = self.new()
+        missing_job = self.wait(missing)
+        self.assertEqual(missing_job['job']['state'], 'failed', missing_job)
+        self.assertIn('model.provider', missing_job['job']['error'])
+        self.assertFalse(marker.exists())
+
+        custom = self.root/'custom-hermes'
+        custom.mkdir()
+        (custom/'config.yaml').write_text('model:\n  provider: openrouter\n  default: llama-3\n')
+        self.env['HERMES_HOME'] = str(custom)
+        self.provider_agent('hermes')
+        resolved = self.new()
+        resolved_job = self.wait(resolved)
+        self.assertEqual(resolved_job['job']['state'], 'done', resolved_job)
+        custom_argv = json.loads((self.artifacts/resolved/'argv.json').read_text())
+        self.assertEqual(custom_argv[custom_argv.index('--provider')+1], 'openrouter')
+        self.assertEqual(custom_argv[custom_argv.index('--model')+1], 'llama-3')
+        self.assertNotIn('xai-oauth', custom_argv)
+
     def test_failed_new_provider_output_never_becomes_applicable(self):
-        for provider in ('opencode','codex'):
+        for provider in ('opencode','codex','hermes'):
             for suffix in ('raise SystemExit(3)', 'emit({"type":"error","message":"HIDDEN failure"})'):
                 self.provider_agent(provider, suffix)
                 self.tool('omarchy-default-agent', f'print({provider!r})')
@@ -627,7 +741,7 @@ else:
                 self.assertNotIn('HIDDEN', json.dumps(shown))
 
     def test_stopped_turns_continue_for_every_provider_without_applying_partial_output(self):
-        for provider in ('claude','opencode','codex'):
+        for provider in ('claude','opencode','codex','hermes'):
             with self.subTest(provider=provider):
                 self.tool('omarchy-default-agent',f'print({provider!r})')
                 if provider == 'claude': self.agent(legacy.SUCCESS+'\ntime.sleep(30)')

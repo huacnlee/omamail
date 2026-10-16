@@ -200,6 +200,15 @@ impl ClaudeStream {
         self.progress = "Writing...";
         Ok(())
     }
+    /// Keep appending to the assistant message a status line interrupted.
+    /// `status` clears the insertion point but not the message, so a later
+    /// delta would otherwise replace the visible answer with only that delta.
+    pub(super) fn continue_answer(&mut self, text: &str) -> Result<()> {
+        if self.current.is_none() {
+            self.current = self.message_index;
+        }
+        self.answer(text, false)
+    }
     pub(super) fn reset_message(&mut self) {
         self.current = None;
         self.message_index = None;

@@ -5,6 +5,7 @@ pub mod context;
 #[cfg(target_os = "macos")]
 mod control;
 pub mod events;
+mod hermes_config;
 mod history;
 pub mod jobs;
 pub mod mcp;

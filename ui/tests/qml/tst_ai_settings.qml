@@ -9,11 +9,14 @@ Item {
     id: serviceFactory
     QtObject {
       property bool backendCanChooseAgent: true
+      property bool backendCanHermes: false
       property string aiAgent: "System default"
       property string aiModel: ""
+      property string aiInferenceProvider: ""
       property var writes: []
       function setAiAgent(value) { aiAgent = value; writes = writes.concat(["agent"]) }
       function setAiModel(value) { aiModel = value; writes = writes.concat(["model"]) }
+      function setAiInferenceProvider(value) { aiInferenceProvider = value; writes = writes.concat(["provider"]) }
     }
   }
   Component {
@@ -66,6 +69,20 @@ Item {
       panel.saveModel()
       findChild(panel, "settings-ai-agent").changed("Codex")
       compare(service.writes.length, 0)
+    }
+    function test_hermes_provider_saves_beside_the_model() {
+      service.backendCanHermes = true
+      var provider = findChild(panel, "settings-ai-inference-provider")
+      verify(provider.visible)
+      compare(provider.text, "")
+      provider.text = " xai-oauth "
+      provider.accepted()
+      compare(service.aiInferenceProvider, "xai-oauth")
+      compare(service.writes, ["provider"])
+      provider.text = "--bad"
+      provider.accepted()
+      verify(panel.error !== "")
+      compare(service.aiInferenceProvider, "xai-oauth")
     }
   }
 }
