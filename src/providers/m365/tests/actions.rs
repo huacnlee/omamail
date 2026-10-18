@@ -357,11 +357,26 @@ async fn a_send_refused_its_token_and_given_up_on_while_a_fresh_one_is_fetched_w
         let later = refresh && counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0;
         later.then_some(Resp::Stall)
     });
+    // Reach the retried refresh before spending the request's clock. Polling while yielding
+    // keeps paused time from auto-advancing while the loopback socket and keyring do real work.
+    tokio::time::pause();
     let message = raw("From: alice@example.org\r\nTo: bob@example.org\r\n");
-    assert_eq!(
-        world.call("m365.send", json!({"raw": message})).await,
-        Err("m365_send_not_attempted")
-    );
+    let send = world.call("m365.send", json!({"raw": message}));
+    tokio::pin!(send);
+    let started = std::time::Instant::now();
+    while refreshes.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+        assert!(
+            futures_util::poll!(send.as_mut()).is_pending(),
+            "send ended before the retried refresh reached the login host"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "retried refresh never arrived"
+        );
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(Duration::from_millis(300)).await;
+    assert_eq!(send.await, Err("m365_send_not_attempted"));
     let sends = world.fake.graph();
     assert_eq!(
         sends

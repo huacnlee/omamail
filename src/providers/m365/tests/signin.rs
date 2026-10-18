@@ -636,7 +636,16 @@ async fn a_refused_grant_a_withdrawn_consent_and_an_empty_keyring_each_say_so_an
     isolated!();
     let world = World::new().await;
     inbox(&world, 1);
-    let verify = || world.call("m365.verify", json!({}));
+    let verify = || async {
+        let result = world.call("m365.verify", json!({})).await;
+        // A failed folder lookup drops its siblings, but an admitted refresh finishes under its
+        // lane guard. Drain it before changing the next scenario's hook or counting its requests.
+        tokio::time::timeout(Duration::from_secs(30), crate::auth::invalidate(ACCOUNT))
+            .await
+            .expect("previous refresh did not finish")
+            .unwrap();
+        result
+    };
     world.store.set("stale");
     assert_eq!(verify().await, Err("m365_signed_out"));
     world.store.set("refresh-0");
@@ -662,8 +671,6 @@ async fn a_refused_grant_a_withdrawn_consent_and_an_empty_keyring_each_say_so_an
     world.fake.hook(|_| None);
     world.store.set("stale");
     inbox(&world, 12);
-    // A refresh a call that was given up on had begun finishes by itself: let it.
-    tokio::time::sleep(Duration::from_millis(200)).await;
     let before = world.fake.login().len();
     let ids: Vec<String> = (1..=12).map(super::oid).collect();
     let changed = world
