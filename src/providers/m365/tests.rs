@@ -106,6 +106,8 @@ pub(super) enum Resp {
     Lying(usize, Vec<u8>),
     /// A body with no length, one chunk per item.
     Chunked(Vec<Vec<u8>>),
+    /// Confirms success, then stalls or truncates a chunked body.
+    UnfinishedBody(u16, bool),
     /// Reads the request and never answers.
     Stall,
     /// Waits, then answers. A test sits a body between the listing clock and the body clock.
@@ -546,6 +548,14 @@ async fn serve(mut socket: tokio::net::TcpStream, state: Arc<Mutex<State>>, base
             }
             body.extend_from_slice(b"0\r\n\r\n");
             write(200, "Transfer-Encoding: chunked\r\n".into(), &body)
+        }
+        Resp::UnfinishedBody(status, stall) => {
+            let head = write(status, "Transfer-Encoding: chunked\r\n".into(), &[]);
+            let _ = socket.write_all(&head).await;
+            if stall {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            }
+            return;
         }
         Resp::Stall => {
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;

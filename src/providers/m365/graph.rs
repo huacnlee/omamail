@@ -449,6 +449,15 @@ impl Graph {
                     .and_then(|text| text.trim().parse::<u64>().ok())
                     .map(Duration::from_secs);
                 let wanted = (200..300).contains(&status);
+                // These writes consume only the status. Once Graph confirmed
+                // them, a missing or broken optional body cannot undo success.
+                if wanted && ceiling == 0 {
+                    return Ok(Reply {
+                        status,
+                        body: Vec::new(),
+                        retry_after,
+                    });
+                }
                 let limit = if wanted { ceiling } else { MAX_ERROR_BODY };
                 // Only a read needs its whole answer. An error is read for its code and a change that
                 // succeeded for what the caller asked of it: neither fails for being longer than that.

@@ -439,3 +439,60 @@ async fn a_call_ends_at_its_deadline_and_a_call_given_up_on_is_cancelled_where_i
     let params = json!({"query": "role:inbox", "limit": 5, "requestToken": "r1"});
     assert!(world.call("m365.list", params).await.is_ok());
 }
+
+#[tokio::test]
+async fn confirmed_mutations_do_not_wait_for_or_fail_on_an_unused_response_body() {
+    isolated!();
+    let world = World::new().await;
+    inbox(&world, 2);
+    world.deadlines(200, 3000);
+    for stall in [false, true] {
+        world
+            .fake
+            .hook(move |req| (req.method == "PATCH").then(|| Resp::UnfinishedBody(200, stall)));
+        let done = world
+            .call(
+                "m365.modify",
+                json!({
+                    "ids": [super::oid(1)], "removeLabelIds": ["UNREAD"]
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            done["succeededIds"],
+            json!([super::oid(1)]),
+            "confirmed PATCH, stall={stall}"
+        );
+        assert_eq!(done["failedIds"], json!([]));
+    }
+}
+
+#[tokio::test]
+async fn an_accepted_send_does_not_become_unknown_when_the_unused_body_stalls() {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    isolated!();
+    let world = World::new().await;
+    world.deadlines(200, 3000);
+    for stall in [false, true] {
+        world.fake.hook(move |req| {
+            req.path
+                .ends_with("/sendMail")
+                .then(|| Resp::UnfinishedBody(202, stall))
+        });
+        let raw = URL_SAFE_NO_PAD.encode(super::plain_mime("Confirmed send"));
+        let sent = world.call("m365.send", json!({"raw":raw})).await;
+        assert!(sent.is_ok(), "confirmed 202, stall={stall}: {sent:?}");
+        assert_eq!(sent.unwrap()["sent"], true);
+    }
+    assert_eq!(
+        world
+            .fake
+            .graph()
+            .iter()
+            .filter(|req| req.path.ends_with("/sendMail"))
+            .count(),
+        2,
+        "each user send is sent only once"
+    );
+}
