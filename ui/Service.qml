@@ -1670,6 +1670,7 @@ Item {
   }
 
   readonly property alias calendarController: sharedCalendar
+  readonly property bool noCalendars: sharedCalendar.noCalendars
   readonly property var barEvents: Preview.upcomingEvents(
     barCalendar.events, Date.now(), 2)
 
