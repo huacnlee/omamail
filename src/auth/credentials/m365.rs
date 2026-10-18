@@ -212,6 +212,28 @@ pub(crate) async fn change(
     client: &str,
     token: Option<&str>,
 ) -> Result<(), &'static str> {
+    change_while(account, client, token, || true)
+        .await
+        .map(|_| ())
+}
+
+/// Saves a device grant only while its flow is current. The checks, save and any rollback own one
+/// refresh lane, so a cancelled grant can never delete a newer grant queued behind its keyring write.
+pub(crate) async fn save_grant(
+    account: &str,
+    client: &str,
+    token: &str,
+    current: impl Fn() -> bool + Send + 'static,
+) -> Result<bool, &'static str> {
+    change_while(account, client, Some(token), current).await
+}
+
+async fn change_while(
+    account: &str,
+    client: &str,
+    token: Option<&str>,
+    current: impl Fn() -> bool + Send + 'static,
+) -> Result<bool, &'static str> {
     valid_account("m365", account)?;
     let client = &client_id(client).ok_or("auth_client_invalid")?;
     let secret = token
@@ -225,15 +247,24 @@ pub(crate) async fn change(
     let lane = lane(account, client).await?;
     let key = key(client, account);
     in_outlook_lane(lane, move |mut tokens| async move {
-        match secret {
-            Some(secret) => store::put(key, secret).await.map_err(store_error)?,
-            None => match store::delete(key).await {
-                Ok(()) | Err(StoreError::Missing) => {}
-                Err(error) => return Err(store_error(error)),
-            },
+        if !current() {
+            return Ok(false);
+        }
+        if let Some(secret) = secret {
+            store::put(key.clone(), secret).await.map_err(store_error)?;
+            tokens.clear();
+            if current() {
+                return Ok(true);
+            }
+            // A cancellation during the native write is undone before another grant or refresh
+            // can take this lane. Comparing token bytes would not protect a reused token value.
+        }
+        match store::delete(key).await {
+            Ok(()) | Err(StoreError::Missing) => {}
+            Err(error) => return Err(store_error(error)),
         }
         tokens.clear();
-        Ok(())
+        Ok(false)
     })
     .await
 }

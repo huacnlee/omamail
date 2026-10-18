@@ -40,7 +40,7 @@ use zeroize::Zeroizing;
 
 use super::{ids, mailbox, params, read};
 use crate::auth::m365::{
-    SCOPE, change, consent_needed, login, login_at, permissions_granted, tenant_unknown,
+    SCOPE, change, consent_needed, login, login_at, permissions_granted, save_grant, tenant_unknown,
 };
 
 const MAX_PENDING: usize = 4;
@@ -467,19 +467,13 @@ async fn grant(id: &str, account: &str, address: &str, client_id: &str, body: &V
             ..failed("m365_wrong_account")
         };
     }
-    // A sign-out while the exchange was in the air ended this sign-in: its token is not kept.
-    if !pending(id) {
-        return done("expired", None);
-    }
-    if let Err(code) = change(account, client_id, Some(refresh)).await {
-        return failed(code);
-    }
-    // And one that came while the token was being saved found nothing to delete yet.
-    if !pending(id) {
-        return match change(account, client_id, None).await {
-            Ok(()) => done("expired", None),
-            Err(code) => failed(code),
-        };
+    // A sign-out can end this flow before or during its keyring write. The pending checks and
+    // rollback share the refresh lane, so that rollback cannot delete a newer flow's saved grant.
+    let request = id.to_owned();
+    match save_grant(account, client_id, refresh, move || pending(&request)).await {
+        Ok(true) => {}
+        Ok(false) => return done("expired", None),
+        Err(code) => return failed(code),
     }
     mailbox::forget(account);
     read::forget(account, None);

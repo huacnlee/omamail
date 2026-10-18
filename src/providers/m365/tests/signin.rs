@@ -772,3 +772,116 @@ async fn a_poll_that_outwaits_its_exchange_says_pending_and_a_later_one_has_the_
 fn signin_grant() -> &'static str {
     "urn:ietf:params:oauth:grant-type:device_code"
 }
+
+#[tokio::test]
+async fn cancelled_older_grant_must_not_delete_newer_same_app_grant() {
+    isolated!();
+    let world = World::signed_out().await;
+    let first = begin(&world).await;
+    let grant = (200, world.fake.state().issue(Some(ADDRESS)));
+    world.fake.state().device.push_back(grant);
+    let saving = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let entered = saving.clone();
+    let released = release.clone();
+    *world.store.during_put.lock().unwrap() = Some(std::sync::Arc::new(move || {
+        if !entered.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !released.load(std::sync::atomic::Ordering::SeqCst)
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }));
+    let next = async {
+        while !saving.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let sign_out = tokio::spawn(async {
+            call(
+                "m365.signOut",
+                &json!({"accountId": ACCOUNT, "clientId": CLIENT}),
+            )
+            .await
+        });
+        // The sign-out ends the old flow and queues its deletion behind the blocked save.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let second = begin(&world).await;
+        let grant = (200, world.fake.state().issue(Some(ADDRESS)));
+        world.fake.state().device.push_back(grant);
+        let unblocking = async {
+            // Queue the second grant's save before allowing the older one to finish.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            release.store(true, std::sync::atomic::Ordering::SeqCst);
+        };
+        let (newer, _) = tokio::join!(poll(&second), unblocking);
+        let out = sign_out.await.unwrap();
+        (newer, out)
+    };
+    let (older, (newer, out)) = tokio::join!(poll(&first), next);
+    assert_eq!(older, json!({"state": "expired"}));
+    assert_eq!(out, Ok(json!({"signedOut": true})));
+    assert_eq!(newer, json!({"state": "signedIn"}));
+    assert_eq!(
+        world.store.token().as_deref(),
+        Some("refresh-2"),
+        "newer signed-in flow must keep its own token"
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_grant_with_reused_token_bytes_cannot_delete_its_replacement() {
+    isolated!();
+    let world = World::signed_out().await;
+    let saving = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let current = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let entered = saving.clone();
+    let released = release.clone();
+    *world.store.during_put.lock().unwrap() = Some(std::sync::Arc::new(move || {
+        if !entered.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !released.load(std::sync::atomic::Ordering::SeqCst)
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }));
+    let live = current.clone();
+    let older = crate::auth::m365::save_grant(ACCOUNT, CLIENT, "same-refresh", move || {
+        live.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let replacement = async {
+        while !saving.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        current.store(false, std::sync::atomic::Ordering::SeqCst);
+        let newer = crate::auth::m365::save_grant(ACCOUNT, CLIENT, "same-refresh", || true);
+        tokio::pin!(newer);
+        // This future reaches the held lane before the old keyring write may finish.
+        assert!(futures_util::poll!(newer.as_mut()).is_pending());
+        release.store(true, std::sync::atomic::Ordering::SeqCst);
+        newer.await
+    };
+    let (old, new) = tokio::join!(older, replacement);
+    assert_eq!(old, Ok(false));
+    assert_eq!(new, Ok(true));
+    assert_eq!(world.store.token().as_deref(), Some("same-refresh"));
+}
+
+#[tokio::test]
+async fn a_grant_cancelled_before_its_lane_is_admitted_keeps_no_token() {
+    isolated!();
+    let world = World::signed_out().await;
+    assert_eq!(
+        crate::auth::m365::save_grant(ACCOUNT, CLIENT, "cancelled-refresh", || false).await,
+        Ok(false)
+    );
+    assert!(world.store.token().is_none());
+    assert!(
+        world.store.puts.lock().unwrap().is_empty(),
+        "cancelled grant must never reach the keyring"
+    );
+}
