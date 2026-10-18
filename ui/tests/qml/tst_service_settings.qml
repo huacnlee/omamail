@@ -88,16 +88,21 @@ Item {
       mailService.applySettings({showBarIcon:false})
       compare(mailService.aiAgent, "System default")
       compare(mailService.aiModel, "")
+      compare(mailService.aiInferenceProvider, "")
       mailService.setAiAgent("OpenCode")
       mailService.setAiModel(" fixture/model#variant ")
+      mailService.setAiInferenceProvider(" xai-oauth ")
       compare(shellStore.updatedEntry.aiAgent, "OpenCode")
       compare(shellStore.updatedEntry.aiModel, "fixture/model#variant")
+      compare(shellStore.updatedEntry.aiInferenceProvider, "xai-oauth")
       compare(shellStore.updatedEntry.showBarIcon, false)
       tryCompare(mailService.agentRunner, "selectedAgent", "OpenCode")
       compare(mailService.agentRunner.selectedModel, "fixture/model#variant")
+      compare(mailService.agentRunner.selectedInferenceProvider, "xai-oauth")
       mailService.applySettings({})
       compare(mailService.agentRunner.selectedAgent, "System default")
       compare(mailService.agentRunner.selectedModel, "")
+      compare(mailService.agentRunner.selectedInferenceProvider, "")
     }
 
     function test_unified_mailboxes_setting_defaults_off_and_persists_changes() {

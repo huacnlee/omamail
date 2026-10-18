@@ -52,6 +52,141 @@ print(json.dumps({'type':'result','subtype':'success','result':'Visible answer'}
     assert!(!parser.display().to_string().contains("hidden credential"));
 }
 
+const HERMES_LOCAL: &str = "local-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+#[test]
+fn hermes_stdout_reads_session_banner_and_keeps_json_strict() {
+    let mut hermes = ProviderStream::new(
+        Provider::Hermes,
+        vec![json!({"role":"user","text":"Question"})],
+    )
+    .unwrap();
+    assert!(
+        accept_stdout_line(&mut hermes, format!("Session: {HERMES_LOCAL}").as_bytes(),).unwrap()
+    );
+    assert_eq!(hermes.session_id(), HERMES_LOCAL);
+    assert!(!accept_stdout_line(&mut hermes, b"Session: latest").unwrap());
+    assert_eq!(hermes.session_id(), HERMES_LOCAL);
+    assert!(
+        accept_stdout_line(
+            &mut hermes,
+            br#"{"type":"system","subtype":"init","session_id":"","model":"grok-4.7"}"#,
+        )
+        .unwrap()
+    );
+    assert_eq!(hermes.session_id(), HERMES_LOCAL);
+    assert!(accept_stdout_line(&mut hermes, b"  {not-json").is_err());
+    assert_eq!(hermes.session_id(), HERMES_LOCAL);
+    let mut claude = parser();
+    assert!(accept_stdout_line(&mut claude, b"Session: local-aa").is_err());
+}
+
+#[tokio::test]
+async fn hermes_empty_init_takes_session_from_banner_and_result() {
+    let script = r#"import sys,json
+sys.stdin.read()
+sid='local-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+print(json.dumps({'type':'system','subtype':'init','model':'grok-4.7','session_id':''}))
+print(json.dumps({'type':'text','text':'Hello'}))
+print('Session: '+sid, flush=True)
+print(json.dumps({'type':'result','session_id':sid,'exit_code':0,'text':'Hello'}))
+sys.stdout.write('session_id: '+sid)
+"#;
+    let mut parser = ProviderStream::new(
+        Provider::Hermes,
+        vec![json!({"role":"user","text":"Question"})],
+    )
+    .unwrap();
+    let result = execute(
+        fake(script),
+        b"Synthetic secret on stdin",
+        &mut parser,
+        Duration::from_secs(5),
+        std::future::pending(),
+        |_| Ok(()),
+    )
+    .await;
+    assert_eq!(result.failure, None);
+    assert_eq!(parser.session_id(), HERMES_LOCAL);
+    assert_eq!(parser.display()["output"], "Hello");
+}
+
+#[tokio::test]
+async fn hermes_result_session_completes_when_init_id_is_empty() {
+    let script = r#"import sys,json
+sys.stdin.read()
+sid='local-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+print(json.dumps({'type':'system','subtype':'init','model':'grok-4.7','session_id':'','timestamp':1}))
+print(json.dumps({'type':'text','text':'Hello','timestamp':2}))
+print(json.dumps({'type':'result','session_id':sid,'exit_code':0,'text':'Hello','tokens':{'input':1,'output':1,'total':2,'cache_read':0,'cache_write':0},'duration_ms':3,'timestamp':4}))
+"#;
+    let mut parser = ProviderStream::new(
+        Provider::Hermes,
+        vec![json!({"role":"user","text":"Question"})],
+    )
+    .unwrap();
+    let result = execute(
+        fake(script),
+        b"Synthetic secret on stdin",
+        &mut parser,
+        Duration::from_secs(5),
+        std::future::pending(),
+        |_| Ok(()),
+    )
+    .await;
+    assert_eq!(result.failure, None);
+    assert_eq!(parser.session_id(), HERMES_LOCAL);
+    assert_eq!(parser.display()["output"], "Hello");
+    assert!(parser.final_seen());
+}
+
+#[tokio::test]
+async fn hermes_v0221_stream_json_emitter_round_trip() {
+    // The v0.22.1 tree is not part of this repo. When it is checked out at
+    // HERMES_SRC, drive the real StreamJsonEmitter through the worker.
+    let root = std::env::var("HERMES_SRC").unwrap_or_else(|_| "/tmp/hermes-src".to_owned());
+    let source = std::path::Path::new(&root).join("hermes_cli/stream_json.py");
+    if !source.is_file() {
+        return;
+    }
+    let script = r#"import sys
+sys.path.insert(0, sys.argv[1])
+from hermes_cli.stream_json import StreamJsonEmitter
+sys.stdin.read()
+sid = "local-" + "0123456789abcdef" * 4
+emitter = StreamJsonEmitter(model="grok-4.7", session_id="")
+emitter.on_text_delta("Hello ")
+print("Session: " + sid, flush=True)
+emitter.on_text_delta("مرحبا")
+emitter.on_tool_progress("tool.started", "terminal", None, {"cmd": "SECRET"}, tool_call_id="call-1")
+emitter.on_tool_progress("tool.completed", "terminal", None, None, result="SECRET result", tool_call_id="call-1")
+raise SystemExit(emitter.emit_result(
+    {"final_response": "Hello مرحبا", "input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+    session_id=sid, exit_code=0))
+"#;
+    let mut command = Command::new("python3");
+    command.args(["-c", script, &root]);
+    let mut parser = ProviderStream::new(
+        Provider::Hermes,
+        vec![json!({"role":"user","text":"Question"})],
+    )
+    .unwrap();
+    let result = execute(
+        command,
+        b"Synthetic secret on stdin",
+        &mut parser,
+        Duration::from_secs(5),
+        std::future::pending(),
+        |_| Ok(()),
+    )
+    .await;
+    assert_eq!(result.failure, None);
+    assert_eq!(parser.session_id(), HERMES_LOCAL);
+    assert_eq!(parser.display()["output"], "Hello مرحبا");
+    assert!(parser.final_seen());
+    assert!(!parser.display().to_string().contains("SECRET"));
+}
+
 #[tokio::test]
 async fn incomplete_nonzero_and_invalid_events_cannot_succeed() {
     for script in [

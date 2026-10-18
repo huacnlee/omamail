@@ -9,10 +9,21 @@ Item {
   property var backend: null
   property string selectedAgent: "System default"
   property string selectedModel: ""
+  property string selectedInferenceProvider: ""
   property bool providerAvailable: false
   property string resolvedProvider: ""
   property string availabilityError: "Checking the selected AI agent..."
   property int availabilitySerial: 0
+  function unavailableDefaultMessage() {
+    var choice = "Claude, Codex or OpenCode"
+    if (Number(backend && backend.apiVersion) >= 8) choice += " or Hermes"
+    return "Your system-default agent is not supported. Choose " + choice + " in Settings → AI."
+  }
+  function chooseAgentMessage() {
+    var choice = "OpenCode, Codex or Claude"
+    if (Number(backend && backend.apiVersion) >= 8) choice += " or Hermes"
+    return "Choose " + choice + " in Settings → AI, or select one as Omarchy's default."
+  }
   function refreshAvailability() {
     var serial = ++availabilitySerial
     if (!available()) {
@@ -36,7 +47,7 @@ Item {
       root.providerAvailable = !error && !!result && result.available === true
       root.availabilityError = root.providerAvailable ? "" : error
         ? "Could not check the selected AI agent."
-        : "Your system-default agent is not supported. Choose Claude, Codex or OpenCode in Settings → AI."
+        : unavailableDefaultMessage()
     })
   }
   property int selectionRevision: 0
@@ -46,12 +57,14 @@ Item {
   onSelectedAgentChanged: { providerAvailable = false; resetSelection(); refreshAvailability() }
   onResolvedProviderChanged: resetSelection()
   onSelectedModelChanged: { resetSelection(); refreshAvailability() }
+  onSelectedInferenceProviderChanged: resetSelection()
   onSelectionResetAtChanged: resetSelection()
   function canContinueSelection(job) {
     if (!job) return false
     var provider = Options.provider(selectedAgent) || resolvedProvider
     if (provider !== "" && provider !== String(job.provider || "claude")) return false
     if (String(job.model || "") !== selectedModel) return false
+    if (String(job.inferenceProvider || "") !== selectedInferenceProvider) return false
     if (selectionJobs[String(job.id)] === selectionRevision) return true
     var created = job.createdOrder ? Number(job.createdOrder) / 1000000 : Number(job.created || 0) * 1000
     return created > selectionResetAt
@@ -196,7 +209,7 @@ Item {
   function wantsAttention(job) { return !!job && attentionIds.indexOf(String(job.id)) >= 0 }
   function isActive(job) { return !!job && activeIds.indexOf(String(job.id)) >= 0 }
 
-  function selection() { return {agent: selectedAgent, model: selectedModel, revision: selectionRevision} }
+  function selection() { return {agent: selectedAgent, model: selectedModel, inferenceProvider: selectedInferenceProvider, revision: selectionRevision} }
   function start(payloadLine, quiet, capturedSelection) {
     if (!available()) { lastError = "Mail backend is unavailable"; return false }
     if (!providerAvailable) { lastError = availabilityError; return false }
@@ -206,6 +219,7 @@ Item {
     if (typeof payload !== "string" && (typeof payload !== "object" || Array.isArray(payload))) return false
     var selected = capturedSelection || selection()
     if (selected.agent !== selectedAgent || selected.model !== selectedModel
+        || String(selected.inferenceProvider || "") !== selectedInferenceProvider
         || (selected.revision !== undefined && selected.revision !== selectionRevision)) {
       lastError = "AI selection changed. Start a new chat."
       return false
@@ -217,7 +231,7 @@ Item {
       return false
     }
     var revision = selectionRevision
-    var options = Options.startOptions(payload, selected.agent, selected.model, backend.apiVersion)
+    var options = Options.startOptions(payload, selected.agent, selected.model, selected.inferenceProvider, backend.apiVersion)
     if (options.error) { lastError = options.error; return false }
     lastError = ""
     starting = true
@@ -230,7 +244,7 @@ Item {
           var code = String(error && error.message ? error.message : "")
           root.lastError = code === "agent_choose_claude"
             ? (Number(root.backend.apiVersion) >= 6
-              ? "Choose OpenCode, Codex or Claude in Settings → AI, or select one as Omarchy's default."
+              ? chooseAgentMessage()
               : "This backend supports Claude only. Select Claude as Omarchy's default AI agent.")
             : "Could not confirm AI started. Check the conversation before retrying."
           root.failed(root.lastError)

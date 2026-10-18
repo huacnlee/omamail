@@ -1,5 +1,5 @@
 {
-  "apiVersion": 7,
+  "apiVersion": 8,
   "releasedApiVersion": 7,
   "protocolVersion": 1,
   "methods": [
@@ -1255,6 +1255,48 @@
       }
     },
     {
+      "name": "AI Hermes provider availability is data-only",
+      "method": "agent.providerStatus",
+      "params": {
+        "provider": "hermes"
+      },
+      "equals": {
+        "available": true,
+        "provider": "hermes"
+      }
+    },
+    {
+      "name": "AI Hermes inference provider is validated before starting a worker",
+      "method": "agent.jobStart",
+      "params": {
+        "provider": "hermes",
+        "inferenceProvider": "--bad",
+        "payload": {
+          "messageId": "synthetic",
+          "prompt": "Synthetic question"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_invalid_model"
+      }
+    },
+    {
+      "name": "AI follow-ups cannot override the Hermes inference provider",
+      "method": "agent.jobStart",
+      "params": {
+        "inferenceProvider": "xai-oauth",
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Synthetic follow-up"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_continuation_override"
+      }
+    },
+    {
       "name": "gmail message mutation answers with a queue ticket",
       "method": "gmail.trash",
       "params": {
@@ -1291,6 +1333,10 @@
   ],
   "unreleased": {
     "methods": [],
-    "cases": []
+    "cases": [
+      "AI Hermes provider availability is data-only",
+      "AI Hermes inference provider is validated before starting a worker",
+      "AI follow-ups cannot override the Hermes inference provider"
+    ]
   }
 }

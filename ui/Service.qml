@@ -146,7 +146,8 @@ Item {
     unifiedMailboxes: false,
     suggestEvents: false,
     aiAgent: "System default",
-    aiModel: ""
+    aiModel: "",
+    aiInferenceProvider: ""
   })
   function normalizedSettings(values) {
     var next = ({})
@@ -217,7 +218,9 @@ Item {
     return platform && platform.standalone && selected === "System default" ? "OpenCode" : selected
   }
   readonly property string aiModel: String(settings ? settings.aiModel || "" : "")
+  readonly property string aiInferenceProvider: String(settings ? settings.aiInferenceProvider || "" : "")
   readonly property bool backendCanChooseAgent: backend.ready && backend.apiVersion >= 6
+  readonly property bool backendCanHermes: backend.ready && backend.apiVersion >= 8
   readonly property bool backendCanAgentProposals: backend.ready && backend.apiVersion >= 6
   function setAiAgent(value) {
     if (String(value) === aiAgent) return
@@ -229,6 +232,12 @@ Item {
     if (model === aiModel) return
     persistSetting("aiChatResetAt", Date.now())
     persistSetting("aiModel", model)
+  }
+  function setAiInferenceProvider(value) {
+    var provider = String(value).trim()
+    if (provider === aiInferenceProvider) return
+    persistSetting("aiChatResetAt", Date.now())
+    persistSetting("aiInferenceProvider", provider)
   }
   function setSuggestEvents(value) { persistSetting("suggestEvents", value === true) }
   readonly property var eventSuggestions: eventSuggester.suggestions
@@ -2801,6 +2810,7 @@ Item {
         pluginDir: root.pluginDir
         selectedAgent: root.aiAgent
         selectedModel: root.aiModel
+        selectedInferenceProvider: root.aiInferenceProvider
         selectionResetAt: Number(root.settings ? root.settings.aiChatResetAt || 0 : 0)
         // The open account owns what the rows show and cancel: an IMAP id is
         // only unique inside one account, and two accounts can share an address.
