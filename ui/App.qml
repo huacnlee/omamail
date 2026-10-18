@@ -1267,15 +1267,26 @@ Item {
     if (!service) return
     var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
-    // A removed mailbox takes its saved sign-in with it, once the removal is confirmed.
+    // Keep the account until its saved sign-in is confirmed gone. The backend
+    // may be starting or the keyring locked; a destroyed delegate cannot retry.
     var host = service.accountAt(index)
-    if (host) host.forgetStoredCredentials()
-    service.removeAccountAt(index)
-    // The editor's page is gone with its account. Settings is where the rest
-    // of them are, over a fresh root: the list underneath may have changed
-    // mailbox with the removal.
-    navUntouched = false
-    nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
+    var entry = service.accountList.accounts[index]
+    var removalNav = nav
+    if (!host) return
+    host.forgetStoredCredentials(function(forgotten) {
+      if (!root || !root.service || !forgotten) return
+      var current = Accounts.confirmRemoval({ accounts: root.service.accountSummaries || [] }, request)
+      // An edit or model rebuild while cleanup was pending is a newer account.
+      if (current < 0 || root.service.accountAt(current) !== host
+          || root.service.accountList.accounts[current] !== entry) return
+      // A newer page or composer belongs to the user, not this delayed reply.
+      var stillOnRemovalPage = root.nav === removalNav
+      root.service.removeAccountAt(current)
+      if (stillOnRemovalPage) {
+        root.navUntouched = false
+        root.nav = Nav.push(Nav.resetTo(root.nav, root.rootKind()), Nav.entry("settings"))
+      }
+    })
   }
 
   // Confirm the named event or series before deleting it.

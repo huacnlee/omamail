@@ -37,6 +37,7 @@ Item {
 
   property bool loggedIn: false
   property bool loginBusy: false
+  property bool removalBusy: false
   // "", "starting", "waiting" or "checking": what the page says it is doing.
   property string signInStage: ""
   // A restore is owed from the start until it ends: the mailbox then does not
@@ -112,7 +113,7 @@ Item {
   }
 
   function beginLogin() {
-    if (loginBusy || loggedIn) return
+    if (loginBusy || loggedIn || removalBusy) return
     var problem = M365.backendProblem(backend)
     if (problem === "" && !configured) problem = "Add this mailbox's Application (client) ID first"
     if (problem !== "") {
@@ -246,7 +247,7 @@ Item {
   // saved sign-in is proven by the same check. Quiet when there is none, since a
   // mailbox being added has none by design.
   function restoreSession() {
-    if (loginBusy || restoring || loggedIn || !configured || !restoreOwed) return
+    if (loginBusy || restoring || loggedIn || removalBusy || !configured || !restoreOwed) return
     var problem = M365.backendProblem(backend)
     if (problem !== "") {
       // One that is not up yet is waited for; one that is up and too old is not.
@@ -328,6 +329,7 @@ Item {
 
   function reset() {
     generation++
+    removalBusy = false
     clearCode()
     retryTimer.stop()
     loginBusy = false
@@ -347,10 +349,46 @@ Item {
     loggedOut()
   }
 
-  // The mailbox's removal was confirmed: one added again under the same address
-  // starts with nothing saved.
-  function forgetCredential() {
-    logout()
+  // Removal must keep this account alive until the backend confirms its saved
+  // sign-in is gone. A per-account queue dies with its delegate, and a failed
+  // keyring deletion must leave a visible account the person can retry.
+  function forgetCredential(done) {
+    if (removalBusy) { if (typeof done === "function") done(false); return }
+    var requests = []
+    function add(account, client) {
+      if (account !== root.accountId || client === "") return
+      if (!requests.some(function(known) { return known.clientId === client }))
+        requests.push({ accountId: account, clientId: client })
+    }
+    add(accountId, effectiveClientId)
+    for (var i = 0; i < signInClients.length; i++) add(signInClients[i].accountId, signInClients[i].clientId)
+    for (var j = 0; j < owedSignOuts.length; j++) add(owedSignOuts[j].accountId, owedSignOuts[j].clientId)
+    if (requests.length === 0) { if (typeof done === "function") done(true); return }
+    var problem = M365.backendProblem(backend)
+    if (problem !== "") {
+      lastError = "The mailbox was not removed. " + problem + ". Try Remove account again when it is ready"
+      if (typeof done === "function") done(false)
+      return
+    }
+    reset()
+    restoreOwed = false
+    removalBusy = true
+    loggedOut()
+    var gen = generation
+    var remaining = requests.length
+    var failureText = ""
+    for (var k = 0; k < requests.length; k++) {
+      backend.call("m365.signOut", requests[k], function(result, failure) {
+        if (!root || gen !== root.generation) return
+        if (failure || !result || result.signedOut !== true)
+          failureText = M365.signOutFailure(failure || "m365_invalid_response")
+        if (--remaining !== 0) return
+        root.removalBusy = false
+        if (failureText !== "") root.lastError = "The mailbox was not removed. " + failureText
+        else root.owedSignOuts = root.owedSignOuts.filter(function(owed) { return owed.accountId !== root.accountId })
+        if (typeof done === "function") done(failureText === "")
+      })
+    }
   }
 
   // A different mailbox has a different sign-in, and whatever was in the air

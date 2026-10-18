@@ -2602,8 +2602,9 @@ Item {
 
   // A removed mailbox's password must not wait in the keyring for one added
   // again under the same address to find.
-  function forgetStoredCredentials() {
-    if (auth && typeof auth.forgetCredential === "function") auth.forgetCredential()
+  function forgetStoredCredentials(done) {
+    if (auth && typeof auth.forgetCredential === "function") auth.forgetCredential(done)
+    else if (typeof done === "function") done(true)
   }
 
   function signOut() {

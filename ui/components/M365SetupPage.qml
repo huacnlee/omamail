@@ -26,7 +26,8 @@ Column {
 
   readonly property var auth: service ? service.auth : null
   readonly property bool signedIn: !!auth && auth.loggedIn === true
-  readonly property bool busy: !!auth && auth.loginBusy === true
+  readonly property bool removing: !!auth && auth.removalBusy === true
+  readonly property bool busy: !!auth && (auth.loginBusy === true || removing)
   readonly property string stage: auth && auth.signInStage !== undefined ? String(auth.signInStage) : ""
   readonly property bool reconnecting: !signedIn && !busy && !!auth && auth.recoveringSession === true
   // The same rule the auth object applies before it sends anything: an older
@@ -67,6 +68,7 @@ Column {
   }
 
   function syncFromStore() {
+    errorText.text = auth ? String(auth.lastError || "") : ""
     if (!service) return
     addressField.text = String(service.accountAddress || "")
     clientIdField.text = auth && auth.clientId ? String(auth.clientId) : ""
@@ -85,7 +87,7 @@ Column {
     target: root.auth
     ignoreUnknownSignals: true
     function onLastErrorChanged() {
-      if (root.auth && root.auth.lastError !== "") errorText.text = String(root.auth.lastError)
+      errorText.text = root.auth ? String(root.auth.lastError || "") : ""
     }
     // A session that is there is no failure to report any more.
     function onLoggedInChanged() {
@@ -249,7 +251,8 @@ Column {
     width: parent.width
     visible: root.busy || root.reconnecting
     textFormat: Text.PlainText
-    text: root.reconnecting ? "Checking the saved Microsoft sign-in"
+    text: root.removing ? "Removing the saved Microsoft sign-in"
+      : root.reconnecting ? "Checking the saved Microsoft sign-in"
       : root.stage === "checking" ? "Signed in on Microsoft's side. Checking the mailbox"
       : root.stage === "waiting" ? "Waiting for you to finish on the Microsoft page"
       : "Asking Microsoft for a code"
@@ -355,7 +358,7 @@ Column {
     Button {
       objectName: "m365-sign-in"
       visible: !root.signedIn
-      text: root.busy ? "Waiting for Microsoft" : "Sign in with Microsoft..."
+      text: root.removing ? "Removing account" : root.busy ? "Waiting for Microsoft" : "Sign in with Microsoft..."
       enabled: !root.busy && root.backendProblem === "" && addressField.text.trim() !== ""
         && clientIdField.text.trim() !== ""
       foreground: root.textColor
@@ -366,7 +369,7 @@ Column {
 
     Button {
       objectName: "m365-cancel-sign-in"
-      visible: root.busy
+      visible: root.busy && !root.removing
       text: "Cancel"
       foreground: root.dimColor
       bordered: false
@@ -389,6 +392,7 @@ Column {
       objectName: "m365-remove"
       visible: !!root.service && root.service.accountCount > 1
       text: "Remove account"
+      enabled: !root.removing
       foreground: root.dangerColor
       bordered: false
       fontSize: Style.font.bodySmall

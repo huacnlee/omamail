@@ -590,19 +590,45 @@ Item {
       compare(calls("m365.signOut").length, 1, "a mailbox added again under the same address starts clean")
     }
 
-    function test_a_removed_mailbox_forgets_its_sign_in_and_one_asked_before_the_backend_is_up_waits_for_it() {
-      var auth = built()
-      auth.restoreSession()
-      answer(calls("m365.verify")[0], mailbox)
+    function test_removal_waits_for_confirmed_cleanup_and_retains_the_account_on_failure() {
+      var auth = made()
+      var results = []
       backendStub.ready = false
-      auth.forgetCredential()
-      compare(auth.loggedIn, false, "the session is forgotten at once")
-      compare(loggedOut.count, 1)
-      compare(calls("m365.signOut").length, 0, "nothing can be sent yet")
+      auth.forgetCredential(function(ok) { results.push(ok) })
+      compare(results, [false])
+      compare(auth.removalBusy, false)
+      compare(calls("m365.signOut").length, 0)
+      verify(auth.lastError.indexOf("not removed") >= 0)
       backendStub.ready = true
-      tryVerify(function() { return calls("m365.signOut").length === 1 }, 2000, "sent when the backend is up")
-      compare(calls("m365.signOut")[0].params, { accountId: root.account, clientId: root.client })
-      compare(calls("m365.verify").length, 1, "and the mailbox is not restored")
+      auth.forgetCredential(function(ok) { results.push(ok) })
+      compare(auth.removalBusy, true)
+      compare(results, [false], "no completion before the keyring result")
+      auth.beginLogin()
+      compare(calls("m365.signInBegin").length, 0, "no newer grant during removal")
+      answer(calls("m365.signOut")[0], null, "auth_keyring_failed")
+      compare(results, [false, false])
+      compare(auth.removalBusy, false)
+      verify(auth.lastError.indexOf("not removed") >= 0 && auth.lastError.indexOf("keyring") >= 0)
+      auth.forgetCredential(function(ok) { results.push(ok) })
+      answer(calls("m365.signOut")[1], { signedOut: true })
+      compare(results, [false, false, true])
+      compare(auth.removalBusy, false)
+      compare(auth.loggedIn, false)
+    }
+
+    function test_removal_checks_every_client_and_refuses_an_unconfirmed_reply() {
+      var auth = made()
+      var oldClient = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      auth.signInClients = [{ accountId: root.account, clientId: oldClient },
+        { accountId: root.account, clientId: root.client }]
+      var result = null
+      auth.forgetCredential(function(ok) { result = ok })
+      compare(calls("m365.signOut").length, 2, "one deletion per app ID")
+      answer(calls("m365.signOut")[0], { signedOut: true })
+      compare(result, null, "the older app's grant is also awaited")
+      answer(calls("m365.signOut")[1], {})
+      compare(result, false, "a missing success flag cannot remove the account")
+      compare(auth.removalBusy, false)
     }
 
     function test_an_application_id_in_capitals_is_sent_as_the_backend_keys_it() {

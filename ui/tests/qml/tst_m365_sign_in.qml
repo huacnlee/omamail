@@ -510,7 +510,107 @@ Item {
       app.confirmAccountRemoval(dialog.request)
       tryVerify(function() { return asked("m365.signOut").length === 1 }, 2000, "its sign-in is deleted")
       compare(asked("m365.signOut")[0].params, { accountId: accountId, clientId: client })
-      compare(mailService.accountList.accounts.filter(function(entry) { return entry.id === accountId }).length, 0)
+      compare(mailService.accountList.accounts.filter(function(entry) { return entry.id === accountId }).length, 1,
+        "the account stays until its saved sign-in was removed")
+      reply(asked("m365.signOut")[0], { signedOut: true })
+      tryVerify(function() { return mailService.accountList.accounts.filter(function(entry) { return entry.id === accountId }).length === 0 }, 2000)
+    }
+
+    function mailboxForRemoval(ready) {
+      mailService.backend.connected = ready
+      var list = Accounts.add(Accounts.emptyList(), { email: address, provider: "m365", clientId: client })
+      list = Accounts.add(list, { email: "bob@example.test", provider: "gmail" })
+      mailService.accountList = Accounts.setActive(list, accountId)
+      mailService.accountsLoaded = true
+      mailService.refreshCurrent()
+      tryVerify(function() { return mailService.findAccount(accountId) !== null && !!mailService.findAccount(accountId).auth }, 2000)
+      var request = Accounts.removalRequest({ accounts: mailService.accountSummaries }, 0)
+      compare(request.id, accountId)
+      return request
+    }
+
+    function test_removal_before_backend_start_keeps_the_account_until_cleanup_can_be_retried() {
+      var request = mailboxForRemoval(false)
+      compare(mailService.backend.ready, false)
+      app.confirmAccountRemoval(request)
+      wait(50)
+      verify(mailService.findAccount(accountId) !== null, "no destroyed delegate with owed credential deletion")
+      verify(mailService.findAccount(accountId).auth.lastError.indexOf("not removed") >= 0)
+      compare(asked("m365.signOut").length, 0)
+      BackendFixture.markReady(mailService, 8)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return asked("m365.signOut").length === 1 }, 2000)
+      verify(mailService.findAccount(accountId) !== null, "still present while keyring cleanup is pending")
+      reply(asked("m365.signOut")[0], { signedOut: true })
+      tryVerify(function() { return mailService.findAccount(accountId) === null }, 2000)
+    }
+
+    function test_failed_removal_keeps_the_account_and_reports_the_keyring_error() {
+      var request = mailboxForRemoval(true)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return asked("m365.signOut").length === 1 }, 2000)
+      refuse(asked("m365.signOut")[0], "auth_keyring_failed")
+      tryVerify(function() { return mailService.findAccount(accountId).auth.lastError.indexOf("not removed") >= 0 }, 2000)
+      verify(mailService.findAccount(accountId).auth.lastError.indexOf("keyring") >= 0)
+      compare(mailService.accountCount, 2)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return asked("m365.signOut").length === 2 }, 2000)
+      reply(asked("m365.signOut")[1], { signedOut: true })
+      tryVerify(function() { return mailService.findAccount(accountId) === null }, 2000)
+    }
+
+    function test_late_removal_success_cannot_delete_an_account_replaced_while_waiting() {
+      var request = mailboxForRemoval(true)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return asked("m365.signOut").length === 1 }, 2000)
+      var replacement = JSON.parse(JSON.stringify(mailService.accountList))
+      replacement.accounts[0].clientId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      mailService.accountList = replacement
+      tryCompare(mailService.findAccount(accountId).auth, "clientId", replacement.accounts[0].clientId)
+      reply(asked("m365.signOut")[0], { signedOut: true })
+      wait(50)
+      compare(mailService.accountCount, 2)
+      verify(mailService.findAccount(accountId) !== null, "a stale completion cannot remove the replacement")
+    }
+
+    function test_late_removal_keeps_newer_navigation_and_its_overlay() {
+      var request = mailboxForRemoval(true)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return asked("m365.signOut").length === 1 }, 2000)
+      app.openHelp()
+      var newerNav = app.nav
+      reply(asked("m365.signOut")[0], { signedOut: true })
+      tryVerify(function() { return mailService.findAccount(accountId) === null }, 2000)
+      compare(app.nav, newerNav, "a delayed removal cannot replace a newer page or overlay")
+      compare(app.overlay, "help")
+    }
+
+    function test_removal_error_is_visible_after_returning_and_clears_for_retry() {
+      var request = mailboxForRemoval(true)
+      app.openSettings()
+      app.editAccount(0)
+      waitForRendering(app)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return asked("m365.signOut").length === 1 }, 2000)
+      compare(named(app, "m365-remove").enabled, false)
+      compare(named(app, "m365-sign-in").enabled, false)
+      compare(named(app, "m365-cancel-sign-in").visible, false)
+      verify(named(app, "m365-progress").text.indexOf("Removing") >= 0)
+      refuse(asked("m365.signOut")[0], "auth_store_unavailable")
+      tryVerify(function() { return named(app, "m365-error").visible }, 2000)
+      verify(named(app, "m365-error").text.indexOf("not removed") >= 0)
+      verify(named(app, "m365-remove").enabled)
+      app.back()
+      app.editAccount(0)
+      waitForRendering(app)
+      verify(named(app, "m365-error").visible, "a recreated form still explains the failed removal")
+      verify(named(app, "m365-error").text.indexOf("not removed") >= 0)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return asked("m365.signOut").length === 2 }, 2000)
+      compare(named(app, "m365-error").text, "", "a retry clears the previous failure")
+      compare(named(app, "m365-remove").enabled, false)
+      reply(asked("m365.signOut")[1], { signedOut: true })
+      tryVerify(function() { return mailService.findAccount(accountId) === null }, 2000)
     }
 
     // The one removal dialog that was asked: the window has a few dialogs of this shape.
