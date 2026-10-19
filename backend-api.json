@@ -1,6 +1,6 @@
 {
   "apiVersion": 8,
-  "releasedApiVersion": 7,
+  "releasedApiVersion": 8,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -1473,39 +1473,7 @@
     }
   ],
   "unreleased": {
-    "methods": [
-      "m365.signInBegin",
-      "m365.signInPoll",
-      "m365.signOut",
-      "m365.verify",
-      "m365.list",
-      "m365.messages",
-      "m365.read",
-      "m365.attachment",
-      "m365.modify",
-      "m365.trash",
-      "m365.untrash",
-      "m365.send",
-      "m365.saveDraft",
-      "m365.deleteDraft",
-      "m365.sendAs",
-      "m365.invalidate",
-      "m365.cancel"
-    ],
-    "cases": [
-      "Microsoft 365 provider rules",
-      "Microsoft 365 text search is a text query",
-      "Microsoft 365 answers one sender identity without a request",
-      "Microsoft 365 verify names a mailbox that is not saved",
-      "Microsoft 365 list refuses a forged page token",
-      "Microsoft 365 messages refuse an id that is not its own",
-      "Microsoft 365 send refuses a body that is not canonical base64url",
-      "Microsoft 365 sign-in needs an application id",
-      "mail action rejects malformed Microsoft 365 IDs before preview",
-      "Microsoft 365 saves a draft only from canonical base64url",
-      "Microsoft 365 deletes a draft only by an id of its own",
-      "Microsoft 365 calendar discovery asks the mailbox's own sign-in",
-      "outbox accepts the Microsoft 365 provider"
-    ]
+    "methods": [],
+    "cases": []
   }
 }
