@@ -88,11 +88,13 @@ const settings = (values) => accounts.makeExchangeSettings(Object.assign({ ewsUr
 // ------------------------------------------------------ the connected backend
 
 {
-  // Nothing is sent to a backend that has no Exchange methods, or none at all yet.
-  assert.strictEqual(exchange.backendProblem({ ready: true, apiVersion: 8 }), "")
+  // Nothing is sent to a backend that has no Exchange methods, or none at all
+  // yet: they are the API 9 step, and the released 0.11.1 is API 8.
   assert.strictEqual(exchange.backendProblem({ ready: true, apiVersion: 9 }), "")
+  assert.strictEqual(exchange.backendProblem({ ready: true, apiVersion: 10 }), "")
+  assert.ok(exchange.backendProblem({ ready: true, apiVersion: 8 }).indexOf("Update the mail backend") === 0)
   assert.ok(exchange.backendProblem({ ready: true, apiVersion: 7 }).indexOf("Update the mail backend") === 0)
-  assert.strictEqual(exchange.backendProblem({ ready: false, apiVersion: 8 }), "Waiting for the mail backend to start")
+  assert.strictEqual(exchange.backendProblem({ ready: false, apiVersion: 9 }), "Waiting for the mail backend to start")
   assert.strictEqual(exchange.backendProblem(null), "Waiting for the mail backend to start")
 }
 

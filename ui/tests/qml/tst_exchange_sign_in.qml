@@ -289,10 +289,12 @@ Item {
     }
 
     // A backend from before the Exchange methods is sent nothing: the page says
-    // to update it, and Sign in waits. So does a backend not started yet.
+    // to update it, and Sign in waits. So does a backend not started yet. The
+    // released 0.11.1 is API 8, one step short of them.
     function test_a_backend_without_exchange_is_told_to_update_and_sent_nothing() {
-      BackendFixture.markReady(mailService, 7)
+      BackendFixture.markReady(mailService, 8)
       var account = openForm()
+      verify(named(app, "setup-page").item, "the chooser still offers Exchange")
       var note = named(app, "exchange-backend")
       verify(note.visible)
       compare(note.text, "Update the mail backend to sign in: the one installed has no Exchange support")
@@ -307,7 +309,7 @@ Item {
       compare(note.text, "Waiting for the mail backend to start")
       verify(!named(app, "exchange-submit").enabled)
 
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       verify(!note.visible)
       verify(named(app, "exchange-submit").enabled)
     }

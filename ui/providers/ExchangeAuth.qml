@@ -105,6 +105,12 @@ Item {
     }
   }
 
+  // A backend that is up but older than the Exchange methods knows no Exchange
+  // password either, so it is asked nothing of the keyring.
+  function backendOutdated() {
+    return !!backend && backend.ready === true && Exchange.backendProblem(backend) !== ""
+  }
+
   function restoreSession() {
     if (configured) lookup()
     else lookedUp = true
@@ -117,6 +123,10 @@ Item {
     // Signed out before the backend was up: the password is still to be deleted.
     if (account !== "" && Credentials.owes(account)) {
       answerLookup("", "credential_missing", key)
+      return
+    }
+    if (backendOutdated()) {
+      answerLookup("", "backend_needs_update", key)
       return
     }
     if (!platform || typeof platform.credentialGet !== "function" || account === "") {
@@ -139,7 +149,8 @@ Item {
     var missing = !error || error === "credential_missing"
     lookedUp = missing
     var found = missing && String(value || "") !== "" && key === serverKey
-    var reason = missing ? "No password saved for this mailbox. Sign in again" : "The credential store is unavailable"
+    var reason = missing ? "No password saved for this mailbox. Sign in again"
+      : error === "backend_needs_update" ? Exchange.BACKEND_OUTDATED : "The credential store is unavailable"
     if (found) {
       stored = true
       storedKey = key
@@ -236,6 +247,10 @@ Item {
 
   // `done(removed)`: false when the keyring did not confirm the delete.
   function erase(account, done) {
+    if (backendOutdated()) {
+      if (typeof done === "function") done(false)
+      return
+    }
     if (!platform || typeof platform.credentialDelete !== "function" || account === "") {
       if (typeof done === "function") done(true)
       return
@@ -303,10 +318,12 @@ Item {
   function forgetCredential(done) {
     function finish(forgotten) { if (typeof done === "function") done(forgotten) }
     if (removalBusy) { finish(false); return }
-    var problem = loginBusy || Credentials.writing(accountId) > 0 ? "A sign-in to it is still being finished"
-      : Exchange.backendProblem(backend)
+    var busy = loginBusy || Credentials.writing(accountId) > 0
+    var problem = busy ? "A sign-in to it is still being finished" : Exchange.backendProblem(backend)
     if (problem !== "") {
-      lastError = "The mailbox was not removed. " + problem + ". Try Remove account again when it is ready"
+      lastError = !busy && backendOutdated()
+        ? "The mailbox was not removed: the mail backend needs an update first. Update it, then try Remove account again"
+        : "The mailbox was not removed. " + problem + ". Try Remove account again when it is ready"
       finish(false)
       return
     }
@@ -325,10 +342,20 @@ Item {
 
   // Sign-out is at once in the window. The keyring is reached through the
   // backend, so one asked for before the backend is up is owed and made when it
-  // is; nothing finds the password in between.
+  // is; nothing finds the password in between. An outdated backend cannot delete
+  // it, and nothing is owed: an updated one in a later run would not know of the
+  // debt, so the page says to sign out again then.
   function logout() {
     var account = accountId
-    if (backend && backend.ready === true) {
+    if (backendOutdated()) {
+      stored = false
+      pending = ""
+      forgets++
+      loginBusy = false
+      lookedUp = true
+      Credentials.forgot(account)
+      lastError = "Signed out, but the mail backend needs an update before it can delete the saved password. Update it, then sign out again"
+    } else if (backend && backend.ready === true) {
       release(account, function(forgotten) {
         if (root && !forgotten && root.accountId === account) root.lastError = root.signOutFailure
       })

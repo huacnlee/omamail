@@ -10,13 +10,13 @@ var EWS_EXAMPLE = "https://mail.example.org/EWS/Exchange.asmx"
 
 // The first backend API with the `exchange.*` methods: an older backend has none
 // of them, so the setup page sends nothing to it.
-var MINIMUM_API = 8
+var MINIMUM_API = 9
+var BACKEND_OUTDATED = "Update the mail backend to sign in: the one installed has no Exchange support"
 
 // Why the connected backend cannot sign in an Exchange mailbox, or "".
 function backendProblem(backend) {
   if (!backend || backend.ready !== true) return "Waiting for the mail backend to start"
-  return Number(backend.apiVersion) >= MINIMUM_API ? ""
-    : "Update the mail backend to sign in: the one installed has no Exchange support"
+  return Number(backend.apiVersion) >= MINIMUM_API ? "" : BACKEND_OUTDATED
 }
 
 function trimmed(value) {

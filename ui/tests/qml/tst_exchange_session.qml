@@ -246,6 +246,11 @@ Item {
       return mailService.accountList.accounts.some(function(entry) { return entry.id === accountId })
     }
 
+    // What reached the backend for the keyring.
+    function credentialRequests() {
+      return fixture.requests.filter(function(request) { return request.method.indexOf("credentials.") === 0 })
+    }
+
     function holdDeletes() {
       var held = []
       fixture.answers["credentials.delete"] = function(params, request) {
@@ -280,11 +285,55 @@ Item {
       verify(mailService.findAccount(accountId).auth.lastError.indexOf("not removed") >= 0)
       compare(keyring.deletes, [], "the keyring was not asked")
       compare(keyring.entries[accountId], secret)
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       app.confirmAccountRemoval(request)
       tryVerify(function() { return !present() }, 2000, "asked again once it is up")
       compare(keyring.deletes, [accountId])
       compare(keyring.entries[accountId], undefined)
+    }
+
+    // The released 0.11.1 is API 8 and knows no Exchange password: restoring and
+    // removing the mailbox ask it nothing and say why, and the mailbox stays.
+    function test_a_backend_without_exchange_is_asked_nothing_of_the_keyring() {
+      keyring.entries[accountId] = secret
+      BackendFixture.markReady(mailService, 8)
+      fixture.requests = []
+      seed(null, [entryFor("ada@corp.example.test")])
+      var account = mailService.findAccount(accountId)
+      tryCompare(account.auth, "lastError", "Update the mail backend to sign in: the one installed has no Exchange support")
+      verify(!account.auth.loggedIn)
+      var request = { id: accountId, email: "jane@corp.example.test", index: 1 }
+      app.confirmAccountRemoval(request)
+      wait(50)
+      verify(present(), "the mailbox stays while its password cannot be deleted")
+      compare(account.auth.lastError,
+        "The mailbox was not removed: the mail backend needs an update first. Update it, then try Remove account again")
+      compare(credentialRequests().length, 0, "nothing was asked of the keyring")
+      compare(keyring.entries[accountId], secret)
+      BackendFixture.markReady(mailService, 9)
+      app.confirmAccountRemoval(request)
+      tryVerify(function() { return !present() }, 2000, "removed once the backend can delete it")
+      compare(keyring.entries[accountId], undefined)
+    }
+
+    // Signed in, then an older backend without Exchange starts in its place:
+    // signing out asks it nothing and says the password is still there.
+    function test_signing_out_on_a_backend_without_exchange_says_the_password_stays() {
+      keyring.entries[accountId] = secret
+      seed(null, [entryFor("ada@corp.example.test")])
+      var account = mailService.accountAt(1)
+      tryVerify(function() { return account.ready }, 2000)
+      openEditor(1)
+      BackendFixture.markReady(mailService, 8)
+      fixture.requests = []
+      mailService.signOut()
+      wait(50)
+      verify(!account.auth.loggedIn)
+      compare(credentialRequests().length, 0, "nothing was asked of the keyring")
+      compare(keyring.entries[accountId], secret)
+      tryVerify(function() { return named(app, "exchange-error").visible }, 2000)
+      compare(named(app, "exchange-error").text,
+        "Signed out, but the mail backend needs an update before it can delete the saved password. Update it, then sign out again")
     }
 
     function test_a_removal_the_keyring_refuses_keeps_the_mailbox_and_says_so() {
@@ -360,7 +409,7 @@ Item {
       account.auth.restoreSession()
       wait(50)
       compare(account.auth.loggedIn, false, "nothing finds the password meanwhile")
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       tryVerify(function() { return keyring.deletes.length === 1 }, 2000, "deleted once it is up")
       compare(keyring.deletes, [accountId])
       compare(keyring.entries[accountId], undefined)
@@ -463,7 +512,7 @@ Item {
       mailService.backend.connected = false
       account.signOut()
       keyring.failDeletes = true
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       tryVerify(function() { return keyring.deletes.length === 1 }, 2000)
       tryVerify(function() { return account.auth.lastError.indexOf("Signed out, but the keyring") === 0 }, 2000,
         "the refused delete has been answered")
@@ -484,7 +533,7 @@ Item {
       compare(account.auth.signOutOwed, false)
       var deletes = keyring.deletes.length
       mailService.backend.connected = false
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       wait(100)
       compare(keyring.deletes.length, deletes, "the restart deletes nothing")
       compare(keyring.entries[accountId], "new-synthetic-passw0rd")
@@ -543,7 +592,7 @@ Item {
       }, 2000, "the mailbox's host was rebuilt")
       compare(mailService.findAccount(accountId).auth.loggedIn, false, "still signed out")
       compare(keyring.deletes, [])
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       tryVerify(function() { return keyring.deletes.indexOf(accountId) >= 0 }, 2000, "the owed delete is made")
       compare(keyring.entries[accountId], undefined)
     }
@@ -565,7 +614,7 @@ Item {
       if (list.activeId === accountId) list.activeId = jill
       mailService.accountList = list
       tryVerify(function() { return mailService.findAccount(jill) !== null }, 2000)
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       tryVerify(function() { return keyring.deletes.length >= 1 }, 2000)
       wait(100)
       compare(keyring.deletes, [accountId], "the address that was signed out, and no other")
@@ -584,7 +633,7 @@ Item {
       mailService.backend.connected = false
       jane.signOut()
       keyring.failDeletes = true
-      BackendFixture.markReady(mailService, 8)
+      BackendFixture.markReady(mailService, 9)
       tryVerify(function() { return keyring.deletes.indexOf(accountId) >= 0 }, 2000)
       tryVerify(function() { return jane.auth.lastError.indexOf("Signed out, but the keyring") === 0 }, 2000,
         "the signed-out mailbox says so")

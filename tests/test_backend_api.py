@@ -206,8 +206,8 @@ function storageSnapshot(directory = process.env.HOME) {
 
   await call('message.parse', {raw:17}, -32602);
   const providers = await call('providers.snapshot');
-  // The pinned release has no exchange or m365 provider; their rules are unreleased.
-  for (const id of ['gmail','outlook','hey','jmap','imap'].concat(released ? [] : ['exchange','m365'])) {
+  // The pinned release has no exchange provider; its rules are unreleased.
+  for (const id of ['gmail','outlook','hey','jmap','imap','m365'].concat(released ? [] : ['exchange'])) {
     assert.ok(providers[id] && providers[id].queries && providers[id].capabilities);
     assert.equal(typeof providers[id].nativeSync, 'boolean');
   }

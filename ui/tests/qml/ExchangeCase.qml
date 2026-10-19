@@ -53,7 +53,7 @@ TestCase {
     // The native ledger and the merged list answer as they do in the real window.
     NativeIntentFixture.install(service)
     NativeModel.install(service)
-    fixture = BackendFixture.markReady(service, 8)
+    fixture = BackendFixture.markReady(service, 9)
   }
 
   function init() {
@@ -99,7 +99,7 @@ TestCase {
     ExchangeCredentials.reset()
     wait(0)
     service.recount()
-    BackendFixture.markReady(service, 8)
+    BackendFixture.markReady(service, 9)
     service.backend.pending = ({})
   }
 
