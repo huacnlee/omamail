@@ -35,19 +35,27 @@ fn header(value: &str) -> Result<String> {
     }
     Ok(out)
 }
+// RFC 5322 specials: a display name holding one is one name only when quoted.
+const SPECIALS: &[char] = &[
+    '(', ')', '<', '>', '[', ']', ':', ';', '@', '\\', ',', '.', '"',
+];
+/// A display name as a quoted-string, `"` and `\` escaped: `always` in a header,
+/// and in address text a person reads only when the name holds a special.
+pub(crate) fn quoted_phrase(value: &str, always: bool) -> String {
+    if value.is_empty() || (!always && !value.contains(SPECIALS)) {
+        return value.into();
+    }
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+/// A display name in a header: one encoded word when it is not ASCII or holds
+/// `=?`, which readers decode even inside quotes; otherwise quoted.
 fn phrase(value: &str) -> Result<String> {
     let value = header(value)?;
     let value = value.trim();
-    if value.is_empty() {
-        return Ok(String::new());
-    }
-    if !value.is_ascii() {
+    if !value.is_ascii() || value.contains("=?") {
         return Ok(format!("=?UTF-8?B?{}?=", STANDARD.encode(value)));
     }
-    Ok(format!(
-        "\"{}\"",
-        value.replace('\\', "\\\\").replace('"', "\\\"")
-    ))
+    Ok(quoted_phrase(value, true))
 }
 fn fold(name: &str, value: &str) -> Result<String> {
     let value = header(value)?;
@@ -57,38 +65,83 @@ fn fold(name: &str, value: &str) -> Result<String> {
         format!("{name}: =?UTF-8?B?{}?=", STANDARD.encode(value))
     })
 }
+// An address that is one without angle brackets: a dot-atom on both sides of
+// the `@`. Anything else keeps its brackets, so `<a@x.org,b@x.org>` stays one.
+fn plain_address(value: &str) -> bool {
+    let atom = |part: &str| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~".contains(&b))
+    };
+    value
+        .split_once('@')
+        .is_some_and(|(local, domain)| local.split('.').all(atom) && domain.split('.').all(atom))
+}
+fn addresses(list: &mailparse::MailAddrList) -> Vec<String> {
+    list.iter()
+        .flat_map(|address| match address {
+            mailparse::MailAddr::Single(single) => vec![single.addr.clone()],
+            mailparse::MailAddr::Group(group) => {
+                group.addrs.iter().map(|s| s.addr.clone()).collect()
+            }
+        })
+        .collect()
+}
 fn address_line(name: &str, value: &str) -> Result<String> {
+    // ASCII goes out as typed, comments and unquoted commas included. A list
+    // ASCII cannot carry, or with a name holding `=?`, is written again with
+    // each name through `phrase`, and that rewrite refuses what it could change
+    // the reading of: a group, an address that is not ASCII, or a line that
+    // names other addresses than the list did.
     let value = header(value)?;
-    if value.is_ascii() {
+    let parsed = mailparse::addrparse(&value);
+    let word = |name: &str| name.contains("=?");
+    let words = parsed.as_ref().is_ok_and(|list| {
+        list.iter().any(|address| match address {
+            mailparse::MailAddr::Single(single) => {
+                word(single.display_name.as_deref().unwrap_or(""))
+            }
+            mailparse::MailAddr::Group(group) => {
+                word(&group.group_name)
+                    || group
+                        .addrs
+                        .iter()
+                        .any(|s| word(s.display_name.as_deref().unwrap_or("")))
+            }
+        })
+    });
+    if value.is_ascii() && !words {
         return Ok(format!("{name}: {value}"));
     }
-    fn single(value: &mailparse::SingleInfo) -> Result<String> {
-        let address = header(&value.addr)?;
-        let name = phrase(value.display_name.as_deref().unwrap_or(""))?;
-        Ok(if name.is_empty() {
-            address
-        } else {
-            format!("{name} <{address}>")
-        })
-    }
-    let parsed = mailparse::addrparse(&value).map_err(|_| "invalid_message_header")?;
-    let mut addresses = Vec::new();
+    let parsed = parsed.map_err(|_| "invalid_message_header")?;
+    let mut written = Vec::new();
     for address in parsed.iter() {
-        addresses.push(match address {
-            mailparse::MailAddr::Single(value) => single(value)?,
-            mailparse::MailAddr::Group(group) => format!(
-                "{}: {};",
-                phrase(&group.group_name)?,
-                group
-                    .addrs
-                    .iter()
-                    .map(single)
-                    .collect::<Result<Vec<_>>>()?
-                    .join(", ")
-            ),
+        let mailparse::MailAddr::Single(single) = address else {
+            return Err("invalid_message_header");
+        };
+        if !single.addr.is_ascii() {
+            return Err("invalid_message_header");
+        }
+        let phrase = phrase(single.display_name.as_deref().unwrap_or(""))?;
+        written.push(match (phrase.is_empty(), plain_address(&single.addr)) {
+            (true, true) => single.addr.clone(),
+            (true, false) => format!("<{}>", single.addr),
+            (false, _) => format!("{phrase} <{}>", single.addr),
         });
     }
-    Ok(format!("{name}: {}", addresses.join(", ")))
+    let line = format!("{name}: {}", written.join(", "));
+    let check = format!("{line}\r\n\r\n");
+    let (headers, _) =
+        mailparse::parse_headers(check.as_bytes()).map_err(|_| "invalid_message_header")?;
+    let read = headers
+        .first()
+        .and_then(|header| mailparse::addrparse_header(header).ok())
+        .ok_or("invalid_message_header")?;
+    if addresses(&read) != addresses(&parsed) {
+        return Err("invalid_message_header");
+    }
+    Ok(line)
 }
 fn reference(value: &str) -> Result<String> {
     Ok(header(value)?

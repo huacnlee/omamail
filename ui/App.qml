@@ -310,6 +310,10 @@ Item {
   readonly property string currentView: page === "reader" ? "reader"
     : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
   readonly property bool calendarVisible: currentView === "calendar"
+  // With no calendar connected anywhere the view cannot hold an event, so the
+  // window stops offering it; Settings still adds one.
+  readonly property bool calendarAvailable: !(service && service.noCalendars === true)
+  onCalendarAvailableChanged: if (!calendarAvailable && calendarVisible) backToList()
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
@@ -491,8 +495,7 @@ Item {
     if (payload.messageId) Qt.callLater(function() {
       root.openMessage(String(payload.messageId))
     })
-    if (payload.view === "calendar") {
-      showCalendar()
+    if (payload.view === "calendar" && showCalendar()) {
       Qt.callLater(function() {
         calendarView.showEvent(String(payload.eventId || ""), Number(payload.eventStart || 0))
       })
@@ -611,8 +614,10 @@ Item {
   }
 
   function showCalendar() {
+    if (!calendarAvailable) return false
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
+    return true
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -1001,8 +1006,7 @@ Item {
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
-    if (id === "archive") return actOnCursor("archive")
-    if (id === "trash") return actOnCursor("trash")
+    if (id === "archive" || id === "trash") return actOnCursor(list.keyActions[id])
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     //
@@ -1066,16 +1070,12 @@ Item {
     if (id === "switchAccount") return accountSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
-      else {
-        showCalendar()
-        calendarView.refresh()
-      }
+      else if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "mailView") return backToList()
     if (id === "calendarView") {
-      showCalendar()
-      calendarView.refresh()
+      if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "toggleSidebar") return toggleSidebar()
@@ -1811,6 +1811,7 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          calendarAvailable: root.calendarAvailable
           menuLabelPath: labelMenu.opened && !!root.service
             && labelMenu.accountId === root.service.activeAccountId ? labelMenu.labelPath : ""
           service: root.service
@@ -1822,8 +1823,7 @@ Item {
           numbersVisible: focusScope.ctrlHeld
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
-            root.showCalendar()
-            calendarView.refresh()
+            if (root.showCalendar()) calendarView.refresh()
           }
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
@@ -1946,6 +1946,7 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               checkedIds: root.checkedIds
+              selectionActive: root.selectionActive
               ctrlHeld: focusScope.ctrlHeld
               urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
@@ -1953,9 +1954,9 @@ Item {
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
-              onMenuRequested: function(id, sceneX, sceneY) {
+              onMenuRequested: function(id, sceneX, sceneY, ids) {
                 root.cursorId = id
-                rowMenu.openAt(id, sceneX, sceneY)
+                rowMenu.openAt(id, sceneX, sceneY, ids)
               }
             }
           }
@@ -2033,6 +2034,8 @@ Item {
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
           contentDirection: root.service ? root.service.contentDirection : ""
+          actions: list.readerActions
+          keyActions: list.keyActions
           onBodyModeRequested: function(mode) {
             if (root.service) root.service.setBodyMode(mode)
           }
@@ -2080,9 +2083,7 @@ Item {
                 root.service.toggleStar(root.service.selectedId)
               return
             }
-            if (((root.service.conversationProjection || ({})).memberIds || []).indexOf(root.service.selectedId) < 0
-                || root.cursorId === "")
-              root.cursorId = root.service.selectedId
+            root.cursorId = Model.readerTarget(root.service.conversationProjection, root.service.selectedId, root.cursorId)
             if (action === "moveToLabel") return root.openLabelPicker(outside)
             root.actOnCursor(action, outside)
           }
@@ -2364,8 +2365,7 @@ Item {
                 Qt.callLater(function() { if (root.service) root.service.signIn() })
               }
               onOpenCalendarRequested: {
-                root.showCalendar()
-                calendarView.refresh()
+                if (root.showCalendar()) calendarView.refresh()
               }
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
@@ -2660,7 +2660,7 @@ Item {
           panelFontFamily: root.fontFamily
           hints: Keymap.hintsFor(focusScope.keyContext,
             root.service ? root.service.unavailableActions : [],
-            root.cursorId !== "")
+            root.cursorId !== "", list.keyActions)
         }
       }
 
@@ -2669,6 +2669,7 @@ Item {
         id: appMenu
         objectName: "app-menu"
         anchors.fill: parent
+        calendarAvailable: root.calendarAvailable
         textColor: root.foreground
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
@@ -2685,8 +2686,7 @@ Item {
           if (root.service) root.service.selectMailbox("inbox")
         }
         onCalendarRequested: {
-          root.showCalendar()
-          calendarView.refresh()
+          if (root.showCalendar()) calendarView.refresh()
         }
         onSetupRequested: root.openSettings()
         onSwitchAccountRequested: accountSwitcher.openCentered()
@@ -2981,8 +2981,6 @@ Item {
           var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
           if (action === "moveToLabel") return root.openLabelPicker(outside)
-          if ((action === "star" || action === "unstar") && root.selectionActive && !outside)
-            return root.actOnChecked(Model.starActionFor(Model.summariesById(root.service.messages, root.checkedIds)))
           root.actOnCursor(action, outside)
         }
         // From a stop on the rail. A member is not a row, so the cursor stays

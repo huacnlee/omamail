@@ -26,7 +26,7 @@ fn configured_identities(settings: &Value) -> Result<Value, &'static str> {
 // hand-edited entry names agent sends exactly as it names composer sends
 // instead of failing them.
 fn sender_name(raw: &str) -> String {
-    let line: String = raw.chars().map(|c| if c.is_ascii_control() { ' ' } else { c }).collect();
+    let line: String = raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     line.split(' ').filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ").trim().to_string()
 }
 
@@ -642,6 +642,8 @@ mod tests {
         assert_eq!(unnamed, json!([{"email":"me@example.org","displayName":"","isPrimary":true,"isDefault":true}]));
         let edited = configured_identities(&json!({"email":"me@example.org","senderName":"Jane\r\nBcc: x@example.org\u{7f}\tExample"})).unwrap();
         assert_eq!(edited[0]["displayName"], "Jane Bcc: x@example.org Example", "one header line, as the UI stores it");
+        let c1 = configured_identities(&json!({"email":"me@example.org","senderName":"Jane\u{85}Example\u{9f}"})).unwrap();
+        assert_eq!(c1[0]["displayName"], "Jane Example", "a C1 control too, which the composer would refuse");
     }
 
     #[test]

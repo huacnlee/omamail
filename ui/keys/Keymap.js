@@ -69,12 +69,19 @@ var BINDINGS = [
   { id: "previousMember", keys: ["p"], contexts: ["reader"],
     group: "Moving", label: "Previous message in the conversation" },
 
+  // Each is the button in its slot, and where that action is already done the
+  // button is its inverse: `d` restores a message in the trash and `e` moves
+  // one in Archive to the Inbox (`Model.keyActionFor`). Re-trashing moves
+  // nothing, so `d` was a key that did nothing there. `inverse` names that
+  // action and its hint, so the hint row says what the key will do.
   { id: "archive", keys: ["e"], contexts: MAIL,
-    group: "Acting", label: "Archive",
-    hint: { list: "archive", reader: "archive" } },
+    group: "Acting", label: "Archive (in Archive: move to Inbox)",
+    hint: { list: "archive", reader: "archive" },
+    inverse: { action: "unarchive", hint: "move to inbox" } },
   { id: "trash", keys: ["d"], contexts: MAIL,
-    group: "Acting", label: "Move to trash",
-    hint: { list: "trash", reader: "trash" } },
+    group: "Acting", label: "Move to trash (in the trash: restore)",
+    hint: { list: "trash", reader: "trash" },
+    inverse: { action: "untrash", hint: "restore" } },
   { id: "star", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
   // `v` because that is the key Gmail moves a message with, and issue #58 asks
@@ -407,15 +414,20 @@ function helpGroups(hidden) {
 // what a key means is a property of the application, and only whether it is on
 // offer depends on which mailbox is open. `hasSelection` makes the few hints
 // that act on a particular row contextual without changing their bindings.
-function hintsFor(context, unavailable, hasSelection) {
+// `actions` says what a binding with an `inverse` will ask for, by binding
+// id; where that is the inverse, the hint names it rather than the key's own
+// verb.
+function hintsFor(context, unavailable, hasSelection, actions) {
   var out = []
   var rows = bindingsFor(context)
   var missing = Array.isArray(unavailable) ? unavailable : []
+  var asked = actions && typeof actions === "object" ? actions : {}
   for (var i = 0; i < rows.length; i++) {
     if (rows[i].hintNeedsSelection && hasSelection !== true) continue
     var unavailableId = rows[i].hintUnavailableId || rows[i].id
     if (missing.indexOf(unavailableId) >= 0) continue
     var text = hintTextFor(rows[i], context)
+    if (text !== "" && rows[i].inverse && asked[rows[i].id] === rows[i].inverse.action) text = rows[i].inverse.hint
     if (text !== "") out.push(({ key: hintKeyFor(rows[i]), label: text }))
   }
   return out

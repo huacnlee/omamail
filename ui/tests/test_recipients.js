@@ -47,6 +47,36 @@ assert.strictEqual(
   "Jane Doe <jane@example.com>"
 )
 
+// A contact's name is often a stranger's, harvested from mail that arrived,
+// and the backend writes the field's text into the header. A name holding a
+// special is quoted, or `Team: eve@example.net;` in front of an address would
+// be a group that sends a copy to eve.
+{
+  const message = load("message/Message.js")
+  // One special per name, so each one in the set is needed on its own.
+  const quoted = (name) => '"' + name.replace(/([\\"])/g, "\\$1") + '" <dave@example.org>'
+  const cases = "()<>[]:;@\\,.\"".split("").map((c) => ["Ada " + c + " Lovelace", quoted("Ada " + c + " Lovelace")])
+  cases.push(
+    ["Team: eve@example.net;", '"Team: eve@example.net;" <dave@example.org>'],
+    ['Say "hi" \\ bye', '"Say \\"hi\\" \\\\ bye" <dave@example.org>'],
+    ["Smith (Sales)", '"Smith (Sales)" <dave@example.org>'],
+    ["Dr. Dave", '"Dr. Dave" <dave@example.org>'],
+    ["eve@example.net", '"eve@example.net" <dave@example.org>'],
+    ["[ops]", '"[ops]" <dave@example.org>'],
+    ["Müller, Jörg", '"Müller, Jörg" <dave@example.org>'],
+    ["Jörg Müller", "Jörg Müller <dave@example.org>"],
+    ["Dave\u0000Lovelace", "Dave Lovelace <dave@example.org>"],
+    ["\u0000", "dave@example.org"])
+  for (const [name, text] of cases) {
+    const written = recipients.append("ada@example.org", { name: name, email: "dave@example.org" })
+    assert.strictEqual(written, "ada@example.org, " + text, JSON.stringify(name))
+    const summary = message.summarize({ payload: message.parseRfc822(
+      message.buildRawMessage({ to: written, body: "x" })) }, new Date(0))
+    deepEqual(summary.to.map((entry) => entry.email),
+      ["ada@example.org", "dave@example.org"], JSON.stringify(name))
+  }
+}
+
 deepEqual(recipients.filter(contacts, "morgan"), [
   { name: "Morgan Reed", email: "morgan@example.com" }
 ])

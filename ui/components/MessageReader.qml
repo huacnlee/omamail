@@ -6,6 +6,7 @@ import "../message/Direction.js" as Direction
 import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
+import "../account/Model.js" as Model
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -125,6 +126,18 @@ Item {
 
   readonly property var summary: service ? service.selectedMessage : null
   readonly property bool isDraft: !!summary && summary.isDraft === true
+  // What the archive and trash buttons ask for, by binding id. The window
+  // decides it over the rows the buttons' action will reach, which are not
+  // always the open message (`MessageList.readerActions`): the selection when
+  // the message is ticked, the conversation's row when a member is open.
+  // `keys` false means `e` and `d` reach other rows, so the tooltips leave
+  // them out rather than name a key that does something else.
+  property var actions: null
+  // What `e` and `d` ask for, for the empty reader's key list.
+  property var keyActions: null
+  readonly property string archiveAction: actions ? actions.archive : "archive"
+  readonly property string trashAction: actions ? actions.trash : "trash"
+  function keyHint(key) { return actions && actions.keys === false ? "" : " · " + key }
 
   // The id the service answers to, which is not always the one on the summary.
   // A list made of several mailboxes addresses a row by mailbox and id, and the
@@ -277,6 +290,7 @@ Item {
     dimColor: root.dimColor
     dimmerColor: root.dimmerColor
     panelFontFamily: root.panelFontFamily
+    keyActions: root.keyActions
   }
 
   // Nothing known at all, which after the reader learned to open on the list's
@@ -973,9 +987,10 @@ Item {
           x: actionGap.x + actionGap.width + messageActions.gap
           y: Math.round((parent.height - height) / 2)
           visible: !root.service || root.service.canArchive
-          iconName: "archive"; tooltipText: "Archive · e"
+          iconName: root.archiveAction === "unarchive" ? "inbox" : "archive"
+          tooltipText: Model.actionName(root.archiveAction) + root.keyHint("e")
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-          onClicked: root.actionRequested("archive")
+          onClicked: root.actionRequested(root.archiveAction)
         }
         // Archive under a label, or move to a folder: the same picker `v`
         // opens, one press away in the reader too.
@@ -999,9 +1014,10 @@ Item {
               ? archiveButton.x + archiveButton.width
               : actionGap.x + actionGap.width)) + messageActions.gap
           y: Math.round((parent.height - height) / 2)
-          iconName: "trash"; tooltipText: "Move to trash · d"
+          iconName: root.trashAction === "untrash" ? "undo" : "trash"
+          tooltipText: Model.actionName(root.trashAction) + root.keyHint("d")
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-          onClicked: root.actionRequested("trash")
+          onClicked: root.actionRequested(root.trashAction)
         }
 
       }

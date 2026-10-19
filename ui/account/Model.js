@@ -538,6 +538,104 @@ function unavailableActions(capabilities) {
   return out
 }
 
+// The mailbox the list is showing, or "" while it shows something else: a
+// search reaches the whole account and a label view is somewhere else,
+// whatever `mailboxKey` still says. `view` is anything with the service's
+// `mailboxKey`, `searchQuery` and `rawQuery`.
+function plainMailbox(view) {
+  var on = view || {}
+  if (String(on.searchQuery || "") !== "" || String(on.rawQuery || "") !== "") return ""
+  return String(on.mailboxKey || "")
+}
+
+// Whether a message is in the trash. Its own TRASH label says so wherever the
+// provider's resource carries one. A HEY posting carries no label for the box
+// it was listed from, so the plain Trash listing is the other witness.
+function inTrash(summary, view) {
+  if (!summary) return false
+  return summary.inTrash === true || plainMailbox(view) === "trash"
+}
+
+// Whether a message is archived: out of the inbox and not somewhere that has
+// its own verb. Spam counts as "its own verb" only where a spam verb exists —
+// an IMAP Junk folder has no report-spam inverse to offer instead, so a Junk
+// message there is the one spam case "Move to Inbox" still means. The verb is
+// the owning mailbox's (`view.hostForId`), because a merged list holds both
+// kinds, and an owner that cannot be found is not taken to lack one.
+function isArchived(summary, view, id) {
+  if (!summary || summary.inInbox !== false || inTrash(summary, view)) return false
+  if (summary.isSent === true || summary.isDraft === true) return false
+  if (summary.inSpam !== true) return true
+  var host = !view ? null : typeof view.hostForId === "function" ? view.hostForId(id) : view
+  return !!host && host.canReportSpam === false
+}
+
+// Whether every one of these rows is in the trash, or archived: the menu and
+// `keyActionFor` ask over the rows an action will reach, never one of them.
+function allInTrash(rows, view) {
+  var list = Array.isArray(rows) ? rows : []
+  for (var i = 0; i < list.length; i++) if (!inTrash(list[i], view)) return false
+  return list.length > 0
+}
+
+function allArchived(rows, view) {
+  var list = Array.isArray(rows) ? rows : []
+  for (var i = 0; i < list.length; i++)
+    if (!isArchived(list[i], view, list[i] ? list[i].id : "")) return false
+  return list.length > 0
+}
+
+// What the archive or trash slot asks for on the rows its action will reach.
+// Where the slot's action is already done for all of them the slot is the way
+// back: `d` restores messages in the trash, `e` moves archived messages in the
+// Archive mailbox to the Inbox. Archived alone is not enough for `e`: on IMAP
+// every folder but the Inbox reads as archived, and `e` in one of them files
+// the message in Archive, which is worth keeping. Anything else is the slot's
+// own action, so a mixed selection lands in one place rather than swapping
+// every row — the rule `starActionFor` keeps for `s`.
+function keyActionFor(action, rows, view) {
+  var verb = String(action || "")
+  if (verb === "trash") return allInTrash(rows, view) ? "untrash" : verb
+  if (verb === "archive" && plainMailbox(view) === "archive" && allArchived(rows, view)) return "unarchive"
+  return verb
+}
+
+// The view a message that is not one of the listing's rows is judged in: the
+// same mailboxes and their spam verbs, and no listing. The listing witnesses
+// where its own rows are (`inTrash`, the Archive rule of `keyActionFor`), not
+// where a message opened from elsewhere is, such as one a new-mail
+// notification opened over the Trash.
+function unlistedView(view) {
+  var on = view || {}
+  return { mailboxKey: "", searchQuery: "", rawQuery: "", canReportSpam: on.canReportSpam,
+    hostForId: function(id) { return typeof on.hostForId === "function" ? on.hostForId(id) : on } }
+}
+
+// The row the reader's own buttons act on when the selection does not
+// reach the open message: the cursor's row while the open message is a
+// member of that row's conversation, else the open message itself. App moves
+// the cursor there before acting, and the list draws the buttons from it.
+function readerTarget(projection, selectedId, cursorId) {
+  var members = projection && Array.isArray(projection.memberIds) ? projection.memberIds : []
+  var cursor = String(cursorId || "")
+  return members.indexOf(selectedId) >= 0 && cursor !== "" ? cursor : String(selectedId || "")
+}
+
+// The words for the four verbs, for the menu, the row and the reader, so a
+// verb reads the same wherever it is offered. Which verb each control offers
+// is its own: the menu offers Move to Inbox for an archived message anywhere,
+// the buttons and `e` only in Archive. Untrash is "Restore", not "Move to Inbox":
+// Gmail's takes the TRASH label off and leaves the rest, so a sent message
+// goes back to Sent, while the other clients move it to the Inbox.
+function actionName(action, labelView) {
+  var verb = String(action || "")
+  if (verb === "archive") return "Archive"
+  if (verb === "trash") return "Move to trash"
+  if (verb === "untrash") return "Restore"
+  if (verb === "unarchive") return labelView === true ? "Move to Inbox and remove label" : "Move to Inbox"
+  return ""
+}
+
 // A row carrying a block, with its own flags read the way `Message.summarize`
 // reads them: unread and starred are "this message, *or* any counted member".
 // A representative that has been read while a reply has not is still an unread

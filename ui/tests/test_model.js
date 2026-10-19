@@ -1763,3 +1763,103 @@ assert.strictEqual(model.monitoredNote([]), "")
 // A provider with no move verb is told so in the hints, the way archive is.
 deepEqual(model.unavailableActions({ archive: true, star: true, move: true }), [])
 deepEqual(model.unavailableActions({ archive: true, star: true }), ["move"])
+
+// ------------------------------------------------------- the way back
+//
+// `e` and `d` are their buttons, and where the button's action is already done
+// it is the way back. A message in the trash cannot be trashed again — that
+// moved nothing — and on HEY, which has no archive and no move, untrash is the
+// only way out of the trash at all.
+{
+  const plain = (key) => ({ mailboxKey: key, searchQuery: "", rawQuery: "" })
+  const labelled = { id: "g1", inInbox: false, inTrash: true, labelIds: ["TRASH"] }
+  // A HEY posting says nothing about the box it was listed from.
+  const posting = { id: "1:2", inInbox: false, inTrash: false, labelIds: [] }
+  const inbox = { id: "i1", inInbox: true, inTrash: false, labelIds: ["INBOX"] }
+  const filed = { id: "a1", inInbox: false, inTrash: false, inSpam: false,
+    isSent: false, isDraft: false, labelIds: [] }
+
+  assert.strictEqual(model.inTrash(labelled, plain("inbox")), true, "its own TRASH label says so anywhere")
+  assert.strictEqual(model.inTrash(posting, plain("trash")), true, "the plain Trash listing says so for HEY")
+  assert.strictEqual(model.inTrash(posting, plain("papertrail")), false)
+  assert.strictEqual(model.inTrash(posting, { mailboxKey: "trash", searchQuery: "invoice", rawQuery: "" }), false,
+    "a search reaches the whole account, whatever mailbox the rail still has")
+  assert.strictEqual(model.inTrash(posting, { mailboxKey: "trash", searchQuery: "", rawQuery: "label:Bills" }), false,
+    "a label view is somewhere else")
+  assert.strictEqual(model.inTrash(null, plain("trash")), false)
+
+  assert.strictEqual(model.keyActionFor("trash", [labelled], plain("trash")), "untrash")
+  assert.strictEqual(model.keyActionFor("trash", [posting], plain("trash")), "untrash")
+  assert.strictEqual(model.keyActionFor("trash", [inbox], plain("inbox")), "trash")
+  assert.strictEqual(model.keyActionFor("trash", [labelled, inbox], plain("inbox")), "trash",
+    "a mixed selection lands in one place rather than swapping every row")
+  assert.strictEqual(model.keyActionFor("trash", [labelled, posting], plain("trash")), "untrash")
+  assert.strictEqual(model.keyActionFor("trash", [], plain("trash")), "trash", "no rows, no change")
+
+  // `e` turns back only in Archive: on IMAP every folder but the Inbox reads as
+  // archived, and `e` there files the message in Archive.
+  assert.strictEqual(model.keyActionFor("archive", [filed], plain("archive")), "unarchive")
+  assert.strictEqual(model.keyActionFor("archive", [filed], { mailboxKey: "archive", searchQuery: "x", rawQuery: "" }),
+    "archive", "a search from Archive is not Archive")
+  assert.strictEqual(model.keyActionFor("archive", [filed], { mailboxKey: "inbox", searchQuery: "", rawQuery: "folder:Receipts" }),
+    "archive", "a folder of one's own still archives")
+  assert.strictEqual(model.keyActionFor("archive", [filed], plain("all")), "archive")
+  assert.strictEqual(model.keyActionFor("archive", [{ ...filed, inInbox: true }], plain("archive")), "archive",
+    "a message that is in the inbox as well can still be archived")
+  assert.strictEqual(model.keyActionFor("archive", [labelled], plain("trash")), "archive",
+    "the archive key is not the way out of the trash")
+  assert.strictEqual(model.keyActionFor("star", [labelled], plain("trash")), "star", "other keys are their own")
+
+  // The menu's archived rule, now shared: spam is archived only where the
+  // owning mailbox has no spam verb, and an owner that cannot be found is not
+  // taken to lack one.
+  const junk = { ...filed, inSpam: true }
+  assert.strictEqual(model.isArchived(filed, plain("archive"), "a1"), true)
+  assert.strictEqual(model.isArchived(posting, plain("trash"), "1:2"), false, "in the trash is not archived")
+  assert.strictEqual(model.isArchived(junk, { canReportSpam: false }, "a1"), true)
+  assert.strictEqual(model.isArchived(junk, { canReportSpam: true }, "a1"), false)
+  assert.strictEqual(model.isArchived(junk, { hostForId: () => null }, "a1"), false)
+  assert.strictEqual(model.isArchived(junk, { hostForId: (id) => id === "a1" ? { canReportSpam: false } : null }, "a1"), true)
+  assert.strictEqual(model.isArchived({ ...filed, isSent: true }, plain("sent"), "a1"), false)
+
+  // Over every row an action reaches: one that is not there is enough to say no.
+  assert.strictEqual(model.allInTrash([labelled, posting], plain("trash")), true)
+  assert.strictEqual(model.allInTrash([labelled, inbox], plain("inbox")), false)
+  assert.strictEqual(model.allInTrash([], plain("trash")), false, "nothing reached is nothing to restore")
+  assert.strictEqual(model.allArchived([filed, { ...filed, id: "a2" }], plain("archive")), true)
+  assert.strictEqual(model.allArchived([filed, { ...filed, id: "a2", inInbox: true }], plain("archive")), false)
+  assert.strictEqual(model.allArchived([], plain("archive")), false)
+
+  // A message that is not a listed row is judged by its own labels: an Inbox
+  // message a notification opened over the Trash is trashed, not restored.
+  const opened = { id: "n1", inInbox: true, inTrash: false, labelIds: ["INBOX"] }
+  assert.strictEqual(model.keyActionFor("trash", [opened], plain("trash")), "untrash",
+    "as a row of the Trash listing it would count as in the trash")
+  assert.strictEqual(model.keyActionFor("trash", [opened], model.unlistedView(plain("trash"))), "trash")
+  assert.strictEqual(model.keyActionFor("trash", [labelled], model.unlistedView(plain("inbox"))), "untrash",
+    "its own TRASH label still says so")
+  assert.strictEqual(model.keyActionFor("archive", [filed], model.unlistedView(plain("archive"))), "archive")
+  const owner = { canReportSpam: false }
+  assert.strictEqual(model.isArchived({ ...filed, inSpam: true },
+    model.unlistedView({ hostForId: () => owner }), "a1"), true, "the owning mailbox still decides spam")
+
+  // The row the reader's buttons land on without a selection: the cursor's
+  // row for a conversation member, the open message otherwise — App moves the
+  // cursor there and the list draws from it.
+  const rail = { memberIds: ["m1", "m2"] }
+  assert.strictEqual(model.readerTarget(rail, "m2", "m1"), "m1")
+  assert.strictEqual(model.readerTarget(rail, "m2", ""), "m2", "no cursor: the open message")
+  assert.strictEqual(model.readerTarget(rail, "x9", "m1"), "x9", "not a member: the open message")
+  assert.strictEqual(model.readerTarget(null, "x9", "m1"), "x9")
+
+  // Restore, not Move to Inbox: Gmail's untrash takes TRASH off and leaves the
+  // rest, so a sent message goes back to Sent.
+  assert.strictEqual(model.actionName("untrash"), "Restore")
+  assert.strictEqual(model.actionName("unarchive"), "Move to Inbox")
+  assert.strictEqual(model.actionName("unarchive", true), "Move to Inbox and remove label")
+  assert.strictEqual(model.actionName("trash"), "Move to trash")
+  assert.strictEqual(model.actionName("archive"), "Archive")
+  // An immediate action: no ellipsis.
+  for (const verb of ["archive", "unarchive", "trash", "untrash"])
+    assert.ok(!/\.\.\.$/.test(model.actionName(verb)), verb + " opens nothing")
+}

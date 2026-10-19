@@ -501,7 +501,11 @@ TestCase {
     var scope = focusScopeOf(composition)
     verify(scope)
     scope.enabled = true
-    composition.app.showCalendar()
+    // The window offers a calendar only once one is connected.
+    composition.app.service.calendarController.sourceList = ({ version: 1, sources: [{
+      id: "caldav:calendar-example", kind: "caldav", name: "Example",
+      url: "https://calendar.example/", username: "me", enabled: true }] })
+    verify(composition.app.showCalendar())
     var router = keyRouter(composition)
     verify(router)
     router.context = "calendar"
