@@ -37,6 +37,31 @@ assert.strictEqual(imap.suggestedSettings("jane@126.com").imapHost, "imap.126.co
 assert.strictEqual(imap.suggestedSettings("jane@yeah.net").smtpHost, "smtp.yeah.net")
 assert.strictEqual(imap.suggestedSettings("jane@126.com").note, "")
 
+// GMX Germany (gmx.de, gmx.net) and international GMX (gmx.com) document
+// different servers, so a German address must not be handed the .com ones.
+// Both stay TLS on connect.
+assert.strictEqual(imap.presetFor("jane@gmx.de").id, "gmx-de")
+assert.strictEqual(imap.presetFor("jane@gmx.com").id, "gmx")
+for (const address of ["jane@gmx.de", "jane@gmx.net", "Jane@GMX.DE"]) {
+  const gmx = imap.suggestedSettings(address)
+  assert.strictEqual(gmx.imapHost, "imap.gmx.net", address)
+  assert.strictEqual(gmx.smtpHost, "mail.gmx.net", address)
+  assert.strictEqual(gmx.imapPort, 993, address)
+  assert.strictEqual(gmx.smtpPort, 465, address)
+  assert.strictEqual(gmx.insecure, false, address)
+}
+const gmxDe = imap.setupSettings(Object.assign({ address: "jane@gmx.de" }, imap.suggestedSettings("jane@gmx.de")))
+assert.ok(imap.imapUrl(gmxDe, "INBOX").startsWith("imaps://imap.gmx.net:993/"))
+assert.ok(imap.smtpUrl(gmxDe).startsWith("smtps://mail.gmx.net:465"))
+const gmxCom = imap.suggestedSettings("jane@gmx.com")
+assert.strictEqual(gmxCom.imapHost, "imap.gmx.com")
+assert.strictEqual(gmxCom.smtpHost, "mail.gmx.com")
+assert.strictEqual(gmxCom.imapPort, 993)
+assert.strictEqual(gmxCom.smtpPort, 465)
+const gmxComSetup = imap.setupSettings(Object.assign({ address: "jane@gmx.com" }, gmxCom))
+assert.ok(imap.imapUrl(gmxComSetup, "INBOX").startsWith("imaps://imap.gmx.com:993/"))
+assert.ok(imap.smtpUrl(gmxComSetup).startsWith("smtps://mail.gmx.com:465"))
+
 // An unknown domain still gets a guess: imap.<domain> is right far more often
 // than an empty field is useful, and a wrong guess is visible and editable.
 const guess = imap.suggestedSettings("jane@example.org")

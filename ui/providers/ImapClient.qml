@@ -321,7 +321,7 @@ Item {
     target: root.auth
     function onVerifyRequested(settings, credentials) {
       var owner = root.auth
-      var generation = root.oauthTransport ? owner.sessionGeneration : undefined
+      var generation = owner.sessionGeneration
       root.verifyCredentials(settings, credentials, function(ok, error) {
         if (root.auth === owner) owner.completeSignIn(ok, error, generation)
       })

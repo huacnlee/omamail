@@ -771,7 +771,7 @@ Item {
       if (warning !== "" && service && typeof service.note === "function")
         service.note(warning)
       draftSavedTimer.restart()
-      if (service.mailboxKey === "drafts") service.refresh()
+      if (currentView === "reader" && service.selectedId === "") backToList()
     })
   }
 

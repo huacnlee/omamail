@@ -120,10 +120,189 @@ TestCase {
     manifest: ({id:"omamail"})
   }
 
+  property bool omarchyThemeWritten: false
+
   function init() {
     host.reset()
     calendarFixture.calendarPalettePath = ""
     calendarFixture.colorKey = "accent"
+  }
+
+  // Color is a singleton: a test that installs an Omarchy theme takes it out
+  // again, so the next test starts from the fallback palette it expects.
+  function cleanup() {
+    if (!omarchyThemeWritten) return
+    omarchyThemeWritten = false
+    host.reset()
+    Commons.Color.reload()
+  }
+
+  // An installed theme as Omarchy leaves it: colors.toml, and the shell.toml
+  // omarchy-theme-set-templates renders from it, which writes every colour as
+  // a quoted "#rrggbb" and the popup border as a reference to [hyprland].
+  function installOmarchyTheme(theme) {
+    var dir = "/fixture/home/.local/state/omarchy/current/theme/"
+    host.write(dir + "colors.toml", [
+      'mode = "' + theme.mode + '"', 'background = "' + theme.background + '"',
+      'foreground = "' + theme.foreground + '"', 'accent = "' + theme.accent + '"',
+      'red = "' + theme.red + '"', 'yellow = "' + theme.yellow + '"',
+      'green = "' + theme.green + '"'].join("\n"), false)
+    host.write(dir + "shell.toml", [
+      "[controls]", 'normal-color        = "' + theme.foreground + '"',
+      "normal-fill-alpha   = 0.04", 'hover-cursor-color        = "' + theme.foreground + '"',
+      "hover-cursor-fill-alpha   = 0.08", 'selected-color        = "' + theme.foreground + '"',
+      "selected-fill-alpha   = 0.18", "",
+      "[popups]", 'background       = "' + theme.background + '"',
+      "background-alpha = 1.0", 'text             = "' + theme.foreground + '"',
+      'border           = "hyprland.active-border"', "border-alpha     = 1.0"].join("\n"), false)
+    omarchyThemeWritten = true
+    Quickshell.nativeHost = host
+    Quickshell.fileStore = host
+    verify(Commons.Color.reload(), "the fixture must read as an installed Omarchy theme")
+    compare(Commons.Color.dark, theme.mode === "dark")
+  }
+
+  function contrastRatio(first, second) {
+    function luminance(value) {
+      var channels = [value.r, value.g, value.b]
+      var weights = [0.2126, 0.7152, 0.0722]
+      var result = 0
+      for (var i = 0; i < 3; i++) {
+        var c = channels[i]
+        result += weights[i] * (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+      }
+      return result
+    }
+    var a = luminance(first)
+    var b = luminance(second)
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+  }
+
+  function popupOf(owner) {
+    var values = owner.data || []
+    for (var i = 0; i < values.length; i++)
+      if (values[i] instanceof Popup) return values[i]
+    return null
+  }
+
+  function omarchyThemes() {
+    return [
+      {tag: "Flexoki Light", mode: "light", background: "#fffcf0", foreground: "#100f0f",
+        accent: "#205ea6", red: "#d14d41", yellow: "#d0a215", green: "#879a39"},
+      {tag: "Tokyo Night", mode: "dark", background: "#1a1b26", foreground: "#a9b1d6",
+        accent: "#7aa2f7", red: "#f7768e", yellow: "#e0af68", green: "#9ece6a"}
+    ]
+  }
+
+  function test_menus_and_tooltips_take_the_theme_popup_colours_data() { return omarchyThemes() }
+
+  function test_menus_and_tooltips_take_the_theme_popup_colours(data) {
+    installOmarchyTheme(data)
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+
+    var appMenu = findChild(composition, "app-menu")
+    verify(appMenu)
+    appMenu.openAt(40, 40)
+    tryCompare(appMenu, "opened", true)
+    var menu = popupOf(appMenu)
+    verify(menu, "the window menu is a Popup")
+    var quitRow = findChild(composition, "app-menu-quit")
+    verify(quitRow)
+    var rowLabel = quitRow.children[0]
+    verify(rowLabel && rowLabel.text !== undefined, "the row's label")
+    compare(String(menu.background.color), data.background)
+    compare(String(rowLabel.color), data.foreground)
+    verify(contrastRatio(rowLabel.color, menu.background.color) >= 4.5,
+      "menu text on its background: " + rowLabel.color + " on " + menu.background.color)
+    appMenu.close()
+    tryCompare(appMenu, "opened", false)
+
+    var tip = findChild(composition, "omamail-tooltip")
+    verify(tip, "the composed app must show a styled tooltip somewhere")
+    tip.visible = true
+    tryCompare(tip, "opened", true, Style.tooltipDelay + 1000)
+    var tipBackground = findChild(tip, "omamail-tooltip-background")
+    var tipLabel = findChild(tip, "omamail-tooltip-label")
+    verify(tipBackground)
+    verify(tipLabel)
+    compare(String(tipBackground.color), data.background)
+    compare(String(tipLabel.color), data.foreground)
+    verify(contrastRatio(tipLabel.color, tipBackground.color) >= 4.5,
+      "tooltip text on its background: " + tipLabel.color + " on " + tipBackground.color)
+    tip.visible = false
+    tryCompare(tip, "opened", false)
+  }
+
+  function test_control_fills_take_the_theme_control_colours_data() { return omarchyThemes() }
+
+  // A fill is the [controls] colour at its alpha. On a dark theme that colour
+  // is the light foreground, so a selected control sits a little lighter than
+  // the window; a fill started from black sat darker.
+  function test_control_fills_take_the_theme_control_colours(data) {
+    installOmarchyTheme(data)
+    var track = findChild(styledSwitch, "omamail-switch-knob").parent
+    verify(track && styledSwitch.checked, "the checked switch's track")
+    // The track animates its colour, so it is waited for.
+    var selected = String(Qt.alpha(data.foreground, 0.18))
+    tryVerify(function() { return String(track.color) === selected }, 1000,
+      "selected fill: " + track.color + ", expected " + selected)
+    var field = findChild(styledSpinBox, "omamail-spinbox-background")
+    verify(field)
+    compare(String(field.color), String(Qt.alpha(data.foreground, 0.04)), "normal fill")
+    compare(String(Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)),
+      String(Qt.alpha(data.foreground, 0.08)), "hover fill")
+    function over(fill, base) {
+      return Qt.rgba(base.r * (1 - fill.a) + fill.r * fill.a, base.g * (1 - fill.a) + fill.g * fill.a,
+        base.b * (1 - fill.a) + fill.b * fill.a, 1)
+    }
+    var window = Commons.Color.background
+    var shown = over(track.color, window)
+    verify(contrastRatio(shown, Commons.Color.foreground) < contrastRatio(window, Commons.Color.foreground),
+      "a selected fill moves the window toward the theme's text colour: " + shown + " on " + window)
+  }
+
+  // The draft question is a Popup like a menu, and its buttons are filled
+  // like any control: both were drawn from black. Its colours are bindings,
+  // so a theme changed while it is open reaches it too.
+  function test_compose_exit_dialog_follows_the_theme() {
+    var themes = omarchyThemes()
+    var dark = themes[1]
+    var light = themes[0]
+    installOmarchyTheme(dark)
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    composition.app.backToList()
+    composition.app.startCompose("new")
+    var field = findChild(composition, "compose-subject-field")
+    verify(field)
+    var compose = field
+    while (compose && typeof compose.hasUserChanges !== "function") compose = compose.parent
+    verify(compose, "the composer")
+    compose.userModified = true
+    composition.app.goBack()
+    var exitDialog = findChild(composition, "compose-exit-dialog")
+    verify(exitDialog)
+    tryCompare(exitDialog, "opened", true)
+    var dialog = popupOf(exitDialog)
+    verify(dialog, "the draft question is a Popup")
+    var cancel = dialog.contentItem.children[2].children[0]
+    verify(cancel && cancel.text === "Cancel", "the Cancel button")
+    var title = dialog.contentItem.children[0]
+    verify(title && title.text === "Save this draft?", "the dialog's title")
+
+    compare(String(dialog.background.color), dark.background)
+    compare(String(cancel.color), String(Qt.alpha(dark.foreground, 0.04)), "button fill")
+
+    installOmarchyTheme(light)
+    verify(exitDialog.opened)
+    compare(String(dialog.background.color), light.background)
+    compare(String(cancel.color), String(Qt.alpha(light.foreground, 0.04)), "button fill")
+    compare(String(title.color), light.foreground)
+    verify(contrastRatio(title.color, dialog.background.color) >= 4.5,
+      "dialog text on its background: " + title.color + " on " + dialog.background.color)
+    exitDialog.close()
+    tryCompare(exitDialog, "opened", false)
   }
 
   function test_calendar_settings_palette_data() {

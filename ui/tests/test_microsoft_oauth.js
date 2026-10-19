@@ -39,6 +39,31 @@ assert.strictEqual(microsoft.deviceUrlFor("bad tenant"), microsoft.DEVICE_URL,
   "an unusable tenant falls back to the consumer authority")
 assert.strictEqual(microsoft.isWorkTenant("consumers"), false)
 assert.strictEqual(microsoft.isWorkTenant("organizations"), true)
+assert.strictEqual(microsoft.workTenant(""), "organizations",
+  "blank selects the generic authority for a multi-tenant registration")
+assert.strictEqual(microsoft.workTenant(" Contoso.onmicrosoft.COM "), "contoso.onmicrosoft.com")
+assert.strictEqual(microsoft.workTenant("12345678-1234-4abc-9def-1234567890ab"),
+  "12345678-1234-4abc-9def-1234567890ab")
+assert.strictEqual(microsoft.workTenant("consumers"), "", "a work account cannot use the consumer authority")
+assert.strictEqual(microsoft.workTenant("common"), "", "personal accounts cannot enter through the work form")
+assert.strictEqual(microsoft.workTenant("evil.example/../consumers"), "",
+  "input cannot steer the sign-in outside one authority segment")
+assert.strictEqual(microsoft.workTenant("x"), "", "a tenant domain is fully qualified")
+assert.strictEqual(microsoft.workTenant("123"), "", "a number is not a Directory ID")
+assert.strictEqual(microsoft.workTenant("contoso."), "", "a tenant domain has no empty label")
+assert.strictEqual(microsoft.workTenant("contoso-.com"), "", "a domain label cannot end in a hyphen")
+assert.strictEqual(microsoft.workTenant("12345678-1234-4abc-9def-1234567890a"), "",
+  "a malformed Directory ID is refused")
+// The backend reads a saved tenant the same way: an empty one is a personal
+// account's, and anything workTenant answers is a work authority it accepts.
+assert.strictEqual(microsoft.normalizeTenant(""), "consumers",
+  "a personal account still saves no tenant and still signs in at consumers")
+assert.strictEqual(microsoft.isWorkTenant(microsoft.workTenant("contoso.onmicrosoft.com")), true)
+assert.strictEqual(microsoft.isWorkTenant(microsoft.workTenant("12345678-1234-4abc-9def-1234567890ab")), true)
+assert.strictEqual(microsoft.deviceUrlFor(microsoft.workTenant("12345678-1234-4abc-9def-1234567890ab")),
+  "https://login.microsoftonline.com/12345678-1234-4abc-9def-1234567890ab/oauth2/v2.0/devicecode")
+assert.strictEqual(microsoft.tokenUrlFor(microsoft.workTenant("Contoso.onmicrosoft.com")),
+  "https://login.microsoftonline.com/contoso.onmicrosoft.com/oauth2/v2.0/token")
 
 // Graph's token is asked for with the same refresh token and Graph's scope.
 const graphBody = microsoft.graphRefreshBody(clientId, "refresh-secret")

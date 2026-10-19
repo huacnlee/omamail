@@ -1123,6 +1123,26 @@ mod tests {
         );
     }
 
+    /// A single-tenant registration's directory id or verified domain, as
+    /// the setup page saves it, is the authority every refresh goes to.
+    #[test]
+    fn a_single_tenant_accounts_stored_tenant_builds_its_own_token_url() {
+        for tenant in [
+            "12345678-1234-4abc-9def-1234567890ab",
+            "contoso.onmicrosoft.com",
+        ] {
+            let entry = json!({"imap":{"tenant":tenant}});
+            assert_eq!(stored_tenant(&entry), tenant);
+            assert_eq!(
+                destination(
+                    &json!({"provider":"outlook","endpoint":"token","tenant":stored_tenant(&entry)}),
+                )
+                .unwrap(),
+                format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token")
+            );
+        }
+    }
+
     fn expiry_at(
         monotonic: std::time::Instant,
         wall: std::time::SystemTime,
