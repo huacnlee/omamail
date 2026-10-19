@@ -3,7 +3,9 @@ import QtTest 1.3
 import "../.." as Omamail
 import "BackendFixture.js" as BackendFixture
 import "NativeIntentFixture.js" as NativeIntentFixture
+import "ModelFixture.js" as NativeModel
 import "../../account/Accounts.js" as Accounts
+import "../../account/Unified.js" as Unified
 
 // The batch's two boundaries, driven against a client the test controls.
 //
@@ -92,7 +94,7 @@ Item {
     name: "BatchActions"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService); NativeIntentFixture.install(mailService) }
+    function initTestCase() { NativeModel.install(mailService); NativeIntentFixture.install(mailService) }
 
     readonly property string ada: "ada@example.com"
     readonly property string bob: "bob@example.com"
@@ -135,9 +137,94 @@ Item {
 
     function init() {
       record.reset()
+      mailService.setUnifiedMailboxes(false)
       app.checkedIds = []
       app.checkedAccountId = ""
       app.resetNavigation()
+    }
+
+    function test_unified_trash_restores_failed_checks_and_reports_all_accounts() {
+      seed([entry(ada), entry(bob)], "imap:" + ada)
+      var first = mailService.accountAt(0)
+      var second = mailService.accountAt(1)
+      first.messages = [row("1:INBOX"), row("2:INBOX"), row("3:INBOX")]
+      second.messages = [row("1:INBOX"), row("4:INBOX")]
+      mailService.setUnifiedMailboxes(true)
+      var failed = Unified.unifiedId(first.accountId, "2:INBOX")
+      var ids = [Unified.unifiedId(first.accountId, "1:INBOX"), failed,
+        Unified.unifiedId(second.accountId, "1:INBOX")]
+      tryVerify(function() { return mailService.messages.length === 5 })
+      app.checkedAccountId = mailService.activeAccountId
+      app.checkedIds = ids
+      app.cursorId = ids[0]
+      record.refuse = "2:INBOX"
+      record.hold = true
+      verify(app.actOnChecked("trash"))
+      compare(app.checkedIds, [])
+      tryVerify(function() { return record.trashed.length === 3 })
+      compare(record.trashed.filter(function(id) { return id === "1:INBOX" }).length, 2,
+        "the identical local id reaches both owning accounts")
+      record.finish()
+      tryCompare(app, "checkedIds", [failed])
+      tryVerify(function() { return mailService.lastError.indexOf("2 of 3 selected across 2 mailboxes") >= 0 })
+      verify(mailService.lastError.indexOf(ada + ": 1 completed, 1 failed") >= 0)
+      verify(mailService.lastError.indexOf(bob + ": 1 completed, 0 failed") >= 0)
+      compare(first.messages.map(function(message) { return message.id }), ["2:INBOX", "3:INBOX"])
+      compare(second.messages.map(function(message) { return message.id }), ["4:INBOX"])
+    }
+
+    function test_batch_completion_reports_a_whole_batch_failure_once() {
+      seed([entry(ada)], "imap:" + ada)
+      var account = mailService.accountAt(0)
+      account.messages = [row("1:INBOX"), row("2:INBOX")]
+      record.refuseBatch = true
+      var answers = []
+      verify(account.actMany(["1:INBOX", "2:INBOX"], "markRead", function(result) { answers.push(result) }))
+      tryVerify(function() { return answers.length === 1 })
+      compare(answers[0].failedIds, ["1:INBOX", "2:INBOX"])
+      verify(answers[0].error !== "")
+      compare(account.messages.length, 2)
+    }
+
+    function test_queued_batches_keep_every_completion_callback() {
+      seed([entry(ada)], "imap:" + ada)
+      var account = mailService.accountAt(0)
+      account.messages = [row("1:INBOX"), row("2:INBOX")]
+      record.hold = true
+      var answers = []
+      verify(account.actMany(["1:INBOX", "2:INBOX"], "markRead", function(result) { answers.push(result) }))
+      tryCompare(account, "pendingAction", "markRead")
+      for (var i = 0; i < 2; i++)
+        verify(account.actMany(["1:INBOX", "2:INBOX"], "markRead", function(result) { answers.push(result) }))
+      tryVerify(function() { return account.queuedActions.length === 2 })
+      record.finish()
+      tryVerify(function() { return answers.length === 3 })
+      for (var a = 0; a < answers.length; a++) compare(answers[a].failedIds, [])
+      compare(record.batches.length, 3)
+    }
+    function test_sign_out_finishes_queued_batches_without_dispatching_them() {
+      seed([entry(ada)], "imap:" + ada)
+      var account = mailService.accountAt(0)
+      account.messages = [row("1:INBOX"), row("2:INBOX")]
+      record.hold = true
+      var answers = []
+      verify(account.actMany(["1:INBOX", "2:INBOX"], "markRead", function(result) { answers.push(result) }))
+      tryCompare(account, "pendingAction", "markRead")
+      verify(account.actMany(["1:INBOX", "2:INBOX"], "markRead", function(result) { answers.push(result) }))
+      tryVerify(function() { return account.queuedActions.length === 1 })
+      compare(record.batches.length, 1)
+      account.signOut()
+      compare(answers.length, 2)
+      compare(account.actionCompletions.length, 0)
+      compare(account.queuedActions.length, 0)
+      for (var i = 0; i < answers.length; i++) {
+        compare(answers[i].failedIds, ["1:INBOX", "2:INBOX"])
+        compare(answers[i].error, "Account signed out")
+      }
+      record.finish()
+      wait(30)
+      compare(answers.length, 2, "late replies cannot finish the same batch again")
+      compare(record.batches.length, 1, "the queued mutation never reached the provider")
     }
 
     function having(item, accept) {

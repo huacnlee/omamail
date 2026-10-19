@@ -41,6 +41,23 @@ Item {
       compare(service.backendCanCheckMicrosoftConnection, false)
       compare(service.backendCanDiscoverCalendars, false)
     }
+    function test_sender_name_requirement_is_fixed_across_releases() {
+      var service = createTemporaryObject(factory, parent)
+      verify(service !== null)
+      var backend = service.backend
+      backend.launchEnabled = true
+      backend.connected = true
+      backend.protocolInfo = ({ apiVersion: 6 })
+      compare(service.backendCanNameSender, false, "published API 6 ignores a stored sender name")
+      backend.protocolInfo = ({ apiVersion: 7 })
+      compare(service.backendCanNameSender, true)
+      backend.latestApiVersion = 8
+      backend.protocolInfo = ({ apiVersion: 8 })
+      compare(service.backendCanNameSender, true,
+        "a later API must not take the sender name away")
+      backend.connected = false
+      compare(service.backendCanNameSender, false)
+    }
     function test_calendar_requests_obey_the_connected_api() {
       var service = createTemporaryObject(factory, parent)
       verify(service !== null)

@@ -7,3 +7,5 @@ Switch 2.0 Switch.qml
 Switch 6.0 Switch.qml
 ToolTip 2.0 ToolTip.qml
 ToolTip 6.0 ToolTip.qml
+ComboBox 2.0 ComboBox.qml
+ComboBox 6.0 ComboBox.qml

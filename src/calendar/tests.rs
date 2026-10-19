@@ -1,4 +1,37 @@
 use super::*;
+
+#[test]
+fn google_requests_keep_calendar_identity_and_preconditions() {
+    let request = prepare(&json!({"source":{"kind":"google","calendarId":"family/a?b@example.org"},
+        "operation":"update","eventId":"instance/one","body":"{}","ifMatch":"\"revision\"","sendUpdates":"all"})).unwrap();
+    assert_eq!(request.url.host_str(), Some("www.googleapis.com"));
+    assert_eq!(
+        decoded_path(&request.url),
+        vec![
+            b"".to_vec(),
+            b"calendar".to_vec(),
+            b"v3".to_vec(),
+            b"calendars".to_vec(),
+            b"family/a?b@example.org".to_vec(),
+            b"events".to_vec(),
+            b"instance/one".to_vec()
+        ]
+    );
+    assert_eq!(request.if_match.as_deref(), Some("\"revision\""));
+    assert!(
+        request
+            .url
+            .query_pairs()
+            .any(|(k, v)| k == "conferenceDataVersion" && v == "1")
+    );
+    assert!(
+        prepare(
+            &json!({"source":{"kind":"google","calendarId":".."},"operation":"get","eventId":"x"})
+        )
+        .is_err()
+    );
+    assert!(prepare(&json!({"source":{"kind":"caldav"},"operation":"move"})).is_err());
+}
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -209,6 +242,7 @@ async fn server(response: &'static str) -> (Url, tokio::task::JoinHandle<Vec<u8>
 
 fn local_request(url: Url) -> Request {
     Request {
+        if_match: None,
         url,
         method: Method::GET,
         body: String::new(),
@@ -216,6 +250,47 @@ fn local_request(url: Url) -> Request {
         source_id: String::new(),
         username: String::new(),
         account_id: String::new(),
+    }
+}
+
+#[tokio::test]
+async fn google_mutation_keeps_revision_and_never_follows_redirect() {
+    let client = Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let response = Box::leak(format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{}/stolen\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", target.local_addr().unwrap()).into_boxed_str());
+    let (url, task) = server(response).await;
+    let mut request = prepare(&json!({"source":{"kind":"google","calendarId":"shared@example.org"},
+        "operation":"update","eventId":"event","body":"{\"summary\":\"synthetic\"}","ifMatch":"\"revision\"","sendUpdates":"none"})).unwrap();
+    request.url = url;
+    assert!(
+        execute(&client, request, Some("synthetic-calendar-token"), None)
+            .await
+            .is_err()
+    );
+    let bytes = String::from_utf8(task.await.unwrap())
+        .unwrap()
+        .to_lowercase();
+    assert!(bytes.starts_with("patch "));
+    assert!(bytes.contains("if-match: \"revision\""));
+    assert!(bytes.contains("authorization: bearer synthetic-calendar-token"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), target.accept())
+            .await
+            .is_err()
+    );
+    for suffix in ["\r", "\n", "\r\n", "\0"] {
+        assert!(
+            prepare(
+                &json!({"source":{"kind":"google"},"operation":"update","eventId":"event",
+            "body":"{}","ifMatch":format!("revision{suffix}")})
+            )
+            .is_err()
+        );
     }
 }
 
@@ -269,6 +344,60 @@ async fn native_http_bounds_downloads() {
         "calendar_response_too_large"
     );
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn google_move_sends_explicit_zero_content_length() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut request = prepare(&json!({"source":{"kind":"google","calendarId":"family@example.test"},
+        "operation":"move","eventId":"meeting","destination":"owner@example.test","sendUpdates":"none"})).unwrap();
+    assert_eq!(request.method, Method::POST);
+    assert!(request.url.path().ends_with("/events/meeting/move"));
+    assert!(
+        request
+            .url
+            .query_pairs()
+            .any(|(key, value)| key == "destination" && value == "owner@example.test")
+    );
+    request.url.set_scheme("http").unwrap();
+    request.url.set_host(Some("127.0.0.1")).unwrap();
+    request
+        .url
+        .set_port(Some(listener.local_addr().unwrap().port()))
+        .unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut headers = Vec::new();
+        loop {
+            let mut byte = [0];
+            socket.read_exact(&mut byte).await.unwrap();
+            headers.push(byte[0]);
+            if headers.ends_with(b"\r\n\r\n") {
+                break;
+            }
+            assert!(headers.len() < 16384);
+        }
+        let text = String::from_utf8(headers).unwrap().to_lowercase();
+        let framed = text.contains("\r\ncontent-length: 0\r\n");
+        let reply = if framed {
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+        } else {
+            "HTTP/1.1 411 Length Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        };
+        socket.write_all(reply.as_bytes()).await.unwrap();
+        assert!(framed, "empty Google POST must state its content length");
+    });
+    let client = Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    assert!(
+        execute(&client, request, Some("synthetic-token"), None)
+            .await
+            .is_ok()
+    );
+    server.await.unwrap();
 }
 
 #[tokio::test]

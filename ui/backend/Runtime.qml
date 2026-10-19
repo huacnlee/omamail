@@ -38,7 +38,11 @@ Item {
     if (bundled) {
       requiredVersion = bundledVersion
       requiredApiVersion = bundledApiVersion
-      latestApiVersion = bundledApiVersion
+      // The same one step past the pin the plugin accepts. A release bundle
+      // carries the released backend; `make app-run` builds this checkout's,
+      // which answers with the unreleased step and was refused as incompatible.
+      // Features still gate on the API the connected binary reports.
+      latestApiVersion = bundledApiVersion > 0 ? bundledApiVersion + 1 : 0
       unreleasedMethods = []
       installedVersion = bundledVersion
       executable = bundledExecutable

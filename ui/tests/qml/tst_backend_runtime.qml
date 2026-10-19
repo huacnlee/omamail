@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../../backend" as BackendModule
+import "../../backend/Compatibility.js" as Compatibility
 
 Item {
   Component {
@@ -21,8 +22,34 @@ Item {
       }
     }
   }
+  Component {
+    id: bundledFactory
+    BackendModule.Runtime {
+      pluginDir: "/synthetic/plugin"
+      bundledMode: true
+      bundledExecutable: "/synthetic/app/omamail"
+      bundledVersion: "0.10.7"
+      bundledApiVersion: 5
+    }
+  }
   TestCase {
     name: "PrivateRuntime"
+    // `make app-run` bundles the backend this checkout builds, which answers
+    // with the unreleased step; a release bundle answers with the pin.
+    function test_bundle_accepts_the_pin_and_one_step_past_it() {
+      var runtime = createTemporaryObject(bundledFactory, parent)
+      runtime.refresh()
+      compare(runtime.state, "ready")
+      compare(runtime.requiredApiVersion, 5)
+      compare(runtime.latestApiVersion, 6)
+      compare(runtime.unreleasedMethods.length, 0)
+      for (var api = 5; api <= 7; api++) {
+        var info = { protocol: 1, version: "0.10.7", apiVersion: api }
+        compare(Compatibility.accepts(info, runtime.requiredVersion, runtime.requiredApiVersion,
+          runtime.latestApiVersion), api !== 7, "API " + api)
+      }
+    }
+
     function make() { return createTemporaryObject(factory, parent) }
     function processOf(runtime) {
       for (var i = 0; i < runtime.children.length; i++)

@@ -28,6 +28,8 @@ Item {
     property var backendRuntime: null
 
     property bool hasAgent: true
+    property bool agentAvailable: true
+    property string agentUnavailableReason: "Your system-default agent is not supported. Choose Claude, Codex or OpenCode in Settings → AI."
     property bool agentStarting: false
     property string agentError: ""
     property string agentShownId: ""
@@ -39,13 +41,17 @@ Item {
     property var agentJobs: ({})
     property var agentAttentionByMessage: ({})
     property var draftAgentJobs: []
+    property var readerAgentJob: null
+    readonly property var agentAllJobs: readerAgentJob ? [readerAgentJob] : []
     property string cancelledAgentId: ""
     function agentJobsForDraft(fields) { return draftAgentJobs }
     function cancelAgentJob(id) { cancelledAgentId=id; return true }
     function showAgentJob(id) { agentShownId=id }
     function acknowledgeAgentJob(id) {}
     function agentJobWantsAttention(job) { return false }
-    function agentJobFor(id, owner) { return null }
+    function agentJobFor(id, owner) {
+      return readerAgentJob && readerAgentJob.messageId === id && readerAgentJob.accountId === owner ? readerAgentJob : null
+    }
     function agentSelectionJob(ids, owner) { return null }
     function refreshAgentJobs() {}
     property bool ready: true
@@ -211,7 +217,114 @@ Item {
       return item
     }
 
+    function typed(item, prefix) {
+      if (String(item).indexOf(prefix) === 0) return item
+      var children = item.children || []
+      for (var i = 0; i < children.length; i++) {
+        var found = typed(children[i], prefix)
+        if (found) return found
+      }
+      return null
+    }
+
+    SignalSpy { id: shortcutSpy; signalName: "triggered" }
+
+    function test_readiness_changes_keep_the_open_draft_and_keyboard_together() {
+      var compose = composeView()
+      app.open("{}")
+      shortcutSpy.target = named(app, "key-router")
+      shortcutSpy.clear()
+      wait(20)
+      compare(shortcutSpy.target.context, "list")
+      keyClick(Qt.Key_D)
+      keyClick(Qt.Key_E)
+      compare(shortcutSpy.count, 2, "positive control: real mailbox shortcuts dispatch")
+      compare(shortcutSpy.signalArguments[0][0], "trash")
+      compare(shortcutSpy.signalArguments[1][0], "archive")
+      app.startCompose("new")
+      named(compose, "compose-subject-field").text = "Readiness draft"
+      named(compose, "compose-body-editor").text = "Keep these words"
+      var sidebar = typed(app, "MailboxSidebar_")
+      var reader = typed(app, "MessageReader_")
+      var list = typed(app, "MessageList_")
+      verify(sidebar)
+      verify(reader)
+      verify(list)
+
+      mailService.anyAccountReady = false
+      wait(20)
+      compare(compose.opened, true)
+      compare(app.composing, true)
+      compare(sidebar.visible, false)
+      compare(reader.visible, false)
+      compare(list.visible, false)
+      compare(named(app, "key-router").context, "page")
+
+      mailService.anyAccountReady = true
+      wait(20)
+      compare(compose.opened, true)
+      compare(compose.visible, true)
+      compare(app.composing, true)
+      compare(app.navKinds.join(","), "list,compose")
+      compare(sidebar.visible, false)
+      compare(reader.visible, false)
+      compare(list.visible, false)
+      compare(named(app, "key-router").context, "compose")
+      compare(named(compose, "compose-subject-field").text, "Readiness draft")
+      compare(named(compose, "compose-body-editor").text, "Keep these words")
+
+      var subject = named(compose, "compose-subject-field")
+      subject.forceActiveFocus()
+      subject.cursorPosition = subject.text.length
+      shortcutSpy.clear()
+      keyClick(Qt.Key_D)
+      keyClick(Qt.Key_E)
+      compare(subject.text, "Readiness draftde")
+      compare(shortcutSpy.count, 0, "typing must never dispatch a mailbox action")
+
+      app.openSettings()
+      compare(compose.visible, false)
+      compare(named(app, "key-router").context, "page")
+      app.back()
+      compare(compose.visible, true)
+      compare(app.composing, true)
+      compare(named(app, "key-router").context, "compose")
+
+      // A normal queued send must remove the restored overlay as well.
+      named(compose, "compose-to-field").text = "synthetic@example.com"
+      compose.submit()
+      compare(compose.opened, false)
+      compare(app.navKinds.join(","), "list")
+      mailService.anyAccountReady = false
+      mailService.anyAccountReady = true
+      compare(app.composing, false)
+      compare(app.navKinds.join(","), "list")
+    }
+
+    function test_readiness_changes_keep_the_event_composer_in_navigation() {
+      app.open("{}")
+      var composer = typed(app, "CalendarEventComposer_")
+      verify(composer)
+      composer.begin()
+      mailService.anyAccountReady = false
+      wait(20)
+      compare(composer.opened, true)
+      compare(app.composing, true)
+      compare(named(app, "key-router").context, "page")
+      mailService.anyAccountReady = true
+      wait(20)
+      compare(composer.visible, true)
+      compare(app.navKinds.join(","), "list,eventComposer")
+      compare(named(app, "key-router").context, "eventCompose")
+      app.back()
+      compare(composer.opened, false)
+      compare(app.composing, false)
+      compare(app.navKinds.join(","), "list")
+    }
+
     function init() {
+      mailService.agentAvailable = true
+      mailService.anyAccountReady = true
       mailService.backendRuntime = null
       app.draftSavedToast = ""
       app.composeRecoveryNotice = ""
@@ -248,6 +361,7 @@ Item {
       if (aiDock) { aiDock.submittedPrompt=""; findChild(aiDock,"agent-pending-queue").messages=[] }
       app.preferredAssistantWidth = 0
       mailService.draftAgentJobs = []; mailService.cancelledAgentId = ""
+      mailService.readerAgentJob = null
       mailService.agentRequests = 0
       mailService.lastAgentPrompt = ""
       mailService.sending = false
@@ -264,7 +378,7 @@ Item {
       mailService.attachmentCallback = null
       mailService.mailboxKey = "inbox"
       mailService.detailLoading = false
-      mailService.detailPainted = false
+      mailService.detailPainted = true
       mailService.selectedId = "message-1"
       mailService.selectedBody = ({ text: "Original body", source: "plain" })
       mailService.selectedAttachments = []
@@ -382,7 +496,7 @@ Item {
       app.writeComposeRecovery(raw)
       var warning = app.draftSavedNotice
       verify(warning.indexOf("Keep this window open") >= 0)
-      wait(4200)
+      tryCompare(app, "draftSavedToast", "", 6000)
       compare(app.draftSavedNotice, warning, "the prior save's timer cannot dismiss a recovery warning")
       compare(recoveryBackend.requests.length, priorRequests, "the old connection receives no recovery RPC")
       verify(app.composeWriteQueued)
@@ -410,9 +524,41 @@ Item {
       verify(app.composeRecovery.active !== true);verify(!composeView().opened)
       compare(lastNativeRequest("outbox.forget"),null)
       var saved = lastNativeRequest("compose.recoverySave")
+      // Rust refuses a record without version 1, which left the stale receipt on disk.
+      compare(saved.params.record.version, 1)
+      compare(saved.params.record.active, false)
       saved.done({record:saved.params.record,revision:"r2"},null)
       lastNativeRequest("outbox.snapshot").done({entries:[{state:"sent"}]},null)
       verify(lastNativeRequest("outbox.forget") !== null)
+    }
+    function test_proposal_receipt_ack_waits_for_durable_recovery_data() {
+      return [{tag:"cancelled",state:"cancelled"},{tag:"failed",state:"failed"}]
+    }
+    function test_proposal_receipt_ack_waits_for_durable_recovery(data) {
+      var id = "agent-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1"
+      var record = recoveredPending()
+      record.draft.pendingSendId = id
+      recoveryBackend.ready = true
+      lastNativeRequest("compose.recoveryRead").done({record:record,revision:"r1"},null)
+      lastNativeRequest("outbox.snapshot").done({entries:[{id:id,state:data.state}]},null)
+      tryVerify(function(){return lastNativeRequest("compose.recoverySave") !== null})
+      var saved = lastNativeRequest("compose.recoverySave")
+      compare(saved.params.record.draft.body, record.draft.body)
+      verify(!saved.params.record.draft.pendingSendId)
+      compare(app.composeReceiptAcks.length, 1)
+      compare(lastNativeRequest("outbox.forget"), null)
+      // Even another ack drain cannot release the only durable payload early.
+      app.acknowledgeComposeReceipts()
+      compare(lastNativeRequest("outbox.forget"), null)
+      saved.done({record:saved.params.record,revision:"r2"},null)
+      var receipt = lastNativeRequest("outbox.snapshot")
+      compare(receipt.params.sendId, id)
+      receipt.done({entries:[{id:id,state:data.state}]},null)
+      var ack = lastNativeRequest("outbox.forget")
+      verify(ack !== null)
+      compare(ack.params, {accountId:record.draft.accountId,sendId:id})
+      ack.done({},null)
+      compare(app.composeReceiptAcks.length, 0)
     }
     function test_queued_receipt_stays_parked_instead_of_opening_a_duplicate_composer() {
       recoveryBackend.ready = true
@@ -646,6 +792,32 @@ Item {
       tryCompare(body,"activeFocus",true)
     }
 
+    function test_open_ai_follows_reply_into_composer_data() {
+      return [{tag:"Reply",mode:"reply"},{tag:"Reply all",mode:"replyAll"}]
+    }
+    function test_open_ai_follows_reply_into_composer(data) {
+      app.open("{}")
+      var reader = named(app,"agent-prompt")
+      var draft = named(app,"compose-agent")
+      mailService.readerAgentJob = {id:"reader-chat",messageId:mailService.selectedId,
+        accountId:mailService.composeAccountId,state:"done",canContinue:true}
+      reader.openCenteredFor(mailService.selectedId,"Original message")
+      compare(reader.opened,true)
+      compare(reader.job.id,"reader-chat")
+      app.startCompose(data.mode)
+      compare(app.composing,true)
+      compare(reader.opened,false)
+      compare(draft.opened,true)
+      compare(app.assistantOpen,true)
+      compare(composeView().agentParentJobId,"reader-chat")
+      compare(draft.job.id,"reader-chat")
+    }
+    function test_closed_ai_stays_closed_when_replying() {
+      app.open("{}")
+      named(app,"agent-prompt").close()
+      app.startCompose("replyAll")
+      compare(app.assistantOpen,false)
+    }
     function test_ai_dock_resizes_from_left_edge_and_keeps_width() {
       app.open("{}")
       app.startCompose("new")
@@ -734,56 +906,82 @@ Item {
       mouseClick(toggle, toggle.width / 2, toggle.height / 2)
       tryCompare(dock, "opened", false)
     }
+    function test_unsupported_default_keeps_ai_visible_but_blocks_mouse_and_shortcut() {
+      app.open("{}")
+      app.backToList()
+      app.startCompose("new")
+      mailService.agentAvailable = false
+      var toggle = named(app, "header-ai-button")
+      tryVerify(function() { return toggle.visible })
+      verify(!toggle.enabled)
+      verify(toggle.tooltipText.indexOf("not supported") >= 0)
+      mouseClick(toggle, toggle.width / 2, toggle.height / 2)
+      app.runShortcut("askAgent", "Alt+G")
+      verify(!app.assistantOpen)
+      compare(mailService.agentRequests, 0)
+      mailService.agentAvailable = true
+      verify(toggle.enabled)
+      mouseClick(toggle, toggle.width / 2, toggle.height / 2)
+      tryCompare(app, "assistantOpen", true)
+    }
 
-    function test_ai_command_keys_fill_without_sending_and_escape_in_order() {
+    function test_ai_slash_text_uses_normal_send_and_close_keys() {
       app.open("{}")
       app.startCompose("new")
       app.runShortcut("askAgent", "Alt+G")
       var dock = named(app, "compose-agent")
       var field = named(dock, "agent-prompt-field")
       tryCompare(field, "activeFocus", true)
-      field.text = "/"
+      field.text = "/r"
       field.cursorPosition = field.length
-      tryCompare(dock, "commandsOpen", true)
-      tryCompare(named(app, "key-router"), "context", "assistantCommands")
-      wait(0)
-      keyClick(Qt.Key_Down)
-      compare(dock.commandIndex, 1, "Down must route to command selection")
-      keyClick(Qt.Key_Up)
-      compare(dock.commandIndex, 0, "Up must route to command selection")
-      keyClick(Qt.Key_Return)
-      tryCompare(dock, "commandsOpen", false)
-      verify(field.text.length > 1)
-      compare(field.text, "/review ")
-      compare(mailService.agentRequests, 0)
-      compare(field.activeFocus, true)
-      keyClick(Qt.Key_Backspace)
-      compare(field.text, "")
-      compare(dock.commandTokens.length, 0)
-      field.text = "/"
-      field.cursorPosition = field.length
-      tryCompare(dock, "commandsOpen", true)
+      tryCompare(named(app, "key-router"), "context", "assistant")
       keyClick(Qt.Key_Enter, Qt.ShiftModifier)
-      compare(field.text, "/\n")
+      compare(field.text, "/r\n")
       compare(mailService.agentRequests, 0)
       field.text = "/r"
-      tryCompare(dock, "commandsOpen", true)
       keyClick(Qt.Key_Enter)
-      tryCompare(dock, "commandsOpen", false)
-      compare(field.text, "/review ")
-      compare(mailService.agentRequests, 0)
-      field.clear()
-      field.text = "/"
-      tryCompare(dock, "commandsOpen", true)
+      compare(mailService.lastAgentPrompt, "/r")
+      compare(mailService.agentRequests, 1)
+      field.text = "/unknown"
       wait(0)
-      keyClick(Qt.Key_Escape)
-      tryCompare(dock, "commandsOpen", false)
-      compare(dock.opened, true)
       keyClick(Qt.Key_Escape)
       tryCompare(dock, "opened", false)
       compare(app.composing, true)
     }
 
+    function test_clear_suggestion_selects_before_executing() {
+      app.open("{}")
+      app.startCompose("new")
+      app.runShortcut("askAgent", "Alt+G")
+      var dock=named(app,"compose-agent")
+      var field=named(dock,"agent-prompt-field")
+      tryCompare(field,"activeFocus",true)
+      field.text="/"
+      tryCompare(dock,"commandsOpen",true)
+      tryCompare(named(app,"key-router"),"context","assistantCommands")
+      keyClick(Qt.Key_Return)
+      compare(field.text,"/clear ")
+      compare(dock.clearCommandStart,0)
+      compare(dock.commandsOpen,false)
+      compare(mailService.agentRequests,0)
+      keyClick(Qt.Key_Return)
+      compare(field.text,"")
+      compare(dock.clearCommandStart,-1)
+      compare(dock.opened,true)
+      compare(mailService.agentRequests,0)
+      field.text="/clear"
+      tryCompare(dock,"commandsOpen",true)
+      keyClick(Qt.Key_Return)
+      compare(field.text,"")
+      compare(mailService.agentRequests,0)
+      field.text="/cl"
+      tryCompare(dock,"commandsOpen",true)
+      keyClick(Qt.Key_Escape)
+      compare(dock.commandsOpen,false)
+      compare(dock.opened,true)
+      keyClick(Qt.Key_Escape)
+      compare(dock.opened,false)
+    }
     function test_ai_dock_allows_returning_to_draft_fields() {
       app.open("{}")
       app.startCompose("new")

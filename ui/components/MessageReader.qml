@@ -6,6 +6,7 @@ import "../message/Direction.js" as Direction
 import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
+import "../account/Model.js" as Model
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -125,6 +126,18 @@ Item {
 
   readonly property var summary: service ? service.selectedMessage : null
   readonly property bool isDraft: !!summary && summary.isDraft === true
+  // What the archive and trash buttons ask for, by binding id. The window
+  // decides it over the rows the buttons' action will reach, which are not
+  // always the open message (`MessageList.readerActions`): the selection when
+  // the message is ticked, the conversation's row when a member is open.
+  // `keys` false means `e` and `d` reach other rows, so the tooltips leave
+  // them out rather than name a key that does something else.
+  property var actions: null
+  // What `e` and `d` ask for, for the empty reader's key list.
+  property var keyActions: null
+  readonly property string archiveAction: actions ? actions.archive : "archive"
+  readonly property string trashAction: actions ? actions.trash : "trash"
+  function keyHint(key) { return actions && actions.keys === false ? "" : " · " + key }
 
   // The id the service answers to, which is not always the one on the summary.
   // A list made of several mailboxes addresses a row by mailbox and id, and the
@@ -133,6 +146,18 @@ Item {
   // composed id where there is one and the same string everywhere else, which
   // is what the list and the compose view already hand back.
   readonly property string selectedId: service ? String(service.selectedId || "") : ""
+
+  readonly property var attachments: service ? service.selectedAttachments || [] : []
+  property bool attachmentsExpanded: false
+  onSelectedIdChanged: resetAttachments()
+  onServiceChanged: resetAttachments()
+  onAttachmentsChanged: if (attachments.length === 0) resetAttachments()
+
+  function resetAttachments() {
+    attachmentsExpanded = false
+    attachmentFlick.cancelFlick()
+    attachmentFlick.contentY = 0
+  }
 
   // Which way this message runs.
   //
@@ -265,6 +290,7 @@ Item {
     dimColor: root.dimColor
     dimmerColor: root.dimmerColor
     panelFontFamily: root.panelFontFamily
+    keyActions: root.keyActions
   }
 
   // Nothing known at all, which after the reader learned to open on the list's
@@ -357,19 +383,44 @@ Item {
       anchors.topMargin: backBar.visible ? Style.space(14) : 0
       spacing: Style.space(4)
 
-      Text {
+      Item {
         width: parent.width
-        // A stranger wrote this. Qt's default AutoText switches a string that
-        // looks like markup into rich text, and rich text with an <img> in it is
-        // a fetch — the same beacon the message body is stripped of.
-        textFormat: Text.PlainText
-        text: root.summary ? root.summary.subject : ""
-        color: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-        wrapMode: Text.WordWrap
-        horizontalAlignment: root.subjectAlignment
+        height: subjectLine.implicitHeight
+        Rectangle {
+          objectName: "reader-subject-selection"
+          anchors.fill: parent
+          radius: Style.cornerRadius
+          visible: subjectLine.selected
+          color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.08)
+        }
+        Text {
+          id: subjectLine
+          objectName: "reader-subject"
+          width: parent.width
+          // A stranger wrote this. Qt's default AutoText switches a string that
+          // looks like markup into rich text, and rich text with an <img> in it is
+          // a fetch — the same beacon the message body is stripped of.
+          textFormat: Text.PlainText
+          text: root.summary ? root.summary.subject : ""
+          color: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.subtitle
+          font.bold: true
+          wrapMode: Text.WordWrap
+          horizontalAlignment: root.subjectAlignment
+
+          readonly property bool selected: subjectMenu.opened
+          TapHandler {
+            acceptedButtons: Qt.RightButton
+            onTapped: function(eventPoint) {
+              if (!root.summary) return
+              // Anchor to the line's own lower edge, not the pointer, so the menu
+              // lands in the same place however the line was pressed.
+              var scene = subjectLine.mapToGlobal(0, subjectLine.height)
+              subjectMenu.openAt(root.summary.subject, scene.x, scene.y)
+            }
+          }
+        }
       }
 
       Text {
@@ -602,6 +653,8 @@ Item {
       response: root.service ? root.service.selectedResponse : ""
       canRespond: !!root.service && root.service.canRespondToInvite
       sending: !!root.service && root.service.rsvpSending
+      fallbackAvailable: !!root.service && root.service.rsvpFallbackAvailable === true
+      calendarUrl: String(root.service && root.service.rsvpCalendarUrl || "")
       textColor: root.textColor
       accentColor: root.accentColor
       dimColor: root.dimColor
@@ -610,6 +663,7 @@ Item {
       onRespondRequested: function(answer) {
         if (root.service) root.service.rsvp(answer)
       }
+      onMailOnlyRequested: function(answer) { if (root.service) root.service.rsvpMailOnly(answer) }
       // The same rule the body's own links obey: this leaves the app, and it
       // leaves it through the desktop's browser rather than anything here.
       onOpenRequested: function(url) { root.openLink(url) }
@@ -771,32 +825,76 @@ Item {
     spacing: Style.space(4)
     visible: !!root.summary
 
-    Repeater {
-      model: root.service ? root.service.selectedAttachments : []
+    // The count is always one row. Expanding files must not let their number
+    // take the body away again: they scroll separately and use at most 40% of
+    // the space left below the header, capped at a short list on tall windows.
+    Button {
+      id: attachmentToggle
+      objectName: "attachment-toggle"
+      visible: root.attachments.length > 0
+      text: root.attachments.length + (root.attachments.length === 1
+        ? " attachment" : " attachments") + (root.attachmentsExpanded ? " · Hide" : " · Show")
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      fontSize: Style.font.caption
+      horizontalPadding: Style.space(6)
+      verticalPadding: Style.space(3)
+      selected: root.attachmentsExpanded
+      onClicked: root.attachmentsExpanded = !root.attachmentsExpanded
+    }
 
-      AttachmentRow {
-        required property var modelData
-        width: parent.width
-        attachment: modelData
-        // Asked of the service by message and attachment rather than looked up
-        // by attachment alone: in a merged list the key is the mailbox's as
-        // well, and a bare id found nothing, so the row never went busy.
-        saving: !!root.service && root.service.attachmentIsSaving(root.selectedId,
-          modelData && modelData.attachmentId ? modelData.attachmentId : "")
-        textColor: root.textColor
-        dimColor: root.dimColor
-        dimmerColor: root.dimmerColor
-        panelFontFamily: root.panelFontFamily
-        onOpenRequested: function(attachment) {
-          if (root.service && root.summary)
-            root.service.openAttachment(root.selectedId, attachment)
-        }
-        onSaveRequested: function(attachment) {
-          // `selectedId`, like every other action on this message: `summary.id`
-          // is the id the owning account issued, which reaches no mailbox in a
-          // merged list and so saved from whichever one was active.
-          if (root.service && root.summary)
-            root.service.saveAttachment(root.selectedId, attachment)
+    Flickable {
+      id: attachmentFlick
+      objectName: "attachment-scroller"
+      width: parent.width
+      visible: attachmentToggle.visible && root.attachmentsExpanded
+      height: visible ? Math.min(contentHeight, Style.space(160), Math.max(0,
+        root.height - bodyFlick.y - actionsRow.implicitHeight
+          - attachmentToggle.height - Style.space(18)) * 0.4) : 0
+      contentWidth: width
+      contentHeight: attachmentRows.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+      flickableDirection: Flickable.VerticalFlick
+      WheelScroller { view: attachmentFlick }
+      ScrollBar.vertical: ScrollBar { id: attachmentScrollBar; policy: ScrollBar.AsNeeded }
+
+      Column {
+        id: attachmentRows
+        // Keep the last action clear of the scrollbar's pointer target.
+        width: parent.width - (attachmentScrollBar.visible
+          ? attachmentScrollBar.width + Style.space(4) : 0)
+        spacing: Style.space(4)
+
+        Repeater {
+          model: root.attachments
+
+          AttachmentRow {
+            required property var modelData
+            width: attachmentRows.width
+            attachment: modelData
+            // Asked of the service by message and attachment rather than looked up
+            // by attachment alone: in a merged list the key is the mailbox's as
+            // well, and a bare id found nothing, so the row never went busy.
+            saving: !!root.service && root.service.attachmentIsSaving(root.selectedId,
+              modelData && modelData.attachmentId ? modelData.attachmentId : "")
+            textColor: root.textColor
+            dimColor: root.dimColor
+            dimmerColor: root.dimmerColor
+            panelFontFamily: root.panelFontFamily
+            onOpenRequested: function(attachment) {
+              if (root.service && root.summary)
+                root.service.openAttachment(root.selectedId, attachment)
+            }
+            onSaveRequested: function(attachment) {
+              // `selectedId`, like every other action on this message: `summary.id`
+              // is the id the owning account issued, which reaches no mailbox in a
+              // merged list and so saved from whichever one was active.
+              if (root.service && root.summary)
+                root.service.saveAttachment(root.selectedId, attachment)
+            }
+          }
         }
       }
     }
@@ -889,9 +987,10 @@ Item {
           x: actionGap.x + actionGap.width + messageActions.gap
           y: Math.round((parent.height - height) / 2)
           visible: !root.service || root.service.canArchive
-          iconName: "archive"; tooltipText: "Archive · e"
+          iconName: root.archiveAction === "unarchive" ? "inbox" : "archive"
+          tooltipText: Model.actionName(root.archiveAction) + root.keyHint("e")
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-          onClicked: root.actionRequested("archive")
+          onClicked: root.actionRequested(root.archiveAction)
         }
         // Archive under a label, or move to a folder: the same picker `v`
         // opens, one press away in the reader too.
@@ -915,9 +1014,10 @@ Item {
               ? archiveButton.x + archiveButton.width
               : actionGap.x + actionGap.width)) + messageActions.gap
           y: Math.round((parent.height - height) / 2)
-          iconName: "trash"; tooltipText: "Move to trash · d"
+          iconName: root.trashAction === "untrash" ? "undo" : "trash"
+          tooltipText: Model.actionName(root.trashAction) + root.keyHint("d")
           foreground: root.dimColor; hoverColor: root.textColor; fontFamily: root.panelFontFamily
-          onClicked: root.actionRequested("trash")
+          onClicked: root.actionRequested(root.trashAction)
         }
 
       }
@@ -1048,6 +1148,20 @@ Item {
       if (root.service && typeof root.service.copyText === "function") root.service.copyText(text)
     }
     onOpenLinkRequested: function(url) { root.openLink(url) }
+  }
+
+  // The subject's own menu: one row, the subject as written. Beside the
+  // body's menu for the same reason that menu lives here.
+  SubjectMenu {
+    id: subjectMenu
+    objectName: "reader-subject-menu"
+    textColor: root.textColor
+    popupBackgroundColor: root.popupBackgroundColor
+    popupBorderColor: root.popupBorderColor
+    panelFontFamily: root.panelFontFamily
+    onCopyRequested: function(subject) {
+      if (root.service && typeof root.service.copyText === "function") root.service.copyText(subject)
+    }
   }
 
   ImagePopover {

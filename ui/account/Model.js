@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Conversation.js" as Conversation
+.import "../providers/Registry.js" as Registry
 
 // View models. Anything the panel decides — what the setup card should say,
 // whether a message still belongs in the list after an action, what the badge
@@ -48,6 +49,7 @@ function providerName(provider) {
 
 function setupHeadline(state, provider, authKind) {
   var name = providerName(provider)
+  var microsoft = Registry.signsInWithMicrosoft(Registry.named(name))
   if (state === "unavailable") return name + " integration is coming later"
   // A provider whose sign-in is a program of its own says which program: the
   // generic sentence sends somebody looking through Omarchy for a package this
@@ -59,13 +61,13 @@ function setupHeadline(state, provider, authKind) {
   if (state === "no_credentials") {
     if (authKind === "password") return "Add this mailbox"
     if (authKind === "cli") return "Sign in to " + name
-    if (name === "Outlook") return "Add this Outlook mailbox"
+    if (microsoft) return "Add this " + name + " mailbox"
     return "Connect a Google Cloud project"
   }
   if (state === "signing_in") {
     if (authKind === "password") return "Checking the mailbox…"
     if (authKind === "cli") return "Waiting for " + name + "…"
-    if (name === "Outlook") return "Waiting for Microsoft…"
+    if (microsoft) return "Waiting for Microsoft…"
     return "Waiting for Google…"
   }
   if (state === "reconnecting") return "Reconnecting to " + name + "…"
@@ -95,6 +97,8 @@ function setupDetail(state, missingTools, reason, provider, authKind) {
       return "The HEY CLI is installed. Signing in opens HEY in your browser; the token it comes back with is the CLI's own, and Omamail never sees it."
     if (name === "Outlook")
       return "Add the mailbox and a Microsoft public-client ID. Sign-in happens on Microsoft's page; Omamail never sees the account password."
+    if (Registry.signsInWithMicrosoft(Registry.named(name)))
+      return "Add the mailbox and the Application (client) ID of your Microsoft app. Sign-in happens on Microsoft's page; Omamail never sees the account password."
     return "Gmail has no shared app to sign in through, so this plugin uses an OAuth client you own. It takes about two minutes to create."
   }
   if (state === "signing_in") {
@@ -536,6 +540,104 @@ function unavailableActions(capabilities) {
   if (caps.star !== true) out.push("star")
   if (caps.move !== true) out.push("move")
   return out
+}
+
+// The mailbox the list is showing, or "" while it shows something else: a
+// search reaches the whole account and a label view is somewhere else,
+// whatever `mailboxKey` still says. `view` is anything with the service's
+// `mailboxKey`, `searchQuery` and `rawQuery`.
+function plainMailbox(view) {
+  var on = view || {}
+  if (String(on.searchQuery || "") !== "" || String(on.rawQuery || "") !== "") return ""
+  return String(on.mailboxKey || "")
+}
+
+// Whether a message is in the trash. Its own TRASH label says so wherever the
+// provider's resource carries one. A HEY posting carries no label for the box
+// it was listed from, so the plain Trash listing is the other witness.
+function inTrash(summary, view) {
+  if (!summary) return false
+  return summary.inTrash === true || plainMailbox(view) === "trash"
+}
+
+// Whether a message is archived: out of the inbox and not somewhere that has
+// its own verb. Spam counts as "its own verb" only where a spam verb exists —
+// an IMAP Junk folder has no report-spam inverse to offer instead, so a Junk
+// message there is the one spam case "Move to Inbox" still means. The verb is
+// the owning mailbox's (`view.hostForId`), because a merged list holds both
+// kinds, and an owner that cannot be found is not taken to lack one.
+function isArchived(summary, view, id) {
+  if (!summary || summary.inInbox !== false || inTrash(summary, view)) return false
+  if (summary.isSent === true || summary.isDraft === true) return false
+  if (summary.inSpam !== true) return true
+  var host = !view ? null : typeof view.hostForId === "function" ? view.hostForId(id) : view
+  return !!host && host.canReportSpam === false
+}
+
+// Whether every one of these rows is in the trash, or archived: the menu and
+// `keyActionFor` ask over the rows an action will reach, never one of them.
+function allInTrash(rows, view) {
+  var list = Array.isArray(rows) ? rows : []
+  for (var i = 0; i < list.length; i++) if (!inTrash(list[i], view)) return false
+  return list.length > 0
+}
+
+function allArchived(rows, view) {
+  var list = Array.isArray(rows) ? rows : []
+  for (var i = 0; i < list.length; i++)
+    if (!isArchived(list[i], view, list[i] ? list[i].id : "")) return false
+  return list.length > 0
+}
+
+// What the archive or trash slot asks for on the rows its action will reach.
+// Where the slot's action is already done for all of them the slot is the way
+// back: `d` restores messages in the trash, `e` moves archived messages in the
+// Archive mailbox to the Inbox. Archived alone is not enough for `e`: on IMAP
+// every folder but the Inbox reads as archived, and `e` in one of them files
+// the message in Archive, which is worth keeping. Anything else is the slot's
+// own action, so a mixed selection lands in one place rather than swapping
+// every row — the rule `starActionFor` keeps for `s`.
+function keyActionFor(action, rows, view) {
+  var verb = String(action || "")
+  if (verb === "trash") return allInTrash(rows, view) ? "untrash" : verb
+  if (verb === "archive" && plainMailbox(view) === "archive" && allArchived(rows, view)) return "unarchive"
+  return verb
+}
+
+// The view a message that is not one of the listing's rows is judged in: the
+// same mailboxes and their spam verbs, and no listing. The listing witnesses
+// where its own rows are (`inTrash`, the Archive rule of `keyActionFor`), not
+// where a message opened from elsewhere is, such as one a new-mail
+// notification opened over the Trash.
+function unlistedView(view) {
+  var on = view || {}
+  return { mailboxKey: "", searchQuery: "", rawQuery: "", canReportSpam: on.canReportSpam,
+    hostForId: function(id) { return typeof on.hostForId === "function" ? on.hostForId(id) : on } }
+}
+
+// The row the reader's own buttons act on when the selection does not
+// reach the open message: the cursor's row while the open message is a
+// member of that row's conversation, else the open message itself. App moves
+// the cursor there before acting, and the list draws the buttons from it.
+function readerTarget(projection, selectedId, cursorId) {
+  var members = projection && Array.isArray(projection.memberIds) ? projection.memberIds : []
+  var cursor = String(cursorId || "")
+  return members.indexOf(selectedId) >= 0 && cursor !== "" ? cursor : String(selectedId || "")
+}
+
+// The words for the four verbs, for the menu, the row and the reader, so a
+// verb reads the same wherever it is offered. Which verb each control offers
+// is its own: the menu offers Move to Inbox for an archived message anywhere,
+// the buttons and `e` only in Archive. Untrash is "Restore", not "Move to Inbox":
+// Gmail's takes the TRASH label off and leaves the rest, so a sent message
+// goes back to Sent, while the other clients move it to the Inbox.
+function actionName(action, labelView) {
+  var verb = String(action || "")
+  if (verb === "archive") return "Archive"
+  if (verb === "trash") return "Move to trash"
+  if (verb === "untrash") return "Restore"
+  if (verb === "unarchive") return labelView === true ? "Move to Inbox and remove label" : "Move to Inbox"
+  return ""
 }
 
 // A row carrying a block, with its own flags read the way `Message.summarize`
@@ -1403,6 +1505,43 @@ function reloadLimit(pageSize, loadedDepth) {
   var depth = Math.floor(Number(loadedDepth)) || 0
   if (depth <= page) return page
   return Math.min(Math.max(page, RELOAD_CEILING), depth)
+}
+
+// ---------------------------------------------------- conversation projection
+
+// The rail a projection source is about, as one key: the account that holds
+// the thread, the thread's id, and the mailbox it is viewed from. The source
+// names a thread when the reader is inside one; two sources with the same key
+// are asking about the same rail.
+//
+// The account is part of it because a thread id is the provider's, not the
+// world's. All mailboxes composes a message id with its account on the way
+// out and leaves `thread.id` as it came, so two accounts can each hold a
+// thread called `t1` in their Inbox — and a reader moving from one to the
+// other is moving between two rails, not asking again about one. The parts
+// are JSON-encoded so no id can run into the next.
+function projectionKey(source) {
+  var fields = source && typeof source === "object" ? source : ({})
+  var thread = fields.thread
+  var id = thread && typeof thread === "object" && thread.id ? String(thread.id) : ""
+  return JSON.stringify([String(fields.accountId || ""), id, String(fields.mailboxKey || "")])
+}
+
+// What the reader draws while a new projection is in flight. About the same
+// rail, the one in hand stays up — its stops and its caption — and only the
+// ways along it go: the navigation, and the first and last stop that `n` and
+// `p` fall back to when the open message has no entry there. So a stale next
+// or previous cannot be followed before the answer lands, and neither can an
+// end be jumped to. About a different rail, nothing: its stops are not this
+// one's. A blank is built afresh each time, lists included, so nothing drawn
+// from one can reach into another.
+function blankProjection() {
+  return { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] }
+}
+
+function pendingProjection(projection, sameRail) {
+  if (!sameRail || !projection || typeof projection !== "object") return blankProjection()
+  return Object.assign({}, projection, { navigation: {}, first: "", last: "" })
 }
 
 function resultSummary(list, estimate, hasMore) {

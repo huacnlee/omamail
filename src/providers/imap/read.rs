@@ -2,6 +2,7 @@
 use super::*;
 use base64::engine::general_purpose::{STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 use std::collections::{BTreeMap, BTreeSet};
+mod search;
 #[derive(Clone, Debug, PartialEq)]
 enum Node {
     Text(Vec<u8>),
@@ -833,6 +834,11 @@ pub(super) fn validate(method: &str, p: &Value) -> Result<()> {
     Ok(())
 }
 pub(super) async fn call(method: &str, p: &Value) -> Result<Value> {
+    if matches!(method, "imap.list" | "imap.listContinue")
+        && p["query"].as_str().unwrap_or("").starts_with("search:")
+    {
+        return search::call(p).await;
+    }
     if method == "imap.attachment" {
         let mut request = p.clone();
         request["ids"] = json!([string(p, "messageId")?]);

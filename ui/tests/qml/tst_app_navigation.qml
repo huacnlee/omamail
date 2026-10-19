@@ -107,6 +107,7 @@ Item {
     property var sendAsAliases: []
     property var sendIdentities: []
     property var calendarController: null
+    property bool noCalendars: false
     property var selectedBody: ({ text: "Original body", source: "plain" })
     property var selectedMessage: null
     property var unavailableActions: []
@@ -268,6 +269,7 @@ Item {
       mailService.selectedId = ""
       mailService.selectedMessage = null
       mailService.unavailableActions = []
+      mailService.noCalendars = false
       mailService.selectedBody = ({ text: "Original body", source: "plain" })
       fakeAuth.credentialsPresent = false
       fakeShell.hidden = []
@@ -449,6 +451,23 @@ Item {
       compare(mailService.count("saveDraft"), 0, "an untouched reply leaves without saving")
     }
 
+    function test_a_reply_raised_from_the_list_waits_for_the_body() {
+      app.cursorId = "message-1"
+      app.composeFromCursor("reply")
+      // What selecting a listed row does: the summary at once, the body later.
+      mailService.selectedMessage = ({
+        id: "message-1", subject: "One",
+        from: ({ email: "sender@example.com", display: "Sender" }), to: [], cc: []
+      })
+      wait(50)
+      compare(app.composing, false, "the summary alone does not begin the draft")
+
+      mailService.land()
+      tryCompare(app, "composing", true)
+      app.back()
+      tryCompare(app, "composing", false)
+    }
+
     function test_the_shortcut_sheet_closes_before_the_page_under_it() {
       app.openMessage("message-1")
       app.runShortcut("help", "")
@@ -462,6 +481,33 @@ Item {
       app.runShortcut("help", "")
       app.runShortcut("help", "")
       compare(kinds(), "list,reader", "the key toggles")
+    }
+
+    function test_no_connected_calendar_takes_the_calendar_out_of_the_window() {
+      app.runShortcut("calendarView", "")
+      compare(kinds(), "calendar")
+      mailService.noCalendars = true
+      compare(app.calendarAvailable, false)
+      compare(kinds(), "list", "a calendar that loses its last source closes")
+
+      app.runShortcut("calendarView", "")
+      app.runShortcut("calendar", "")
+      compare(kinds(), "list", "neither shortcut opens an empty calendar")
+      compare(app.showCalendar(), false)
+
+      var menu = named(app, "app-menu")
+      menu.openAt(40, 40)
+      wait(20)
+      var row = null
+      for (var i = 0; i < menu.menuRows.length; i++)
+        if (menu.menuRows[i].objectName === "app-menu-calendar") row = menu.menuRows[i]
+      verify(row, "the menu has a calendar row")
+      compare(row.visible, false, "and does not offer it")
+      menu.close()
+
+      mailService.noCalendars = false
+      app.runShortcut("calendarView", "")
+      compare(kinds(), "calendar", "connecting one brings it back")
     }
 
     function test_the_calendar_is_the_other_root_and_back_on_a_root_closes() {
@@ -582,7 +628,7 @@ Item {
       waitForRendering(app)
     }
 
-    function test_header_creation_actions_keep_their_labels() {
+    function test_header_shows_compose_for_mail_and_view_selector_for_calendar() {
       var compose = named(app, "compose-button")
       verify(compose && compose.visible)
       compare(compose.text, "Compose")
@@ -590,10 +636,14 @@ Item {
 
       app.showCalendar()
       waitForRendering(app)
-      var createEvent = named(app, "create-event-button")
-      verify(createEvent && createEvent.visible)
-      compare(createEvent.text, "Create event")
-      compare(typeof createEvent.iconName, "undefined")
+      verify(!compose.visible)
+      compare(named(app, "create-event-button"), null)
+      var selector = named(app, "calendar-view-selector")
+      verify(selector && selector.visible)
+      app.runShortcut("calendarWeek")
+      compare(selector.currentText, "Week (w)")
+      app.runShortcut("calendarDay")
+      compare(selector.currentText, "Day (d)")
     }
     function test_status_error_opens_external_diagnosis_once() {
       mailService.lastError = "Could not confirm AI started. Check the conversation before retrying."

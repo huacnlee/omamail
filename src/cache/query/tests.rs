@@ -6,12 +6,24 @@ fn row(id: &str, subject: &str, at: i64, labels: Value) -> Value {
 fn conservative_search_terms_and_provider_scope() {
     let mut store = store::empty();
     store["queries"] = json!({"folder:INBOX|25":{"at":2,"summaries":[row("in","needle",10,json!([]))]},"folder:Sent|25":{"at":1,"summaries":[row("sent","needle",20,json!([]))]}});
-    assert_eq!(search(&store, "needle", "imap").len(), 1);
+    assert_eq!(search(&store, "needle", "imap").len(), 2);
     assert_eq!(search(&store, "needle", "hey").len(), 2);
     assert!(search(&store, "from:sender", "gmail").is_empty());
     store["queries"]["folder:INBOX|25"]["summaries"][0]["labelIds"] = json!(["TRASH"]);
     assert_eq!(search(&store, "needle", "gmail").len(), 1);
     assert_eq!(query_key("  in:inbox  ", 25), "in:inbox|25");
+}
+#[test]
+fn m365_pages_answer_search_like_jmap_roles_and_never_from_trash_or_junk() {
+    let mut store = store::empty();
+    store["queries"] = json!({
+        "role:inbox|25":{"at":3,"summaries":[row("in","needle",10,json!(["INBOX"]))]},
+        "role:trash|25":{"at":2,"summaries":[row("gone","needle",20,json!(["TRASH"]))]},
+        "role:junk|25":{"at":1,"summaries":[row("spam","needle",30,json!(["SPAM"]))]}
+    });
+    let found = search(&store, "needle", "m365");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["id"], "in");
 }
 #[test]
 fn newest_copy_owns_scope_and_older_copy_can_supply_search_fields() {
@@ -80,7 +92,14 @@ fn ttl_clock_reversal_and_quoted_imap_scope() {
     assert!(!stale(100.0, 90.0, 10.0));
     assert!(!stale(100.0, 110.0, 10.0));
     assert!(stale(100.0, 111.0, 10.0));
-    assert!(!eligible("imap", "folder:\"INBOX Sent\"", &json!({})));
+    assert!(eligible("imap", "folder:\"INBOX Sent\"", &json!({})));
+    assert!(!eligible("imap", "folder:\"Junk Email\"", &json!({})));
+    assert!(!eligible(
+        "imap",
+        "search:TEXT needle",
+        &json!({"labelIds":["TRASH"]})
+    ));
+    assert!(!eligible("imap", "folder:Custom", &json!({"inSpam":true})));
     assert!(eligible("outlook", "folder:\"INBOX\" UNSEEN", &json!({})));
     assert!(!eligible("jmap", "role:junk", &json!({})));
     assert!(eligible("hey", "role:junk", &json!({})));

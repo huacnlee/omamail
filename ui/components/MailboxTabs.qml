@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
@@ -23,23 +24,12 @@ Flickable {
   signal selected(string key)
   signal chipHovered(int index, bool isHovered)
 
-  // Scrolling a six-segment control in a narrow window is worse than not
-  // offering two of the segments: All mail and Trash are places you go looking
-  // for something, not places you work from, and search reaches both. The
-  // mailbox in view is never dropped, however rarely it is used.
-  readonly property bool crowded: measure.implicitWidth > width && width > 0
-  readonly property var mailboxes: {
-    var all = Array.isArray(root.allMailboxes) ? root.allMailboxes : []
-    if (!crowded) return all
-    var out = []
-    for (var i = 0; i < all.length; i++) {
-      if (!all[i].optional || all[i].key === root.current) out.push(all[i])
-    }
-    return out
-  }
+  // Keep every destination reachable, including folders excluded from search.
+  // Narrow windows scroll the row instead of hiding Archive, Junk and Trash.
+  readonly property var mailboxes: Array.isArray(root.allMailboxes) ? root.allMailboxes : []
 
   width: parent ? parent.width : 0
-  implicitHeight: track.height
+  implicitHeight: track.height + (interactive ? scrollBar.height : 0)
   contentWidth: track.width
   contentHeight: track.height
   clip: true
@@ -47,33 +37,40 @@ Flickable {
   flickableDirection: Flickable.HorizontalFlick
   interactive: contentWidth > width
 
+  QQC.ScrollBar.horizontal: QQC.ScrollBar {
+    id: scrollBar
+    policy: root.interactive ? QQC.ScrollBar.AlwaysOn : QQC.ScrollBar.AlwaysOff
+    background: Item {}
+    contentItem: Rectangle {
+      implicitWidth: 6
+      implicitHeight: 6
+      radius: 3
+      color: Qt.alpha(root.textColor, scrollBar.pressed ? 0.7 : 0.3)
+    }
+  }
+
+  function revealCurrent() {
+    for (var i = 0; i < mailboxes.length; i++) {
+      if (mailboxes[i].key !== current) continue
+      var chip = segments.itemAt(i)
+      if (!chip) return
+      var left = track.x + chip.x
+      var right = left + chip.width
+      if (left < contentX) contentX = left
+      else if (right > contentX + width) contentX = Math.max(0, right - width)
+      return
+    }
+  }
+  onCurrentChanged: Qt.callLater(revealCurrent)
+  onWidthChanged: Qt.callLater(revealCurrent)
+
   // One segmented control rather than loose chips. Separate chips left the
   // selected one's fill floating at a different left edge from the logo above
   // and the message text below; a single track has one edge, and that edge is
   // the one everything else lines up on.
-  // Measured, not guessed: the labels are theme-dependent and this has to know
-  // the width of the full set before deciding whether to show it.
-  Row {
-    id: measure
-    visible: false
-    spacing: 0
-    Repeater {
-      model: root.allMailboxes
-      Button {
-        required property var modelData
-        text: modelData.label
-        bordered: false
-        fontSize: Style.font.bodySmall
-      }
-    }
-  }
-
   Rectangle {
     id: track
-    // Centred whenever the row has slack — which is the case once segments have
-    // stood down. Left-aligned the moment it fills the width, so at the sizes
-    // where it does span, its edge is still the one the logo and the message
-    // text line up on.
+    // Centre when there is room; overflowing rows start at the left edge.
     x: Math.max(0, (root.width - width) / 2)
     width: chips.implicitWidth
     height: chips.implicitHeight
@@ -87,7 +84,9 @@ Flickable {
       spacing: 0
 
       Repeater {
+        id: segments
         model: root.mailboxes
+        onItemAdded: Qt.callLater(root.revealCurrent)
 
         Item {
           id: segment

@@ -26,6 +26,16 @@ Item {
 
   Omamail.App { id: app; service: mailService }
 
+  QtObject {
+    id: agentBackend
+    property bool ready: true
+    property int apiVersion: 6
+    function call(method, params, callback) {
+      if (method === "agent.providerStatus") callback({available:true,provider:"claude"}, "")
+      // Tests inject completed jobs/proposals; no agent process is started.
+    }
+  }
+
   SignalSpy {
     id: failureSpy
     target: mailService
@@ -36,7 +46,14 @@ Item {
     name: "SendFailures"
     when: windowShown
 
-    function initTestCase() { BackendFixture.markReady(mailService) }
+    function initTestCase() {
+      var fixture = BackendFixture.install(mailService)
+      // Repeated API/account setup must not fill the bounded RPC queue with
+      // unanswered background cache reads and starve the send under test.
+      fixture.answers = {"cache.calendarRead":null, "cache.queryRestore":null}
+      BackendFixture.markReady(mailService)
+      mailService.agentRunner.backend = agentBackend
+    }
 
     readonly property string ada: "ada@example.com"
     readonly property string bob: "bob@example.com"
@@ -169,6 +186,169 @@ Item {
         "the failing account must be active before its draft is restored")
       compare(compose.opened, true)
       compare(named(compose, "compose-body-editor").text, "Keep Ada's words")
+    }
+
+    function test_ai_card_send_keeps_displayed_body_and_uses_normal_outbox() {
+      BackendFixture.markReady(mailService, 6)
+      var owner = entry(ada)
+      owner.signature = "Do not append this changed signature"
+      seed([owner], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      var fixture = BackendFixture.install(mailService)
+      var start = fixture.requests.length
+      var displayed = "Hi Bob,\n\nThursday works.  \n\nAda\n\n> Original question\n"
+      var id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0"
+      var compose = composeView()
+      var sendId = compose.sendProposal({accountId:adaId,from:ada,to:bob,cc:"",bcc:"",
+        subject:"Re: Check-in",body:displayed,attachments:[],threadId:"thread",inReplyTo:"message",draftId:""}, id, "chat")
+      compare(sendId, "agent-" + id)
+      var queued = answerQueued(adaId)
+      compare(queued.id, sendId)
+      var composed = null
+      for (var i = start; i < fixture.requests.length; i++)
+        if (fixture.requests[i].method === "message.compose") composed = fixture.requests[i].params.fields
+      verify(composed !== null)
+      compare(composed.body, displayed)
+      compare(composed.signature, "")
+      compare(composed.signatureHtml, "")
+      compare(composed.to, bob)
+      compare(composed.inReplyTo, "message")
+      compare(mailService.accountAt(0).sendQueue.latest.id, sendId)
+      compare(compose.parkedDrafts.length, 1)
+      compare(compose.pendingDraft.body, displayed)
+      compare(compose.pendingDraft.agentParentJobId, "chat")
+      BackendFixture.markReady(mailService)
+    }
+
+    function proposal() {
+      return {accountId:adaId,from:ada,to:bob,cc:"",bcc:"",replyTo:"",
+        subject:"Re: Proposal",body:"Exact reply\n\n> Quoted history\n",attachments:[],
+        threadId:"thread",inReplyTo:"message",replyMessageId:"source",draftId:""}
+    }
+
+    function test_proposal_routing_edits_block_card_dispatch_data() {
+      var rows = []
+      var fields = ["to", "cc", "bcc", "replyTo", "from"]
+      for (var i = 0; i < fields.length; i++) {
+        rows.push({tag:fields[i]+"-pending", field:fields[i], pending:true})
+        rows.push({tag:fields[i]+"-displayed", field:fields[i], pending:false})
+      }
+      return rows
+    }
+
+    function test_proposal_routing_edits_block_card_dispatch(data) {
+      BackendFixture.markReady(mailService, 6)
+      seed([entry(ada)], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      app.opened = true
+      app.startCompose("new")
+      var compose = composeView()
+      named(compose, "compose-to-field").text = "original@example.test"
+      compose.replaceBody("Manual draft")
+      var envelope = compose.outgoingEnvelope()
+      var card = {id:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-3", jobId:"routing-chat",
+        accountId:adaId,draftKey:compose.draftKey,subject:"Proposed subject",body:"Proposed body",
+        applicable:true,envelope:envelope}
+      var job = {id:card.jobId, accountId:adaId, draftKey:compose.draftKey,
+        state:"done",canContinue:true,created:Date.now()/1000}
+      var runner = mailService.agentRunner
+      runner.providerAvailable = true
+      runner.jobs = [job]
+      var scopes = {}; scopes["draft:" + compose.draftKey] = {jobs:[job],history:[job]}
+      var accounts = {}; accounts[adaId] = scopes
+      runner.scopesByAccount = accounts
+      app.composeAgent.open()
+      runner.shownId = job.id
+      runner.shownTranscript = [{role:"assistant",text:"Here's a draft."}]
+      if (!data.pending) runner.shownProposals = [card]
+      if (data.field === "from") compose.fromEmail = "corrected@example.test"
+      else named(compose, "compose-" + (data.field === "replyTo" ? "reply-to" : data.field) + "-field").text = "corrected@example.test"
+      if (data.pending) runner.shownProposals = [card]
+      verify(waitForRendering(app.composeAgent))
+      var send = named(app.composeAgent, "agent-send-email")
+      var fixture = BackendFixture.install(mailService)
+      var start = fixture.requests.length
+      verify(!app.composeAgent.useProposal(card, true), "Imperative entry also refuses stale routing")
+      verify(!compose.sendProposal(envelope, card.id, job.id), "Composer rechecks at dispatch")
+      mouseClick(send)
+      wait(0)
+      compare(fixture.requests.slice(start).filter(function(r) {
+        return r.method === "message.compose" || r.method === "outbox.enqueue"
+      }).length, 0, "No MIME construction or outbox enqueue for the old destination")
+      compare(compose.parkedDrafts.length, 0)
+      verify(!send.enabled)
+      var recipients = named(app.composeAgent, "agent-proposal-recipients")
+      verify(recipients !== null)
+      compare(recipients.textFormat, Text.PlainText)
+      verify(recipients.text.indexOf("From: " + ada) >= 0)
+      verify(recipients.text.indexOf("To: original@example.test") >= 0)
+      verify(named(app.composeAgent, "agent-proposal-routing-changed").visible)
+      if (data.field === "to") {
+        verify(app.composeAgent.useProposal(card, false))
+        compare(named(compose, "compose-to-field").text, "corrected@example.test")
+        compare(named(compose, "compose-body-editor").text, card.body)
+        compose.submit()
+        answerQueued(adaId)
+        var composed = fixture.requests.slice(start).filter(function(r) { return r.method === "message.compose" })
+        compare(composed.length, 1)
+        compare(composed[0].params.fields.to, "corrected@example.test")
+        compare(composed[0].params.fields.body, card.body)
+      }
+      runner.shownProposals = []
+      runner.jobs = []; runner.scopesByAccount = ({})
+      app.composeAgent.close()
+      BackendFixture.markReady(mailService)
+    }
+
+    function test_ai_card_undo_restores_its_draft_and_queues_receipt_ack() {
+      seed([entry(ada)], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      var compose = composeView()
+      var envelope = proposal()
+      var id = compose.sendProposal(envelope, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1", "chat")
+      verify(!!id)
+      answerQueued(adaId)
+      app.saveComposeRecovery()
+      compare(app.composeRecovery.draft.pendingSendId, id)
+      compare(app.composeRecovery.draft.body, envelope.body)
+      verify(app.undoPendingSend())
+      var request = pending("outbox.undo", adaId)
+      verify(request !== null)
+      request.answered = true
+      BackendFixture.respond(mailService, request, {id:id,snapshot:{accountId:adaId,
+        revision:++outboxRevision,entries:[{id:id,state:"cancelled"}]}})
+      tryCompare(compose, "opened", true)
+      compare(named(compose,"compose-body-editor").text, envelope.body)
+      compare(named(compose,"compose-to-field").text, envelope.to)
+      compare(compose.threadId, envelope.threadId)
+      compare(compose.parkedDrafts.length, 0)
+      compare(app.composeReceiptAcks.filter(function(entry) { return entry.sendId === id }).length, 1)
+    }
+
+    function test_ai_card_failure_restores_snapshot_without_losing_manual_edits() {
+      seed([entry(ada)], adaId)
+      mailService.accountAt(0).profile = {email:ada}
+      var compose = composeView()
+      app.startCompose("new")
+      named(compose,"compose-to-field").text = "other@example.com"
+      named(compose,"compose-body-editor").text = "Newer manual edits"
+      var originalKey = compose.draftKey
+      var envelope = proposal()
+      var id = compose.sendProposal(envelope, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-2", "chat")
+      verify(!!id)
+      compare(compose.draftKey, originalKey)
+      compare(named(compose,"compose-body-editor").text, "Newer manual edits")
+      tryVerify(function() { return pending("outbox.enqueue", adaId) !== null })
+      var request = pending("outbox.enqueue", adaId)
+      verify(request !== null)
+      request.answered = true
+      BackendFixture.respond(mailService, request, {snapshot:{accountId:adaId,
+        revision:++outboxRevision,entries:[{id:id,state:"failed"}]}})
+      tryCompare(compose, "parkedForSend", false)
+      compare(named(compose,"compose-body-editor").text, envelope.body)
+      verify(compose.interruptedDraft !== null)
+      compare(compose.interruptedDraft.body, "Newer manual edits")
+      compare(compose.interruptedDraft.draftKey, originalKey)
     }
 
     function test_zero_delay_native_failure_restores_the_composer_data() {

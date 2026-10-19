@@ -5,7 +5,6 @@ import qs.Ui
 import "../agent/Agent.js" as Agent
 import "../agent" as AI
 import "../agent/ChatText.js" as ChatText
-import "Menu.js" as Menu
 
 // A contextual conversation. The system AI streams public output in the
 // background; applying a suggestion remains an explicit owner action.
@@ -20,15 +19,44 @@ FocusScope {
   required property string panelFontFamily
   property var service: null
   property var composer: null
+  property var proposalComposer: composer
   property string messageId: ""
   property var messageIds: []
   property string subject: ""
   property string accountId: ""
   property var returnFocus: null
   property string localError: ""
+  property var sentProposals: ({})
+  readonly property var proposals: service && service.backendCanAgentProposals && service.agentShownId === (job ? String(job.id) : "")
+    ? (service.agentShownProposals || []) : []
+  onProposalsChanged: syncConversation()
+  function proposalFor(id) {
+    for (var i = 0; i < proposals.length; i++) if (String(proposals[i].id) === id) return proposals[i]
+    return ({subject:"",body:"",applicable:false})
+  }
+  signal applyProposalRequested(var envelope, string parentId)
+  readonly property string routingChangedText: "Recipients or sender changed. Use this version, then send from the composer."
+  function proposalRoutingChanged(envelope) {
+    return !!proposalComposer && typeof proposalComposer.proposalRoutingChanged === "function"
+      && proposalComposer.proposalRoutingChanged(envelope)
+  }
+  function useProposal(proposal, send) {
+    var envelope = proposal.envelope ? Agent.proposalEnvelope(Object.assign({}, proposal.envelope,
+      {subject: String(proposal.subject), body: String(proposal.body)})) : null
+    if (!envelope || !proposal.applicable || (send && sentProposals[proposal.id])) return false
+    if (send) {
+      if (proposalRoutingChanged(envelope)) { localError = routingChangedText; return false }
+      var accepted = proposalComposer && proposalComposer.sendProposal(envelope, proposal.id, job ? String(job.id) : "")
+      if (!accepted) { localError = "Could not queue this email. Check its recipients and mailbox."; return false }
+      var sent = Object.assign({}, sentProposals); sent[proposal.id] = true; sentProposals = sent
+      return true
+    }
+    if (composer) return composer.applyProposal(envelope)
+    else applyProposalRequested(envelope, job ? String(job.id) : "")
+    return true
+  }
   property string submittedPrompt: ""
   property string submittedInput: ""
-  property var submittedTokens: []
   property string submittedJobId: ""
   property string submittedScope: ""
   readonly property string queueScope: JSON.stringify(composer
@@ -40,6 +68,7 @@ FocusScope {
     service: root.service
     currentScope: root.queueScope
     currentJob: root.job
+    draftFields: root.composer ? root.fields : null
   }
   readonly property var fields: composer ? composer.currentFields() : ({})
   readonly property bool overSelection: messageIds.length > 1
@@ -50,13 +79,23 @@ FocusScope {
     if (!service || !service.hasAgent) return null
     if (composer) {
       var drafts = service.agentJobsForDraft(fields)
-      return drafts.length > 0 ? drafts[0] : null
+      if (drafts.length > 0) return drafts[0]
+      if (composer.agentParentJobId) {
+        var all = service.agentAllJobs || []
+        for (var i = 0; i < all.length; i++) if (String(all[i].id) === composer.agentParentJobId && Agent.canUseDraftChat(all[i], fields)) return all[i]
+      }
+      var reader = fields.replyMessageId ? service.agentJobFor(fields.replyMessageId, fields.accountId) : null
+      return Agent.canUseDraftChat(reader, fields) ? reader : null
     }
     if (overSelection) return service.agentSelectionJob(messageIds, accountId)
     var id = messageId
     return id !== "" ? service.agentJobFor(id, accountId) : null
   }
   property bool historyMode: false
+  function selectionOwns(candidate) {
+    return !service || typeof service.canContinueAgentJob !== "function" || service.canContinueAgentJob(candidate)
+  }
+  readonly property bool canContinue: !!job && !!job.canContinue && selectionOwns(job)
   property string viewedJobId: ""
   property string viewedConversationId: ""
   readonly property var historyJobs: service && typeof service.agentHistoryFor === "function"
@@ -66,9 +105,10 @@ FocusScope {
     if (viewedJobId !== "") {
       for (var i=0; i<historyJobs.length; i++) if (String(historyJobs[i].id) === viewedJobId || (viewedConversationId !== "" && String(historyJobs[i].conversationId || historyJobs[i].id) === viewedConversationId)) return historyJobs[i]
     }
-    return defaultJob && String(defaultJob.id) !== ignoredJobId ? defaultJob : null
+    return defaultJob && selectionOwns(defaultJob) && String(defaultJob.id) !== ignoredJobId ? defaultJob : null
   }
   function showHistory() { historyMode = true; historyList.currentIndex = historyJobs.length ? 0 : -1; historyList.forceActiveFocus() }
+  function leaveHistory() { historyMode = false; takeFocus() }
   function selectHistory(id) {
     viewedJobId = String(id)
     viewedConversationId = ""
@@ -106,18 +146,11 @@ FocusScope {
   readonly property string output: service && job && service.agentShownId === String(job.id)
     ? service.agentShownOutput : ""
   readonly property string answer: composer ? Agent.draftAnswer(job, output, conversation) : output
-  readonly property bool draftChanged: !!composer && !!job && !!job.draftFingerprint
-    && job.draftFingerprint !== Agent.draftFingerprint(fields)
   readonly property string errorText: localError || (service ? service.agentError || "" : "")
   onErrorTextChanged: {
     if (errorText !== "" && submittedPrompt !== "" && submittedScope === queueScope && !Agent.isActive(job) && !(service && service.agentStarting)) {
       if (field.text === "") {
-        updatingCommands = true
         field.text = submittedInput
-        commandText = field.text
-        commandTokens = submittedTokens
-        dismissedCommandText = field.text
-        updatingCommands = false
       }
       submittedPrompt = ""
     }
@@ -130,18 +163,10 @@ FocusScope {
   anchors.fill: parent
   z: 60
 
-  TextEdit { id: clipboardText; visible: false; textFormat: TextEdit.PlainText }
-  function copyReply(raw) {
-    clipboardText.text = raw
-    clipboardText.selectAll()
-    clipboardText.copy()
-    clipboardText.deselect()
-    clipboardText.text = ""
-  }
   ListModel { id: chatModel }
   function syncConversation() {
     if (!chatModel) return
-    var rows = conversation
+    var rows = Agent.conversationWithProposals(conversation, proposals)
     if (chatModel.count > rows.length) chatModel.remove(rows.length, chatModel.count - rows.length)
     for (var i = 0; i < rows.length; i++) {
       if (i >= chatModel.count) chatModel.append({entryRole: rows[i].role, entryText: rows[i].text})
@@ -152,6 +177,46 @@ FocusScope {
     }
   }
   onConversationChanged: syncConversation()
+  property bool restoringEarlier: false
+  property real earlierHeight: 0
+  property real earlierY: 0
+  property string earlierJobId: ""
+  function loadEarlier() {
+    if (!service || !service.agentHasEarlier || service.agentLoadingEarlier || restoringEarlier) return false
+    earlierHeight = answerFlick.contentHeight
+    earlierY = answerFlick.contentY
+    earlierJobId = job ? String(job.id) : ""
+    restoringEarlier = true
+    answerFlick.followEnd = false
+    if (service.loadEarlierAgentMessages() === false) { restoringEarlier = false; return false }
+    return true
+  }
+  Connections {
+    target: root.service
+    ignoreUnknownSignals: true
+    function onAgentSelectionRevisionChanged() {
+      pending.messages = []
+      pending.paused = true
+      pending.dispatching = false
+      pending.waitingForTurn = false
+      root.submittedPrompt = ""
+      root.viewedJobId = ""
+      root.viewedConversationId = ""
+      root.historyMode = false
+      root.localError = ""
+      if (root.composer) root.composer.agentParentJobId = ""
+    }
+    function onAgentLoadingEarlierChanged() {
+      if (!root.restoringEarlier || root.service.agentLoadingEarlier) return
+      Qt.callLater(function() {
+        if (root.opened && root.job && String(root.job.id) === root.earlierJobId) {
+          chat.forceLayout()
+          answerFlick.contentY = root.earlierY + Math.max(0, answerFlick.contentHeight - root.earlierHeight)
+        }
+        root.restoringEarlier = false
+      })
+    }
+  }
   Component.onCompleted: syncConversation()
 
   function watchJob() {
@@ -168,66 +233,69 @@ FocusScope {
   property string openedDraftKey: ""
 
   property string dismissedCommandText: ""
-  property var commandTokens: []
-  property string commandText: ""
-  property bool updatingCommands: false
-  function updateCommandText() {
-    if (updatingCommands) return
-    var edited = Agent.editCommands(commandText, field.text, commandTokens)
-    updatingCommands = true
-    commandTokens = edited.tokens
-    if (field.text !== edited.text) {
-      field.text = edited.text
-      field.cursorPosition = edited.cursor
-    }
-    commandText = field.text
-    updatingCommands = false
-  }
+  readonly property var commandMatches: ["/clear", "/history", "/diagnose"].filter(function(command) {
+    var input = field.text.trim()
+    return input.charAt(0) === "/" && command.indexOf(input) === 0
+  })
   property int commandIndex: 0
-  readonly property var commandMatches: Agent.commandSuggestions(field.text,
-    composer ? Agent.draftAsks() : Agent.mailAsks(overSelection))
-  readonly property bool commandsOpen: opened && !historyMode && activeFocus && field.text !== dismissedCommandText
-    && commandMatches.items.length > 0
   onCommandMatchesChanged: commandIndex = 0
+  readonly property bool commandsOpen: opened && !historyMode && activeFocus
+    && field.text !== dismissedCommandText && commandMatches.length > 0
+  readonly property int clearCommandStart: field.text.trim() === "/clear" ? field.text.indexOf("/") : -1
   function moveCommand(delta) {
-    var count = commandMatches.items.length
-    if (count) commandIndex = (commandIndex + delta + count) % count
-    commandList.positionViewAtIndex(commandIndex, ListView.Contain)
+    commandIndex = (commandIndex + delta + commandMatches.length) % commandMatches.length
+    return true
   }
   function chooseCommand(index) {
-    var selected = index === undefined ? commandIndex : index
-    if (selected < 0 || selected >= commandMatches.items.length) return false
-    var choice = commandMatches.items[selected]
-    var start = commandMatches.start
-    // The separator belongs to the token so an immediate Backspace stays atomic.
-    var label = "/" + choice.command + " "
-    updatingCommands = true
-    field.text = field.text.slice(0, start) + label
-    commandTokens = commandTokens.concat([{start: start, end: start + label.length, prompt: choice.prompt + " "}])
-    commandText = field.text
-    updatingCommands = false
+    if (!commandsOpen) return false
+    var command = commandMatches[typeof index === "number" ? index : commandIndex]
+    // History takes no argument, so choosing it opens the list at once.
+    if (field.text.trim() === command || command === "/history") {
+      field.text = command
+      return submitCurrent()
+    }
+    field.text = command + " "
     dismissedCommandText = field.text
-    field.cursorPosition = field.text.length
+    field.cursorPosition = field.length
     takeFocus()
     return true
   }
   function dismissCommands() { dismissedCommandText = field.text }
+
   function submitCurrent() {
     if (historyMode) {
       if (historyList.currentIndex < 0 || historyList.currentIndex >= historyJobs.length) return false
       selectHistory(historyJobs[historyList.currentIndex].id)
       return true
     }
-    return submit(Agent.expandCommands(field.text, commandTokens), true)
+    var command = field.text.trim()
+    if (command === "/history") { field.text = ""; showHistory(); return true }
+    if (command === "/diagnose") {
+      if (!service || typeof service.diagnoseError !== "function" || service.diagnosing) return false
+      field.text = ""
+      service.diagnoseError()
+      return true
+    }
+    if (command === "/clear") {
+      if (working || pending.busy) {
+        localError = working ? "Stop the current request before starting a new chat."
+          : "Remove queued messages before starting a new chat."
+        return false
+      }
+      newChat()
+      return true
+    }
+    return submit(field.text, true)
   }
-  function newChat() {
+  function newChat(preserveInput) {
     if (working || pending.busy) return
     ignoredJobId = defaultJob ? String(defaultJob.id) : ""
     viewedJobId = ""
     viewedConversationId = ""
     historyMode = false
-    field.text = ""
+    if (!preserveInput) field.text = ""
     localError = ""
+    if (service && typeof service.clearAgentError === "function") service.clearAgentError()
     takeFocus()
   }
   function takeFocus() { if (historyMode) historyList.forceActiveFocus(); else field.forceActiveFocus() }
@@ -273,6 +341,7 @@ FocusScope {
   }
   function submit(promptText, fromInput) {
     if (!service) return false
+    if (service.agentAvailable === false) { localError = service.agentUnavailableReason; return false }
     var prompt = String(promptText || "").trim()
     if (prompt === "") return false
     if (working || pending.busy) {
@@ -290,13 +359,12 @@ FocusScope {
     }
     if (!fromInput) field.text = prompt
     var inputText = field.text
-    var inputTokens = commandTokens.slice()
     localError = ""
-    if (job && !job.canContinue) {
+    if (job && !canContinue) {
       localError = "Start a new chat to ask again."
       return false
     }
-    var accepted = job ? service.answerAgent(String(job.id), prompt)
+    var accepted = job ? service.answerAgent(String(job.id), prompt, composer ? composer.currentFields() : null)
       : (composer ? service.askAgentDraft(fields, prompt)
         : (overSelection ? service.askAgentMany(messageIds, prompt, accountId)
           : service.askAgent(messageId, prompt, accountId)))
@@ -306,7 +374,6 @@ FocusScope {
       submittedScope = queueScope
       submittedPrompt = prompt
       submittedInput = inputText
-      submittedTokens = inputTokens
       submittedJobId = job ? String(job.id) : ""
       answerFlick.followEnd = true
     }
@@ -321,76 +388,6 @@ FocusScope {
     if (replace) composer.replaceBody(answer)
     else composer.insertAtCursor(answer)
     return true
-  }
-
-  QQC.Popup {
-    id: moreMenu
-    objectName: "agent-more-menu"
-    width: Math.min(Style.space(200), root.width - Style.space(24))
-    padding: Style.space(4)
-    focus: true
-    property int cursorIndex: -1
-    readonly property var rows: [newChatRow, historyRow, diagnoseRow]
-    closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
-    function place() {
-      var anchor = closeButton.mapToItem(root, 0, 0)
-      x = Math.max(0, Math.min(anchor.x + closeButton.width - width, root.width - width))
-      var next = anchor.y + closeButton.height + Style.space(4)
-      if (next + height > root.height) next = anchor.y - height
-      y = Math.max(0, Math.min(next, root.height - height))
-    }
-    onOpened: { cursorIndex = Menu.firstSelectable(rows); place() }
-    onHeightChanged: if (visible) place()
-    background: Rectangle { color: root.popupBackgroundColor; border.color: root.popupBorderColor }
-    contentItem: Column {
-      spacing: Style.space(2)
-      focus: true
-      Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
-          moreMenu.cursorIndex = Menu.nextSelectable(moreMenu.rows, moreMenu.cursorIndex, event.key === Qt.Key_Up ? -1 : 1)
-          event.accepted = true
-        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-          var row = moreMenu.rows[moreMenu.cursorIndex]
-          if (row && row.enabled) row.activated()
-          event.accepted = true
-        }
-      }
-      MenuActionRow {
-        id: newChatRow
-        objectName: "agent-new-chat-menu-row"
-        width: moreMenu.availableWidth
-        text: "New chat"
-        textColor: root.textColor
-        panelFontFamily: root.panelFontFamily
-        collection: moreMenu.rows
-        cursorIndex: moreMenu.cursorIndex
-        enabled: !root.working && !pending.busy
-        onActivated: { moreMenu.close(); root.newChat() }
-      }
-      MenuActionRow {
-        id: historyRow
-        width: moreMenu.availableWidth
-        text: "History..."
-        textColor: root.textColor
-        panelFontFamily: root.panelFontFamily
-        collection: moreMenu.rows
-        cursorIndex: moreMenu.cursorIndex
-        onActivated: { moreMenu.close(); root.showHistory() }
-      }
-      MenuActionRow {
-        id: diagnoseRow
-        objectName: "agent-diagnose-menu-row"
-        width: moreMenu.availableWidth
-        text: "Diagnose..."
-        textColor: root.textColor
-        panelFontFamily: root.panelFontFamily
-        collection: moreMenu.rows
-        cursorIndex: moreMenu.cursorIndex
-        enabled: !!root.service && typeof root.service.diagnoseError === "function"
-          && !root.service.diagnosing
-        onActivated: { moreMenu.close(); root.service.diagnoseError() }
-      }
-    }
   }
 
   Rectangle {
@@ -410,13 +407,26 @@ FocusScope {
       anchors.margins: Style.space(12)
       spacing: Style.space(8)
       Row {
+        id: header
         width: parent.width
         spacing: Style.space(8)
+        BackBar {
+          id: historyBack
+          objectName: "agent-history-back"
+          visible: root.historyMode
+          anchors.verticalCenter: parent.verticalCenter
+          label: "Chat"
+          textColor: root.textColor
+          dimColor: root.dimColor
+          panelFontFamily: root.panelFontFamily
+          onActivated: root.leaveHistory()
+        }
         Text {
-          width: parent.width - closeButton.width - parent.spacing
+          width: parent.width - (historyBack.visible ? historyBack.width + parent.spacing : 0)
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
-          text: root.composer ? "AI · " + (root.fields.subject || "Draft")
+          text: root.historyMode ? "AI · History"
+            : root.composer ? "AI · " + (root.fields.subject || "Draft")
             : "AI · " + (root.subject || "Message")
           color: root.textColor
           font.family: root.panelFontFamily
@@ -424,45 +434,23 @@ FocusScope {
           font.bold: true
           elide: Text.ElideRight
         }
-        Button {
-          id: closeButton
-          objectName: "agent-more-button"
-          width: Style.space(20)
-          height: Style.space(20)
-          bordered: true
-          focusable: true
-          horizontalPadding: 0
-          verticalPadding: 0
-          foreground: root.dimColor
-          accent: root.accentColor
-          fontFamily: root.panelFontFamily
-          tooltipText: "More..."
-          selected: moreMenu.visible
-          Accessible.name: "More AI actions"
-          ActionIcon {
-            anchors.centerIn: parent
-            name: "more"
-            iconSize: Style.font.iconSmall
-            color: root.dimColor
-            fontFamily: root.panelFontFamily
-          }
-          onClicked: moreMenu.open()
-        }
       }
       Flickable {
         id: answerFlick
+        objectName: "agent-transcript-scroll"
         visible: !root.historyMode
         width: parent.width
-        height: Math.max(Style.space(32), content.height - y - controls.implicitHeight - pendingRows.implicitHeight - (pendingRows.visible ? Style.space(8) : 0) - requestRow.implicitHeight - statusText.implicitHeight - Style.space(8) * (controls.implicitHeight > 0 ? 3 : 2)
-          - (changedNotice.visible ? changedNotice.implicitHeight + Style.space(8) : 0))
+        height: Math.max(Style.space(32), content.height - y - controls.implicitHeight - pendingRows.implicitHeight - (pendingRows.visible ? Style.space(8) : 0) - requestRow.implicitHeight - statusText.implicitHeight - Style.space(8) * (controls.implicitHeight > 0 ? 3 : 2))
         contentWidth: width
         contentHeight: Math.max(height, chat.implicitHeight)
         property bool followEnd: true
         property real lastContentY: 0
         onContentYChanged: {
+          var upward = contentY < lastContentY
           if (contentY < lastContentY) followEnd = false
           if (atYEnd) followEnd = true
           lastContentY = contentY
+          if (upward && contentY <= Style.space(24) && !root.restoringEarlier) root.loadEarlier()
         }
         onMovementStarted: followEnd = atYEnd
         onMovementEnded: followEnd = atYEnd
@@ -478,6 +466,15 @@ FocusScope {
           y: Math.max(0, answerFlick.height - implicitHeight)
           width: answerFlick.width
           spacing: Style.space(12)
+          Button {
+            objectName: "agent-earlier-messages"
+            text: "Earlier messages"
+            visible: !!root.service && root.service.agentHasEarlier === true
+            enabled: !!root.service && root.service.agentLoadingEarlier !== true
+            foreground: root.textColor; accent: root.accentColor
+            fontFamily: root.panelFontFamily
+            onClicked: root.loadEarlier()
+          }
           Repeater {
             model: chatModel
             Item {
@@ -486,7 +483,14 @@ FocusScope {
               required property int index
               readonly property bool userMessage: entryRole === "user"
               width: chat.width
-              height: entry.implicitHeight + (userMessage ? Style.space(16) : (replyCopy.visible ? replyCopy.height + Style.space(4) : 0))
+               height: entryRole === "proposal" ? draftLoader.height : entry.implicitHeight + (userMessage ? Style.space(16) : 0)
+              Loader {
+                id: draftLoader
+                width: parent.width
+                active: entryRole === "proposal"
+                property var proposal: root.proposalFor(entryText)
+                sourceComponent: proposalTemplate
+              }
               Rectangle {
                 anchors.fill: parent
                 visible: parent.userMessage
@@ -506,36 +510,9 @@ FocusScope {
                 font.family: root.panelFontFamily
                 font.pixelSize: Style.font.bodySmall
               }
-              QQC.AbstractButton {
-                id: replyCopy
-                objectName: "agent-copy-reply"
-                property bool copied: false
-                Timer { id: copyFeedback; interval: 1600; onTriggered: replyCopy.copied = false }
-                visible: entryRole === "assistant" && !root.working
-                anchors.left: parent.left
-                anchors.bottom: parent.bottom
-                width: Style.font.iconSmall
-                height: Style.font.iconSmall
-                padding: 0
-                hoverEnabled: true
-                focusPolicy: Qt.StrongFocus
-                background: null
-                Accessible.name: copied ? "Copied" : "Copy reply"
-                contentItem: ActionIcon {
-                  name: replyCopy.copied ? "check" : "copy"
-                  iconSize: Style.font.iconSmall
-                  color: replyCopy.hovered || replyCopy.activeFocus ? root.textColor : root.dimColor
-                  fontFamily: root.panelFontFamily
-                }
-                PanelToolTip {
-                  visible: replyCopy.hovered
-                  text: replyCopy.copied ? "Copied" : "Copy reply"
-                  fontFamily: root.panelFontFamily
-                }
-                onClicked: { root.copyReply(entryText); copied = true; copyFeedback.restart() }
-              }
               TextEdit {
                 id: entry
+                visible: entryRole !== "proposal"
                 objectName: entryRole === "assistant" ? "agent-result" : "agent-chat-entry"
                 x: parent.userMessage ? Style.space(22) : 0
                 y: parent.userMessage ? Style.space(8) : 0
@@ -555,6 +532,109 @@ FocusScope {
               }
             }
           }
+          Component {
+            id: proposalTemplate
+            Rectangle {
+              id: proposalCard
+              objectName: "agent-draft-proposal"
+              readonly property var modelData: parent.proposal
+              readonly property var envelope: modelData.envelope || null
+              readonly property bool routingChanged: root.proposalRoutingChanged(envelope)
+              readonly property var queue: root.service && typeof root.service.agentProposalQueue === "function" && envelope
+                ? root.service.agentProposalQueue(envelope.accountId) : null
+              readonly property string sendId: "agent-" + modelData.id
+              readonly property string delivery: queue ? String(queue.deliveryStates[sendId] || "") : ""
+              readonly property bool submitted: delivery !== "" || !!root.sentProposals[modelData.id]
+              Component.onCompleted: if (queue) queue.watchDelivery(sendId)
+              width: parent.width
+              height: proposalContent.implicitHeight + Style.space(24)
+              color: Style.normalFillFor(root.textColor, root.accentColor)
+              border.color: root.popupBorderColor
+              radius: Style.space(6)
+              Column {
+                id: proposalContent
+                x: Style.space(12); y: Style.space(12)
+                width: parent.width - Style.space(24)
+                spacing: Style.space(8)
+                Text {
+                  objectName: "agent-proposal-recipients"
+                  width: parent.width
+                  text: proposalCard.envelope ? "From: " + String(proposalCard.envelope.from || "")
+                    + "\nTo: " + String(proposalCard.envelope.to || "")
+                    + (proposalCard.envelope.cc ? "\nCc: " + proposalCard.envelope.cc : "")
+                    + (proposalCard.envelope.bcc ? "\nBcc: " + proposalCard.envelope.bcc : "")
+                    + (proposalCard.envelope.replyTo ? "\nReply-To: " + proposalCard.envelope.replyTo : "")
+                    : "This proposal has no saved recipients or attachment snapshot. Ask again from its message or draft."
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.dimColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                Text {
+                  width: parent.width
+                  text: "Subject: " + proposalCard.modelData.subject
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.textColor
+                  font.family: root.panelFontFamily
+                  font.bold: true
+                }
+                TextEdit {
+                  objectName: "agent-proposal-body"
+                  width: parent.width
+                  text: Agent.replyOnly(proposalCard.modelData.body, proposalCard.envelope ? proposalCard.envelope.replyQuote : "")
+                  textFormat: TextEdit.PlainText
+                  readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
+                  color: root.textColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Text {
+                  width: parent.width
+                  visible: !!proposalCard.envelope && proposalCard.envelope.attachments.length > 0
+                  text: proposalCard.envelope ? "Attachments: " + Agent.attachmentLabels(proposalCard.envelope.attachments) : ""
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.dimColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                Flow {
+                  width: parent.width
+                  spacing: Style.space(8)
+                  Button {
+                    objectName: "agent-apply-draft"
+                    text: root.composer ? "Use this version" : "Edit draft..."
+                    foreground: root.textColor; accent: root.accentColor
+                    fontFamily: root.panelFontFamily; bordered: true
+                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && (!proposalCard.submitted || ["failed", "cancelled", "unknown"].indexOf(proposalCard.delivery) >= 0)
+                    onClicked: root.useProposal(proposalCard.modelData, false)
+                  }
+                  Button {
+                    objectName: "agent-send-email"
+                    text: ({queued:"Queued for sending", sending:"Sending...", sent:"Sent", failed:"Send failed", cancelled:"Send undone", unknown:"Check Sent — delivery unknown"})[proposalCard.delivery]
+                      || (proposalCard.submitted ? "Checking send status..." : "Send email")
+                    foreground: root.textColor; accent: root.accentColor
+                    fontFamily: root.panelFontFamily; bordered: true
+                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && !proposalCard.submitted && !proposalCard.routingChanged
+                    onClicked: root.useProposal(proposalCard.modelData, true)
+                  }
+                }
+                Text {
+                  objectName: "agent-proposal-routing-changed"
+                  width: parent.width
+                  visible: proposalCard.routingChanged && !proposalCard.submitted
+                  text: root.routingChangedText
+                  textFormat: Text.PlainText
+                  wrapMode: Text.Wrap
+                  color: root.dimColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+            }
+          }
           Text {
             width: parent.width
             visible: !!root.job && Agent.detailText(root.job) !== ""
@@ -567,26 +647,24 @@ FocusScope {
           }
         }
       }
-      Text {
-        id: changedNotice
-        textFormat: Text.PlainText
-        width: parent.width
-        visible: !root.historyMode && root.draftChanged
-        text: "This draft changed. Follow-ups use the original draft; start a new chat to include your edits."
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-      }
       Flow {
         id: controls
         visible: !root.historyMode
         width: parent.width
         spacing: Style.space(6)
         Button {
+          objectName: "agent-restart-chat"
+          text: "New chat"
+          visible: !!root.job && !root.canContinue && !root.working
+          enabled: !pending.busy
+          foreground: root.textColor; accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.newChat(true)
+        }
+        Button {
           objectName: "agent-insert"
           text: "Insert at cursor"
-          visible: !!root.composer && root.answer !== ""
+          visible: !!root.composer && root.answer !== "" && !(root.service && root.service.backendCanAgentProposals)
           foreground: root.textColor
           accent: root.accentColor
           bordered: true
@@ -598,7 +676,7 @@ FocusScope {
         Button {
           objectName: "agent-replace"
           text: "Replace body"
-          visible: !!root.composer && root.answer !== ""
+          visible: !!root.composer && root.answer !== "" && !(root.service && root.service.backendCanAgentProposals)
           foreground: root.textColor
           accent: root.accentColor
           bordered: true
@@ -681,7 +759,8 @@ FocusScope {
         textFormat: Text.PlainText
         text: root.errorText || (pending.visibleHere ? pending.error : "") || (root.working ? Agent.workingText(root.job, root.statusNow, root.preparationStarted)
           + (Agent.progressText(root.job) ? "\n" + Agent.progressText(root.job) : "")
-          : (root.job ? Agent.stateLabel(root.job) : "Ask your system AI about this mail."))
+          : (root.job && !root.selectionOwns(root.job) ? "Read-only chat from a previous AI selection. Start a new chat to continue."
+            : (root.job ? Agent.stateLabel(root.job) : "Ask your system AI about this mail.")))
         color: root.errorText !== "" ? root.urgentColor : root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
@@ -702,7 +781,6 @@ FocusScope {
             id: field
             objectName: "agent-prompt-field"
             textFormat: TextEdit.PlainText
-            onTextChanged: root.updateCommandText()
             Keys.onPressed: function(event) { root.keyPressed(event) }
             width: inputScroll.availableWidth
             font.family: root.panelFontFamily
@@ -721,28 +799,18 @@ FocusScope {
             background: Rectangle {
               color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.06)
             }
-            // Paint each character so highlights follow wrapping and resizing.
-            // The text itself stays plain; user input never becomes markup.
             Repeater {
-              model: root.commandTokens
-              delegate: Item {
-                required property var modelData
-                anchors.fill: parent
-                Repeater {
-                  // The separator is part of atomic deletion, not the highlight.
-                  model: field.getText(parent.modelData.start, parent.modelData.end).trim().length
-                  delegate: Rectangle {
-                    required property int index
-                    readonly property int position: parent.modelData.start + index
-                    readonly property rect first: { field.text; field.width; field.font; return field.positionToRectangle(position) }
-                    readonly property rect next: { field.text; field.width; field.font; return field.positionToRectangle(position + 1) }
-                    x: first.x
-                    y: first.y
-                    width: next.y === first.y ? Math.abs(next.x - first.x) : commandMetrics.advanceWidth(field.getText(position, position + 1))
-                    height: first.height
-                    color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.24)
-                  }
-                }
+              model: root.clearCommandStart >= 0 ? 6 : 0
+              delegate: Rectangle {
+                required property int index
+                readonly property int position: root.clearCommandStart + index
+                readonly property rect first: { field.text; field.width; field.font; return field.positionToRectangle(position) }
+                readonly property rect next: { field.text; field.width; field.font; return field.positionToRectangle(position + 1) }
+                x: first.x
+                y: first.y
+                width: next.y === first.y ? Math.abs(next.x - first.x) : commandMetrics.advanceWidth(field.getText(position, position + 1))
+                height: first.height
+                color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.24)
               }
             }
             FontMetrics { id: commandMetrics; font: field.font }
@@ -782,12 +850,30 @@ FocusScope {
       objectName: "agent-history"
       visible: root.historyMode
       anchors.fill: content
-      anchors.topMargin: closeButton.height + Style.space(8)
+      anchors.topMargin: header.height + content.spacing
       clip: true
       model: root.historyJobs
       keyNavigationEnabled: true
       spacing: Style.space(4)
       QQC.ScrollBar.vertical: QQC.ScrollBar {}
+      footer: Flow {
+        width: historyList.width
+        spacing: Style.space(8)
+        Button {
+          text: "Newer chats"
+          visible: !!root.service && root.service.agentHasNewerChats === true
+          foreground: root.textColor; accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.service.pageAgentChats(false)
+        }
+        Button {
+          text: "Older chats"
+          visible: !!root.service && root.service.agentHasOlderChats === true
+          foreground: root.textColor; accent: root.accentColor
+          fontFamily: root.panelFontFamily
+          onClicked: root.service.pageAgentChats(true)
+        }
+      }
       delegate: QQC.ItemDelegate {
         required property var modelData
         required property int index
@@ -813,45 +899,39 @@ FocusScope {
       }
     }
     Rectangle {
-      id: commandMenu
       objectName: "agent-commands"
       visible: root.commandsOpen
       z: 80
       x: content.x
       y: Math.max(content.y, content.y + requestRow.y - height - Style.space(8))
       width: inputScroll.width
-      height: Math.min(commandList.contentHeight + Style.space(8), Math.max(Style.space(28), requestRow.y - Style.space(8)))
+      height: commandRows.implicitHeight + Style.space(8)
       color: root.popupBackgroundColor
       border.color: root.popupBorderColor
-      ListView {
-        id: commandList
-        anchors.fill: parent
-        anchors.margins: Style.space(4)
-        clip: true
-        model: root.commandMatches.items
-        currentIndex: root.commandIndex
-        QQC.ScrollBar.vertical: QQC.ScrollBar {}
-        delegate: QQC.ItemDelegate {
-          required property var modelData
-          required property int index
-          width: commandList.width
-          height: Style.spacing.popupRowHeight
-          highlighted: index === root.commandIndex
-          focusPolicy: Qt.NoFocus
-          contentItem: Text {
-            text: "/" + modelData.command + " · " + modelData.label
-            textFormat: Text.PlainText
-            color: root.textColor
-            font.family: root.panelFontFamily
-            font.pixelSize: Style.font.bodySmall
-            elide: Text.ElideRight
+      Column {
+        id: commandRows
+        x: Style.space(4); y: Style.space(4)
+        width: parent.width - Style.space(8)
+        Repeater {
+          model: root.commandMatches
+          QQC.ItemDelegate {
+            required property string modelData
+            required property int index
+            objectName: "agent-" + modelData.slice(1) + "-command"
+            width: commandRows.width
+            height: Style.spacing.popupRowHeight
+            focusPolicy: Qt.NoFocus
+            contentItem: Text {
+              text: modelData + " · " + ({"/clear":"New chat", "/history":"History...", "/diagnose":"Diagnose..."})[modelData]
+              textFormat: Text.PlainText
+              color: root.textColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+            background: Rectangle { color: index === root.commandIndex ? Style.selectedFillFor(root.textColor, root.accentColor) : Style.normalFillFor(root.textColor, root.accentColor) }
+            onClicked: { field.text = modelData; root.submitCurrent() }
           }
-          background: Rectangle {
-            color: parent.highlighted || parent.hovered
-              ? Style.selectedFillFor(root.textColor, root.accentColor)
-              : Style.normalFillFor(root.textColor, root.accentColor)
-          }
-          onClicked: root.chooseCommand(index)
         }
       }
     }

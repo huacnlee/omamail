@@ -19,6 +19,18 @@ Item {
     property bool unsubscribing: false
     property string unsubscribeDone: ""
     property string error: ""
+    property bool ready: true
+    property bool canSend: true
+    property var selectedUnsubscribe: null
+    property string receivedAsAddress: "me@example.org"
+    property string receivedAsName: ""
+    property string ownAddress: "me@example.org"
+    property var sent: []
+    property var api: ({sendMessage: function(payload, callback) {
+      mailbox.sent = mailbox.sent.concat([payload])
+      callback({}, null)
+    }})
+    function clearNotice() {}
     function fail(message) { error = message }
   }
   Account.Unsubscribe { id: action; account: mailbox }
@@ -32,6 +44,23 @@ Item {
       mailbox.unsubscribing = false
       mailbox.unsubscribeDone = ""
       mailbox.error = ""
+      mailbox.sent = []
+    }
+    // The list's mailto address is a stranger's; one that cannot be written
+    // into a header is refused before anything is sent.
+    function test_mail_to_an_unwritable_address_is_refused() {
+      mailbox.selectedUnsubscribe = {oneClick: false, postUrl: "", url: "",
+        mail: {to: "x<a\u0000@list.example.org>", subject: "Unsubscribe", body: "Unsubscribe"}}
+      action.run()
+      compare(mailbox.sent.length, 0)
+      compare(mailbox.unsubscribing, false)
+      verify(mailbox.error !== "")
+      mailbox.error = ""
+      mailbox.selectedUnsubscribe = {oneClick: false, postUrl: "", url: "",
+        mail: {to: "list@example.org", subject: "Unsubscribe", body: "Unsubscribe"}}
+      action.run()
+      compare(mailbox.sent.length, 1)
+      compare(mailbox.unsubscribeDone, "Unsubscribe request sent to list@example.org")
     }
     function test_native_request_and_success() {
       action.postUnsubscribe("https://sender.example/unsubscribe?token=synthetic")

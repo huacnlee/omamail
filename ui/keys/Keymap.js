@@ -13,7 +13,7 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "page", "calendar", "assistant", "assistantCommands"]
+var CONTEXTS = ["list", "reader", "search", "compose", "eventCompose", "eventGuests", "page", "calendar", "assistant", "assistantCommands"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -69,12 +69,19 @@ var BINDINGS = [
   { id: "previousMember", keys: ["p"], contexts: ["reader"],
     group: "Moving", label: "Previous message in the conversation" },
 
+  // Each is the button in its slot, and where that action is already done the
+  // button is its inverse: `d` restores a message in the trash and `e` moves
+  // one in Archive to the Inbox (`Model.keyActionFor`). Re-trashing moves
+  // nothing, so `d` was a key that did nothing there. `inverse` names that
+  // action and its hint, so the hint row says what the key will do.
   { id: "archive", keys: ["e"], contexts: MAIL,
-    group: "Acting", label: "Archive",
-    hint: { list: "archive", reader: "archive" } },
+    group: "Acting", label: "Archive (in Archive: move to Inbox)",
+    hint: { list: "archive", reader: "archive" },
+    inverse: { action: "unarchive", hint: "move to inbox" } },
   { id: "trash", keys: ["d"], contexts: MAIL,
-    group: "Acting", label: "Move to trash",
-    hint: { list: "trash", reader: "trash" } },
+    group: "Acting", label: "Move to trash (in the trash: restore)",
+    hint: { list: "trash", reader: "trash" },
+    inverse: { action: "untrash", hint: "restore" } },
   { id: "star", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
   // `v` because that is the key Gmail moves a message with, and issue #58 asks
@@ -129,12 +136,26 @@ var BINDINGS = [
     group: "Calendar", label: "Go to today" },
   { id: "calendarWeek", keys: ["w"], contexts: ["calendar"],
     group: "Calendar", label: "Show week view" },
+  { id: "calendarDay", keys: ["d"], contexts: ["calendar"],
+    group: "Calendar", label: "Show day view" },
+  { id: "calendarAgenda", keys: ["a"], contexts: ["calendar"],
+    group: "Calendar", label: "Show agenda view" },
+  { id: "calendarUndo", keys: ["u"], contexts: ["calendar"],
+    group: "Calendar", label: "Undo the last event change", hint: { calendar: "undo" } },
   { id: "calendarMonth", keys: ["m"], contexts: ["calendar"],
     group: "Calendar", label: "Show month view" },
   // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
   // a hand on the numpad expects the same thing of them.
   { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
+  { id: "saveEvent", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["eventCompose"],
+    group: "Writing", label: "Save and close the event", hint: { eventCompose: "save" } },
+  { id: "guestNext", keys: ["Down"], contexts: ["eventGuests"],
+    group: "Writing", label: "Next guest suggestion" },
+  { id: "guestPrevious", keys: ["Up"], contexts: ["eventGuests"],
+    group: "Writing", label: "Previous guest suggestion" },
+  { id: "guestChoose", keys: ["Return", "Enter"], contexts: ["eventGuests"],
+    group: "Writing", label: "Choose guest suggestion" },
   { id: "undoSend", keys: ["Alt+Z"], contexts: ANY,
     survivesOverlay: true,
     group: "Writing", label: "Undo send" },
@@ -183,12 +204,10 @@ var BINDINGS = [
   { id: "assistantSend", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["assistant", "assistantCommands"],
     sequenceContexts: { "Return": ["assistant"], "Enter": ["assistant"] },
     group: "AI", label: "Send the AI message" },
-  { id: "assistantCommandUp", keys: ["Up"], contexts: ["assistantCommands"],
-    group: "AI", label: "Previous AI command" },
-  { id: "assistantCommandDown", keys: ["Down"], contexts: ["assistantCommands"],
-    group: "AI", label: "Next AI command" },
+  { id: "assistantCommandNext", keys: ["Down"], contexts: ["assistantCommands"], group: "AI", label: "Next command" },
+  { id: "assistantCommandPrevious", keys: ["Up"], contexts: ["assistantCommands"], group: "AI", label: "Previous command" },
   { id: "assistantChooseCommand", keys: ["Return", "Enter"], contexts: ["assistantCommands"],
-    group: "AI", label: "Fill the selected AI command" },
+    group: "AI", label: "Complete or run the selected AI command" },
 
   { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Switch between mail and calendar" },
@@ -220,7 +239,7 @@ var BINDINGS = [
   { id: "back", keys: ["Escape"], contexts: ANY,
     survivesOverlay: true,
     group: "Mailbox", label: "Back, or close the window",
-    hint: { reader: "back", page: "back", compose: "close", search: "leave" } }
+    hint: { reader: "back", page: "back", compose: "close", eventCompose: "close", search: "leave" } }
 ]
 
 // A pending send is a transient action over the screen, not a screen of its
@@ -230,6 +249,7 @@ function contextFor(state) {
   var value = state || ({})
   if (value.assistantEditing) return value.assistantCommands ? "assistantCommands" : "assistant"
   if (value.showPage) return "page"
+  if (value.eventComposing) return value.guestSuggestions ? "eventGuests" : "eventCompose"
   if (value.composing) return "compose"
   if (value.searchFocused) return "search"
   if (value.calendarVisible) return "calendar"
@@ -394,15 +414,20 @@ function helpGroups(hidden) {
 // what a key means is a property of the application, and only whether it is on
 // offer depends on which mailbox is open. `hasSelection` makes the few hints
 // that act on a particular row contextual without changing their bindings.
-function hintsFor(context, unavailable, hasSelection) {
+// `actions` says what a binding with an `inverse` will ask for, by binding
+// id; where that is the inverse, the hint names it rather than the key's own
+// verb.
+function hintsFor(context, unavailable, hasSelection, actions) {
   var out = []
   var rows = bindingsFor(context)
   var missing = Array.isArray(unavailable) ? unavailable : []
+  var asked = actions && typeof actions === "object" ? actions : {}
   for (var i = 0; i < rows.length; i++) {
     if (rows[i].hintNeedsSelection && hasSelection !== true) continue
     var unavailableId = rows[i].hintUnavailableId || rows[i].id
     if (missing.indexOf(unavailableId) >= 0) continue
     var text = hintTextFor(rows[i], context)
+    if (text !== "" && rows[i].inverse && asked[rows[i].id] === rows[i].inverse.action) text = rows[i].inverse.hint
     if (text !== "") out.push(({ key: hintKeyFor(rows[i]), label: text }))
   }
   return out

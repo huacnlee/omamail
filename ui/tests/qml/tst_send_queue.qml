@@ -39,6 +39,7 @@ Item {
     name: "SendQueue"
     function init() {
       queue.parked = []; queue.submitted = ({}); queue.handled = ({}); queue.revision = -1
+      queue.deliveryStates = ({})
       queue.undoBusy = false; queue.undoPending = null; queue.uncertain = ({}); queue.serverEntries = []; queue.arm(); backend.calls = []
       account.successes = []; account.failures = []; account.removed = []; account.sending = false
     }
@@ -59,6 +60,26 @@ Item {
       compare(undone, ""); compare(backend.calls[0].method, "outbox.undo")
       backend.calls[0].callback({id:"send1",snapshot:snapshot(2,[entry("send1","cancelled")])},null)
       compare(undone,"send1");compare(queue.parked.length,0)
+    }
+    function test_proposal_undo_targets_its_send_not_the_latest() {
+      queue.apply(snapshot(1,[entry("proposal","queued"),entry("other","queued")]))
+      var undone=""
+      verify(queue.undo("proposal",function(id){undone=id}))
+      compare(backend.calls[0].params.sendId,"proposal")
+      backend.calls[0].callback({id:"proposal",snapshot:snapshot(2,[entry("proposal","cancelled"),entry("other","queued")])},null)
+      compare(undone,"proposal")
+      compare(queue.parked[0].id,"other")
+      compare(queue.deliveryStates.proposal,"cancelled")
+    }
+    function test_historical_delivery_lookup_has_no_send_side_effects() {
+      queue.watchDelivery("proposal")
+      compare(backend.calls[0].method,"outbox.snapshot")
+      backend.calls[0].callback(snapshot(5,[entry("proposal","sent")]),null)
+      compare(queue.deliveryStates.proposal,"sent")
+      compare(account.successes.length,0)
+      compare(account.failures.length,0)
+      compare(queue.parked.length,0)
+      compare(backend.calls.length,1)
     }
     function test_undo_racing_delivery_does_not_restore_a_sent_draft() {
       queue.apply(snapshot(1,[entry("send1","queued")]))

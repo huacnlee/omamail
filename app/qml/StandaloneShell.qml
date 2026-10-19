@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Dialogs
 import qs.Commons
+import qs.Commons as Commons
 
 QtObject {
   id: root
@@ -16,7 +17,7 @@ QtObject {
   readonly property string calendarPalettePath: ""
   readonly property string notificationError: String(host && host.notificationError || "")
   readonly property var capabilities: ({
-    agent: false,
+    agent: !!host && !!host.capabilities && host.capabilities.agent === true,
     tray: false,
     mailto: false,
     notifications: !!host && !!host.capabilities
@@ -24,7 +25,7 @@ QtObject {
     reopen: !!host && !!host.capabilities && host.capabilities.reopen === true,
     // An installed Omarchy theme is the palette; the appearance setting only
     // has something to decide where the fallback palettes are in use.
-    appearance: !Color.hasOmarchyTheme
+    appearance: !Commons.Color.hasOmarchyTheme
   })
 
   property var fileCallback: null

@@ -11,11 +11,26 @@ Item {
     id: backendFactory
     QtObject {
       property bool ready: true
+      property int apiVersion: 6
       property var requests: []
       property bool holdProjection: false
       property var projections: []
+      property bool holdStatus: false
+      property var statuses: []
       property var projection: ({byMessage:{},anyActive:false,activeIds:[],finishedIds:[],attention:false,attentionByMessage:{},newlyFinished:[]})
-      function call(method, params, callback) {if(method === "agent.jobsProjection") {if(holdProjection)projections=projections.concat([{params:params,callback:callback}]);else callback(projection, "");return} requests=requests.concat([{method:method,params:params,callback:callback}])}
+      function call(method, params, callback) {
+        if (method === "agent.providerStatus") {
+          if (holdStatus) statuses = statuses.concat([{params:params,callback:callback}])
+          else callback({available:true,provider:params.provider || "claude"}, "")
+          return
+        }
+        if (method === "agent.jobsProjection") {
+          if (holdProjection) projections = projections.concat([{params:params,callback:callback}])
+          else callback(projection, "")
+          return
+        }
+        requests = requests.concat([{method:method,params:params,callback:callback}])
+      }
       function finish(index,result,error) {requests[index].callback(result,error || "")}
     }
   }
@@ -45,6 +60,36 @@ Item {
       bridge.projection.newlyFinished=[]
       bridge.finish(1,[{id:"one",state:"done"}])
       compare(finished,["one"])
+    }
+    function test_unsupported_default_blocks_dispatch_and_explicit_choice_recovers() {
+      bridge.holdStatus = true
+      runner.refreshAvailability()
+      bridge.statuses[0].callback({available:false,provider:""}, "")
+      verify(!runner.providerAvailable)
+      verify(runner.availabilityError.indexOf("not supported") >= 0)
+      verify(!runner.start({prompt:"Must not start"}))
+      compare(bridge.requests.length, 0)
+      runner.selectedAgent = "Codex"
+      compare(bridge.statuses[1].params.provider, "codex")
+      bridge.statuses[1].callback({available:true,provider:"codex"}, "")
+      bridge.statuses[0].callback({available:false,provider:""}, "")
+      verify(runner.providerAvailable, "Late default result cannot disable explicit choice")
+      verify(runner.start({prompt:"Use explicit choice"}))
+      compare(bridge.requests[0].params.provider, "codex")
+    }
+    function test_published_backend_keeps_default_ai_and_disconnect_fails_closed() {
+      bridge.holdStatus = true
+      bridge.apiVersion = 5
+      runner.refreshAvailability()
+      compare(bridge.statuses.length, 0)
+      verify(runner.providerAvailable)
+      bridge.apiVersion = 6
+      compare(bridge.statuses.length, 1)
+      bridge.ready = false
+      bridge.statuses[0].callback({available:true,provider:"codex"}, "")
+      verify(!runner.providerAvailable)
+      verify(!runner.start({prompt:"Disconnected"}))
+      compare(bridge.requests.length, 0)
     }
     function test_account_switch_reprojects_pending_listing_and_ignores_stale_result() {
       runner.jobs=[{id:"one",state:"running"}]
@@ -97,6 +142,54 @@ Item {
       verify(runner.start(payload))
       compare(bridge.requests[0].params.payload,payload)
       compare(typeof bridge.requests[0].params.payload,"object")
+    }
+    function test_options_are_gated_and_only_sent_for_new_chats() {
+      runner.selectedAgent = "OpenCode"
+      runner.selectedModel = "fixture/model#variant"
+      bridge.apiVersion = 5
+      verify(!runner.start({prompt:"Question"}))
+      compare(bridge.requests.length, 0)
+      verify(runner.lastError.indexOf("API 6") >= 0)
+      bridge.apiVersion = 6
+      verify(runner.start({prompt:"Question"}))
+      compare(bridge.requests[0].params.provider, "opencode")
+      compare(bridge.requests[0].params.model, "fixture/model#variant")
+      bridge.finish(0, {id:"new"})
+      bridge.requests = []
+      runner.jobs = [{id:"new",state:"done",canContinue:true,provider:"opencode",model:"fixture/model#variant"}]
+      verify(runner.start({parent:"new",prompt:"Same agent"}))
+      compare(bridge.requests[0].params.provider, undefined)
+      bridge.finish(0,{id:"child"})
+      bridge.requests = []
+      runner.selectedAgent = "Codex"
+      verify(!runner.start({parent:"new",prompt:"Follow-up"}))
+      compare(bridge.requests.length, 0)
+      runner.selectedAgent = "OpenCode"
+      verify(!runner.start({parent:"new",prompt:"Still archived"}))
+      compare(bridge.requests.length, 0)
+    }
+    function test_unsupported_default_explains_available_agents_without_raw_output() {
+      verify(runner.start({prompt:"Question"}))
+      bridge.finish(0, null, {message:"agent_choose_claude"})
+      verify(runner.lastError.indexOf("OpenCode, Codex or Claude") >= 0)
+    }
+    function test_selection_cutoff_survives_reload_without_losing_new_chats() {
+      runner.selectedAgent = "Codex"
+      runner.selectionResetAt = 100000
+      verify(!runner.canContinueSelection({id:"old",provider:"codex",created:99}))
+      verify(!runner.canContinueSelection({id:"other",provider:"claude",created:101}))
+      verify(runner.canContinueSelection({id:"new",provider:"codex",created:101}))
+      runner.selectedModel = "chosen"
+      verify(!runner.canContinueSelection({id:"new",provider:"codex",created:101}))
+    }
+    function test_prepared_context_keeps_its_captured_selection() {
+      runner.selectedAgent = "OpenCode"
+      runner.selectedModel = "fixture/model"
+      var selected = runner.selection()
+      runner.selectedAgent = "Codex"
+      runner.selectedModel = "other"
+      verify(!runner.start({prompt:"Question"}, false, selected))
+      compare(bridge.requests.length, 0)
     }
     function test_latest_shown_job_wins() {
       runner.show("one");runner.show("two")

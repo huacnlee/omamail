@@ -187,10 +187,15 @@ pub fn address(value: &str) -> Value {
 pub fn addresses(value: &str) -> Vec<Value> {
     let mut quotes = false;
     let mut angled = false;
+    let mut escaped = false;
     let mut start = 0;
     let mut result = Vec::new();
     for (i, c) in value.char_indices() {
+        // Inside quotes a backslash escapes the next character, so `"O\"Neil, Pat"`
+        // stays one name.
         match c {
+            _ if escaped => escaped = false,
+            '\\' if quotes => escaped = true,
             '"' => quotes = !quotes,
             '<' => angled = true,
             '>' => angled = false,
@@ -424,6 +429,46 @@ fn walk(
     }
     Ok(())
 }
+// Be conservative: angle-bracket prose is a legitimate plain alternative.
+// Require nested markup, not merely a document-root name or closing tag in text.
+fn markup_as_text(plain: &str) -> bool {
+    let text = plain.trim();
+    if !text.starts_with('<') || !text.ends_with('>') || !text.contains("</") {
+        return false;
+    }
+    let Ok(root) = super::html::parse(text) else {
+        return false;
+    };
+    if root
+        .children
+        .iter()
+        .any(|n| n.kind == "text" && !n.text.trim().is_empty())
+    {
+        return false;
+    }
+    let Some(first) = root.children.iter().find(|n| n.kind != "text") else {
+        return false;
+    };
+    if !matches!(
+        first.name.as_str(),
+        "html" | "head" | "body" | "div" | "table" | "style" | "center" | "span" | "p"
+    ) {
+        return false;
+    }
+    let begins_with_markup = |n: &super::html::Node| {
+        n.children
+            .iter()
+            .find(|child| child.kind != "text" || !child.text.trim().is_empty())
+            .is_some_and(|child| child.kind != "text")
+    };
+    // Style text alone is ambiguous too: require a nested structural sibling.
+    if first.name == "style" {
+        return root.children.iter().any(|n| {
+            matches!(n.name.as_str(), "html" | "body" | "div" | "table") && begins_with_markup(n)
+        });
+    }
+    begins_with_markup(first)
+}
 pub fn prepare(message: &Value, now: i64) -> Result<Value> {
     prepare_content(message, now, true)
 }
@@ -446,7 +491,7 @@ fn prepare_content(message: &Value, now: i64, read_html: bool) -> Result<Value> 
         &mut html,
         &mut files,
     )?;
-    let source = if !plain.is_empty() {
+    let source = if !plain.is_empty() && !(markup_as_text(&plain) && !html.is_empty()) {
         "plain"
     } else if !html.is_empty() {
         "html"

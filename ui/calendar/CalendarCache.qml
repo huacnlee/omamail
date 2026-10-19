@@ -20,8 +20,8 @@ Item {
     return Cache.eventsFor(store, scope, startMs, endMs, sourceIds)
   }
 
-  function put(scope, startMs, endMs, events) {
-    store = Cache.putRange(store, scope, startMs, endMs, events, Date.now())
+  function put(scope, startMs, endMs, events, refreshedSourceIds) {
+    store = Cache.putRange(store, scope, startMs, endMs, events, Date.now(), refreshedSourceIds)
     if (loaded) saveTimer.restart()
   }
 

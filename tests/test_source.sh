@@ -61,6 +61,23 @@ for file in "${JS_FILES[@]}"; do
   fi
 done
 
+# Calendar display clocks use the locale's short format. The composer's
+# HH:mm entry convention and its validation error are deliberately separate.
+python3 - <<'PY_CALENDAR_TIME'
+import re
+from pathlib import Path
+files = sorted(Path("calendar").glob("*.qml")) + sorted(Path("calendar").glob("*.js"))
+files += sorted(Path("components").glob("*Calendar*.qml"))
+for path in files:
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if re.match(r"\s*//", line):
+            continue
+        for match in re.finditer(r'"([^"\n]*(?:hh|HH):mm[^"\n]*)"', line):
+            if path == Path("calendar/Calendar.js") and match.group(1) == "Enter valid dates (YYYY-MM-DD) and times (HH:mm)":
+                continue
+            raise SystemExit("test_source.sh: %s:%d hard-codes a calendar clock; use the locale short time format" % (path, number))
+PY_CALENDAR_TIME
+
 # 3. Nothing may name a colour inside a JS library either: colours are passed
 #    in from QML, which is the only place that can read the theme.
 # Html.js is the one exception, and a narrow one: PAPER and INK are the sheet a
@@ -224,7 +241,7 @@ grep -q 'bar ? bar\.barForeground' BarWidget.qml \
   || fail "the bar icon must follow bar.barForeground in transparent mode"
 grep -q 'markColor: root.accent' App.qml \
   || fail "the Omamail header M must use the active theme accent"
-grep -q 'markColor: Color.accent' BarWidget.qml \
+grep -q 'markColor: Commons.Color.accent' BarWidget.qml \
   || fail "the bar M must use the active theme accent"
 
 # IconTextButton has no separate hover glyph colour. Assigning one makes the
@@ -351,16 +368,16 @@ for icon in chevronLeft chevronRight chevronDown mail; do
     fail "Icons.js does not define the $icon icon"
   fi
 done
-grep -q 'text: "Week"' components/CalendarView.qml \
-  || fail "the calendar needs a week-view control"
+grep -q 'objectName: "calendar-view-selector"' components/CalendarView.qml \
+  || fail "the calendar needs a view dropdown"
 python3 - <<'PY'
 from pathlib import Path
 text = Path("components/CalendarView.qml").read_text()
-if text.index('text: "Week"') > text.index('text: "Month"'):
+if '["Day", "Week", "Month", "Agenda"]' not in text:
     raise SystemExit("test_source.sh: Week must appear before Month in the view switcher")
-if 'text: "Go to today"' not in text:
+if 'text: "Today"' not in text or 'onClicked: root.goToday()' not in text:
     raise SystemExit("test_source.sh: Today must read as a navigation action")
-today = text.index('text: "Go to today"')
+today = text.index('text: "Today"')
 right = text.index('anchors.right: parent.right')
 if today > right:
     raise SystemExit("test_source.sh: Go to today must sit with the date on the left")
@@ -431,7 +448,7 @@ text = Path("App.qml").read_text()
 header = text[text.index("id: headerRight"):text.index("PanelSeparator {", text.index("id: headerRight"))]
 if "spacing: Style.space(8)" not in header:
     raise SystemExit("test_source.sh: refresh needs breathing room before the header action")
-for name in ("create-event-button", "compose-button"):
+for name in ("compose-button",):
     marker = 'objectName: "' + name + '"'
     start = text.index(marker)
     opening = text.rfind("\n          Button {", 0, start)
@@ -456,7 +473,8 @@ app = Path("App.qml").read_text()
 sidebar_use = app[app.index("id: sidebar"):app.index("MailboxTabs {")]
 if "!root.calendarVisible" in sidebar_use or "calendarSelected: root.calendarVisible" not in sidebar_use:
     raise SystemExit("test_source.sh: the mailbox sidebar must remain visible and select Calendar")
-header = app[app.index("id: headerRight"):app.index("// mailbox as a whole")]
+header_start = app.index("id: headerRight")
+header = app[header_start:app.index("PanelSeparator {", header_start)]
 if 'iconName: root.calendarVisible ? "mail" : "calendar"' in header:
     raise SystemExit("test_source.sh: Calendar navigation belongs in the sidebar, not the header")
 
@@ -477,12 +495,12 @@ if "calendarTodayBackgroundColor: root.calendarTodayBackground" not in app:
     raise SystemExit("test_source.sh: App must pass the system Today background token")
 if "readonly property color calendarBorder: Style.normalBorderColor" not in app:
     raise SystemExit("test_source.sh: calendar borders must originate from the system border token")
-if "readonly property color calendarTodayBackground: Style.selectedAccentFill" not in app:
+if "readonly property color calendarTodayBackground: Qt.alpha(root.accent, 0.035)" not in app:
     raise SystemExit("test_source.sh: Today must use the quieter system accent fill token")
 if "calendarBorderWidth: root.calendarBorderWidth" not in app:
     raise SystemExit("test_source.sh: App must pass the system calendar border width")
-if "border.color: root.calendarBorderColor" not in calendar or "border.width: root.calendarBorderWidth" not in calendar:
-    raise SystemExit("test_source.sh: month cells must consume the themed calendar border")
+if "color: Qt.alpha(root.calendarBorderColor, 0.25)" not in calendar or "width: root.calendarBorderWidth" not in calendar or "height: root.calendarBorderWidth" not in calendar:
+    raise SystemExit("test_source.sh: month dividers must consume the themed calendar border")
 if "? root.calendarTodayBackgroundColor" not in calendar:
     raise SystemExit("test_source.sh: the Month Today cell must consume the themed background")
 if ("calendarBorderColor: root.calendarBorderColor" not in calendar
@@ -527,7 +545,7 @@ service = Path("Service.qml").read_text()
 if "readonly property var pendingSendHost" not in service:
     raise SystemExit("test_source.sh: an undoable send must remain reachable across accounts")
 PY
-grep -q 'allDayEventsOnDay' components/WeekCalendarView.qml \
+grep -q 'Calendar.displayInAllDayLane' components/WeekCalendarView.qml \
   || fail "all-day events must have a pinned week-view lane"
 grep -q 'signal createAt' components/WeekCalendarView.qml \
   || fail "empty week slots must start event creation"
@@ -581,9 +599,9 @@ grep -q 'leaving.kind === "calendarDetail"' App.qml \
 if grep -q 'Shortcut { sequence: "Escape"' components/CalendarEventComposer.qml; then
   fail "event creation must use the central Escape route, not an ambiguous duplicate"
 fi
-grep -q 'text: "Make recurring"' components/CalendarEventComposer.qml \
+grep -q 'objectName: "event-repeat-selector"' components/CalendarEventComposer.qml \
   || fail "event creation needs an optional recurrence section"
-grep -q 'text: "Add a calendar"' components/CalendarSettings.qml \
+grep -q 'text: "Connect a CalDAV calendar\.\.\."' components/CalendarSettings.qml \
   || fail "settings must let a user add a calendar"
 grep -q 'placeholderText: "Calendar name"' components/CalendarSettings.qml \
   || fail "calendar setup needs a name field"
@@ -1329,6 +1347,22 @@ if "selectionIsPreview" not in mark.group(0):
                      "(`root.selectionIsPreview`), or stepping a list reads it")
 PREVIEWREAD
 
+# The standalone host (`backend/Runtime.qml`) accepts its bundled backend's API
+# and the one step past it. Below apiVersion-1, `make app-run` refuses the
+# checkout's own backend as incompatible; above releasedApiVersion, a release
+# bundle claims an API it does not carry. The release pin folds only
+# backend-api.json, so the window, not equality, is what holds on main.
+python3 - <<'BUNDLEDAPI' || exit 1
+import json, pathlib, re
+contract = json.loads(pathlib.Path("../backend-api.json").read_text())
+api, released = contract["apiVersion"], contract["releasedApiVersion"]
+found = re.search(r"bundledApiVersion: root\.standalone \? (\d+) : 0", pathlib.Path("Service.qml").read_text())
+bundled = int(found.group(1)) if found else None
+if bundled is None or not api - 1 <= bundled <= released:
+    raise SystemExit(f"BUNDLEDAPI: ui/Service.qml bundledApiVersion {bundled} must be between apiVersion-1 ({api - 1}) "
+                     f"and releasedApiVersion ({released}): the standalone host accepts its bundled API and one step past it")
+BUNDLEDAPI
+
 # The backend a QML file calls is the contract's, by name: a method that is
 # not declared cannot be called at all, and one the checkout has not shipped
 # yet is declared unreleased so `Backend` can refuse it on the pinned binary.
@@ -1350,6 +1384,31 @@ if unknown:
                      + ", ".join(m + " (" + ", ".join(sorted(called[m])) + ")" for m in unknown))
 
 CONTRACTCALLS
+
+# Microsoft 365 signs in on Microsoft's own page and everything that could
+# authenticate anybody stays in Rust: the device code, the refresh token in the
+# keyring, the access token in memory. QML that named a token, assembled a header,
+# read the keyring or spoke to the network would be a second place the rule lived.
+python3 - <<'M365LITERALS'
+from pathlib import Path
+import re
+
+names = ("providers/M365Auth.qml", "providers/M365Client.qml", "providers/M365Protocol.js",
+         "providers/M365.js", "components/M365SetupPage.qml")
+for name in names:
+    code = ""
+    for token in re.finditer(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*|[^"/]+|/', Path(name).read_text()):
+        text = token.group(0)
+        if text.startswith("//"):
+            continue
+        if text.startswith('"') and re.search(
+                r"Authorization|Bearer |Basic |refresh_token|access_token|device_code|id_token|m365-refresh-token", text):
+            raise SystemExit("test_source.sh: Microsoft 365 holds no token in QML; " + name + " names one: " + text)
+        code += '""' if text.startswith('"') else text
+    if re.search(r"XMLHttpRequest|\bfetch\(|WebSocket|\bProcess\b|credentialGet|credentialPut|credentialDelete", code):
+        raise SystemExit("test_source.sh: " + name + " must not carry network, process or keyring code")
+M365LITERALS
+
 # Credential metadata and secret values cross one typed backend RPC. Provider
 # and calendar QML must never regain a platform command or keyring helper.
 if grep -E 'secret-tool|scripts/keyring-(lookup|store|clear)\.sh' \

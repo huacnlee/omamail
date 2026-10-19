@@ -177,4 +177,18 @@ assert.strictEqual(unsub.fromMessage(null).available, false)
 assert.strictEqual(unsub.postBody(), "List-Unsubscribe=One-Click")
 assert.strictEqual(unsub.postContentType(), "application/x-www-form-urlencoded")
 
+// A list's mailto address is a stranger's, and `parseMailto` lets these three
+// through. The message built for them is refused: no NUL, C1 or raw UTF-8 byte
+// reaches a header, and no encoded word that names nobody is sent instead.
+{
+  const message = load("message/Message.js")
+  for (const link of ["mailto:x%3Ca%00@list.example.org%3E", "mailto:x%3Ca%C2%85@list.example.org%3E",
+    "mailto:x%3Cu%C3%BC@list.example.org%3E"]) {
+    const info = unsub.parseMailto(link)
+    assert.ok(info, link)
+    assert.strictEqual(message.buildSendPayload({ from: "me@example.org", to: info.to,
+      subject: info.subject, body: info.body }), null, link)
+  }
+}
+
 console.log("test_unsubscribe.js ok")

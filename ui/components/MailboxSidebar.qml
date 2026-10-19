@@ -21,6 +21,7 @@ Item {
   required property string panelFontFamily
   property bool collapsed: false
   property bool calendarSelected: false
+  property bool calendarAvailable: true
   property string menuLabelPath: ""
 
   signal mailboxSelected(string key)
@@ -166,6 +167,7 @@ Item {
       x: Style.space(6)
       label: "Calendar"
       icon: "calendar"
+      visible: root.calendarAvailable
       selected: root.calendarSelected
       onActivated: root.calendarRequested()
     }

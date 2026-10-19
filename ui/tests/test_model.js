@@ -1549,6 +1549,54 @@ assert.strictEqual(model.reloadLimit(25, "nonsense"), 25)
 assert.strictEqual(model.reloadLimit(0, 40), 40, "a page of nothing still asks for what was shown")
 assert.strictEqual(model.reloadLimit(null, null), 1)
 
+// ---------------------------------------------------- conversation projection
+
+const adaT1 = { accountId: "ada@example.org", thread: { id: "t1" }, mailboxKey: "inbox" }
+assert.strictEqual(model.projectionKey(adaT1), JSON.stringify(["ada@example.org", "t1", "inbox"]))
+assert.strictEqual(model.projectionKey({ accountId: "ada@example.org", thread: { id: "t1" }, mailboxKey: "archive" }),
+  JSON.stringify(["ada@example.org", "t1", "archive"]),
+  "the same thread viewed from another mailbox is another rail")
+// All mailboxes leaves a thread's id as its provider gave it, so two accounts
+// in one merged view can each hold a `t1` in their Inbox. A reader moving from
+// one to the other is moving between two rails, and the key says so.
+const bobT1 = { accountId: "bob@example.net", thread: { id: "t1" }, mailboxKey: "inbox" }
+assert.strictEqual(model.projectionKey(bobT1), JSON.stringify(["bob@example.net", "t1", "inbox"]))
+assert.notStrictEqual(model.projectionKey(adaT1), model.projectionKey(bobT1),
+  "the same thread id in another account is another rail")
+assert.notStrictEqual(model.projectionKey({ accountId: "a", thread: { id: "b\nc" }, mailboxKey: "d" }),
+  model.projectionKey({ accountId: "a\nb", thread: { id: "c" }, mailboxKey: "d" }),
+  "and no id can run into the part beside it, whatever characters it carries")
+assert.strictEqual(model.projectionKey({ accountId: "ada@example.org", thread: null, mailboxKey: "inbox" }),
+  JSON.stringify(["ada@example.org", "", "inbox"]),
+  "a message outside any thread has no thread in its key")
+assert.strictEqual(model.projectionKey({ thread: { id: "t1" }, mailboxKey: "inbox" }),
+  JSON.stringify(["", "t1", "inbox"]), "a source naming no account is keyed without one")
+assert.strictEqual(model.projectionKey(null), JSON.stringify(["", "", ""]))
+assert.strictEqual(model.projectionKey({ accountId: "ada@example.org", thread: "t1" }),
+  JSON.stringify(["ada@example.org", "", ""]), "a thread that is not an object names nothing")
+
+const drawn = { showsRail: true, stops: [{ id: "a" }, { id: "b" }], caption: "2 messages",
+  navigation: { a: { next: "b" } }, memberIds: ["a", "b"], first: "b", last: "a" }
+deepEqual(model.pendingProjection(drawn, true),
+  { showsRail: true, stops: [{ id: "a" }, { id: "b" }], caption: "2 messages", navigation: {}, memberIds: ["a", "b"],
+    first: "", last: "" },
+  "the same rail keeps its stops and caption and loses the ways along it: the navigation, and the ends the keys fall back to")
+assert.notStrictEqual(model.pendingProjection(drawn, true), drawn, "as a new object, so the view notices")
+deepEqual(drawn.navigation, { a: { next: "b" } }, "and the one in hand is not written to")
+assert.strictEqual(drawn.first, "b")
+deepEqual(model.pendingProjection(drawn, false),
+  { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] },
+  "a different rail starts from nothing")
+deepEqual(model.pendingProjection(null, true), { showsRail: false, stops: [], caption: "", navigation: {}, memberIds: [] })
+{
+  const one = model.pendingProjection(null, false)
+  const other = model.pendingProjection(null, false)
+  assert.notStrictEqual(one, other, "a blank is a fresh object each time")
+  assert.notStrictEqual(one.stops, other.stops, "down to its lists")
+  assert.notStrictEqual(one.navigation, other.navigation)
+  assert.notStrictEqual(one.memberIds, other.memberIds)
+}
+
 assert.strictEqual(model.activityStatus({}), "", "nothing in flight says nothing")
 assert.strictEqual(model.activityStatus({ sending: 1 }), "Sending")
 assert.strictEqual(model.activityStatus({ sending: 2, queuedSends: 3 }), "Sending 2 \u00b7 3 queued to send")
@@ -1715,3 +1763,103 @@ assert.strictEqual(model.monitoredNote([]), "")
 // A provider with no move verb is told so in the hints, the way archive is.
 deepEqual(model.unavailableActions({ archive: true, star: true, move: true }), [])
 deepEqual(model.unavailableActions({ archive: true, star: true }), ["move"])
+
+// ------------------------------------------------------- the way back
+//
+// `e` and `d` are their buttons, and where the button's action is already done
+// it is the way back. A message in the trash cannot be trashed again — that
+// moved nothing — and on HEY, which has no archive and no move, untrash is the
+// only way out of the trash at all.
+{
+  const plain = (key) => ({ mailboxKey: key, searchQuery: "", rawQuery: "" })
+  const labelled = { id: "g1", inInbox: false, inTrash: true, labelIds: ["TRASH"] }
+  // A HEY posting says nothing about the box it was listed from.
+  const posting = { id: "1:2", inInbox: false, inTrash: false, labelIds: [] }
+  const inbox = { id: "i1", inInbox: true, inTrash: false, labelIds: ["INBOX"] }
+  const filed = { id: "a1", inInbox: false, inTrash: false, inSpam: false,
+    isSent: false, isDraft: false, labelIds: [] }
+
+  assert.strictEqual(model.inTrash(labelled, plain("inbox")), true, "its own TRASH label says so anywhere")
+  assert.strictEqual(model.inTrash(posting, plain("trash")), true, "the plain Trash listing says so for HEY")
+  assert.strictEqual(model.inTrash(posting, plain("papertrail")), false)
+  assert.strictEqual(model.inTrash(posting, { mailboxKey: "trash", searchQuery: "invoice", rawQuery: "" }), false,
+    "a search reaches the whole account, whatever mailbox the rail still has")
+  assert.strictEqual(model.inTrash(posting, { mailboxKey: "trash", searchQuery: "", rawQuery: "label:Bills" }), false,
+    "a label view is somewhere else")
+  assert.strictEqual(model.inTrash(null, plain("trash")), false)
+
+  assert.strictEqual(model.keyActionFor("trash", [labelled], plain("trash")), "untrash")
+  assert.strictEqual(model.keyActionFor("trash", [posting], plain("trash")), "untrash")
+  assert.strictEqual(model.keyActionFor("trash", [inbox], plain("inbox")), "trash")
+  assert.strictEqual(model.keyActionFor("trash", [labelled, inbox], plain("inbox")), "trash",
+    "a mixed selection lands in one place rather than swapping every row")
+  assert.strictEqual(model.keyActionFor("trash", [labelled, posting], plain("trash")), "untrash")
+  assert.strictEqual(model.keyActionFor("trash", [], plain("trash")), "trash", "no rows, no change")
+
+  // `e` turns back only in Archive: on IMAP every folder but the Inbox reads as
+  // archived, and `e` there files the message in Archive.
+  assert.strictEqual(model.keyActionFor("archive", [filed], plain("archive")), "unarchive")
+  assert.strictEqual(model.keyActionFor("archive", [filed], { mailboxKey: "archive", searchQuery: "x", rawQuery: "" }),
+    "archive", "a search from Archive is not Archive")
+  assert.strictEqual(model.keyActionFor("archive", [filed], { mailboxKey: "inbox", searchQuery: "", rawQuery: "folder:Receipts" }),
+    "archive", "a folder of one's own still archives")
+  assert.strictEqual(model.keyActionFor("archive", [filed], plain("all")), "archive")
+  assert.strictEqual(model.keyActionFor("archive", [{ ...filed, inInbox: true }], plain("archive")), "archive",
+    "a message that is in the inbox as well can still be archived")
+  assert.strictEqual(model.keyActionFor("archive", [labelled], plain("trash")), "archive",
+    "the archive key is not the way out of the trash")
+  assert.strictEqual(model.keyActionFor("star", [labelled], plain("trash")), "star", "other keys are their own")
+
+  // The menu's archived rule, now shared: spam is archived only where the
+  // owning mailbox has no spam verb, and an owner that cannot be found is not
+  // taken to lack one.
+  const junk = { ...filed, inSpam: true }
+  assert.strictEqual(model.isArchived(filed, plain("archive"), "a1"), true)
+  assert.strictEqual(model.isArchived(posting, plain("trash"), "1:2"), false, "in the trash is not archived")
+  assert.strictEqual(model.isArchived(junk, { canReportSpam: false }, "a1"), true)
+  assert.strictEqual(model.isArchived(junk, { canReportSpam: true }, "a1"), false)
+  assert.strictEqual(model.isArchived(junk, { hostForId: () => null }, "a1"), false)
+  assert.strictEqual(model.isArchived(junk, { hostForId: (id) => id === "a1" ? { canReportSpam: false } : null }, "a1"), true)
+  assert.strictEqual(model.isArchived({ ...filed, isSent: true }, plain("sent"), "a1"), false)
+
+  // Over every row an action reaches: one that is not there is enough to say no.
+  assert.strictEqual(model.allInTrash([labelled, posting], plain("trash")), true)
+  assert.strictEqual(model.allInTrash([labelled, inbox], plain("inbox")), false)
+  assert.strictEqual(model.allInTrash([], plain("trash")), false, "nothing reached is nothing to restore")
+  assert.strictEqual(model.allArchived([filed, { ...filed, id: "a2" }], plain("archive")), true)
+  assert.strictEqual(model.allArchived([filed, { ...filed, id: "a2", inInbox: true }], plain("archive")), false)
+  assert.strictEqual(model.allArchived([], plain("archive")), false)
+
+  // A message that is not a listed row is judged by its own labels: an Inbox
+  // message a notification opened over the Trash is trashed, not restored.
+  const opened = { id: "n1", inInbox: true, inTrash: false, labelIds: ["INBOX"] }
+  assert.strictEqual(model.keyActionFor("trash", [opened], plain("trash")), "untrash",
+    "as a row of the Trash listing it would count as in the trash")
+  assert.strictEqual(model.keyActionFor("trash", [opened], model.unlistedView(plain("trash"))), "trash")
+  assert.strictEqual(model.keyActionFor("trash", [labelled], model.unlistedView(plain("inbox"))), "untrash",
+    "its own TRASH label still says so")
+  assert.strictEqual(model.keyActionFor("archive", [filed], model.unlistedView(plain("archive"))), "archive")
+  const owner = { canReportSpam: false }
+  assert.strictEqual(model.isArchived({ ...filed, inSpam: true },
+    model.unlistedView({ hostForId: () => owner }), "a1"), true, "the owning mailbox still decides spam")
+
+  // The row the reader's buttons land on without a selection: the cursor's
+  // row for a conversation member, the open message otherwise — App moves the
+  // cursor there and the list draws from it.
+  const rail = { memberIds: ["m1", "m2"] }
+  assert.strictEqual(model.readerTarget(rail, "m2", "m1"), "m1")
+  assert.strictEqual(model.readerTarget(rail, "m2", ""), "m2", "no cursor: the open message")
+  assert.strictEqual(model.readerTarget(rail, "x9", "m1"), "x9", "not a member: the open message")
+  assert.strictEqual(model.readerTarget(null, "x9", "m1"), "x9")
+
+  // Restore, not Move to Inbox: Gmail's untrash takes TRASH off and leaves the
+  // rest, so a sent message goes back to Sent.
+  assert.strictEqual(model.actionName("untrash"), "Restore")
+  assert.strictEqual(model.actionName("unarchive"), "Move to Inbox")
+  assert.strictEqual(model.actionName("unarchive", true), "Move to Inbox and remove label")
+  assert.strictEqual(model.actionName("trash"), "Move to trash")
+  assert.strictEqual(model.actionName("archive"), "Archive")
+  // An immediate action: no ellipsis.
+  for (const verb of ["archive", "unarchive", "trash", "untrash"])
+    assert.ok(!/\.\.\.$/.test(model.actionName(verb)), verb + " opens nothing")
+}

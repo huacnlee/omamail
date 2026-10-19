@@ -2,6 +2,13 @@ const assert = require("assert")
 const { load, deepEqual } = require("./load")
 
 const provider = load("providers/Registry.js")
+for (const api of [1, 5, 6, 7]) {
+  const boxes = provider.mailboxes("imap", [], api)
+  assert.strictEqual(boxes.some(box => box.key === "archive"), api < 6)
+  assert.strictEqual(boxes.some(box => box.key === "all"), api >= 6)
+  assert.strictEqual(boxes.find(box => box.key === (api < 6 ? "archive" : "all")).query,
+    api < 6 ? "folder:\\Archive" : "search:ALL")
+}
 // Historical query assertions stay as oracles; Rust independently matches the
 // captured parameter/result fixtures. Production Registry has no query engine.
 const legacy = load("tests/oracles/providers/Registry.js")
@@ -10,13 +17,13 @@ for (const method of ["query", "cachedSummaryInSearch", "labelQuery", "addressQu
 
 // ------------------------------------------------------------- the registry
 //
-// Four providers, and the ids are what an accounts.json holds — renaming one
+// Six providers, and the ids are what an accounts.json holds — renaming one
 // silently orphans every account already written with the old name.
 //
-// The order is the order the chooser lists them in: the three hosted mailboxes
+// The order is the order the chooser lists them in: the four hosted mailboxes
 // with a service of their own, then the two that are every other mailbox, IMAP
 // first because it is the one nearly every server speaks.
-deepEqual(provider.ids(), ["gmail", "hey", "outlook", "imap", "jmap"])
+deepEqual(provider.ids(), ["gmail", "hey", "outlook", "m365", "imap", "jmap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("outlook").name, "Outlook")
 assert.strictEqual(provider.get("imap").name, "IMAP")
@@ -235,11 +242,11 @@ deepEqual(provider.mailboxes("imap", []).map(box => box.key), imapKeys)
 deepEqual(provider.mailboxes("imap", "archive").map(box => box.key), imapKeys,
   "and so is anything that is not a list")
 
-const withoutArchive = provider.mailboxes("imap", ["archive"])
-assert.strictEqual(withoutArchive.filter(box => box.key === "archive").length, 0)
-assert.strictEqual(withoutArchive.length, imapKeys.length - 1)
-assert.strictEqual(withoutArchive.indexOf(withoutArchive.filter(box => box.key === "spam")[0]),
-  imapKeys.indexOf("spam") - 1, "Junk moves up when Archive is not there")
+const withoutAll = provider.mailboxes("imap", ["all"])
+assert.strictEqual(withoutAll.filter(box => box.key === "all").length, 0)
+assert.strictEqual(withoutAll.length, imapKeys.length - 1)
+assert.strictEqual(withoutAll.indexOf(withoutAll.filter(box => box.key === "spam")[0]),
+  imapKeys.indexOf("spam") - 1, "Junk moves up when All mail is not there")
 
 deepEqual(provider.mailboxes("imap", ["archive", "spam", "trash"]).map(box => box.key),
   imapKeys.filter(key => key !== "archive" && key !== "spam" && key !== "trash"))
@@ -252,8 +259,8 @@ dropped.push({ key: "invented" })
 assert.strictEqual(provider.mailboxes("imap", ["archive"]).length, dropped.length - 1)
 
 assert.strictEqual(provider.hasMailbox("gmail", "all"), true)
-assert.strictEqual(provider.hasMailbox("imap", "all"), false, "IMAP has Archive, not All mail")
-assert.strictEqual(provider.hasMailbox("imap", "archive"), true)
+assert.strictEqual(provider.hasMailbox("imap", "all"), true)
+assert.strictEqual(provider.hasMailbox("imap", "archive"), true, "Archive remains available to API 5")
 assert.strictEqual(provider.hasMailbox("gmail", "drafts"), true)
 assert.strictEqual(provider.hasMailbox("hey", "drafts"), true)
 assert.strictEqual(provider.hasMailbox("imap", "drafts"), true)

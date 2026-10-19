@@ -64,7 +64,7 @@ Item {
       wait(300)
     }
     function blocks(item, out) {
-      if (item.event !== undefined && item.laneWidth !== undefined) out.push(item)
+      if (item.eventData !== undefined && item.laneWidth !== undefined) out.push(item)
       var children = item.children || []
       for (var i = 0; i < children.length; i++) blocks(children[i], out)
       return out
@@ -95,7 +95,7 @@ Item {
       var tip = findChild(drawn[0], "calendar-event-tooltip")
       verify(tip !== null)
       verify(tip.visible, "hover opens the production calendar tooltip")
-      compare(tip.contentItem.text, events[0].summary)
+      verify(tip.contentItem.text.indexOf(events[0].summary) === 0)
       compare(tip.contentItem.textFormat, Text.PlainText)
       var spy = createTemporaryObject(activationSpyFactory, host, {target: view})
       mouseClick(drawn[0], drawn[0].width / 2, 10)

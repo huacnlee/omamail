@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../.." as Omamail
 import "../../components" as Mail
 import "../../account/Accounts.js" as Accounts
@@ -35,6 +36,7 @@ Item {
   QtObject {
     id: bridge
     property bool ready: true
+    property int apiVersion: 6
     property var modelBridge: null
     property var starts: []
     property var listed: []
@@ -43,6 +45,7 @@ Item {
     property var held: []
     property string refuse: ""
     function call(method, params, callback) {
+      if (method === "agent.providerStatus") { callback({available:true,provider:"claude"}, ""); return }
       if (method === "agent.jobsProjection") { modelBridge.call(method, params, function(result, error) { if (error) bridge.projectionErrors = bridge.projectionErrors.concat([error]); callback(result, error) }); return }
       if (method === "agent.jobsList") { callback(listed, ""); return }
       if (method === "agent.jobStart") {
@@ -64,10 +67,10 @@ Item {
   Mail.EventSuggestionCard {
     id: card
     width: 500
-    textColor: Color.foreground
-    accentColor: Color.accent
-    dimColor: Color.foreground
-    dimmerColor: Color.foreground
+    textColor: Commons.Color.foreground
+    accentColor: Commons.Color.accent
+    dimColor: Commons.Color.foreground
+    dimmerColor: Commons.Color.foreground
     panelFontFamily: "monospace"
   }
   SignalSpy { id: added; target: card; signalName: "addRequested" }

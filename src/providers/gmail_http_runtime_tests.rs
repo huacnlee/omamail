@@ -143,7 +143,12 @@ async fn mail_send_preview_reads_google_identity_without_mutation_or_local_write
         std::fs::write(directory.join("sentinel"), b"unchanged existing state").unwrap();
     }
     std::fs::write(fixture.state.join("omamail/outbox.json"), b"[]\n").unwrap();
-    let attachment = fixture.root.join("quote\\工\".txt");
+    // Keep the hostile display name separate from a Windows-valid filename.
+    let attachment = fixture.root.join(if cfg!(windows) {
+        "attachment-工.txt"
+    } else {
+        "quote\\工\".txt"
+    });
     std::fs::write(&attachment, b"private attachment bytes").unwrap();
     let before = fixture_tree(&fixture.root);
     let body = json!({"access_token":"synthetic-access-token","expires_in":3600,

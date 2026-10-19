@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Templates as T
 import qs.Commons
+import qs.Commons as Commons
 
 T.ToolTip {
   id: control
@@ -46,16 +47,16 @@ T.ToolTip {
     objectName: "omamail-tooltip-label"
     text: control.text
     textFormat: Text.PlainText
-    color: Color.popups.text
+    color: Commons.Color.popups.text
     font.family: Style.font.family
     font.pixelSize: Style.font.caption
   }
 
   background: Rectangle {
     objectName: "omamail-tooltip-background"
-    color: Color.popups.background
+    color: Commons.Color.popups.background
     radius: Style.cornerRadius
     border.width: Style.normalBorderWidth
-    border.color: Color.popups.border
+    border.color: Commons.Color.popups.border
   }
 }

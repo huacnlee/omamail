@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
+import qs.Commons as Commons
 
 Item {
   id: root
@@ -8,10 +9,10 @@ Item {
   property string label: ""
   property string value: ""
   property var options: []
-  property color foreground: Color.foreground
-  property color background: Color.background
-  property color popupBorder: Color.popups.border
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color background: Commons.Color.background
+  property color popupBorder: Commons.Color.popups.border
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   property int rowHeight: Style.spacing.controlHeight
   property int popupRowHeight: Style.spacing.popupRowHeight
@@ -67,14 +68,45 @@ Item {
     palette.button: root.background
     palette.highlight: root.accent
     palette.window: root.background
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.bodySmall
+    // One row per option at the shell's popup row height: the cursor row takes
+    // the hover fill, the chosen one a check, and neither is coloured with the
+    // accent.
     delegate: QQC.ItemDelegate {
+      id: option
       required property var modelData
-      width: combo.width
+      required property int index
+      width: combo.width - 2
       height: root.popupRowHeight
-      text: String(modelData.label || "")
-      font.family: root.fontFamily
-      palette.text: root.foreground
-      palette.highlight: root.accent
+      leftPadding: Style.spacing.controlPaddingX
+      rightPadding: Style.spacing.controlPaddingX
+      highlighted: combo.highlightedIndex === index
+      contentItem: Row {
+        spacing: Style.space(6)
+        Text {
+          width: Style.space(12)
+          anchors.verticalCenter: parent.verticalCenter
+          text: option.index === combo.currentIndex ? "✓" : ""
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          width: option.availableWidth - Style.space(18)
+          text: String(option.modelData.label || "")
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+      background: Rectangle {
+        color: option.highlighted || option.hovered
+          ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+      }
     }
     onActivated: function(index) {
       if (index < 0 || index >= root.options.length) return

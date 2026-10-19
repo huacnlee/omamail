@@ -84,6 +84,7 @@ var FACTS = {
     "inheritedDefault": "in:inbox",
     "nativeSync": true,
     "queries": {
+      "all": "search:ALL",
       "archive": "folder:\\Archive",
       "drafts": "folder:\\Drafts",
       "inbox": "folder:INBOX",
@@ -109,6 +110,37 @@ var FACTS = {
       "spam": true,
       "star": true,
       "threads": true,
+      "web": false,
+      "webBox": false
+    },
+    "inheritedDefault": "in:inbox",
+    "nativeSync": true,
+    "queries": {
+      "archive": "role:archive",
+      "drafts": "role:drafts",
+      "inbox": "role:inbox",
+      "sent": "role:sent",
+      "spam": "role:junk",
+      "starred": "role:inbox flagged",
+      "trash": "role:trash",
+      "unread": "role:inbox unseen"
+    },
+    "webHomeUrl": ""
+  },
+  "m365": {
+    "addressSearch": false,
+    "capabilities": {
+      "archive": true,
+      "batch": true,
+      "conversations": false,
+      "labels": false,
+      "manageLabels": false,
+      "move": false,
+      "search": true,
+      "send": true,
+      "spam": false,
+      "star": true,
+      "threads": false,
       "web": false,
       "webBox": false
     },

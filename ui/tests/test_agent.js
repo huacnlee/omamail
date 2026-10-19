@@ -4,6 +4,53 @@ const a = load('agent/Agent.js')
 const oracle = load('tests/oracles/agent/Agent.js')
 const copy = v => JSON.parse(JSON.stringify(v))
 const A = 'imap:ada@example.com', B = 'imap:bob@example.com'
+const readerChat = {accountId:A,messageId:'original',draftKey:''}
+const draftA = {accountId:A,replyMessageId:'original',draftKey:'draft-A'}
+const draftB = {...draftA,draftKey:'draft-B'}
+assert.equal(a.canUseDraftChat(readerChat,draftA),true)
+const ownedChat = {...readerChat,draftKey:draftA.draftKey}
+assert.equal(a.canUseDraftChat(ownedChat,draftA),true)
+assert.equal(a.canUseDraftChat(ownedChat,draftB),false)
+assert.equal(a.canUseDraftChat(readerChat,draftB),true)
+assert.equal(a.canUseDraftChat({...readerChat,accountId:B},draftB),false)
+assert.equal(a.canUseDraftChat({...readerChat,messageId:'different'},draftB),false)
+const quote = 'On Monday, Bob wrote:\n> Original question'
+assert.equal(a.replyOnly('My reply\n\n' + quote, quote), 'My reply')
+assert.equal(a.replyOnly('My reply\n\n> A deliberate quotation', quote), 'My reply\n\n> A deliberate quotation')
+const saved = {body:'My reply',replyQuote:quote,threadId:'original-thread'}
+assert.equal(a.proposalEnvelope(saved).body, 'My reply\n\n' + quote)
+assert.equal(saved.body, 'My reply')
+assert.equal(a.proposalEnvelope(a.proposalEnvelope(saved)).body, 'My reply\n\n' + quote)
+assert.equal(a.proposalEnvelope({body:'Legacy complete reply'}).body, 'Legacy complete reply')
+const proposalAttachment = {filename:'notes.txt',data:'SGVsbG8=',path:'/private/editor-file',owned:true}
+const recoveryDraft = a.proposalDraft({accountId:A,from:'ada@example.com',to:'bob@example.com',
+  subject:'Re: Hello',body:'Reply\n\n'+quote,replyQuote:quote,replyMessageId:'original',
+  threadId:'thread',inReplyTo:'message',attachments:[proposalAttachment]}, 'chat', 'draft')
+assert.equal(recoveryDraft.body, 'Reply\n\n'+quote)
+assert.equal(recoveryDraft.bodyQuote, quote)
+assert.equal(a.proposalDraft({accountId:A,body:'Legacy'}, 'chat', 'draft').bodyQuote, '')
+assert.equal(recoveryDraft.draftAttachments[0].data, proposalAttachment.data)
+assert.equal(recoveryDraft.draftAttachments[0].path, '')
+assert.equal(recoveryDraft.draftAttachments[0].owned, false)
+assert.equal(proposalAttachment.path, '/private/editor-file')
+assert.equal(proposalAttachment.owned, true)
+assert.equal(recoveryDraft.agentParentJobId, 'chat')
+assert.deepEqual(copy(a.conversationWithProposals([
+  {role:'user',text:'Draft a reply'}, {role:'assistant',text:'Here is a draft'},
+  {role:'assistant',text:'Would you like a warmer tone?'}
+], [{id:'first',afterTurn:2},{id:'second',afterTurn:2}])), [
+  {role:'user',text:'Draft a reply'}, {role:'assistant',text:'Here is a draft'},
+  {role:'assistant',text:'Would you like a warmer tone?'},
+  {role:'proposal',text:'first'}, {role:'proposal',text:'second'}
+])
+assert.deepEqual(copy(a.conversationWithProposals([
+  {role:'user',text:'Draft'}, {role:'status',text:'Creating draft'},
+  {role:'assistant',text:'Please review it'}, {role:'user',text:'Make it shorter'}
+], [{id:'draft',afterTurn:2}])), [
+  {role:'user',text:'Draft'}, {role:'status',text:'Creating draft'},
+  {role:'assistant',text:'Please review it'}, {role:'proposal',text:'draft'},
+  {role:'user',text:'Make it shorter'}
+])
 const jobs = [
   { id:'r', messageId:'42:INBOX', accountId:A, state:'running', created:2 },
   { id:'b', messageIds:['42:INBOX','43:INBOX'], accountId:B, state:'done', created:3 },
@@ -52,7 +99,6 @@ assert.equal(a.draftAnswer({state:'running'},'Partial'),'')
 assert.equal(a.draftAnswer({state:'running',resultReady:true},'Ready'),'Ready')
 assert.equal(a.draftAnswer({state:'done',question:'Clarify?'},'Not a body'),'')
 assert.equal(a.draftAnswer({state:'failed'},'Unusable'),'')
-assert.ok(a.draftAsks().every(x=>x.label && x.prompt))
 console.log('test_agent.js ok')
 
 assert.equal(a.draftAnswer({state:'done'},'Full text\nQUESTION: ordinary mail text\n'),'Full text\nQUESTION: ordinary mail text\n')
@@ -66,24 +112,6 @@ assert.equal(oracle.jobFor(sameSecond,'m',A).id,'new')
 assert.equal(oracle.jobsByMessage(sameSecond,A).m.id,'new')
 
 assert.equal(oracle.selectionJob([{id:'multi',accountId:A,messageIds:['m','n'],state:'done'}],['m'],A),null)
-assert.equal(a.commandSuggestions('/trans',a.mailAsks(false)).items.length,2)
-assert.equal(a.commandSuggestions('A question /trans',a.mailAsks(false)).items.length,0)
-assert.ok(a.commandSuggestions('First line\n/rewrite',a.draftAsks()).items[0].prompt.includes('mail title and body'))
-const commandTokens=[{start:0,end:10,prompt:'Summarize the mail.'},{start:11,end:19,prompt:'Explain the mail.'}]
-assert.equal(a.expandCommands('/summarize\n/explain <中文>',commandTokens),'Summarize the mail.\nExplain the mail. <中文>')
-assert.equal(a.expandCommands('/summarize',[]),'/summarize')
-let commandEdit=a.editCommands('/summarize\n/explain','/summariz\n/explain',commandTokens)
-assert.equal(commandEdit.text,'\n/explain')
-assert.deepEqual(copy(commandEdit.tokens),[{start:1,end:9,prompt:'Explain the mail.'}])
-commandEdit=a.editCommands('/summarize\n/explain','/suNEWain',commandTokens)
-assert.equal(commandEdit.text,'NEW')
-assert.equal(commandEdit.tokens.length,0)
-commandEdit=a.editCommands('/summarize','/sumXmarize',[commandTokens[0]])
-assert.equal(commandEdit.text,'X')
-assert.equal(commandEdit.tokens.length,0)
-commandEdit=a.editCommands('/summarize','前 /summarize',[commandTokens[0]])
-assert.equal(commandEdit.text,'前 /summarize')
-assert.equal(commandEdit.tokens[0].start,2)
 const formatTurns=[{role:'user',text:a.MAIL_TRANSFORM_FORMAT}]
 assert.equal(a.draftAnswer({state:'done'},'Title: New title\n\nBody:\nNew body',formatTurns),'New body')
 assert.equal(a.draftAnswer({state:'done'},'Unstructured response',formatTurns),'')
@@ -99,8 +127,8 @@ assert.deepEqual(copy(oracle.historyFor(history,A,['m'],'')).map(j=>j.id),['a2',
 assert.deepEqual(copy(oracle.historyFor(history,A,['n','m'],'')).map(j=>j.id),['multi'])
 assert.deepEqual(copy(oracle.historyFor(drafts,A,[],'draft1')).map(j=>j.id),['d1'])
 
-assert.equal(a.workingText({state:'running',created:100},2580000,0),'• Working (41m 20s • Esc to interrupt • / show commands)')
-assert.equal(a.workingText(null,3500,1000),'• Preparing (0m 2s • / show commands)')
+assert.equal(a.workingText({state:'running',created:100},2580000,0),'• Working (41m 20s • Esc to interrupt)')
+assert.equal(a.workingText(null,3500,1000),'• Preparing (0m 2s)')
 
 assert.equal(a.pendingJob(history,null,false,'a1','a1').id,'a2')
 assert.equal(a.pendingJob(history,history[0],false,'',''),null)

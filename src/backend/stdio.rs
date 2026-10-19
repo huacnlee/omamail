@@ -6,6 +6,8 @@ use std::sync::{
 };
 
 pub fn serve() -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    bind_to_parent()?;
     let failed = Arc::new(AtomicBool::new(false));
     super::protocol::serve(
         BufReader::new(Input {
@@ -16,6 +18,30 @@ pub fn serve() -> io::Result<()> {
             failed,
         },
     )
+}
+
+#[cfg(target_os = "linux")]
+fn bind_to_parent() -> io::Result<()> {
+    // Register before the protocol starts runtime threads. This applies only
+    // to serve, not CLI commands or deliberately detached agent workers.
+    // Linux ties this to the creating parent thread, not its whole process.
+    // SIGKILL cannot be blocked/ignored by an inherited signal disposition;
+    // the kernel releases the outbox lock even if another process holds stdin.
+    let parent = unsafe { libc::getppid() };
+    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // prctl does not signal retroactively: reject a parent that died between
+    // the observation and registration. A parent lost before our first
+    // observation (including reparenting to a subreaper) cannot be identified
+    // without an identity supplied by the launcher.
+    if unsafe { libc::getppid() } != parent {
+        return Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "backend parent exited during startup",
+        ));
+    }
+    Ok(())
 }
 
 struct Input {
@@ -29,10 +55,62 @@ impl Read for Input {
         }
         #[cfg(windows)]
         {
-            // Windows anonymous pipes do not support poll(2). A failed stdout
-            // will be observed before the next request; otherwise the blocking
-            // stdin read is exactly the backend protocol's required wait.
-            return io::stdin().read(bytes);
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::{
+                Foundation::ERROR_BROKEN_PIPE,
+                Storage::FileSystem::{FILE_TYPE_PIPE, GetFileType, ReadFile},
+                System::Pipes::PeekNamedPipe,
+            };
+            let mut input = io::stdin();
+            let handle = input.as_raw_handle();
+            if unsafe { GetFileType(handle) } != FILE_TYPE_PIPE {
+                return input.read(bytes);
+            }
+            // We are the sole reader. Read only bytes already available so an
+            // open, idle stdin cannot conceal a failed response pipe forever.
+            loop {
+                if self.failed.load(Ordering::Acquire) {
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "output closed"));
+                }
+                let mut available = 0;
+                if unsafe {
+                    PeekNamedPipe(
+                        handle,
+                        std::ptr::null_mut(),
+                        0,
+                        std::ptr::null_mut(),
+                        &mut available,
+                        std::ptr::null_mut(),
+                    )
+                } == 0
+                {
+                    let error = io::Error::last_os_error();
+                    return if error.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+                        Ok(0)
+                    } else {
+                        Err(error)
+                    };
+                }
+                if available == 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                let count = bytes.len().min(available as usize) as u32;
+                let mut read = 0;
+                if unsafe {
+                    ReadFile(
+                        handle,
+                        bytes.as_mut_ptr(),
+                        count,
+                        &mut read,
+                        std::ptr::null_mut(),
+                    )
+                } == 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                return Ok(read as usize);
+            }
         }
         #[cfg(unix)]
         loop {

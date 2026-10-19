@@ -12,6 +12,10 @@ use std::{
 static EMPTY_HOME: AtomicU64 = AtomicU64::new(0);
 static MAIL_LIST_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(feature = "integration-test-credentials")]
+#[path = "cli/search.rs"]
+mod search;
+
 fn omamail(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(args)
@@ -52,8 +56,10 @@ fn no_arguments_print_help_without_starting_a_gui() {
 
 #[test]
 fn serve_runs_the_persistent_backend() {
+    let fixture = mail_list_fixture(9, false);
     let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
         .arg("serve")
+        .env("OMAMAIL_INTEGRATION_HOME", &fixture.0)
         .env_remove("HOME")
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_CACHE_HOME")
@@ -70,7 +76,7 @@ fn serve_runs_the_persistent_backend() {
         .unwrap();
     drop(child.stdin.take());
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
+    assert!(output.status.success(), "{output:?}");
     assert!(output.stderr.is_empty());
     let replies: Vec<Value> = output
         .stdout
@@ -108,6 +114,7 @@ fn call_in_empty_home(method: &str, params: &[u8]) -> Output {
     std::fs::create_dir_all(&home).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(["call", method, "--json"])
+        .env("OMAMAIL_INTEGRATION_HOME", &home)
         .env("XDG_CONFIG_HOME", &home)
         .env("HOME", &home)
         .stdin(Stdio::piped())
@@ -131,6 +138,10 @@ impl Drop for MailListFixture {
     }
 }
 
+/// A well-formed Microsoft 365 message id (lower-case base32 of a Graph id). No such message exists
+/// anywhere: these tests stop before any network.
+const M365_ID: &str = "ifau222bi5etembqgayucqkbhu";
+
 fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture {
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "omamail-cli-mail-list-{}-{}",
@@ -139,6 +150,13 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
     ));
     let config = config_root(&root).join("omamail");
     fs::create_dir_all(&config).unwrap();
+    #[cfg(windows)]
+    {
+        // These synthetic ancestors are created by std::fs, so unlike the
+        // native private-directory creator they inherit the temp directory ACL.
+        set_mode(&root, 0o700);
+        set_mode(&config_root(&root), 0o700);
+    }
     fs::write(
         config.join("accounts.json"),
         serde_json::json!({
@@ -148,7 +166,8 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
                 {"provider":"gmail","email":"gmail@example.org"},
                 {"provider":"imap","email":"imap@example.org","imap":{"username":"imap@example.org","imapHost":"127.0.0.1","imapPort":imap_port,"insecure":true,"testPlaintext":true}},
                 {"provider":"jmap","email":"jmap@example.org","jmap":{"sessionUrl":"https://localhost:9/session","username":"jmap@example.org"}},
-                {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}}
+                {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}},
+                {"provider":"m365","email":"m365@example.org","clientId":"00000000-1111-2222-3333-444444444444"}
             ]
         })
         .to_string(),
@@ -216,6 +235,7 @@ fn assert_no_runtime_storage(root: &Path) {
 fn call_mail_list(root: &Path, account: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(["call", "mail.list", "--json"])
+        .env("OMAMAIL_INTEGRATION_HOME", root)
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("HOME", root.join("home"))
         .env("PATH", root.join("bin"))
@@ -249,6 +269,7 @@ fn call_mail_list(root: &Path, account: &str) -> Output {
 fn call_mail_read(root: &Path, account: &str, id: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(["call", "mail.read", "--json"])
+        .env("OMAMAIL_INTEGRATION_HOME", root)
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("HOME", root.join("home"))
         .env("PATH", root.join("bin"))
@@ -284,7 +305,21 @@ fn set_mode(path: &Path, mode: u32) {
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
 }
 #[cfg(windows)]
-fn set_mode(_: &Path, _: u32) {}
+fn set_mode(path: &Path, _: u32) {
+    // Native private storage requires a protected DACL and this user's owner
+    // SID. A no-op Unix-mode stub does not make an inherited Windows file private.
+    let user = std::env::var("USERNAME").unwrap();
+    let grant = if path.is_dir() {
+        format!("{user}:(OI)(CI)F")
+    } else {
+        format!("{user}:F")
+    };
+    for arguments in [vec!["/setowner".to_owned(), user.clone()],
+        vec!["/inheritance:r".to_owned(), "/grant:r".to_owned(), grant]] {
+        let output = Command::new("icacls").arg(path).args(arguments).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+}
 
 #[cfg(unix)]
 fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
@@ -297,8 +332,26 @@ fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
 }
 #[cfg(windows)]
 fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
+    use std::hash::{Hash, Hasher};
+    use std::os::windows::{ffi::OsStrExt, fs::MetadataExt};
+    use windows_sys::Win32::Security::{GetFileSecurityW, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
     let metadata = fs::metadata(path).unwrap();
-    (metadata.len(), (0, 0), (0, 0))
+    let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let flags = DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION;
+    let mut needed = 0;
+    unsafe { GetFileSecurityW(name.as_ptr(), flags, std::ptr::null_mut(), 0, &mut needed) };
+    assert!(needed > 0);
+    let mut descriptor = vec![0u8; needed as usize];
+    assert_ne!(unsafe { GetFileSecurityW(name.as_ptr(), flags, descriptor.as_mut_ptr().cast(), needed, &mut needed) }, 0);
+    descriptor.truncate(needed as usize);
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    descriptor.hash(&mut hash);
+    // Capture bytes separately in fixture_snapshot, and here preserve native
+    // timestamps, attributes, owner and DACL: a same-size write or permission
+    // repair must not pass a read-only regression merely because length stayed put.
+    (metadata.len(),
+        (metadata.last_write_time() as i64, metadata.creation_time() as i64),
+        (metadata.file_attributes() as i64, hash.finish() as i64))
 }
 
 type FixtureSnapshot = Vec<(
@@ -355,6 +408,12 @@ fn malformed_provider_action_previews_refuse_without_credentials_or_writes() {
         ("imap:imap@example.org", "0:INBOX"),
         ("outlook:outlook@example.org", "4294967296:INBOX"),
         ("outlook:outlook@example.org", "1:"),
+        // Microsoft 365 ids are canonical lower-case base32 of a Graph id of 8..=156 bytes.
+        ("m365:m365@example.org", "1:INBOX"),
+        ("m365:m365@example.org", "IFAU222BI5ETEMBQGAYUCQKBHU"),
+        ("m365:m365@example.org", "ifau222bi5etembqgayucqkbhu="),
+        ("m365:m365@example.org", "ifau222bi5etembqgayucqkbhv"),
+        ("m365:m365@example.org", "AAMkAGI20001AAA="),
     ] {
         for operation in ["read", "trash"] {
             let output = root_mail(
@@ -402,7 +461,11 @@ async fn malformed_final_imap_action_id_prevents_all_network_and_cache_changes()
         let mut mutations = 0;
         loop {
             let mut line = String::new();
-            if reader.read_line(&mut line).await.unwrap() == 0 {
+            if match reader.read_line(&mut line).await {
+                            Ok(n) => n == 0,
+                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                            Err(error) => panic!("synthetic IMAP read failed: {error}"),
+                        } {
                 break;
             }
             let response = if line.starts_with("O1 LOGIN ") {
@@ -470,6 +533,7 @@ fn configured_list_failures_do_not_repair_registry_metadata() {
         ("imap:imap@example.org", Some("auth_signed_out")),
         ("jmap:jmap@example.org", Some("auth_signed_out")),
         ("outlook:outlook@example.org", Some("auth_signed_out")),
+        ("m365:m365@example.org", Some("m365_signed_out")),
     ] {
         let output = call_mail_list(&fixture.0, account);
         assert!(!output.status.success(), "{account}: {output:?}");
@@ -515,6 +579,7 @@ fn configured_read_failures_do_not_repair_registry_metadata() {
             "7:INBOX",
             Some("auth_signed_out"),
         ),
+        ("m365:m365@example.org", M365_ID, Some("m365_signed_out")),
     ] {
         let output = call_mail_read(&fixture.0, account, id);
         assert!(!output.status.success(), "{account}: {output:?}");
@@ -538,7 +603,7 @@ fn configured_read_failures_do_not_repair_registry_metadata() {
 }
 
 #[test]
-fn imap_and_outlook_destination_previews_require_readonly_credentials() {
+fn imap_outlook_and_m365_destination_previews_require_readonly_credentials() {
     let fixture = mail_list_fixture(9, false);
     let directory = config_root(&fixture.0).join("omamail");
     let registry = directory.join("accounts.json");
@@ -547,19 +612,20 @@ fn imap_and_outlook_destination_previews_require_readonly_credentials() {
         metadata(&registry),
         fs::read(&registry).unwrap(),
     );
-    for account in ["imap:imap@example.org", "outlook:outlook@example.org"] {
+    for (account, id, expected) in [
+        ("imap:imap@example.org", "7:INBOX", "auth_signed_out"),
+        ("outlook:outlook@example.org", "7:INBOX", "auth_signed_out"),
+        ("m365:m365@example.org", M365_ID, "m365_signed_out"),
+    ] {
         for operation in ["archive", "trash"] {
             let output = root_mail(
                 &fixture.0,
-                &[operation, "7:INBOX", "--account", account, "--json"],
+                &[operation, id, "--account", account, "--json"],
                 b"",
             );
             assert_eq!(output.status.code(), Some(1));
             let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(
-                value["error"]["code"], "auth_signed_out",
-                "{account}: {operation}"
-            );
+            assert_eq!(value["error"]["code"], expected, "{account}: {operation}");
             assert_eq!(
                 (
                     metadata(&directory),
@@ -642,6 +708,32 @@ fn jmap_planning_helpers_are_not_public_methods() {
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["error"]["code"], "method_not_found", "{method}");
     }
+}
+
+#[test]
+fn an_address_registered_under_another_provider_is_not_an_m365_account() {
+    let fixture = mail_list_fixture(9, true);
+    let touched = fixture.0.join("credential-touched");
+    for account in [
+        "m365:imap@example.org",
+        "m365:outlook@example.org",
+        "imap:m365@example.org",
+        "outlook:m365@example.org",
+        "jmap:m365@example.org",
+        "m365:m365@example.org.invalid",
+    ] {
+        let output = call_mail_list(&fixture.0, account);
+        assert_eq!(output.status.code(), Some(1), "{account}: {output:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+            "mail_account_unknown",
+            "{account}"
+        );
+    }
+    assert!(
+        !touched.exists(),
+        "an unknown account must not reach the keyring"
+    );
 }
 
 #[test]
@@ -748,6 +840,7 @@ fn default_output_is_a_table_and_json_is_global() {
     assert!(providers.status.success());
     let text = String::from_utf8(providers.stdout).unwrap();
     assert!(text.contains("Gmail") && text.contains("|"));
+    assert!(text.contains("Microsoft 365"), "{text}");
 }
 
 #[test]
@@ -775,6 +868,7 @@ fn pretty_call_errors_go_to_stderr() {
 fn root_mail(root: &Path, args: &[&str], body: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(args)
+        .env("OMAMAIL_INTEGRATION_HOME", root)
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("XDG_CACHE_HOME", root.join("cache"))
         .env("XDG_STATE_HOME", root.join("state"))
@@ -948,7 +1042,11 @@ fn root_mail_errors_use_stable_envelopes_and_never_fall_back_accounts() {
 #[test]
 fn send_previews_repeatable_inputs_and_strict_bounded_utf8_without_writes() {
     let fixture = mail_list_fixture(9, false);
-    let attachment = fixture.0.join("quoted\\工\".txt");
+    let attachment = fixture.0.join(if cfg!(windows) {
+        "attachment-工.txt"
+    } else {
+        "quoted\\工\".txt"
+    });
     fs::write(&attachment, b"private attachment").unwrap();
     let second = fixture.0.join("second.txt");
     fs::write(&second, b"two").unwrap();
@@ -980,7 +1078,7 @@ fn send_previews_repeatable_inputs_and_strict_bounded_utf8_without_writes() {
         serde_json::json!({"ok":true,"result":{
             "dryRun":true,"executed":false,"accountId":"imap:imap@example.org","from":"imap@example.org",
             "to":["one@example.org","two@example.org"],"cc":["three@example.org"],"bcc":["four@example.org"],
-            "subject":"Unicode 工","body":body,"attachments":[{"name":"quoted\\工\".txt","size":18},{"name":"second.txt","size":3}]
+            "subject":"Unicode 工","body":body,"attachments":[{"name":attachment.file_name().unwrap().to_str().unwrap(),"size":18},{"name":"second.txt","size":3}]
         }})
     );
     for body in [
@@ -1068,6 +1166,7 @@ fn only_send_consumes_stdin_and_human_previews_escape_untrusted_text() {
     ] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
             .args(args)
+            .env("OMAMAIL_INTEGRATION_HOME", &fixture.0)
             .env("XDG_CONFIG_HOME", fixture.0.join("config"))
             .env("HOME", fixture.0.join("home"))
             .env("PATH", fixture.0.join("bin"))
@@ -1177,6 +1276,7 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
     let mut desktop = if owner {
         let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_omamail"))
             .arg("serve")
+            .env("OMAMAIL_INTEGRATION_HOME", &fixture.0)
             .env("XDG_CONFIG_HOME", fixture.0.join("config"))
             .env("XDG_STATE_HOME", fixture.0.join("state"))
             .env("XDG_CACHE_HOME", fixture.0.join("cache"))
@@ -1451,7 +1551,11 @@ async fn imap_action_preview_requires_discovered_destinations_and_execution_uses
                     let mut moves = 0;
                     loop {
                         let mut line = String::new();
-                        if reader.read_line(&mut line).await.unwrap() == 0 {
+                        if match reader.read_line(&mut line).await {
+                            Ok(n) => n == 0,
+                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                            Err(error) => panic!("synthetic IMAP read failed: {error}"),
+                        } {
                             break;
                         }
                         let response = if line.starts_with("O1 LOGIN ") {
@@ -1569,7 +1673,11 @@ async fn imap_archive_keeps_confirmed_folder_results_when_later_select_refuses()
         let mut commands = Vec::new();
         loop {
             let mut line = String::new();
-            if reader.read_line(&mut line).await.unwrap() == 0 {
+            if match reader.read_line(&mut line).await {
+                            Ok(n) => n == 0,
+                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                            Err(error) => panic!("synthetic IMAP read failed: {error}"),
+                        } {
                 break;
             }
             let response = if line.starts_with("O1 LOGIN ") {
@@ -1674,7 +1782,16 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
                 } else if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
                     assert!(line.contains("BODY.PEEK["));
                     assert_eq!(line.contains("BODY.PEEK[]"), read);
-                    let raw = "From: Writer <writer@example.org>\r\nSubject: Safe root result\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsafe body 工";
+                    let raw = concat!(
+                        "From: Writer <writer@example.org>\r\nSubject: Safe root result\r\n",
+                        "List-Unsubscribe: <https://news.example.org/leave>,\r\n <mailto:leave@example.org>\r\n",
+                        "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n",
+                        "Content-Type: multipart/alternative; boundary=parts\r\n\r\n",
+                        "--parts\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsafe body 工\r\n",
+                        "--parts\r\nContent-Type: text/html; charset=utf-8\r\n\r\n",
+                        "<p>safe body 工</p><a href=\"https://news.example.org/leave?a=1&amp;b=2\">Unsubscribe</a>",
+                        "<img src=\"https://tracker.example/pixel\"><a href=\"javascript:bad\">Bad</a>\r\n--parts--\r\n"
+                    );
                     format!(
                         "* 7 FETCH (UID 7 FLAGS () INTERNALDATE \"11-Sep-2026 12:00:00 +0000\" RFC822.SIZE {} BODY[] {{{}}}\r\n{}\r\n)\r\nO1 OK fetched\r\n",
                         raw.len(),
@@ -1714,6 +1831,20 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
                 value["result"]["message"]["nativeContent"]["body"]["text"],
                 "safe body 工"
             );
+            assert_eq!(
+                value["result"]["message"]["links"],
+                serde_json::json!([
+                    {"text":"Unsubscribe","url":"https://news.example.org/leave?a=1&b=2"}
+                ])
+            );
+            assert_eq!(
+                value["result"]["message"]["unsubscribe"],
+                serde_json::json!({
+                    "urls":["https://news.example.org/leave","mailto:leave@example.org"],"oneClick":true
+                })
+            );
+            assert!(!value.to_string().contains("tracker.example"));
+            assert!(!value.to_string().contains("javascript:"));
         } else {
             assert_eq!(value["result"]["messages"][0]["id"], "7:INBOX");
             assert_eq!(value["result"]["mailbox"], "inbox");
@@ -1724,7 +1855,7 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
     }
 }
 
-#[cfg(not(all(feature = "agent", target_os = "linux")))]
+#[cfg(not(all(feature = "agent", unix)))]
 #[test]
 fn agent_disabled_build_has_no_worker_or_agent_rpc() {
     let worker = omamail(&["agent-worker", "synthetic-job"]);

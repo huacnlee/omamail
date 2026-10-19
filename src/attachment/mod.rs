@@ -10,7 +10,20 @@ use std::{
     path::{Path, PathBuf},
 };
 use unicode_normalization::UnicodeNormalization;
+mod pdf;
 pub const MAX_BYTES: usize = 20 * 1024 * 1024;
+const ACTIVE_TEXT_MARKERS: &[&str] = &[
+    "<!doctype",
+    "<html",
+    "<head",
+    "<body",
+    "<script",
+    "<iframe",
+    "<meta",
+    "<svg",
+    "<?xml",
+    "[desktop entry]",
+];
 
 pub fn safe_filename(raw: &str) -> String {
     let basename = raw.rsplit(['/', '\\']).next().unwrap_or("");
@@ -110,6 +123,11 @@ pub fn decode(data: &str) -> Result<Vec<u8>, &'static str> {
     Ok(bytes)
 }
 pub fn openable(name: &str, data: &[u8]) -> bool {
+    // The exception must follow the filename actually given to the desktop,
+    // not the lossy name used below only to reject disguised active suffixes.
+    let pdf_name = Path::new(name)
+        .extension()
+        .is_some_and(|suffix| suffix.eq_ignore_ascii_case("pdf"));
     // Ignore non-ASCII suffix disguises after compatibility normalization.
     // This deliberately errs toward refusing an open; saving remains available.
     let name: String = name
@@ -145,6 +163,25 @@ pub fn openable(name: &str, data: &[u8]) -> bool {
         return false;
     }
     let sample = &data[..data.len().min(65536)];
+    if pdf_name && sample.windows(5).any(|bytes| bytes == b"<?xml") {
+        if let Some(declarations) = pdf::xml_declarations(data) {
+            let mut sample = data.to_vec();
+            for at in declarations {
+                sample[at..at + 5].fill(b' ');
+            }
+            // An exception buys no other exception: scan the whole container,
+            // including bytes beyond the ordinary 64 KiB sniffing window.
+            // PDF bytes are binary; ASCII-fold in place instead of expanding
+            // invalid UTF-8 into multiple full-size replacement strings.
+            sample.retain(|byte| *byte != 0);
+            sample.make_ascii_lowercase();
+            return !ACTIVE_TEXT_MARKERS.iter().any(|marker| {
+                sample
+                    .windows(marker.len())
+                    .any(|part| part == marker.as_bytes())
+            });
+        }
+    }
     let text = if sample.starts_with(b"\xff\xfe") || sample.starts_with(b"\xfe\xff") {
         let little = sample[0] == 255;
         let units: Vec<_> = sample[2..]
@@ -169,21 +206,7 @@ pub fn openable(name: &str, data: &[u8]) -> bool {
             .into()
     };
     let text = text.replace('\0', "").trim_start().to_lowercase();
-    !text.starts_with("#!")
-        && ![
-            "<!doctype",
-            "<html",
-            "<head",
-            "<body",
-            "<script",
-            "<iframe",
-            "<meta",
-            "<svg",
-            "<?xml",
-            "[desktop entry]",
-        ]
-        .iter()
-        .any(|s| text.contains(s))
+    !text.starts_with("#!") && !ACTIVE_TEXT_MARKERS.iter().any(|s| text.contains(s))
 }
 fn downloads() -> Result<PathBuf, &'static str> {
     Ok(crate::platform::dirs::AppDirs::discover()?.downloads)

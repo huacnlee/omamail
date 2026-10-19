@@ -29,6 +29,19 @@ fn empty_params() -> Value {
     json!({})
 }
 
+fn body_allowance(request: &Request) -> std::time::Duration {
+    let params = &request.params;
+    let body = match request.method.as_str() {
+        "m365.read" | "m365.attachment" => true,
+        "m365.messages" => params["full"] == true,
+        "reader.open" => params["accountId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("m365:")),
+        _ => false,
+    };
+    std::time::Duration::from_secs(if body { 60 } else { 0 })
+}
+
 pub fn error(id: Value, code: i32, message: &str) -> Value {
     json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})
 }
@@ -108,6 +121,9 @@ async fn one(
     {
         return (Some(error(Value::Null, -32600, "Invalid Request")), false);
     }
+    // A Microsoft 365 message body is allowed a minute inside the provider, so
+    // its frame may wait that much longer before it counts as expired.
+    let deadline = deadline + body_allowance(&request);
     // An expired queued request must not start a side effect: timeout_at polls
     // its future before checking the clock.
     let result = if tokio::time::Instant::now() >= deadline {
@@ -144,6 +160,29 @@ async fn one(
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn only_a_microsoft_365_body_read_may_wait_past_the_frame_deadline() {
+        let session = crate::backend::Session::default();
+        let late = tokio::time::Instant::now() - Duration::from_secs(1);
+        // Started, and refused for its parameters before anything is asked of anybody.
+        for params in [
+            r#""m365.read","params":{}"#,
+            r#""m365.messages","params":{"full":true}"#,
+        ] {
+            let frame = format!(r#"{{"jsonrpc":"2.0","id":1,"method":{params}}}"#);
+            let (response, _) = handle(frame.as_bytes(), &session, late).await;
+            assert_eq!(response.unwrap()["error"]["message"], "Invalid params");
+        }
+        for params in [
+            r#""m365.list","params":{}"#,
+            r#""m365.messages","params":{"full":false}"#,
+        ] {
+            let frame = format!(r#"{{"jsonrpc":"2.0","id":1,"method":{params}}}"#);
+            let (response, _) = handle(frame.as_bytes(), &session, late).await;
+            assert_eq!(response.unwrap()["error"]["message"], "request_timed_out");
+        }
+    }
 
     #[tokio::test]
     async fn expired_upload_request_does_not_reserve_capacity() {

@@ -41,30 +41,20 @@ readonly property string keyContext:
 | `reader` | A message open | The mailbox keys, plus reply/forward and zoom. `j`/`k` move the mailbox cursor and immediately open its message; `Shift+J`/`Shift+K` scroll the message body |
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
+| `eventCompose` | Creating or editing an event | `Enter` saves and closes after success; `Escape` closes; modified keys remain available |
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
-| `assistantCommands` | Choosing an AI slash command | `Up`, `Down`, `Return`, `Enter`, `Escape`, and the modified keys |
+| `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
 
-While an AI request is running, Escape interrupts it and keeps the dock open;
-otherwise Escape closes the dock. An open command menu or history view is left first.
+While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock. An open command suggestion or history view is left first.
 
-The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts
-a newline. Ctrl+Return/Enter also sends for compatibility.
-While `/` command candidates are visible, `assistantCommands` owns Up/Down and
-Return/Enter; choosing a command inserts a highlighted slash token without sending it.
-Tokens expand into their full instructions only when sent. Editing through a token
-(including Backspace, Delete, or a selection replacement) removes the whole command;
-ordinary text around it remains editable. This is text-edit normalization, not an
-additional key binding. Escape
-first dismisses those candidates, then closes the dock. Both contexts keep the
-keyboard in the AI text area.
-The `assistantSend` row's `sequenceContexts` restricts bare Return/Enter to
-`assistant`, so those keys choose a candidate in `assistantCommands` instead.
-Shift+Return/Enter remains ordinary text input in both contexts.
+The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts a newline. Ctrl+Return/Enter also sends for compatibility. Typing `/` offers `/clear` (new chat), `/history` (conversation history), and `/diagnose` (diagnostics). Up/Down selects a suggestion; Return/Enter completes a partial command or executes an exact command immediately; choosing `/history` always opens the history at once. Commands stay local. Outside suggestions, Up/Down retain normal text navigation.
+
+Changing the AI agent or model starts fresh chats and clears queued follow-ups while preserving unsent input. Previous chats remain readable in History, but cannot continue across the selection change; the cutoff persists across restarts. New chats created afterward can still resume normally.
 
 Qt 6.11's native `TextArea` accepts `ShortcutOverride` for editing keys even
 after `Keys.onShortcutOverride` leaves the event unaccepted. This was measured
@@ -78,13 +68,14 @@ event is left alone, preserving normal typing, IME input and line breaks.
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
 
-**A text-entry context binds no bare key but `Escape`, except AI send and command
-selection described above.**
+**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in the single-line event editor.**
 There is no "is the user typing" question anywhere in the code, because there is
 nothing left for it to answer: if a bare letter is not bound in `compose`, it
 cannot fire there, and the field gets it the way any other character arrives.
 
 ## One mechanism
+
+Implementation constraints: use an `Instantiator`, not a `Repeater`, to construct `Shortcut` objects. Park keyboard focus on a plain `Item`, not the departing focus scope, and do not leave `focus: true` on a component that can become invisible. Popups consume keys before the shortcut map: handle their keys on `contentItem` and let `CloseOnEscape` close them. Provider actions must be refused before optimistic updates even when their buttons are hidden; filter hints with `Keymap.hintsFor` too.
 
 **The context owns the keyboard.** Changing context moves the focus — to
 whatever that context types into, or to a parked home item when the context
@@ -127,8 +118,8 @@ used to exist, and they had.
 | `backToList` | `u`, `Left` | reader | Back to the list |
 | `nextMember` | `n` | reader | Next message in the conversation |
 | `previousMember` | `p` | reader | Previous message in the conversation |
-| `archive` | `e` | mail | Archive |
-| `trash` | `d` | mail | Move to trash |
+| `archive` | `e` | mail | Archive (in Archive: move to Inbox) |
+| `trash` | `d` | mail | Move to trash (in the trash: restore) |
 | `star` | `s` | mail | Star or unstar |
 | `moveToLabel` | `v` | mail | Move to |
 | `markRead` | `Shift+I` | mail | Mark read |
@@ -147,8 +138,15 @@ used to exist, and they had.
 | `calendarNextPeriod` | `l`, `Right` | calendar | Next week or month |
 | `calendarToday` | `t` | calendar | Go to today |
 | `calendarWeek` | `w` | calendar | Show week view |
+| `calendarDay` | `d` | calendar | Show day view |
+| `calendarAgenda` | `a` | calendar | Show agenda view |
+| `calendarUndo` | `u` | calendar | Undo the last event change |
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
+| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose | Save and close the event |
+| `guestNext` | `Down` | eventGuests | Next guest suggestion |
+| `guestPrevious` | `Up` | eventGuests | Previous guest suggestion |
+| `guestChoose` | `Return`, `Enter` | eventGuests | Choose guest suggestion |
 | `undoSend` | `Alt+Z` | all | Undo send |
 | `search` | `/` | mail | Search |
 | `goMailbox` | `Ctrl+1`, `Ctrl+2`, `Ctrl+3`, `Ctrl+4`, `Ctrl+5`, `Ctrl+6`, `Ctrl+7`, `Ctrl+8`, `Ctrl+9` | mail | Go to that mailbox |
@@ -156,9 +154,9 @@ used to exist, and they had.
 | `switchAccount` | `Alt+A` | mail | Switch account |
 | `askAgent` | `Alt+G` | mail+compose | Ask AI about the message or draft |
 | `assistantSend` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | assistant+assistantCommands | Send the AI message |
-| `assistantCommandUp` | `Up` | assistantCommands | Previous AI command |
-| `assistantCommandDown` | `Down` | assistantCommands | Next AI command |
-| `assistantChooseCommand` | `Return`, `Enter` | assistantCommands | Fill the selected AI command |
+| `assistantCommandNext` | `Down` | assistantCommands | Next command |
+| `assistantCommandPrevious` | `Up` | assistantCommands | Previous command |
+| `assistantChooseCommand` | `Return`, `Enter` | assistantCommands | Complete or run the selected AI command |
 | `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
 | `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
 | `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
@@ -179,11 +177,15 @@ In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with wh
 
 `Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 
+`e` and `d` are the archive and trash buttons, and where a button's action is already done for every row it will reach, the button is its inverse, and so is the key: in the trash they restore, and in Archive they move an archived message to the Inbox. The rows are the ones the control acts on: the ticked rows when it is about one of them (a key, a ticked row's menu or middle-click, the reader on a ticked message), else the cursor's row (before there is one, the listing's rows, which is what the hint row and the empty reader's key list describe), the row itself, or the row the open message belongs to. A mixed selection gets the key's own verb, the way `s` stars a mixed one. Restore is the provider's untrash, which every client has, so it is also the way out of the trash on HEY, which has no archive and no move. It is not called Move to Inbox because where it lands is the provider's: Gmail takes the TRASH label off and leaves the rest, the others move the message to the Inbox. `e` turns back only in Archive: on IMAP every folder but the Inbox reads as archived, and `e` in one of them still files the message in Archive. `Model.keyActionFor` is the rule. `MessageList` applies it over each control's rows, with App's own `selectionActive` deciding whether the ticked rows are reached, and App sends the keys and the hint row through its `keyActions`. A button's tooltip, on a row or in the reader, names `e` or `d` only when the key reaches the same rows and asks the same of them. Hovering does not move the cursor, so a row names its keys only when it is the cursor's row, or ticked while the selection is active. A message that is not one of the listing's rows, such as one a notification opened over the Trash, is judged by its own labels.
+
 `n` and `p` walk the conversation rail beside the message on a provider whose listing collapses to conversations, opening the next and previous member in the same reader and stopping at the ends. The rail runs newest at the top, so `n` opens the stop below the open message, which is the older one, and `p` the stop above it, the newer — the keys follow the rail as it is drawn, the way `j` and `k` follow the list. They move the reader and nothing else. `j` and `k` move the list cursor and immediately open the representative of that row, leaving the conversation member selected with `n` or `p`. A message whose conversation has one member draws no rail, and both keys then do nothing. A right-click on a stop opens the same menu a row has — reply, archive, trash, spam, read, star — for that one message: the action reaches the member alone, where the same verb on the row reaches every counted member, and if the open message is the one taken out of the view the reader moves to the stop beside it, the newer one above or else the older below.
 
 The delayed-send toast does not create a keyboard context. The current screen keeps its normal keys while the toast is visible. A new draft, reply, or forward can open during the delay. The send button waits for the queued message, but every draft field remains editable. The toast button restores the queued message. `Alt+Z` does the same from every context. `Ctrl+Z` remains text undo while composing or searching. If another compose is open, Omamail saves it to the provider's Drafts storage before dropping its in-memory fallback. A failed save keeps that fallback.
 
 Back and `Escape` close an untouched composition immediately without saving, including a prefilled reply, forward, or existing provider draft. After a user edit, they open a modal with Cancel, Discard, and Save draft. Save draft initially has focus; Tab and Shift+Tab cycle through the buttons, and Enter activates the focused choice. Escape inside the popup cancels and returns to composing. A failed save restores the changed draft. The composer's bottom Discard button exits immediately.
+
+The event and label delete confirmation initially focuses Delete. Tab and Shift+Tab cycle between Delete and Cancel; Return or Enter activates the focused button. Escape cancels.
 
 ## Why the rail is numbered and not chorded
 
@@ -252,6 +254,8 @@ find a mailbox.
 message list clamps.
 
 ## The cursor
+
+Hover must not write `cursorId`: Qt re-reports hover as content scrolls beneath a stationary pointer. Reveal keyboard selection with `Model.contentYToReveal`; the list is a `Column`, not a view with `positionViewAtIndex`.
 
 `cursorId` is where the keyboard is. `selectedId` is what the reader shows.
 They are two different things, and conflating them was the first bug in this

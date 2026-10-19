@@ -52,20 +52,16 @@ function byId(id) {
 })
 
 const undoSend = byId("undoSend")
+assert.strictEqual(keymap.contextFor({ assistantEditing: true, composing: true }), "assistant")
 assert.strictEqual(keymap.contextFor({ assistantEditing: true, assistantCommands: true, composing: true }), "assistantCommands")
-assert.strictEqual(keymap.contextFor({ assistantEditing: true, assistantCommands: false, composing: true }), "assistant")
-assert.strictEqual(keymap.contextFor({ assistantEditing: false, assistantCommands: true, composing: true }), "compose")
+assert.strictEqual(keymap.contextFor({ assistantEditing: false, composing: true }), "compose")
 deepEqual(byId("assistantSend").keys, ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"])
-deepEqual(byId("assistantChooseCommand").keys, ["Return", "Enter"])
 assert.ok(!keymap.sequencesFor("assistant").some(entry => ["Up", "Down"].includes(entry.sequence)))
 for (const key of ["Return", "Enter"]) {
   assert.strictEqual(keymap.sequencesFor("assistant").find(entry => entry.sequence === key).id, "assistantSend")
   assert.strictEqual(keymap.sequencesFor("assistantCommands").find(entry => entry.sequence === key).id, "assistantChooseCommand")
-  for (const context of ["assistant", "assistantCommands"]) {
-    assert.ok(!keymap.sequencesFor(context).some(entry => entry.sequence === "Shift+" + key))
-  }
+  assert.ok(!keymap.sequencesFor("assistant").some(entry => entry.sequence === "Shift+" + key))
 }
-assert.ok(keymap.sequencesFor("assistantCommands").some(entry => entry.id === "assistantCommandDown" && entry.sequence === "Down"))
 assert.ok(!keymap.sequencesFor("compose").some(entry => entry.id === "assistantSend"))
 assert.ok(undoSend, "the delayed-send state offers an undo action")
 assert.strictEqual(keymap.displayFor(undoSend), "Alt+Z")
@@ -282,6 +278,20 @@ deepEqual(selectedListHints.map(function (h) { return h.key + " " + h.label }),
 assert.ok(!keymap.hintsFor("list", ["move"], true).some(function (h) {
   return h.key === "v"
 }), "a provider without move does not offer the move hint")
+// Where `e` or `d` is the way back, its hint says so rather than naming a verb
+// the key will not perform (`Model.keyActionFor` decides which).
+deepEqual(keymap.hintsFor("list", [], true, { archive: "archive", trash: "untrash" }).map(function (h) { return h.key + " " + h.label }),
+  ["j / k move", "e archive", "d restore", "v move to", "Space select", "c compose"],
+  "in the trash, d restores")
+deepEqual(keymap.hintsFor("reader", [], true, { archive: "unarchive", trash: "trash" }).filter(function (h) {
+  return h.key === "e" || h.key === "d" }).map(function (h) { return h.key + " " + h.label }),
+  ["e move to inbox", "d trash"], "in Archive, e is the way back")
+deepEqual(keymap.hintsFor("list", ["archive", "star", "move"], true, { archive: "unarchive", trash: "untrash" }).map(function (h) { return h.key }),
+  ["j / k", "d", "Space", "c"], "a provider with no archive still drops e, whatever it would ask for")
+deepEqual(keymap.hintsFor("list", [], true, { archive: "archive", trash: "trash" }), selectedListHints,
+  "the keys' own verbs change nothing")
+deepEqual(keymap.hintsFor("list", [], true, { archive: "untrash", trash: "unarchive" }), selectedListHints,
+  "a key's hint changes only for its own way back")
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],
@@ -362,8 +372,7 @@ deepEqual(keymap.hintsFor("list", null), offered)
 const all = keymap.helpGroups().map(g => g.name)
 const weight = g => g.rows.length + 1
 const totalWeight = keymap.helpGroups().reduce((sum, g) => sum + weight(g), 0)
-const withoutAgent = keymap.helpGroups(["askAgent", "assistantSend",
-  "assistantCommandUp", "assistantCommandDown", "assistantChooseCommand"])
+const withoutAgent = keymap.helpGroups(["askAgent", "assistantSend", "assistantChooseCommand", "assistantCommandNext", "assistantCommandPrevious"])
 assert.ok(!withoutAgent.some(g => g.name === "AI"),
   "a host without the agent does not advertise AI shortcuts")
 assert.ok(!withoutAgent.some(g => g.rows.some(r => r.action.indexOf("Ask AI") >= 0)),

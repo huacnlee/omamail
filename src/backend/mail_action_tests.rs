@@ -481,7 +481,12 @@ async fn production_jmap_send_preview_only_reads_identity_and_preserves_storage(
     }
     let fixture = account_fixture(json!({"version":1,"activeId":ACCOUNT,
         "accounts":[{"provider":"jmap","email":"user@example.test"}]}));
-    let attachment = fixture.root.join("quote\\工\".txt");
+    // Keep the hostile display name separate from a Windows-valid filename.
+    let attachment = fixture.root.join(if cfg!(windows) {
+        "attachment-工.txt"
+    } else {
+        "quote\\工\".txt"
+    });
     fs::write(&attachment, b"synthetic attachment").unwrap();
     fs::create_dir_all(fixture.state.join("omamail")).unwrap();
     fs::write(fixture.state.join("omamail/outbox.json"), b"[]\n").unwrap();

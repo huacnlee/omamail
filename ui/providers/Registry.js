@@ -6,6 +6,7 @@
 .import "NativeDomain.js" as NativeDomain
 .import "Gmail.js" as Gmail
 .import "Outlook.js" as Outlook
+.import "M365.js" as M365
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
 .import "Jmap.js" as Jmap
@@ -29,15 +30,28 @@ function capabilities(values) {
   }
 }
 
+function calendarAttendanceMethod(id) {
+  return id === "gmail" ? "calendar.attendance" : ""
+}
+
+function calendarAttendanceUrl(id, accountId) {
+  return id === "gmail" ? "https://calendar.google.com/calendar/u/0/r?authuser=" + encodeURIComponent(String(accountId || "")) : ""
+}
+
 function mailbox(raw) {
   var entry = raw || {}
-  return {
+  var result = {
     key: String(entry.key || ""),
     label: String(entry.label || ""),
     icon: String(entry.icon || ""),
     query: String(entry.query || ""),
     optional: entry.optional === true
   }
+  if (Number(entry.minimumApiVersion || 0) > 0)
+    result.minimumApiVersion = Number(entry.minimumApiVersion)
+  if (Number(entry.maximumApiVersion || 0) > 0)
+    result.maximumApiVersion = Number(entry.maximumApiVersion)
+  return result
 }
 
 function define(source) {
@@ -69,7 +83,7 @@ function define(source) {
   }
 }
 
-var ALL = [define(Gmail), define(Hey), define(Outlook), define(Imap), define(Jmap)]
+var ALL = [define(Gmail), define(Hey), define(Outlook), define(M365), define(Imap), define(Jmap)]
 
 var DEFAULT_ID = "gmail"
 
@@ -120,14 +134,17 @@ function refusal(id, capability, refusals) {
   return String(refusals[String(capability)])
 }
 
-function mailboxes(id, absent) {
+function mailboxes(id, absent, apiVersion) {
   var list = get(id).mailboxes
   var missing = Array.isArray(absent) ? absent : []
   var drop = []
   for (var i = 0; i < missing.length; i++) drop.push(String(missing[i]))
   var out = []
   for (var j = 0; j < list.length; j++) {
-    if (drop.indexOf(list[j].key) < 0) out.push(list[j])
+    if (drop.indexOf(list[j].key) < 0
+        && (apiVersion === undefined || Number(apiVersion) >= Number(list[j].minimumApiVersion || 0))
+        && (!list[j].maximumApiVersion || (apiVersion !== undefined && Number(apiVersion) <= list[j].maximumApiVersion)))
+      out.push(list[j])
   }
   return out
 }
@@ -161,6 +178,19 @@ function unreadQuery(id) {
 
 function badge(id) {
   return get(id).name
+}
+
+// The provider shown under a name, for what is handed a name rather than an id.
+function named(name) {
+  for (var i = 0; i < ALL.length; i++) {
+    if (ALL[i].name === String(name)) return ALL[i].id
+  }
+  return ""
+}
+
+// The providers that sign in on Microsoft's own page, with an Application (client) ID.
+function signsInWithMicrosoft(id) {
+  return ["outlook", "m365"].indexOf(String(id)) >= 0
 }
 
 function summary(id) {

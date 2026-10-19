@@ -19,6 +19,20 @@ use tokio_rustls::{
     rustls::{ClientConfig, RootCertStore, pki_types::ServerName},
 };
 const LIMIT: usize = 32 * 1024 * 1024;
+/// How long one reply may take: the command is written, then read to its
+/// tagged completion. A hang guard, not a speed test — a 4 096-UID date batch
+/// is a quarter of a megabyte, and a server that charges a second a round trip
+/// is still working.
+const COMMAND_BUDGET: Duration = Duration::from_secs(30);
+/// How long one `imap.*` call may take. A call is a conversation — connect,
+/// login, SELECT, then one command per 4 096-UID window — so its cost is the
+/// server's per-command cost multiplied by the mailbox's size. Yahoo charges
+/// roughly half a second per command and a 10 000-message INBOX costs nine of
+/// them; a loaded server multiplies that. The budget has to clear the honest
+/// worst case, because what it exists to stop is a call that never ends.
+/// `ui/backend/Backend.qml` holds the matching frame deadline, so the process
+/// is not killed while a slow server is still answering.
+const CALL_BUDGET: Duration = Duration::from_secs(120);
 type Result<T> = std::result::Result<T, &'static str>;
 trait Socket: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Socket for T {}
@@ -115,9 +129,39 @@ async fn line(w: &mut Wire) -> Result<Vec<u8>> {
 }
 async fn response(w: &mut Wire, tag: &str, continuation: bool) -> Result<Vec<u8>> {
     let mut out = Vec::new();
+    response_each(w, tag, continuation, |record| {
+        out.extend_from_slice(record);
+        Ok(())
+    })
+    .await?;
+    Ok(out)
+}
+/// Read one reply under `COMMAND_BUDGET`: a server that takes a command and
+/// then goes quiet fails the call here, rather than holding it until the
+/// conversation as a whole runs out of time.
+async fn response_each(
+    w: &mut Wire,
+    tag: &str,
+    continuation: bool,
+    visit: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    tokio::time::timeout(COMMAND_BUDGET, records(w, tag, continuation, visit))
+        .await
+        .unwrap_or(Err("request_timed_out"))
+}
+/// Visit complete IMAP response records, keeping literals attached to their
+/// protocol record. UID inventories can retain only numbers instead of a full
+/// response and a second, much larger parsed syntax tree.
+async fn records(
+    w: &mut Wire,
+    tag: &str,
+    continuation: bool,
+    mut visit: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    let mut total = 0;
     loop {
         let l = line(w).await?;
-        if out.len() + l.len() > LIMIT {
+        if total + l.len() > LIMIT {
             return Err("mail_response_too_large");
         }
         let text = String::from_utf8_lossy(&l);
@@ -129,31 +173,41 @@ async fn response(w: &mut Wire, tag: &str, continuation: bool) -> Result<Vec<u8>
             {
                 return Err("imap_command_failed");
             }
-            out.extend_from_slice(&l);
-            return Ok(out);
+            visit(&l)?;
+            return Ok(());
         }
         if text.starts_with("* BYE") {
             return Err("mail_connection_closed");
         }
         if text.starts_with('+') {
             if continuation {
-                return Ok(out);
+                return Ok(());
             }
             return Err("imap_unexpected_continuation");
         }
-        let literal = literal_length(&text);
-        out.extend_from_slice(&l);
-        if let Some(n) = literal {
+        let mut literal = literal_length(&text);
+        total += l.len();
+        let mut record = l;
+        while let Some(n) = literal {
             let n = n.map_err(|_| "imap_invalid_response")?;
-            if n > LIMIT - out.len() {
+            if n > LIMIT - total {
                 return Err("mail_response_too_large");
             }
-            let start = out.len();
-            out.resize(start + n, 0);
-            w.read_exact(&mut out[start..])
+            let start = record.len();
+            record.resize(start + n, 0);
+            w.read_exact(&mut record[start..])
                 .await
                 .map_err(|_| "mail_network_failed")?;
+            total += n;
+            let suffix = line(w).await?;
+            if total + suffix.len() > LIMIT {
+                return Err("mail_response_too_large");
+            }
+            total += suffix.len();
+            literal = literal_length(&String::from_utf8_lossy(&suffix));
+            record.extend(suffix);
         }
+        visit(&record)?;
     }
 }
 /// The octet count a line announces with a trailing `{n}` or `{n+}` literal.
@@ -367,7 +421,7 @@ pub(crate) async fn planned_action_availability(
     account: &str,
     refusals: Value,
 ) -> Result<crate::mail::action::ActionAvailability> {
-    tokio::time::timeout(Duration::from_secs(22), async {
+    tokio::time::timeout(CALL_BUDGET, async {
         let params = resolve_account(
             &json!({"accountId":account,"readOnly":true}),
             "imap.folders",
@@ -415,7 +469,7 @@ pub(crate) async fn execute_planned_action(
         })
         .collect::<Result<_>>()?;
     let mut completed = Vec::new();
-    let result = tokio::time::timeout(Duration::from_secs(22), async {
+    let result = tokio::time::timeout(CALL_BUDGET, async {
         let params = resolve_account(params, method).await?;
         credentials(&params)?;
         mutation::call_planned(
@@ -461,7 +515,7 @@ pub async fn call(method: &str, p: &Value) -> Result<Value> {
 }
 async fn call_inner(method: &str, p: &Value) -> Result<Value> {
     let sent = std::sync::atomic::AtomicBool::new(false);
-    match tokio::time::timeout(Duration::from_secs(22), async {
+    match tokio::time::timeout(CALL_BUDGET, async {
         let resolved = resolve_account(p, method).await?;
         execute(method, &resolved, &sent).await
     })

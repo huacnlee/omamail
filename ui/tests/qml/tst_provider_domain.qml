@@ -31,6 +31,23 @@ Item {
   }
   TestCase {
     name: "NativeProviderDomain"
+    function test_proton_and_gmail_share_all_mail_without_an_extra_archive_entry() {
+      var proton = Provider.mailboxes("imap")
+      var gmail = Provider.mailboxes("gmail")
+      var common = proton.filter(function(box) {
+        return gmail.some(function(other) { return other.key === box.key })
+      })
+      verify(common.some(function(box) { return box.key === "all" }))
+      verify(!proton.some(function(box) { return box.key === "archive" }))
+      verify(!gmail.some(function(box) { return box.key === "archive" }))
+      compare(Provider.mailboxFor("imap", "all").query, "search:ALL")
+      verify(!Provider.mailboxes("imap", [], 5).some(function(box) { return box.key === "all" }))
+      verify(Provider.mailboxes("imap", [], 5).some(function(box) { return box.key === "archive" }))
+      verify(!Provider.mailboxes("imap", [], 6).some(function(box) { return box.key === "archive" }))
+      verify(Provider.mailboxes("imap", [], 6).some(function(box) { return box.key === "all" }))
+      compare(Provider.mailboxFor("gmail", "all").query,
+        "in:anywhere -in:spam -in:trash")
+    }
     function test_native_descriptor_preserves_ceiling_and_mailbox_queries() {
       verify(!Provider.can("hey", "archive"))
       verify(!Provider.can("hey", "star"))

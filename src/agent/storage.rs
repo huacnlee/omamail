@@ -14,10 +14,22 @@ use std::{
 type Result<T> = std::result::Result<T, &'static str>;
 const MAX_BYTES: usize = 1024 * 1024;
 static SERIAL: AtomicU64 = AtomicU64::new(1);
+fn errno() -> *mut libc::c_int {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        libc::__errno_location()
+    }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::__error()
+    }
+}
 pub struct Store {
     root: File,
     lock: File,
     path: PathBuf,
+    #[cfg(test)]
+    pub(super) reads: std::cell::Cell<usize>,
 }
 pub fn check_id(id: &str) -> Result<()> {
     if id.len() == 32
@@ -31,7 +43,17 @@ pub fn check_id(id: &str) -> Result<()> {
     }
 }
 fn filename(name: &str) -> Result<CString> {
-    if !matches!(name, "job.json" | "context.json" | "display.json") {
+    if !matches!(
+        name,
+        "job.json"
+            | "context.json"
+            | "display.json"
+            | "proposals.json"
+            | "cancel.json"
+            | "next.json"
+            | "bootstrap.json"
+            | "claude-settings.json"
+    ) {
         return Err("agent_invalid_filename");
     }
     Ok(CString::new(name).unwrap())
@@ -87,7 +109,7 @@ fn regular(dir: &File, name: &str) -> Result<Option<File>> {
     private(&file, false)?;
     Ok(Some(file))
 }
-fn names(dir: &File) -> Result<Vec<String>> {
+fn names(dir: &File, limit: Option<usize>) -> Result<Vec<String>> {
     let fd = unsafe {
         libc::openat(
             dir.as_raw_fd(),
@@ -107,11 +129,11 @@ fn names(dir: &File) -> Result<Vec<String>> {
         let mut result = Vec::new();
         loop {
             unsafe {
-                *libc::__errno_location() = 0;
+                *errno() = 0;
             }
             let e = unsafe { libc::readdir(stream) };
             if e.is_null() {
-                if unsafe { *libc::__errno_location() } != 0 {
+                if unsafe { *errno() } != 0 {
                     return Err(ioerror());
                 }
                 break;
@@ -123,7 +145,7 @@ fn names(dir: &File) -> Result<Vec<String>> {
                 continue;
             }
             result.push(name.to_owned());
-            if result.len() > 256 {
+            if limit.is_some_and(|limit| result.len() > limit) {
                 return Err("agent_storage_limit");
             }
         }
@@ -160,32 +182,54 @@ impl Store {
         }
         let root = crate::cache::directories(base, &["omamail", "assistant"], true)?
             .ok_or("agent_storage_unavailable")?;
-        let fd = unsafe {
-            libc::openat(
-                root.as_raw_fd(),
-                c".lock".as_ptr(),
-                libc::O_RDWR
-                    | libc::O_CREAT
-                    | libc::O_NOFOLLOW
-                    | libc::O_NONBLOCK
-                    | libc::O_CLOEXEC,
-                0o600,
-            )
-        };
-        if fd < 0 {
-            return Err("agent_unsafe_storage");
-        }
-        let lock = unsafe { File::from_raw_fd(fd) };
+        let lock = crate::platform::private_fs::open_lock(&root, ".lock")
+            .map_err(|_| "agent_unsafe_storage")?;
         private(&lock, false)?;
         lock_with_timeout(&lock, std::time::Duration::from_secs(5))?;
         Ok(Self {
             root,
             lock,
             path: base.join("omamail/assistant"),
+            #[cfg(test)]
+            reads: std::cell::Cell::new(0),
         })
     }
     pub fn path(&self) -> &Path {
         &self.path
+    }
+    /// Creating/removing a turn invalidates the in-process conversation index.
+    pub(super) fn revision(&self) -> Result<[u64; 6]> {
+        let m = self.root.metadata().map_err(|_| ioerror())?;
+        Ok([
+            m.dev(),
+            m.ino(),
+            m.mtime() as u64,
+            m.mtime_nsec() as u64,
+            m.ctime() as u64,
+            m.ctime_nsec() as u64,
+        ])
+    }
+    pub fn contains(&self, id: &str) -> Result<bool> {
+        check_id(id)?;
+        let name = CString::new(id).unwrap();
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if unsafe {
+            libc::fstatat(
+                self.root.as_raw_fd(),
+                name.as_ptr(),
+                stat.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
+                Ok(false)
+            } else {
+                Err("agent_unsafe_storage")
+            };
+        }
+        self.directory(id)?;
+        Ok(true)
     }
     fn directory(&self, id: &str) -> Result<File> {
         check_id(id)?;
@@ -214,7 +258,7 @@ impl Store {
     }
     pub fn ids(&self) -> Result<Vec<String>> {
         let mut ids = Vec::new();
-        for id in names(&self.root)? {
+        for id in names(&self.root, None)? {
             if id == ".lock" {
                 continue;
             }
@@ -226,6 +270,8 @@ impl Store {
         Ok(ids)
     }
     pub fn read_json(&self, id: &str, name: &str, limit: usize) -> Result<Option<Value>> {
+        #[cfg(test)]
+        self.reads.set(self.reads.get() + 1);
         filename(name)?;
         if limit > MAX_BYTES {
             return Err("agent_storage_limit");
@@ -299,7 +345,7 @@ impl Store {
     }
     pub fn remove(&self, id: &str) -> Result<()> {
         let dir = self.directory(id)?;
-        let entries = names(&dir)?;
+        let entries = names(&dir, Some(256))?;
         // Validate the complete set before deleting anything.
         for name in &entries {
             // Pre-streaming jobs kept this legacy output file. Permit its
@@ -335,7 +381,9 @@ mod tests {
     struct Temp(PathBuf);
     impl Temp {
         fn new() -> Self {
-            let p = std::env::temp_dir().join(format!(
+            // macOS temp_dir() can start with the system /var symlink. Resolve
+            // only the fixture parent; storage must still reject fixture links.
+            let p = std::env::temp_dir().canonicalize().unwrap().join(format!(
                 "omamail-agent-store-{}-{}",
                 std::process::id(),
                 SERIAL.fetch_add(1, Ordering::Relaxed)

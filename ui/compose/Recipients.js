@@ -1,4 +1,42 @@
 .pragma library
+.import "../message/Message.js" as Mail
+
+// A follow-up to our own message addresses its To list, not its author.
+// Only the draft owner's identities count as self; another mailbox on a
+// merged view can still be a real recipient. Never carry Bcc into a reply.
+function replyFields(summary, mode, ownAddresses) {
+  var source = summary || ({})
+  var own = normalize(ownAddresses)
+  var self = ({})
+  var seen = ({})
+  var to = []
+  var cc = []
+  var i
+  for (i = 0; i < own.length; i++) self[own[i].email.toLowerCase()] = true
+  var sender = cleanContact(source.from)
+  var outgoing = !!(sender && self[sender.email.toLowerCase()])
+  function keep(values, target) {
+    var contacts = normalize(values)
+    for (var j = 0; j < contacts.length; j++) {
+      var email = contacts[j].email
+      var key = email.toLowerCase()
+      if (self[key] || seen[key]) continue
+      seen[key] = true
+      target.push(email)
+    }
+  }
+  if (outgoing) {
+    keep(source.to, to)
+  } else {
+    var replyTo = cleanContact(source.replyTo) || sender
+    keep(replyTo ? [replyTo] : [], to)
+  }
+  if (mode === "replyAll") {
+    if (!outgoing) keep(source.to, cc)
+    keep(source.cc, cc)
+  }
+  return {to: to.join(", "), cc: cc.join(", "), outgoing: outgoing}
+}
 
 function cleanContact(value) {
   var contact = value || ({})
@@ -72,13 +110,14 @@ function suggest(values, text, limit) {
   return out
 }
 
+// A contact as To text. The name is often a stranger's, harvested from mail
+// that arrived, and the backend writes this text into the header, so a name
+// holding a special is quoted here or it stops being one name there.
 function address(contact) {
   var value = cleanContact(contact)
   if (!value) return ""
-  if (value.name === "") return value.email
-  var name = value.name.replace(/([\\"])/g, "\\$1")
-  if (/[,<>]/.test(name)) name = "\"" + name + "\""
-  return name + " <" + value.email + ">"
+  var name = Mail.quotedPhrase(value.name, false)
+  return name === "" ? value.email : name + " <" + value.email + ">"
 }
 
 function accept(text, contact) {
@@ -122,4 +161,3 @@ function filter(values, query, limit) {
   }
   return out
 }
-

@@ -1,6 +1,6 @@
 {
-  "apiVersion": 5,
-  "releasedApiVersion": 5,
+  "apiVersion": 8,
+  "releasedApiVersion": 7,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -13,6 +13,7 @@
     "account.conversation",
     "agent.context",
     "agent.jobsList",
+    "agent.providerStatus",
     "agent.jobsProjection",
     "agent.jobStart",
     "agent.jobShow",
@@ -95,6 +96,8 @@
     "public.unsubscribe",
     "calendar.request",
     "calendar.discover",
+    "calendar.attendance",
+    "calendar.reminders",
     "auth.form",
     "auth.begin",
     "auth.poll",
@@ -180,9 +183,212 @@
     "jmap.request",
     "jmap.stream.open",
     "jmap.stream.poll",
-    "jmap.stream.close"
+    "jmap.stream.close",
+    "m365.signInBegin",
+    "m365.signInPoll",
+    "m365.signOut",
+    "m365.verify",
+    "m365.list",
+    "m365.messages",
+    "m365.read",
+    "m365.attachment",
+    "m365.modify",
+    "m365.trash",
+    "m365.untrash",
+    "m365.send",
+    "m365.saveDraft",
+    "m365.deleteDraft",
+    "m365.sendAs",
+    "m365.invalidate",
+    "m365.cancel"
   ],
   "contractCases": [
+    {
+      "name": "IMAP account search refuses an expired work continuation",
+      "method": "imap.list",
+      "params": {
+        "query": "search:ALL",
+        "continuation": "expired-snapshot",
+        "settings": {
+          "username": "synthetic",
+          "imapHost": "imap.example.invalid",
+          "imapPort": 993
+        },
+        "credential": "synthetic:secret"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "imap_search_expired"
+      }
+    },
+    {
+      "name": "IMAP account search refuses a malformed page cursor",
+      "method": "imap.list",
+      "params": {
+        "query": "search:ALL",
+        "pageToken": "not-a-page-cursor",
+        "settings": {
+          "username": "synthetic",
+          "imapHost": "imap.example.invalid",
+          "imapPort": 993
+        },
+        "credential": "synthetic:secret"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "IMAP text search includes archived mail",
+      "method": "providers.resolve",
+      "params": {
+        "provider": "imap",
+        "operation": "query",
+        "search": "subject:invoice"
+      },
+      "equals": {
+        "value": "search:SUBJECT \"invoice\""
+      }
+    },
+    {
+      "name": "Outlook text search includes archived mail",
+      "method": "providers.resolve",
+      "params": {
+        "provider": "outlook",
+        "operation": "query",
+        "search": "invoice"
+      },
+      "equals": {
+        "value": "search:TEXT \"invoice\""
+      }
+    },
+    {
+      "name": "IMAP address search includes archived mail",
+      "method": "providers.resolve",
+      "params": {
+        "provider": "imap",
+        "operation": "addressQuery",
+        "field": "from",
+        "value": "ada@example.org"
+      },
+      "equals": {
+        "value": "search:FROM \"ada@example.org\""
+      }
+    },
+    {
+      "name": "IMAP All mail resolves to account-wide listing",
+      "method": "providers.resolve",
+      "params": {
+        "provider": "imap",
+        "operation": "query",
+        "mailbox": "all"
+      },
+      "equals": {
+        "value": "search:ALL"
+      }
+    },
+    {
+      "name": "Reminder view cache has an independent namespace",
+      "method": "cache.calendarRead",
+      "params": {
+        "name": "calendar-reminders"
+      },
+      "equals": {
+        "version": 3
+      },
+      "types": {
+        "ranges": "object"
+      }
+    },
+    {
+      "name": "Reminder actions validate before opening the ledger",
+      "method": "calendar.reminders",
+      "params": {
+        "operation": "dismiss",
+        "now": 1,
+        "key": "../outside"
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "Simultaneous reminders retain each event identity",
+      "method": "calendar.reminders",
+      "params": {
+        "operation": "poll",
+        "now": 1400000,
+        "lastCheck": 1300000,
+        "candidates": [
+          {
+            "key": "contract-one",
+            "occurrence": "contract-one",
+            "eventId": "one",
+            "sourceId": "calendar",
+            "accountId": "synthetic",
+            "title": "First meeting",
+            "start": 2000000,
+            "end": 5600000,
+            "due": 1400000
+          },
+          {
+            "key": "contract-two",
+            "occurrence": "contract-two",
+            "eventId": "two",
+            "sourceId": "calendar",
+            "accountId": "synthetic",
+            "title": "Second meeting",
+            "start": 2000000,
+            "end": 5600000,
+            "due": 1400000
+          }
+        ]
+      },
+      "equals": {
+        "notifications.length": 2,
+        "notifications.0.eventId": "one",
+        "notifications.1.eventId": "two",
+        "notifications.1.title": "Second meeting"
+      },
+      "types": {
+        "notifications.0.key": "string",
+        "notifications.1.key": "string"
+      }
+    },
+    {
+      "name": "Google attendance rejects unsupported answers before authentication",
+      "method": "calendar.attendance",
+      "params": {
+        "accountId": "missing@example.org",
+        "uid": "invite",
+        "organizer": "organizer@example.org",
+        "response": "yes"
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "Google attendance requires the invitation organizer before authentication",
+      "method": "calendar.attendance",
+      "params": {
+        "accountId": "missing@example.org",
+        "uid": "invite",
+        "response": "accepted"
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "Google calendar identity is validated before authentication",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "google",
+          "accountId": "missing@example.org",
+          "calendarId": ".."
+        },
+        "operation": "get",
+        "eventId": "event"
+      },
+      "errorCode": -32000
+    },
     {
       "name": "iCloud request refuses an external credential origin",
       "method": "calendar.request",
@@ -339,6 +545,30 @@
       }
     },
     {
+      "name": "mail send dry run names the IMAP sender",
+      "method": "mail.send",
+      "params": {
+        "account": "imap:named@example.org",
+        "to": [
+          "recipient@example.org"
+        ],
+        "subject": "Contract preview",
+        "body": "Hello"
+      },
+      "equals": {
+        "dryRun": true,
+        "executed": false,
+        "accountId": "imap:named@example.org",
+        "from": "Jane Example <named@example.org>",
+        "to": [
+          "recipient@example.org"
+        ],
+        "subject": "Contract preview",
+        "body": "Hello",
+        "attachments": []
+      }
+    },
+    {
       "name": "mail list rejects unknown fields",
       "method": "mail.list",
       "params": {
@@ -491,6 +721,58 @@
       "errorCode": -32000,
       "equals": {
         "message": "recovery_invalid_user_modified"
+      }
+    },
+    {
+      "name": "AI recovery preserves app-owned quote metadata",
+      "method": "compose.recoverySave",
+      "params": {
+        "record": {
+          "version": 1,
+          "active": true,
+          "draft": {
+            "body": "Answer\n\n> Original",
+            "bodyQuote": "> Original"
+          },
+          "parked": [
+            {
+              "body": "Other answer\n\n> Other",
+              "bodyQuote": "> Other"
+            }
+          ]
+        }
+      },
+      "equals": {
+        "record.draft.bodyQuote": "> Original",
+        "record.parked.0.bodyQuote": "> Other"
+      }
+    },
+    {
+      "name": "AI recovery reads app-owned quote metadata",
+      "method": "compose.recoveryRead",
+      "params": {},
+      "equals": {
+        "record.draft.bodyQuote": "> Original",
+        "record.parked.0.bodyQuote": "> Other"
+      }
+    },
+    {
+      "name": "AI recovery refuses nontext quote metadata",
+      "method": "compose.recoverySave",
+      "params": {
+        "expectedRevision": "unused",
+        "record": {
+          "version": 1,
+          "active": true,
+          "draft": {
+            "body": "Answer",
+            "bodyQuote": []
+          }
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "recovery_invalid"
       }
     },
     {
@@ -727,6 +1009,269 @@
       }
     },
     {
+      "name": "AI job projections retain provider and model",
+      "method": "agent.jobsProjection",
+      "params": {
+        "jobs": [
+          {
+            "id": "fixture",
+            "accountId": "contract-account",
+            "messageId": "42",
+            "kind": "message",
+            "state": "done",
+            "provider": "opencode",
+            "model": "fixture/model#variant",
+            "created": 1
+          }
+        ],
+        "accountId": "contract-account",
+        "seenIds": []
+      },
+      "equals": {
+        "byMessage.42.provider": "opencode",
+        "byMessage.42.model": "fixture/model#variant"
+      }
+    },
+    {
+      "name": "AI provider override is validated before starting a worker",
+      "method": "agent.jobStart",
+      "params": {
+        "provider": "../../bin/sh",
+        "payload": {
+          "messageId": "synthetic",
+          "prompt": "Synthetic question"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_invalid_provider"
+      }
+    },
+    {
+      "name": "AI model override is validated before starting a worker",
+      "method": "agent.jobStart",
+      "params": {
+        "provider": "opencode",
+        "model": "--auto",
+        "payload": {
+          "messageId": "synthetic",
+          "prompt": "Synthetic question"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_invalid_model"
+      }
+    },
+    {
+      "name": "AI follow-ups cannot override the saved provider or model",
+      "method": "agent.jobStart",
+      "params": {
+        "provider": "codex",
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Synthetic follow-up"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_continuation_override"
+      }
+    },
+    {
+      "name": "AI draft updates require a complete current snapshot",
+      "method": "agent.jobStart",
+      "params": {
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Revise",
+          "draftUpdate": {
+            "accountId": "contract-account",
+            "draftKey": "contract-draft",
+            "draft": {
+              "body": "Only one field"
+            }
+          }
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_invalid_draft"
+      }
+    },
+    {
+      "name": "AI draft updates cannot override conversation ownership fields",
+      "method": "agent.jobStart",
+      "params": {
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Revise",
+          "accountId": "other-account"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_continuation_override"
+      }
+    },
+    {
+      "name": "AI envelope ownership is validated before creating a job",
+      "method": "agent.jobStart",
+      "params": {
+        "payload": {
+          "messageId": "synthetic",
+          "accountId": "owner",
+          "prompt": "Draft",
+          "envelope": {
+            "accountId": "other"
+          }
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_context_owner_mismatch"
+      }
+    },
+    {
+      "name": "AI mail refresh refuses routing fields before reading history",
+      "method": "agent.jobStart",
+      "params": {
+        "payload": {
+          "parent": "11111111111111111111111111111111",
+          "prompt": "Follow up",
+          "mailUpdate": {
+            "accountId": "owner",
+            "messageId": "synthetic",
+            "message": "Text",
+            "to": "other@example.org"
+          }
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_invalid_context"
+      }
+    },
+    {
+      "name": "AI app-owned reply history must be text",
+      "method": "agent.jobStart",
+      "params": {
+        "payload": {
+          "messageId": "synthetic",
+          "accountId": "owner",
+          "prompt": "Draft",
+          "envelope": {
+            "accountId": "owner",
+            "from": "",
+            "to": "",
+            "cc": "",
+            "bcc": "",
+            "subject": "",
+            "body": "",
+            "replyTo": "",
+            "threadId": "",
+            "inReplyTo": "",
+            "draftId": "",
+            "attachments": [],
+            "replyQuote": []
+          }
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "agent_invalid_text"
+      }
+    },
+    {
+      "name": "AI conversations expose paged listings without deleting older turns",
+      "method": "agent.jobsList",
+      "params": {
+        "paged": true,
+        "offset": 0,
+        "watchIds": []
+      },
+      "equals": {
+        "jobs": [],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "AI projections preserve per-turn display and stop status",
+      "method": "agent.jobsProjection",
+      "params": {
+        "jobs": [
+          {
+            "id": "fixture",
+            "accountId": "contract-account",
+            "messageId": "42",
+            "kind": "message",
+            "state": "done",
+            "displayVersion": 2,
+            "stopUnconfirmed": false,
+            "created": 1
+          }
+        ],
+        "accountId": "contract-account"
+      },
+      "equals": {
+        "byMessage.42.displayVersion": 2,
+        "byMessage.42.stopUnconfirmed": false
+      }
+    },
+    {
+      "name": "AI transcript pages preserve native session identity",
+      "method": "agent.jobShow",
+      "params": {
+        "id": "0000000000000000000000000000000a"
+      },
+      "equals": {
+        "job.sessionId": "11111111-2222-3333-4444-555555555555",
+        "previous": "00000000000000000000000000000002",
+        "transcript.0.text": "question-2",
+        "transcript.15.text": "answer-9"
+      }
+    },
+    {
+      "name": "AI earlier transcript pages retain every saved turn",
+      "method": "agent.jobShow",
+      "params": {
+        "id": "0000000000000000000000000000000a",
+        "before": "00000000000000000000000000000002"
+      },
+      "equals": {
+        "previous": "",
+        "transcript.0.text": "question-0",
+        "transcript.3.text": "answer-1"
+      }
+    },
+    {
+      "name": "AI watched completions remain visible on older chat pages",
+      "method": "agent.jobsList",
+      "params": {
+        "paged": true,
+        "offset": 32,
+        "watchIds": [
+          "0000000000000000000000000000000a"
+        ]
+      },
+      "equals": {
+        "jobs.0.id": "0000000000000000000000000000000a",
+        "jobs.0.state": "done",
+        "hasMore": false
+      }
+    },
+    {
+      "name": "AI explicit provider availability is data-only",
+      "method": "agent.providerStatus",
+      "params": {
+        "provider": "codex"
+      },
+      "equals": {
+        "available": true,
+        "provider": "codex"
+      }
+    },
+    {
       "name": "gmail message mutation answers with a queue ticket",
       "method": "gmail.trash",
       "params": {
@@ -759,10 +1304,208 @@
       "types": {
         "ticket": "string"
       }
+    },
+    {
+      "name": "Microsoft 365 provider rules",
+      "method": "providers.snapshot",
+      "params": {},
+      "equals": {
+        "m365.nativeSync": true,
+        "m365.capabilities.archive": true,
+        "m365.capabilities.spam": false,
+        "m365.capabilities.labels": false,
+        "m365.queries.archive": "role:archive",
+        "m365.queries.starred": "role:inbox flagged"
+      }
+    },
+    {
+      "name": "Microsoft 365 text search is a text query",
+      "method": "providers.resolve",
+      "params": {
+        "provider": "m365",
+        "operation": "query",
+        "search": "invoice"
+      },
+      "equals": {
+        "value": "text:invoice"
+      }
+    },
+    {
+      "name": "Microsoft 365 answers one sender identity without a request",
+      "method": "m365.sendAs",
+      "params": {
+        "accountId": "m365:sender@example.org"
+      },
+      "equals": {
+        "0.email": "sender@example.org",
+        "0.isDefault": true
+      }
+    },
+    {
+      "name": "Microsoft 365 verify names a mailbox that is not saved",
+      "method": "m365.verify",
+      "params": {
+        "accountId": "m365:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Microsoft 365 list refuses a forged page token",
+      "method": "m365.list",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "query": "role:inbox",
+        "limit": 5,
+        "pageToken": "forged"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 messages refuse an id that is not its own",
+      "method": "m365.messages",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "ids": [
+          "1:INBOX"
+        ],
+        "full": false
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 send refuses a body that is not canonical base64url",
+      "method": "m365.send",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "raw": "not base64url!"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 sign-in needs an application id",
+      "method": "m365.signInBegin",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "address": "sender@example.org"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail action rejects malformed Microsoft 365 IDs before preview",
+      "method": "mail.act",
+      "params": {
+        "account": "m365:sender@example.org",
+        "operation": "read",
+        "ids": [
+          "1:INBOX"
+        ]
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 saves a draft only from canonical base64url",
+      "method": "m365.saveDraft",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "raw": "not base64url!"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 deletes a draft only by an id of its own",
+      "method": "m365.deleteDraft",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "id": "1:Drafts"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 calendar discovery asks the mailbox's own sign-in",
+      "method": "calendar.discover",
+      "params": {
+        "accountId": "m365:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "outbox accepts the Microsoft 365 provider",
+      "method": "outbox.enqueue",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "provider": "m365",
+        "payload": {
+          "raw": "eA",
+          "unexpected": true
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "outbox_invalid_payload"
+      }
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": [
+      "m365.signInBegin",
+      "m365.signInPoll",
+      "m365.signOut",
+      "m365.verify",
+      "m365.list",
+      "m365.messages",
+      "m365.read",
+      "m365.attachment",
+      "m365.modify",
+      "m365.trash",
+      "m365.untrash",
+      "m365.send",
+      "m365.saveDraft",
+      "m365.deleteDraft",
+      "m365.sendAs",
+      "m365.invalidate",
+      "m365.cancel"
+    ],
+    "cases": [
+      "Microsoft 365 provider rules",
+      "Microsoft 365 text search is a text query",
+      "Microsoft 365 answers one sender identity without a request",
+      "Microsoft 365 verify names a mailbox that is not saved",
+      "Microsoft 365 list refuses a forged page token",
+      "Microsoft 365 messages refuse an id that is not its own",
+      "Microsoft 365 send refuses a body that is not canonical base64url",
+      "Microsoft 365 sign-in needs an application id",
+      "mail action rejects malformed Microsoft 365 IDs before preview",
+      "Microsoft 365 saves a draft only from canonical base64url",
+      "Microsoft 365 deletes a draft only by an id of its own",
+      "Microsoft 365 calendar discovery asks the mailbox's own sign-in",
+      "outbox accepts the Microsoft 365 provider"
+    ]
   }
 }

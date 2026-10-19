@@ -104,4 +104,22 @@ deepEqual(aliases.sendAsList("me@icloud.com", null), [
   { email: "me@icloud.com", displayName: "", isPrimary: true, isDefault: true }
 ])
 
+// ------------------------------------------------------------ sender name
+
+// The account's sender name goes on the mailbox's own address and nowhere
+// else: an alias keeps the name it was typed with, or none.
+{
+  const rows = aliases.sendAsList("me@icloud.com", '"Work Desk" <work@icloud.com>, other@icloud.com')
+  const before = JSON.stringify(rows)
+  deepEqual(aliases.withSenderName(rows, "  Jane Example "), [
+    { email: "me@icloud.com", displayName: "Jane Example", isPrimary: true, isDefault: true },
+    { email: "work@icloud.com", displayName: "Work Desk", isPrimary: false, isDefault: false },
+    { email: "other@icloud.com", displayName: "", isPrimary: false, isDefault: false }
+  ])
+  assert.strictEqual(JSON.stringify(rows), before, "the provider's list is not edited in place")
+  // No name is the list as it was: the address goes out alone.
+  assert.strictEqual(aliases.withSenderName(rows, "   "), rows)
+  deepEqual(aliases.withSenderName(null, "Jane"), [])
+}
+
 console.log("Aliases.js ok")

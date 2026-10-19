@@ -161,6 +161,22 @@ assert.strictEqual(sources.calendarEditorUrl({ sources: [{
   kind: "google", enabled: true, accountId: "me@gmail.com"
 }] }), "https://calendar.google.com/calendar/u/0/r/eventedit")
 
+// Google visibility is seeded once, while future discovery refreshes access
+// and retains the local choice. A discovered primary must not become writable
+// merely because the account list is reconciled.
+{
+  const discovery = { provider: "google", accountId: "me@example.org", calendars: [
+    {sourceId: "google:me@example.org", calendarId: "me@example.org", name: "Primary", selected: true, readOnly: true},
+    {sourceId: "google:shared", calendarId: "team@example.org", name: "Team", selected: false, hidden: true}
+  ] }
+  const first = sources.applyDiscovery(sources.emptyList(), discovery)
+  assert.strictEqual(first.sources[0].enabled, true)
+  assert.strictEqual(first.sources[1].enabled, false)
+  const chosen = sources.setEnabled(first, "google:shared", true)
+  const again = sources.applyDiscovery(chosen, discovery)
+  assert.strictEqual(again.sources[1].enabled, true)
+  assert.strictEqual(again.sources[0].readOnly, true)
+}
 console.log("test_calendar_sources.js ok")
 
 assert.strictEqual(sources.sameUrl("https://CALDAV.ICLOUD.COM/Work/", "https://caldav.icloud.com/Work"), true)
@@ -342,4 +358,23 @@ assert.strictEqual(namedMicrosoft.sources[0].name, "Work appointments",
   assert.strictEqual(sources.errorLabel({ id: "caldav:team", kind: "caldav", name: "Team" }, accounts), "Team")
   assert.strictEqual(sources.errorLabel({ id: "caldav:team", kind: "caldav" }, accounts), "caldav:team")
   assert.strictEqual(sources.errorLabel(null, accounts), "Calendar")
+}
+
+// The window hides its calendar only once the list is known to be empty.
+{
+  assert.strictEqual(sources.hasNone(true, sources.emptyList()), true,
+    "nothing connected anywhere hides the calendar")
+  assert.strictEqual(sources.hasNone(false, sources.emptyList()), false,
+    "an unread list keeps the entry rather than flashing it away")
+  assert.strictEqual(sources.hasNone(true, null), true)
+  const disabled = sources.add(sources.emptyList(), {
+    id: "caldav:off", kind: "caldav", name: "Off",
+    url: "https://calendar.example/off/", username: "me", enabled: false
+  })
+  assert.strictEqual(sources.hasNone(true, disabled), false,
+    "a disabled calendar is still turned back on from the calendar")
+  const google = sources.withGoogleAccounts(sources.emptyList(),
+    [{ id: "one@gmail.com", email: "one@gmail.com", provider: "gmail", signedIn: true }])
+  assert.strictEqual(sources.hasNone(true, google), false,
+    "a Google mailbox brings its own calendar")
 }

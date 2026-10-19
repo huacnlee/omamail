@@ -5,6 +5,7 @@ import "../calendar/Calendar.js" as Calendar
 
 Item {
   id: root
+  readonly property string timeFormat: Qt.locale().timeFormat(Locale.ShortFormat)
 
   required property var controller
   required property var days
@@ -21,19 +22,65 @@ Item {
   required property string selectedEventId
 
   signal createAt(double startMs)
+  signal createRange(double startMs, double endMs)
+  signal createAllDay(double startMs, double endMs)
+  signal eventRescheduled(var event, double startMs, double endMs)
   signal eventActivated(var event)
+  property var dragPreview: null
+  property var pendingGesture: null
+  onControllerChanged: pendingGesture = null
+  Connections {
+    target: root.controller
+    ignoreUnknownSignals: true
+    function onEventUpdated(ok, error) {
+      if (!ok) root.pendingGesture = null
+    }
+    function onLoadingChanged() {
+      if (!root.controller.loading && !root.controller.eventWriting) root.pendingGesture = null
+    }
+  }
 
-  readonly property real timeRailWidth: Style.space(52)
+  readonly property real timeRailWidth: Math.max(Style.space(52),
+    allDayLabelMetrics.advanceWidth + Style.space(12),
+    midnightTimeMetrics.advanceWidth + Style.space(12),
+    noonTimeMetrics.advanceWidth + Style.space(12), nowLabel.implicitWidth + Style.space(12))
+  TextMetrics {
+    id: allDayLabelMetrics
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    text: "all-day"
+  }
+  TextMetrics {
+    id: midnightTimeMetrics
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    text: Calendar.timeLabel(new Date(2000, 0, 1, 0, 59).getTime(), root.timeFormat)
+  }
+  TextMetrics {
+    id: noonTimeMetrics
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    text: Calendar.timeLabel(new Date(2000, 0, 1, 12, 59).getTime(), root.timeFormat)
+  }
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
   readonly property var hourRange: Calendar.weekHourRange(
     controller ? controller.events : [], days, 7, 19)
-  readonly property int firstHour: hourRange.first
-  readonly property int lastHour: hourRange.last
+  readonly property int firstHour: 0
+  readonly property int lastHour: 24
+  function resetTimeScroll() {
+    timeline.contentY = Math.max(0, Math.min(hourRange.first * timeline.hourHeight,
+      timeline.contentHeight - timeline.height))
+  }
+  Component.onCompleted: Qt.callLater(root.resetTimeScroll)
+  onDaysChanged: Qt.callLater(root.resetTimeScroll)
   readonly property int hourCount: Math.max(1, lastHour - firstHour)
-  readonly property int allDayCount: Calendar.maxAllDayEvents(
-    controller ? controller.events : [], days)
-  readonly property real allDayHeight: allDayCount > 0
-    ? Style.space(6 + allDayCount * 20) : 0
+  readonly property var allDayLayout: Calendar.spanLayout(
+    (controller ? controller.events : []).filter(Calendar.displayInAllDayLane), days)
+  readonly property int allDayCount: allDayLayout.laneCounts[0] || 0
+  readonly property real allDayHeight: Style.space(8 + Math.max(1, allDayCount) * 24)
+  property int allDayDragStart: -1
+  property int allDayDragEnd: -1
+  readonly property string todayIso: Calendar.isoDate(new Date(nowMs))
 
   CalendarPalette {
     id: calendarPalette
@@ -57,18 +104,28 @@ Item {
     Repeater {
       model: root.days
       delegate: Item {
+        id: dayHeader
         required property var modelData
         required property int index
-        width: (dayHeaders.width - root.timeRailWidth) / 7
+        width: (dayHeaders.width - root.timeRailWidth) / Math.max(1, root.days.length)
         height: parent.height
-        Text {
+        Rectangle {
           anchors.centerIn: parent
-          text: root.weekdayNames[index] + " " + modelData.day
-          color: modelData.isoDate === Calendar.isoDate(new Date())
+          width: headerLabel.implicitWidth + Style.space(14)
+          height: headerLabel.implicitHeight + Style.space(6)
+          radius: Style.cornerRadius
+          color: Qt.alpha(root.accentColor, 0.12)
+          visible: dayHeader.modelData.isoDate === root.todayIso
+        }
+        Text {
+          id: headerLabel
+          anchors.centerIn: parent
+          text: root.weekdayNames[(new Date(modelData.startMs).getDay() + 6) % 7] + " " + modelData.day
+          color: modelData.isoDate === root.todayIso
             ? root.textColor : root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
-          font.bold: modelData.isoDate === Calendar.isoDate(new Date())
+          font.bold: modelData.isoDate === root.todayIso
           textFormat: Text.PlainText
         }
       }
@@ -77,14 +134,14 @@ Item {
 
   Rectangle {
     id: allDayLane
-    visible: root.allDayCount > 0
+    objectName: "calendar-all-day-lane"
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: dayHeaders.bottom
     height: root.allDayHeight
     color: "transparent"
     border.width: root.calendarBorderWidth
-    border.color: root.calendarBorderColor
+    border.color: Qt.alpha(root.calendarBorderColor, 0.2)
     clip: true
 
     Text {
@@ -101,6 +158,7 @@ Item {
     }
 
     Row {
+      id: allDayColumns
       anchors.left: parent.left
       anchors.leftMargin: root.timeRailWidth
       anchors.right: parent.right
@@ -110,56 +168,112 @@ Item {
         delegate: Item {
           id: allDayColumn
           required property var modelData
-          readonly property var events: Calendar.allDayEventsOnDay(
-            root.controller ? root.controller.events : [], modelData)
-          width: (allDayLane.width - root.timeRailWidth) / 7
+          required property int index
+          width: (allDayLane.width - root.timeRailWidth) / Math.max(1, root.days.length)
           height: parent.height
 
           Rectangle {
             anchors.fill: parent
-            color: allDayColumn.modelData.isoDate === Calendar.isoDate(new Date())
+            color: allDayMouse.containsMouse || (root.allDayDragStart >= 0
+              && allDayColumn.index >= Math.min(root.allDayDragStart, root.allDayDragEnd)
+              && allDayColumn.index <= Math.max(root.allDayDragStart, root.allDayDragEnd))
+              ? Qt.alpha(root.accentColor, 0.12)
+              : allDayColumn.modelData.isoDate === root.todayIso
               ? root.calendarTodayBackgroundColor : "transparent"
             border.width: root.calendarBorderWidth
-            border.color: root.calendarBorderColor
+            border.color: Qt.alpha(root.calendarBorderColor, 0.2)
           }
 
-          Column {
+          MouseArea {
+            id: allDayMouse
+            objectName: "calendar-all-day-slots-" + allDayColumn.modelData.isoDate
             anchors.fill: parent
-            anchors.margins: Style.space(2)
-            spacing: Style.space(2)
-            Repeater {
-              model: allDayColumn.events
-              delegate: Rectangle {
-                id: allDayEvent
-                required property var modelData
-                readonly property color eventColor: calendarPalette.colorFor(
-                  root.controller ? root.controller.colorKeyFor(modelData.sourceId) : "")
-                width: parent.width
-                height: Style.space(18)
-                color: Qt.rgba(eventColor.r, eventColor.g, eventColor.b,
-                  String(modelData.uid || "") === root.selectedEventId ? 0.3 : 0.16)
-                border.width: String(modelData.uid || "") === root.selectedEventId ? 2 : 1
-                border.color: eventColor
-                clip: true
+            hoverEnabled: true
+            cursorShape: Qt.CrossCursor
+            preventStealing: true
+            function selectTo(x, y) {
+              var point = mapToItem(allDayColumns, x, y)
+              root.allDayDragEnd = Math.max(0, Math.min(root.days.length - 1, Math.floor(point.x / allDayColumn.width)))
+            }
+            onPressed: {
+              root.allDayDragStart = allDayColumn.index
+              root.allDayDragEnd = allDayColumn.index
+            }
+            onPositionChanged: function(mouse) { if (pressed) selectTo(mouse.x, mouse.y) }
+            onReleased: function(mouse) {
+              selectTo(mouse.x, mouse.y)
+              root.createAllDay(root.days[Math.min(root.allDayDragStart, root.allDayDragEnd)].startMs,
+                root.days[Math.max(root.allDayDragStart, root.allDayDragEnd)].endMs)
+              root.allDayDragStart = -1
+              root.allDayDragEnd = -1
+            }
+            onCanceled: { root.allDayDragStart = -1; root.allDayDragEnd = -1 }
+          }
 
-                Text {
-                  anchors.fill: parent
-                  anchors.leftMargin: Style.space(4)
-                  anchors.rightMargin: Style.space(3)
-                  verticalAlignment: Text.AlignVCenter
-                  text: allDayEvent.modelData.summary || "Untitled event"
-                  color: root.textColor
-                  font.family: root.panelFontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                  textFormat: Text.PlainText
-                }
-                MouseArea {
-                  anchors.fill: parent
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.eventActivated(allDayEvent.modelData)
-                }
-              }
+        }
+      }
+    }
+    Item {
+      anchors.left: parent.left
+      anchors.leftMargin: root.timeRailWidth
+      anchors.right: parent.right
+      height: parent.height
+      Repeater {
+        model: root.allDayLayout.segments
+        delegate: Rectangle {
+          id: allDayEvent
+          required property var modelData
+          readonly property var eventData: modelData.event
+          objectName: "calendar-all-day-event-" + String(eventData.googleId || eventData.uid)
+          readonly property color eventColor: calendarPalette.colorFor(
+            root.controller ? root.controller.colorKeyFor(eventData.sourceId) : "")
+          x: modelData.startColumn * parent.width / Math.max(1, root.days.length) + Style.space(2)
+          y: Style.space(2) + modelData.lane * Style.space(24)
+          width: (modelData.endColumn - modelData.startColumn + 1) * parent.width / Math.max(1, root.days.length) - Style.space(4)
+          height: Style.space(22)
+          color: Qt.alpha(eventColor, Calendar.eventKey(eventData) === root.selectedEventId ? 0.3 : 0.16)
+          border.width: Calendar.eventKey(eventData) === root.selectedEventId ? 1 : 0
+          border.color: eventColor
+          clip: true
+
+          Text {
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(4)
+            anchors.rightMargin: Style.space(3)
+            verticalAlignment: Text.AlignVCenter
+            text: (allDayEvent.modelData.continuesBefore ? "‹ " : "")
+              + (allDayEvent.eventData.start.allDay ? "" : "Timed · ")
+              + String(allDayEvent.eventData.summary || "Untitled event")
+              + (allDayEvent.modelData.continuesAfter ? " ›" : "")
+            color: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+          }
+          MouseArea {
+            id: allDayEventMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.eventActivated(allDayEvent.eventData)
+          }
+          ToolTip {
+            visible: allDayEventMouse.containsMouse
+            delay: 500
+            contentItem: Text {
+              text: String(allDayEvent.eventData.summary || "Untitled event")
+                + (allDayEvent.eventData.start.allDay ? "" : "\n"
+                  + Calendar.dateTimeLabel(allDayEvent.eventData.start.ms, "ddd d MMM", root.timeFormat, ", ")
+                  + " – " + Calendar.dateTimeLabel(allDayEvent.eventData.end.ms, "ddd d MMM", root.timeFormat, ", "))
+              textFormat: Text.PlainText
+              color: root.textColor
+              font.family: root.panelFontFamily
+            }
+            background: Rectangle {
+              color: root.backgroundColor
+              border.color: Qt.alpha(root.textColor, 0.25)
+              radius: Style.cornerRadius
             }
           }
         }
@@ -169,13 +283,14 @@ Item {
 
   Flickable {
     id: timeline
+    objectName: "calendar-time-scroll"
 
     WheelScroller { view: timeline }
     anchors.left: parent.left
     anchors.right: parent.right
-    anchors.top: root.allDayCount > 0 ? allDayLane.bottom : dayHeaders.bottom
+    anchors.top: allDayLane.bottom
     anchors.bottom: parent.bottom
-    readonly property real hourHeight: Math.max(Style.space(28), height / root.hourCount)
+    readonly property real hourHeight: Math.max(Style.space(60), height / root.hourCount)
     contentWidth: width
     contentHeight: Math.max(height, hourHeight * root.hourCount)
     clip: true
@@ -199,7 +314,7 @@ Item {
             anchors.leftMargin: Style.space(4)
             anchors.top: parent.top
             anchors.topMargin: index === 0 ? Style.space(2) : -implicitHeight / 2
-            text: Calendar.two(root.firstHour + index) + ":00"
+            text: Calendar.timeLabel(new Date(2000, 0, 1, root.firstHour + index).getTime(), root.timeFormat)
             color: root.dimColor
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.caption
@@ -211,7 +326,7 @@ Item {
             anchors.right: parent.right
             anchors.top: parent.top
             height: root.calendarBorderWidth
-            color: root.calendarBorderColor
+            color: Qt.alpha(root.calendarBorderColor, 0.18)
           }
         }
       }
@@ -233,7 +348,7 @@ Item {
         Text {
           id: nowLabel
           anchors.centerIn: parent
-          text: Calendar.timeLabel(root.nowMs)
+          text: Calendar.timeLabel(root.nowMs, root.timeFormat)
           color: root.backgroundColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
@@ -253,51 +368,82 @@ Item {
             id: dayColumn
             required property var modelData
             readonly property var dayEvents: Calendar.eventsOnDay(
-              root.controller ? root.controller.events : [], modelData).filter(function(event) {
-                return event && event.start && !event.start.allDay
-              })
-            width: (timeline.width - root.timeRailWidth) / 7
+              (root.controller ? root.controller.events : []).map(function(event) {
+                if (!root.pendingGesture || Calendar.eventKey(event) !== root.pendingGesture.key) return event
+                var moved = {}
+                for (var key in event) moved[key] = event[key]
+                moved.start = { ms: root.pendingGesture.start }
+                moved.end = { ms: root.pendingGesture.end }
+                return moved
+              }), modelData)
+            readonly property var positionedEvents: Calendar.dayLanes(dayEvents, modelData, timeline.hourHeight)
+            width: (timeline.width - root.timeRailWidth) / Math.max(1, root.days.length)
             height: parent.height
 
             Rectangle {
               anchors.fill: parent
-              color: dayColumn.modelData.isoDate === Calendar.isoDate(new Date())
+              color: dayColumn.modelData.isoDate === root.todayIso
                 ? root.calendarTodayBackgroundColor : "transparent"
               border.width: root.calendarBorderWidth
-              border.color: root.calendarBorderColor
+              border.color: Qt.alpha(root.calendarBorderColor, 0.18)
             }
             MouseArea {
+              objectName: "calendar-time-slots-" + dayColumn.modelData.isoDate
               anchors.fill: parent
               cursorShape: Qt.CrossCursor
-              onClicked: root.createAt(Calendar.slotStart(dayColumn.modelData,
-                mouseY, root.firstHour, timeline.hourHeight, 30))
+              preventStealing: true
+              property real initialY: 0
+              property var selection: null
+              function selectTo(y) {
+                var first = Calendar.slotStart(dayColumn.modelData, Math.min(initialY, y), root.firstHour, timeline.hourHeight, 15)
+                var last = Calendar.slotStart(dayColumn.modelData, Math.max(initialY, y) + timeline.hourHeight / 8,
+                  root.firstHour, timeline.hourHeight, 15)
+                last = Math.min(dayColumn.modelData.endMs, Math.max(first + 900000, last))
+                selection = { start: first, end: last }
+                var point = dayColumn.mapToItem(timeline.contentItem, 0, 0)
+                root.dragPreview = { x: point.x,
+                  y: Calendar.eventTop({start:{ms:first}}, dayColumn.modelData, root.firstHour, timeline.hourHeight),
+                  width: dayColumn.width,
+                  height: (last - first) / 3600000 * timeline.hourHeight,
+                  label: Calendar.timeRangeLabel(first, last, root.timeFormat) }
+              }
+              onPressed: function(mouse) { initialY = mouse.y; selectTo(mouse.y) }
+              onPositionChanged: function(mouse) { if (pressed) selectTo(mouse.y) }
+              onReleased: function(mouse) {
+                selectTo(mouse.y)
+                root.dragPreview = null
+                if (Math.abs(mouse.y - initialY) < 6) root.createAt(selection.start)
+                else root.createRange(selection.start, selection.end)
+                selection = null
+              }
+              onCanceled: { selection = null; root.dragPreview = null }
             }
 
             Repeater {
-              // Overlapping events share the column in lanes - see
-              // Calendar.dayLanes - rather than being drawn on top of each other.
-              model: Calendar.dayLanes(dayColumn.dayEvents, dayColumn.modelData)
+              model: dayColumn.positionedEvents
               delegate: Rectangle {
                 id: eventBlock
                 required property var modelData
-                readonly property var event: modelData.event
-                readonly property real laneWidth: Math.max(0, dayColumn.width - Style.space(4)) / Math.max(1, modelData.lanes)
-                // Narrow enough that the title is all that fits.
+                readonly property real laneWidth: Math.max(0, dayColumn.width - Style.space(6)) / Math.max(1, modelData.lanes)
                 readonly property bool narrow: width < Style.space(44)
                 readonly property color eventColor: calendarPalette.colorFor(
-                  root.controller ? root.controller.colorKeyFor(event.sourceId) : "")
-                x: Style.space(2) + modelData.lane * laneWidth
-                // A gap between lanes, none at the column's own edge.
+                  root.controller ? root.controller.colorKeyFor(eventData.sourceId) : "")
+                readonly property var eventData: modelData.event
+                readonly property bool canReschedule: !!root.controller
+                  && typeof root.controller.rescheduleRefusal === "function"
+                  && root.controller.rescheduleRefusal(eventData) === ""
+                x: Style.space(3) + modelData.lane * laneWidth
                 width: Math.max(0, modelData.span * laneWidth
                   - (modelData.lane + modelData.span < modelData.lanes
                     ? Math.min(Style.space(2), laneWidth / 4) : 0))
-                y: Calendar.eventTop(event, dayColumn.modelData,
+                y: Calendar.eventTop(eventData, dayColumn.modelData,
                   root.firstHour, timeline.hourHeight)
-                height: Calendar.eventHeight(event, dayColumn.modelData, timeline.hourHeight)
+                height: Calendar.eventHeight(eventData, dayColumn.modelData, timeline.hourHeight)
                 radius: Style.cornerRadius
-                color: Qt.rgba(eventColor.r, eventColor.g, eventColor.b,
-                  String(event.uid || "") === root.selectedEventId ? 0.3 : 0.17)
-                border.width: String(event.uid || "") === root.selectedEventId ? 2 : 1
+                z: 1
+                color: Qt.tint(root.backgroundColor, Qt.alpha(eventColor,
+                  Calendar.eventKey(eventData) === root.selectedEventId ? 0.3 : 0.17))
+                border.width: Calendar.eventKey(eventData) === root.selectedEventId ? 1 : 0
                 border.color: eventColor
                 clip: true
 
@@ -310,20 +456,15 @@ Item {
                 }
                 Column {
                   anchors.fill: parent
-                  anchors.margins: eventBlock.narrow ? Style.space(3) : Style.space(5)
-                  anchors.leftMargin: Style.space(6)
+                  anchors.margins: Style.space(5)
                   spacing: Style.space(1)
                   Text {
                     width: parent.width
-                    text: eventBlock.event.summary || "Untitled event"
+                    text: eventBlock.eventData.summary || "Untitled event"
                     color: root.textColor
                     font.family: root.panelFontFamily
                     font.pixelSize: Style.font.caption
                     font.bold: true
-                    // A shared lane may take the lines its block has room for,
-                    // at word boundaries. A lane too narrow for a word shows
-                    // one elided line instead - broken inside its words, a
-                    // title reads as other words - and the whole title on hover.
                     wrapMode: eventBlock.narrow ? Text.NoWrap : Text.WordWrap
                     maximumLineCount: eventBlock.narrow ? 1 : Math.max(1, Math.floor(
                       (eventBlock.height - Style.space(10)) / (Style.font.caption * 1.35)) - 1)
@@ -332,45 +473,125 @@ Item {
                   }
                   Text {
                     width: parent.width
-                    // Only with room for it under the title: a half-hour
-                    // block showing half a time says less than none.
                     visible: !eventBlock.narrow && eventBlock.height >= Style.font.caption * 2.9 + Style.space(10)
-                    text: Calendar.two(new Date(eventBlock.event.start.ms).getHours()) + ":"
-                      + Calendar.two(new Date(eventBlock.event.start.ms).getMinutes())
+                    text: width >= timeMetrics.advanceWidth ? timeMetrics.text
+                      : Calendar.timeLabel(eventBlock.eventData.start.ms, root.timeFormat)
+                    elide: Text.ElideRight
                     color: root.dimColor
                     font.family: root.panelFontFamily
                     font.pixelSize: Style.font.caption
                     textFormat: Text.PlainText
+                    TextMetrics {
+                      id: timeMetrics
+                      font.family: root.panelFontFamily
+                      font.pixelSize: Style.font.caption
+                      text: Calendar.timeRangeLabel(eventBlock.eventData.start.ms, eventBlock.eventData.end.ms, root.timeFormat)
+                    }
                   }
                 }
                 MouseArea {
-                  id: eventHover
+                  id: eventMouse
+                  objectName: "calendar-event-drag-" + String(eventBlock.eventData.googleId || eventBlock.eventData.uid)
                   anchors.fill: parent
-                  hoverEnabled: eventBlock.narrow
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.eventActivated(eventBlock.event)
+                  hoverEnabled: true
+                  enabled: !root.pendingGesture && !(root.controller && root.controller.eventWriting)
+                  cursorShape: !eventBlock.canReschedule ? Qt.PointingHandCursor
+                    : mouseY < Style.space(9) || mouseY > height - Style.space(9)
+                    ? Qt.SizeVerCursor : Qt.OpenHandCursor
+                  preventStealing: true
+                  property point initial: Qt.point(0, 0)
+                  property string edge: ""
+                  property bool moved: false
+                  property var proposed: null
+                  onPressed: function(mouse) {
+                    initial = mapToItem(timeline, mouse.x, mouse.y)
+                    edge = mouse.y < Style.space(9) ? "start" : mouse.y > height - Style.space(9) ? "end" : ""
+                    moved = false
+                    proposed = null
+                  }
+                  onPositionChanged: function(mouse) {
+                    if (!pressed || !eventBlock.canReschedule) return
+                    var point = mapToItem(timeline, mouse.x, mouse.y)
+                    if (!moved && Math.abs(point.x - initial.x) + Math.abs(point.y - initial.y) < 6) return
+                    moved = true
+                    var column = Math.max(0, Math.min(root.days.length - 1,
+                      Math.floor((point.x - root.timeRailWidth) / dayColumn.width)))
+                    var initialColumn = Math.floor((initial.x - root.timeRailWidth) / dayColumn.width)
+                    proposed = Calendar.gestureRange(eventBlock.eventData, column - initialColumn,
+                      (point.y - initial.y) / timeline.hourHeight * 60, edge)
+                    if (!proposed) { root.dragPreview = null; return }
+                    var previewDay = root.days[edge === "" ? column : initialColumn]
+                    var previewEvent = { start: {ms: proposed.start}, end: {ms: proposed.end} }
+                    root.dragPreview = { x: root.timeRailWidth + (edge === "" ? column : initialColumn) * dayColumn.width,
+                      y: Calendar.eventTop(previewEvent, previewDay, root.firstHour, timeline.hourHeight),
+                      width: dayColumn.width, height: Calendar.eventHeight(previewEvent, previewDay, timeline.hourHeight),
+                      label: Calendar.timeRangeLabel(proposed.start, proposed.end, root.timeFormat) }
+                  }
+                  onReleased: {
+                    root.dragPreview = null
+                    if (moved && proposed) {
+                      var event = eventBlock.eventData
+                      var next = { key: Calendar.eventKey(event), start: proposed.start, end: proposed.end }
+                      root.eventRescheduled(event, proposed.start, proposed.end)
+                      if (root.controller && root.controller.eventWriting) root.pendingGesture = next
+                    }
+                    else if (!moved) root.eventActivated(eventBlock.eventData)
+                  }
+                  onCanceled: { root.dragPreview = null; proposed = null }
+                }
+                Rectangle {
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  anchors.top: parent.top
+                  anchors.topMargin: Style.space(3)
+                  width: Math.min(Style.space(24), parent.width * 0.4)
+                  height: Style.space(3)
+                  radius: height / 2
+                  color: eventBlock.eventColor
+                  visible: eventBlock.canReschedule && (eventMouse.containsMouse || eventMouse.pressed)
+                }
+                Rectangle {
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  anchors.bottom: parent.bottom
+                  anchors.bottomMargin: Style.space(3)
+                  width: Math.min(Style.space(24), parent.width * 0.4)
+                  height: Style.space(3)
+                  radius: height / 2
+                  color: eventBlock.eventColor
+                  visible: eventBlock.canReschedule && (eventMouse.containsMouse || eventMouse.pressed)
                 }
                 ToolTip {
-                  id: eventTip
                   objectName: "calendar-event-tooltip"
-                  visible: eventBlock.narrow && eventHover.containsMouse
-                  text: String(eventBlock.event.summary || "Untitled event")
-                  delay: 400
+                  visible: eventMouse.containsMouse && !eventMouse.pressed
+                  delay: 500
                   contentItem: Text {
-                    text: eventTip.text
+                    text: String(eventBlock.eventData.summary || "Untitled event") + "\n"
+                      + Calendar.timeRangeLabel(eventBlock.eventData.start.ms, eventBlock.eventData.end.ms, root.timeFormat)
                     textFormat: Text.PlainText
                     color: root.textColor
                     font.family: root.panelFontFamily
-                    font.pixelSize: Style.font.caption
                   }
+                  background: Rectangle {
+                    color: root.backgroundColor
+                    border.color: Qt.alpha(root.textColor, 0.25)
+                    radius: Style.cornerRadius
+                  }
+                }
+                Text {
+                  anchors.right: parent.right
+                  anchors.bottom: parent.bottom
+                  anchors.margins: Style.space(4)
+                  visible: !!root.pendingGesture && root.pendingGesture.key === Calendar.eventKey(eventBlock.eventData)
+                  text: "Saving"
+                  textFormat: Text.PlainText
+                  color: root.textColor
+                  font.family: root.panelFontFamily
+                  font.pixelSize: Style.font.caption
                 }
               }
             }
 
-            // After the events, so a meeting in progress is crossed by the line
-            // rather than covering it. The dot is what survives a theme whose
-            // urgent colour sits close to an event's border: a bare rule reads
-            // as one more hour separator, a rule with a bead on it does not.
+            // Keep the line behind event text; the gutter time and dot remain
+            // visible without striking through a meeting's title.
             Item {
               readonly property real offset: Calendar.nowOffset(
                 dayColumn.modelData, root.firstHour, root.lastHour,
@@ -379,7 +600,7 @@ Item {
               y: offset
               width: parent.width
               height: 0
-              z: 1
+              z: 0
               Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -398,6 +619,29 @@ Item {
             }
           }
         }
+      }
+    }
+    Rectangle {
+      visible: root.dragPreview !== null
+      x: root.dragPreview ? root.dragPreview.x : 0
+      y: root.dragPreview ? root.dragPreview.y : 0
+      width: root.dragPreview ? root.dragPreview.width : 0
+      height: root.dragPreview ? root.dragPreview.height : 0
+      color: Qt.alpha(root.accentColor, 0.2)
+      border.color: root.accentColor
+      border.width: 2
+      radius: Style.cornerRadius
+      Text {
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: Style.space(5)
+        text: root.dragPreview ? root.dragPreview.label || "" : ""
+        elide: Text.ElideRight
+        textFormat: Text.PlainText
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.bold: true
       }
     }
   }

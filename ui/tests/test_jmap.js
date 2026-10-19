@@ -2345,7 +2345,7 @@ assert.strictEqual(registry.can("jmap", "spam", accountRefusals), true,
 assert.strictEqual(registry.can("jmap", "star", accountRefusals), true)
 assert.strictEqual(registry.can("jmap", "send", accountRefusals), true)
 deepEqual(registry.mailboxes("jmap", jmap.absentMailboxes(boxes)).map(box => box.key),
-  ["inbox", "unread", "starred", "sent", "drafts", "spam", "trash"],
+  ["inbox", "unread", "starred", "drafts", "sent", "spam", "trash"],
   "the Archive row is gone and Junk moves up, because the number keys are positional")
 
 // ------------------------------------------------------- the provider itself

@@ -12,7 +12,7 @@ TextField {
   property var service: null
 
   objectName: "account-name-field"
-  placeholderText: "Name (optional) — how this mailbox is listed, e.g. Work"
+  placeholderText: "Mailbox name (optional) — how it is listed in Omamail, e.g. Work"
 
   function syncFromStore() { text = service ? String(service.accountName || "") : "" }
   function value() { return String(text || "").trim() }

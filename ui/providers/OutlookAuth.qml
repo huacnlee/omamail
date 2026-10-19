@@ -167,6 +167,22 @@ Item {
     }
   }
 
+  // Native calendar work resolves its own tokens. Bind its consent result
+  // before it starts, so an old request cannot change a replacement session
+  // or undo the Graph device flow that completed while it was in flight.
+  function graphConsentHandler() {
+    var context = sessionContext()
+    var requestedTenant = tenant
+    var grants = graphGrants
+    return function(error) {
+      if (!root || !root.isCurrent(context) || !root.sessionEnabled
+          || root.tenant !== requestedTenant || root.graphGrants !== grants
+          || !error || error.message !== "auth_consent_required") return false
+      root.graphConsentNeeded = true
+      return true
+    }
+  }
+
   function withGraphToken(callback) {
     if (typeof callback !== "function") return
     if (!sessionEnabled) {
@@ -478,8 +494,9 @@ Item {
     keyringJob = next.shift()
     keyringJobs = next
     var job = keyringJob
-    if (!platform || (job.kind === "store" && typeof platform.credentialPut !== "function")
-        || (job.kind === "clear" && typeof platform.credentialDelete !== "function")) {
+    var nativeStore = backend && typeof backend.call === "function"
+    if (!nativeStore && (!platform || (job.kind === "store" && typeof platform.credentialPut !== "function")
+        || (job.kind === "clear" && typeof platform.credentialDelete !== "function"))) {
       job.token = ""
       keyringJob = null
       if (isCurrent(job.context)) lastError = "Could not update the saved Microsoft session"
@@ -492,7 +509,17 @@ Item {
       if (!ok && root.isCurrent(job.context)) root.lastError = "Could not update the saved Microsoft session"
       root.runKeyringJob()
     }
-    if (job.kind === "store")
+    if (nativeStore) {
+      // Device grants and logout share the backend's account refresh lane.
+      // A mail/Graph refresh already in flight must finish its rotation before
+      // this newer grant replaces it, or the old grant can overwrite consent.
+      var fields = { accountId: job.context.accountId, clientId: job.context.clientId }
+      if (job.kind === "store") fields.token = job.token
+      backend.call(job.kind === "store" ? "auth.store" : "auth.clear", fields, function(result, error) {
+        done(!error && !!result && (job.kind === "store" ? result.saved === true : result.cleared === true),
+          error ? String(error.message || "") : "")
+      })
+    } else if (job.kind === "store")
       platform.credentialPut("outlook-refresh-token", job.context.accountId,
         job.context.clientId, job.token, done)
     else
@@ -529,8 +556,9 @@ Item {
     if (endpoint === "token" && body.indexOf("grant_type=refresh_token") >= 0 && accountId) {
       backend.call("auth.token", { provider: "outlook", accountId: accountId,
         resource: body.indexOf("graph.microsoft.com") >= 0 ? "graph" : "mail" }, function(result, error) {
-        var code = error === "auth_signed_out" ? "invalid_grant" : "temporarily_unavailable"
-        var failure = error === "auth_consent_required"
+        var reason = error ? String(error.message || "") : ""
+        var code = reason === "auth_signed_out" ? "invalid_grant" : "temporarily_unavailable"
+        var failure = reason === "auth_consent_required"
           ? { error: "interaction_required", error_codes: [65001] } : { error: code }
         finish({ status: error ? 400 : 200, body: JSON.stringify(error ? failure : result) }, "")
       })

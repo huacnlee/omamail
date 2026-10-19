@@ -190,6 +190,13 @@ impl Session {
                     .cloned()
                     .ok_or("reader_message_missing")?
             }
+            "m365" => {
+                crate::providers::m365::call(
+                    "m365.read",
+                    &json!({"accountId":account,"id":id,"full":true}),
+                )
+                .await?
+            }
             _ => return Err("reader_provider_unknown"),
         };
         if value["id"] != id || !value["payload"].is_object() {
@@ -291,6 +298,13 @@ impl Session {
             key,
             live: job.live.clone(),
         };
+        // A Microsoft 365 message is up to 24 MiB and is allowed a minute for the body. Every other
+        // provider stays on the 25 seconds a listing uses.
+        let allowance = if account.starts_with("m365:") {
+            Duration::from_secs(80)
+        } else {
+            Duration::from_secs(25)
+        };
         let operation = async {
             registered(&account).await?;
             job.current()?;
@@ -346,7 +360,7 @@ impl Session {
             .await
             .map_err(|_| "worker_failed")?
         };
-        let result = tokio::select! {result=tokio::time::timeout(Duration::from_secs(25),operation)=>result.unwrap_or(Err("reader_timeout")),_=job.cancelled.notified()=>Err("reader_cancelled")};
+        let result = tokio::select! {result=tokio::time::timeout(allowance,operation)=>result.unwrap_or(Err("reader_timeout")),_=job.cancelled.notified()=>Err("reader_cancelled")};
         if result.is_err() {
             *job.live.lock().map_err(|_| "session_failed")? = false;
         }

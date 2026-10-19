@@ -60,6 +60,15 @@ fn draft(value: &Value) -> Result<Value> {
     ] {
         out[key] = json!(text(&value[key]));
     }
+    // Optional for legacy records. This is app-owned metadata, not text to
+    // coerce from another JSON shape; the editor still checks the exact suffix.
+    if let Some(quote) = value.get("bodyQuote") {
+        let quote = quote.as_str().ok_or("recovery_invalid")?;
+        if quote.len() > MAX_BYTES {
+            return Err("recovery_too_large");
+        }
+        out["bodyQuote"] = json!(quote);
+    }
     if let Some(id) = value.get("pendingSendId") {
         let id = id.as_str().ok_or("recovery_invalid_send_id")?;
         if id.len() > 1024 || id.chars().any(char::is_control) {
@@ -67,6 +76,15 @@ fn draft(value: &Value) -> Result<Value> {
         }
         if !id.is_empty() {
             out["pendingSendId"] = json!(id);
+        }
+    }
+    for key in ["draftKey", "replyMessageId", "agentParentJobId"] {
+        if let Some(id) = value.get(key) {
+            let id = id
+                .as_str()
+                .filter(|s| s.len() <= 4096 && !s.chars().any(char::is_control))
+                .ok_or("recovery_invalid_send_id")?;
+            out[key] = json!(id);
         }
     }
     if value["deliveryUnknown"] == true {

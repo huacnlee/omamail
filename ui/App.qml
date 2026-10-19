@@ -4,12 +4,15 @@ import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 import "account/Model.js" as Model
+import "account" as Account
 import "account/Accounts.js" as Accounts
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
+import "compose" as Compose
 import "keys/Keymap.js" as Keymap
 import "providers/Registry.js" as Provider
 import "agent/Agent.js" as Agent
@@ -106,20 +109,18 @@ Item {
     onTriggered: root.saveComposeRecovery()
   }
 
-  readonly property color foreground: Color.foreground
-  readonly property color background: Color.background
-  readonly property color accent: Color.accent
-  readonly property color urgent: Color.urgent
-  readonly property color danger: Color.urgent
-  readonly property color popupBackground: Color.popups.background
-  readonly property color popupBorder: Color.popups.border
-  // Shared structural border used by both the mail surface and the standalone
-  // host window. Keeping this semantic role here makes the native chrome track
-  // the same active Omarchy theme as the dividers inside it.
+  readonly property color foreground: Commons.Color.foreground
+  readonly property color background: Commons.Color.background
+  readonly property color accent: Commons.Color.accent
+  readonly property color urgent: Commons.Color.urgent
+  readonly property color danger: Commons.Color.urgent
+  readonly property color popupBackground: Commons.Color.popups.background
+  readonly property color popupBorder: Commons.Color.popups.border
+  // Shared themed border for mail and standalone window chrome.
   readonly property color borderColor: Style.normalBorderColor
   readonly property int borderWidth: Style.normalBorderWidth
   readonly property color calendarBorder: Style.normalBorderColor
-  readonly property color calendarTodayBackground: Style.selectedAccentFill
+  readonly property color calendarTodayBackground: Qt.alpha(root.accent, 0.035)
   readonly property int calendarBorderWidth: Style.normalBorderWidth
   readonly property color dim: Qt.rgba(
     foreground.r * 0.68 + background.r * 0.32,
@@ -241,9 +242,7 @@ Item {
     return true
   }
 
-  // Acting on the selection acts on every ticked row at once, then drops the
-  // selection: the rows it named have moved or changed, and a selection that
-  // outlived the action would be one keystroke from repeating it.
+  Account.UnifiedBatchSelection { id: batchSelection; app: root; service: root.service }
   function actOnChecked(action) {
     if (!service || checkedIds.length === 0) return false
     // Never through another mailbox: a switch that reached the service by
@@ -259,7 +258,11 @@ Item {
     // The open message going with the selection closes the reader, the way
     // acting on it alone does: it is about to leave this list.
     var wasOpen = currentView === "reader" && ids.indexOf(service.selectedId) >= 0
-    if (!service.actMany(ids, action)) return false
+    var scope = batchSelection.scope
+    var completion = service.unified ? function(result) {
+      Qt.callLater(function() { batchSelection.restore(result.failedIds, scope) })
+    } : undefined
+    if (!service.actMany(ids, action, completion)) return false
     checkedIds = []
     if (!leaves) return true
     if (wasOpen) {
@@ -307,6 +310,10 @@ Item {
   readonly property string currentView: page === "reader" ? "reader"
     : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
   readonly property bool calendarVisible: currentView === "calendar"
+  // With no calendar connected anywhere the view cannot hold an event, so the
+  // window stops offering it; Settings still adds one.
+  readonly property bool calendarAvailable: !(service && service.noCalendars === true)
+  onCalendarAvailableChanged: if (!calendarAvailable && calendarVisible) backToList()
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
@@ -319,11 +326,8 @@ Item {
   readonly property string editingProvider: page === "setup" ? String(navPage.provider || "") : ""
   readonly property bool accountDraftOpen: page === "setup" && navPage.draft === true
 
-  // What the root is made of. Recomputed when a mailbox becomes usable or
-  // stops being — and, before any is, whenever the service learns more about
-  // the accounts it has, but only while the user has not moved off the root
-  // it was given: a form they backed out of must not come back because the
-  // address they typed was saved.
+  // Readiness rebuilds the root. Before sign-in, account changes rebuild only
+  // an untouched root, so saving an address cannot reopen a dismissed form.
   readonly property var rootState: ({
     anyReady: anyReady,
     hasSavedAccounts: !!service && service.hasSavedAccounts === true,
@@ -339,7 +343,11 @@ Item {
     if (flipped || (!rootState.anyReady && navUntouched)) resetNavigation()
   }
   function resetNavigation() {
-    nav = Nav.rootFor(rootState)
+    var next = Nav.rootFor(rootState)
+    // Open drafts emit no openedChanged here. Restore them with new return depths.
+    if (compose && compose.opened) next = Nav.push(next, Nav.entry("compose"))
+    if (eventComposer && eventComposer.opened) next = Nav.push(next, Nav.entry("eventComposer"))
+    nav = next
     navUntouched = true
     pendingComposeReturnTo = -1
   }
@@ -352,11 +360,8 @@ Item {
     nav = Nav.push(nav, Nav.entry(kind, fields))
   }
 
-  // Going somewhere takes the keyboard back from the search field. A click on
-  // a row or on the rail moves no focus — a MouseArea never does — so after
-  // one click in the field the context stayed "search" with a message open,
-  // and `e` typed itself into the query instead of archiving. The field is
-  // left the way it is submitted: by a navigation, not only by Escape.
+  // Mouse navigation does not move focus. Leave search context so mailbox keys
+  // act on the opened message rather than typing into the search field.
   onNavChanged: if (searchBar.fieldFocused) focusScope.parkKeyboard()
 
   // An overlay whose view has closed, wherever it sits. Usually the top; a
@@ -490,8 +495,7 @@ Item {
     if (payload.messageId) Qt.callLater(function() {
       root.openMessage(String(payload.messageId))
     })
-    if (payload.view === "calendar") {
-      showCalendar()
+    if (payload.view === "calendar" && showCalendar()) {
       Qt.callLater(function() {
         calendarView.showEvent(String(payload.eventId || ""), Number(payload.eventStart || 0))
       })
@@ -531,8 +535,7 @@ Item {
     else close()
   }
 
-  // How a message is read is a preference and survives; the heavy-document
-  // override is a per-message decision about one specific message and does not.
+  // The rich-document override belongs to one message.
   function openMessage(id) {
     if (!service) return
     pendingComposeMode = ""
@@ -611,8 +614,10 @@ Item {
   }
 
   function showCalendar() {
+    if (!calendarAvailable) return false
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
+    return true
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -675,18 +680,14 @@ Item {
     return currentView === "reader" ? "reader" : "list"
   }
 
-  function startCompose(mode) {
-    if (!service) return
-    pendingDraftId = ""
-    var next = String(mode || "new")
-    if (next !== "new" && !service.selectedMessage) {
-      pendingComposeMode = next
-      return
-    }
-    pendingComposeMode = ""
-    compose.begin(next, service.selectedMessage, service.selectedBody.text,
-      service.selectedAttachments)
+  Compose.PendingCompose {
+    id: pendingCompose
+    app: root
+    composer: compose
+    assistant: root.agentPrompt
+    composeAssistant: root.composeAgent
   }
+  function startCompose(mode) { pendingCompose.start(mode) }
 
   // A mailto: URL, or the blank draft `compose: true` asks for. The window is
   // already open when this runs — summon delivers the payload to open().
@@ -696,12 +697,7 @@ Item {
     compose.beginDraft(draft)
   }
 
-  function resumeHeldCompose() {
-    if (pendingComposeMode === "" || !service || !service.selectedMessage) return
-    var mode = pendingComposeMode
-    pendingComposeMode = ""
-    startCompose(mode)
-  }
+  function resumeHeldCompose() { pendingCompose.resume() }
 
   function resumeHeldDraft() {
     if (pendingDraftId === "" || !service) return
@@ -815,25 +811,13 @@ Item {
     onTriggered: root.draftSavedToast = ""
   }
 
-  // Opened on the cursor rather than on the selection, the way every other
-  // acting key works: `v` in the list means the row under the cursor, and in
-  // the reader there is only one message it could mean. Refuse an unavailable
-  // move before asking for a destination, through the same provider guard that
-  // checks the final action before its optimistic update.
   // Opened on a message outside the ticks, the picker moves that one alone.
   property bool labelPickerOnlyCursor: false
 
   function openLabelPicker(onlyCursor) {
     if (!service || (cursorId === "" && !selectionActive)) return false
     labelPickerOnlyCursor = onlyCursor === true
-    // A merged list draws no labels, so there is nothing to offer and the
-    // picker would open empty on a destination list it cannot fill — and a
-    // chosen id would belong to whichever mailbox happened to be active
-    // rather than to the row. Refused where it cannot be honoured, which is
-    // the same rule every other unavailable action follows.
-    // Only the merged-list refusal belongs here. A single mailbox whose
-    // provider has no move verb is the provider guard's answer, and saying
-    // "needs one mailbox on screen" over it would name the wrong reason.
+    // Labels belong to one mailbox. Other refusals use the provider guard.
     if (service.unified) {
       service.fail("Moving to a label needs one mailbox on screen")
       return false
@@ -871,7 +855,7 @@ Item {
 
   // With rows ticked, the ask is about all of them, one job with a count.
   function openAgentAt(id, sceneX, sceneY) {
-    if (!service || !service.hasAgent) return false
+    if (!service || !service.hasAgent || service.agentAvailable === false) return false
     if (selectionActive && checkedIds.indexOf(String(id || "")) >= 0) {
       agentPrompt.openForSelection(checkedIds, sceneX, sceneY)
       return true
@@ -882,7 +866,7 @@ Item {
   }
 
   function openAgentCentered(id) {
-    if (!service || !service.hasAgent) return false
+    if (!service || !service.hasAgent || service.agentAvailable === false) return false
     if (selectionActive) {
       var centre = root.mapToGlobal(Math.max(0, root.width / 2 - Style.space(190)),
         Math.max(0, root.height / 2 - Style.space(90)))
@@ -998,9 +982,9 @@ Item {
   // a row fired, for the rows that bind more than one meaning.
   function runShortcut(id, sequence) {
     if (id === "assistantSend") return activeAssistant ? activeAssistant.submitCurrent() : false
-    if (id === "assistantCommandUp") return activeAssistant ? activeAssistant.moveCommand(-1) : false
-    if (id === "assistantCommandDown") return activeAssistant ? activeAssistant.moveCommand(1) : false
     if (id === "assistantChooseCommand") return activeAssistant ? activeAssistant.chooseCommand() : false
+    if (id === "assistantCommandNext") return activeAssistant ? activeAssistant.moveCommand(1) : false
+    if (id === "assistantCommandPrevious") return activeAssistant ? activeAssistant.moveCommand(-1) : false
     // The sheet is on top, so moving moves it. It is a plain overlay rather
     // than a popup, which is why its keys can come from here at all — the
     // switcher's cannot, and answers them itself.
@@ -1022,8 +1006,7 @@ Item {
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
-    if (id === "archive") return actOnCursor("archive")
-    if (id === "trash") return actOnCursor("trash")
+    if (id === "archive" || id === "trash") return actOnCursor(list.keyActions[id])
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     //
@@ -1042,6 +1025,7 @@ Item {
     }
     if (id === "toggleCheck") return toggleCheck(cursorId)
     if (id === "askAgent") {
+      if (!service || !service.hasAgent || service.agentAvailable === false) return false
       if (root.composing) { composeAgent.open(); return true }
       var target = currentView === "reader" && service ? service.selectedId : cursorId
       return openAgentCentered(target)
@@ -1065,8 +1049,15 @@ Item {
     if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
     if (id === "calendarToday") return calendarView.goToday()
     if (id === "calendarWeek") return calendarView.setView("week")
+    if (id === "calendarDay") return calendarView.setView("day")
+    if (id === "calendarAgenda") return calendarView.setView("agenda")
+    if (id === "calendarUndo") return root.service.calendarController.undoLastChange()
     if (id === "calendarMonth") return calendarView.setView("month")
     if (id === "send") return compose.submit()
+    if (id === "saveEvent") return eventComposer.submit("all")
+    if (id === "guestNext") return eventComposer.moveGuestSuggestion(1)
+    if (id === "guestPrevious") return eventComposer.moveGuestSuggestion(-1)
+    if (id === "guestChoose") return eventComposer.chooseGuestSuggestion()
     if (id === "undoSend") { undoPendingSend(); return }
     if (id === "search") return searchBar.focusField()
     if (id === "goMailbox") return goSlot(Keymap.slotFor(id, sequence))
@@ -1079,16 +1070,12 @@ Item {
     if (id === "switchAccount") return accountSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
-      else {
-        showCalendar()
-        calendarView.refresh()
-      }
+      else if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "mailView") return backToList()
     if (id === "calendarView") {
-      showCalendar()
-      calendarView.refresh()
+      if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "toggleSidebar") return toggleSidebar()
@@ -1109,8 +1096,10 @@ Item {
   // purpose: a QQC.Popup with CloseOnEscape consumes the key itself, so a
   // branch for them here would never run. Everything else is the history.
   function goBack() {
+    if (eventComposer.guestSuggestionsOpen) { eventComposer.dismissGuestSuggestions(); return }
+    if (calendarView.dismissPreview()) return
     if (activeAssistant && activeAssistant.commandsOpen) { activeAssistant.dismissCommands(); return }
-    if (activeAssistant && activeAssistant.historyMode) { activeAssistant.historyMode = false; activeAssistant.takeFocus(); return }
+    if (activeAssistant && activeAssistant.historyMode) { activeAssistant.leaveHistory(); return }
     if (activeAssistant && activeAssistant.interrupt()) return
     if (composeAgent.opened) { composeAgent.close(); return }
     if (agentPrompt.opened) { agentPrompt.close(); return }
@@ -1186,95 +1175,18 @@ Item {
     // before the service has finished making the row.
   }
 
-  // The setup pages. Built by the Loader above, one at a time, so the ones not
-  // in use hold no half-typed fields and no state to go stale.
-  Component {
-    id: providerPickerPage
-
-    ProviderPicker {
-      textColor: root.foreground
-      dimColor: root.dim
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      // Back is shown wherever there is something to go back to — which on
-      // first run, where the chooser is the root, there is not.
-      onChosen: function(providerId) { root.chooseProvider(providerId) }
-    }
-  }
-
-  Component {
-    id: gmailSetupPage
-
-    SetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: heySetupPage
-
-    HeySetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: outlookSetupPage
-
-    OutlookSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: jmapSetupPage
-
-    JmapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: imapSetupPage
-
-    ImapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
+  // The setup pages live in SetupPages, one map. A new mailbox is added
+  // there, so this file does not grow.
+  SetupPages {
+    id: setupPages
+    service: root.service
+    textColor: root.foreground
+    dimColor: root.dim
+    dangerColor: root.danger
+    accentColor: root.accent
+    panelFontFamily: root.fontFamily
+    onChosen: function(providerId) { root.chooseProvider(providerId) }
+    onRemoveRequested: root.removeCurrentAccountFromEditor()
   }
 
   // Every mailbox at once. The rail it lands on has to be one they all have,
@@ -1355,32 +1267,37 @@ Item {
     if (!service) return
     var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
-    service.removeAccountAt(index)
-    // The editor's page is gone with its account. Settings is where the rest
-    // of them are, over a fresh root: the list underneath may have changed
-    // mailbox with the removal.
-    navUntouched = false
-    nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
-  }
-
-  // A delete asks first, and asks naming the target. Only the confirmation
-  // reaches the controller, with the event the dialog named.
-  function requestEventDelete(sourceId, event) {
-    if (!event) return
-    confirmDeleteDialog.openFor({
-      kind: "event",
-      name: String(event.summary || "Untitled event"),
-      message: "This event will be permanently deleted.",
-      sourceId: String(sourceId || ""),
-      event: event
+    // Keep the account until its saved sign-in is confirmed gone. The backend
+    // may be starting or the keyring locked; a destroyed delegate cannot retry.
+    var host = service.accountAt(index)
+    var entry = service.accountList.accounts[index]
+    var removalNav = nav
+    if (!host) return
+    host.forgetStoredCredentials(function(forgotten) {
+      if (!root || !root.service || !forgotten) return
+      var current = Accounts.confirmRemoval({ accounts: root.service.accountSummaries || [] }, request)
+      // An edit or model rebuild while cleanup was pending is a newer account.
+      if (current < 0 || root.service.accountAt(current) !== host
+          || root.service.accountList.accounts[current] !== entry) return
+      // A newer page or composer belongs to the user, not this delayed reply.
+      var stillOnRemovalPage = root.nav === removalNav
+      root.service.removeAccountAt(current)
+      if (stillOnRemovalPage) {
+        root.navUntouched = false
+        root.nav = Nav.push(Nav.resetTo(root.nav, root.rootKind()), Nav.entry("settings"))
+      }
     })
   }
 
+  // Confirm the named event or series before deleting it.
+  function requestEventDelete(sourceId, event) {
+    if (event && service) confirmDeleteDialog.openFor(service.calendarController.deleteRequest(sourceId, event))
+  }
 
   function confirmDelete(request) {
     if (!service) return
     if (request.kind === "event" && request.event) {
-      service.calendarController.deleteEvent(request.sourceId, request.event)
+      service.calendarController.confirmDelete(request)
       calendarView.closeDetail()
     }
     if (request.kind === "label" && request.labelId) service.deleteLabel(request.labelId, request.accountId)
@@ -1530,20 +1447,15 @@ Item {
         assistantCommands: !!root.activeAssistant && root.activeAssistant.commandsOpen,
         showPage: root.showPage,
         composing: root.composing,
+        eventComposing: eventComposer.opened,
+        guestSuggestions: eventComposer.guestSuggestionsOpen,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
 
-      // The context owns the keyboard. Changing it moves the focus to whatever
-      // that context types into, or parks it when the context types into
-      // nothing — so a field that has been dismissed cannot go on eating keys.
-      //
-      // Keeping these as two things is the bug this replaces: the context came
-      // from the screen while the focus stayed wherever the last click left it,
-      // and a closed compose field kept swallowing j and k. One mechanism now,
-      // and there is nothing to keep in step.
+      // Context changes move or park focus so dismissed fields cannot eat keys.
       onKeyContextChanged: Qt.callLater(applyContextFocus)
       function focusWithin(container) {
         var item = focusScope.Window.activeFocusItem
@@ -1555,6 +1467,9 @@ Item {
         if (keyContext === "assistant" || keyContext === "assistantCommands") {
           if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
           else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
+        }
+        else if (keyContext === "eventCompose" || keyContext === "eventGuests") {
+          if (!focusWithin(eventComposer)) eventComposer.takeFocus()
         }
         else if (keyContext === "compose") {
           if (focusWithin(compose)) return
@@ -1587,46 +1502,23 @@ Item {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Style.space(48)
+        height: calendarHeaderSlot.visible && calendarHeaderSlot.stacked
+          ? Style.space(60) + calendarView.toolbarHeight : Math.max(Style.space(48), calendarHeaderSlot.visible ? calendarView.toolbarHeight + Style.space(12) : 0)
         visible: !root.composing
 
-        // Kept below the header controls so their own pointer handlers win.
-        // Empty title-bar space starts the platform's native move operation.
-        // A DragHandler with no target: a MouseArea keeps the grab and feeds
-        // moves into QML while the compositor is already dragging, which is
-        // the lag of a window that trails the pointer.
-        MouseArea {
-          id: windowMoveArea
-          objectName: "app-title-bar-drag-area"
+        WindowMoveArea {
           anchors.fill: parent
           enabled: root.standaloneWindowChrome
-          acceptedButtons: Qt.NoButton
-          hoverEnabled: false
-          // Exposed for tests: a target would fight the compositor drag.
-          readonly property bool dragsTheWindow: windowMoveHandler.target === null
-
-          DragHandler {
-            id: windowMoveHandler
-            enabled: windowMoveArea.enabled
-            target: null
-            dragThreshold: 0
-            acceptedButtons: Qt.LeftButton
-            onActiveChanged: {
-              if (!active) return
-              var nativeWindow = header.Window.window
-              if (nativeWindow) nativeWindow.startSystemMove()
-            }
-          }
+          nativeWindow: header.Window.window
         }
 
-        // Identity first, controls after, with a rule between them: the mark
-        // and the name say what this window is, and everything to their right
-        // does something.
+        // App identity precedes the current view's controls.
         Row {
           id: headerLeft
           anchors.left: parent.left
           anchors.leftMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
           ActionIcon {
@@ -1714,20 +1606,29 @@ Item {
           }
         }
 
+        Item {
+          id: calendarHeaderSlot
+          objectName: "calendar-header-slot"
+          readonly property bool stacked: header.width < Style.space(1100)
+          visible: root.calendarVisible && !root.showPage && !root.composing && !calendarView.detailOpen
+          x: stacked ? Style.space(14) : headerLeft.x + headerLeft.width + Style.space(20)
+          y: stacked ? Style.space(48) : (header.height - height) / 2
+          width: Math.max(0, (stacked ? header.width - Style.space(14) : headerRight.x - Style.space(20)) - x)
+          height: calendarView.toolbarHeight
+        }
+
         Row {
           id: headerRight
           anchors.right: parent.right
           anchors.rightMargin: Style.space(14)
           anchors.verticalCenter: parent.verticalCenter
+          anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
-          // Checking for mail and writing one are both things you do to the
-          // mailbox as a whole, so they sit together. The menu is the window's
-          // own, and it stays on the left with the mark.
           IconButton {
             objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing
+            visible: !root.showPage && !root.composing && !root.calendarVisible
             iconName: "refresh"
             tooltipText: root.calendarVisible
               ? (root.service && root.service.calendarController.loading
@@ -1747,21 +1648,6 @@ Item {
               if (root.calendarVisible) calendarView.refresh()
               else if (root.service) root.service.refresh()
             }
-          }
-
-          Button {
-            objectName: "create-event-button"
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && root.calendarVisible
-            text: "Create event"
-            tooltipText: "Create event"
-            foreground: root.dim
-            bordered: true
-            accent: root.accent
-            fontFamily: root.fontFamily
-            fontSize: Style.font.caption
-            enabled: root.ready
-            onClicked: eventComposer.begin()
           }
 
           Button {
@@ -1785,16 +1671,18 @@ Item {
             parent: root.composing ? composeAiSlot : headerRight
             anchors.right: root.composing ? parent.right : undefined
             objectName: "header-ai-button"
+            opacity: enabled ? 1 : 0.4
             anchors.verticalCenter: parent.verticalCenter
             visible: !!root.service && root.service.hasAgent !== false
               && !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
             width: headerComposeButton.implicitHeight
             height: headerComposeButton.implicitHeight
             Accessible.name: "AI"
-            tooltipText: "AI... · alt+g"
+            Accessible.description: tooltipText
+            tooltipText: root.service && root.service.agentAvailable === false ? root.service.agentUnavailableReason : "AI... · alt+g"
             ActionIcon {
               anchors.centerIn: parent
-              // The antenna makes the robot visually bottom-heavy.
+              // Center the robot's body.
               anchors.verticalCenterOffset: -Style.space(1)
               name: "agent"
               iconSize: Style.font.icon
@@ -1808,7 +1696,7 @@ Item {
             accent: root.accent
             fontFamily: root.fontFamily
             fontSize: Style.font.caption
-            enabled: root.ready && (root.assistantOpen || compose.opened || root.selectionActive
+            enabled: root.ready && !!root.service && root.service.agentAvailable !== false && (root.assistantOpen || compose.opened || root.selectionActive
               || root.cursorId !== "" || (!!root.service && root.service.selectedId !== ""))
             onClicked: {
               if (root.assistantOpen) { agentPrompt.close(); composeAgent.close() }
@@ -1826,8 +1714,7 @@ Item {
         }
       }
 
-      // The same global AI control stays at the window's top-right when the
-      // composer's own header replaces the mailbox header.
+      // Reparent the AI control into the composer's header.
       Item {
         id: composeAiSlot
         anchors.top: parent.top
@@ -1861,6 +1748,7 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          calendarAvailable: root.calendarAvailable
           menuLabelPath: labelMenu.opened && !!root.service
             && labelMenu.accountId === root.service.activeAccountId ? labelMenu.labelPath : ""
           service: root.service
@@ -1872,8 +1760,7 @@ Item {
           numbersVisible: focusScope.ctrlHeld
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
-            root.showCalendar()
-            calendarView.refresh()
+            if (root.showCalendar()) calendarView.refresh()
           }
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
@@ -1996,6 +1883,7 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               checkedIds: root.checkedIds
+              selectionActive: root.selectionActive
               ctrlHeld: focusScope.ctrlHeld
               urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
@@ -2003,9 +1891,9 @@ Item {
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
-              onMenuRequested: function(id, sceneX, sceneY) {
+              onMenuRequested: function(id, sceneX, sceneY, ids) {
                 root.cursorId = id
-                rowMenu.openAt(id, sceneX, sceneY)
+                rowMenu.openAt(id, sceneX, sceneY, ids)
               }
             }
           }
@@ -2083,6 +1971,8 @@ Item {
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
           contentDirection: root.service ? root.service.contentDirection : ""
+          actions: list.readerActions
+          keyActions: list.keyActions
           onBodyModeRequested: function(mode) {
             if (root.service) root.service.setBodyMode(mode)
           }
@@ -2130,9 +2020,7 @@ Item {
                 root.service.toggleStar(root.service.selectedId)
               return
             }
-            if (((root.service.conversationProjection || ({})).memberIds || []).indexOf(root.service.selectedId) < 0
-                || root.cursorId === "")
-              root.cursorId = root.service.selectedId
+            root.cursorId = Model.readerTarget(root.service.conversationProjection, root.service.selectedId, root.cursorId)
             if (action === "moveToLabel") return root.openLabelPicker(outside)
             root.actOnCursor(action, outside)
           }
@@ -2159,9 +2047,7 @@ Item {
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
           contentDirection: root.service ? root.service.contentDirection : ""
-          // The stack follows the view: opening pushes, closing pops — and
-          // the pop is here rather than on `closed`, because a draft parked
-          // for sending closes without saying so.
+          // Parked sends close without emitting `closed`; navigation follows opened.
           onOpenedChanged: {
             if (opened) root.trackComposeOpened()
             else root.leaveCompose()
@@ -2207,6 +2093,7 @@ Item {
           z: 10
 
           CalendarView {
+            toolbarHost: calendarHeaderSlot
             id: calendarView
             anchors.fill: parent
             controller: root.service ? root.service.calendarController : null
@@ -2293,7 +2180,7 @@ Item {
           // Setups that share nothing but their place on screen: a chooser for
           // a mailbox whose kind is not settled yet, then whichever page that
           // kind needs — a Cloud walkthrough, a program and a button, or a
-          // server and a password. A Loader rather than four visibilities, so
+          // server and a password. A Loader rather than a visibility each, so
           // the pages not in use hold no fields and no state.
           Loader {
             id: setup
@@ -2305,12 +2192,7 @@ Item {
             // The provider is on the entry, so a service that briefly reports
             // Gmail while it rebuilds an account host cannot swap the page.
             readonly property string kind: root.editingProvider !== "" ? root.editingProvider : "gmail"
-            sourceComponent: root.showPicker
-              ? providerPickerPage
-              : (setup.kind === "imap" ? imapSetupPage
-                : (setup.kind === "jmap" ? jmapSetupPage
-                : (setup.kind === "outlook" ? outlookSetupPage
-                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))))
+            sourceComponent: setupPages.pageFor(kind, root.showPicker)
           }
           }
         }
@@ -2410,6 +2292,13 @@ Item {
               urgentColor: root.urgent
               panelFontFamily: root.fontFamily
               onClientSetupRequested: root.openClientSetup()
+              onCalendarSignInRequested: function(index) {
+                root.editAccount(index)
+                Qt.callLater(function() { if (root.service) root.service.signIn() })
+              }
+              onOpenCalendarRequested: {
+                if (root.showCalendar()) calendarView.refresh()
+              }
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
               onEditRequested: function(index) { root.editAccount(index) }
@@ -2618,9 +2507,6 @@ Item {
           }
         }
 
-        // The right of the status line carries one of two things: what the
-        // window most needs to say, or — when it has nothing to report — what
-        // the keyboard can do from where you are standing.
         readonly property bool hasNotice: root.notice !== ""
           || (!!root.service
             && (root.service.actionStatus !== "" || root.service.lastError !== ""))
@@ -2668,6 +2554,21 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
+          HoverHandler { id: noticeHover }
+          ToolTip {
+            visible: notice.visible && noticeHover.hovered && notice.truncated
+            delay: 500
+            width: Math.min(Style.space(600), window.width - Style.space(32))
+            contentItem: Text {
+              text: notice.text
+              textFormat: Text.PlainText
+              wrapMode: Text.Wrap
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            background: Rectangle { color: root.popupBackground; border.color: root.popupBorder }
+          }
         }
 
         KeyHints {
@@ -2691,7 +2592,7 @@ Item {
           panelFontFamily: root.fontFamily
           hints: Keymap.hintsFor(focusScope.keyContext,
             root.service ? root.service.unavailableActions : [],
-            root.cursorId !== "")
+            root.cursorId !== "", list.keyActions)
         }
       }
 
@@ -2700,6 +2601,7 @@ Item {
         id: appMenu
         objectName: "app-menu"
         anchors.fill: parent
+        calendarAvailable: root.calendarAvailable
         textColor: root.foreground
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
@@ -2716,8 +2618,7 @@ Item {
           if (root.service) root.service.selectMailbox("inbox")
         }
         onCalendarRequested: {
-          root.showCalendar()
-          calendarView.refresh()
+          if (root.showCalendar()) calendarView.refresh()
         }
         onSetupRequested: root.openSettings()
         onSwitchAccountRequested: accountSwitcher.openCentered()
@@ -2794,6 +2695,11 @@ Item {
           anchors.fill: parent
           sourceComponent: Component {
             AgentPrompt {
+              proposalComposer: compose
+              onApplyProposalRequested: function(envelope, parentId) {
+                compose.beginProposal(envelope, parentId)
+                Qt.callLater(function() { root.composeAgent.open() })
+              }
               onOpenedChanged: if (opened) root.composeAgent.close()
               objectName: "agent-prompt"
               service: root.service
@@ -3007,8 +2913,6 @@ Item {
           var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
           if (action === "moveToLabel") return root.openLabelPicker(outside)
-          if ((action === "star" || action === "unstar") && root.selectionActive && !outside)
-            return root.actOnChecked(Model.starActionFor(Model.summariesById(root.service.messages, root.checkedIds)))
           root.actOnCursor(action, outside)
         }
         // From a stop on the rail. A member is not a row, so the cursor stays
@@ -3030,8 +2934,7 @@ Item {
         dimColor: root.dim
         panelFontFamily: root.fontFamily
         hiddenBindings: root.service && root.service.hasAgent === false
-          ? ["askAgent", "assistantSend", "assistantCommandUp",
-             "assistantCommandDown", "assistantChooseCommand"]
+          ? ["askAgent", "assistantSend", "assistantChooseCommand", "assistantCommandNext", "assistantCommandPrevious"]
           : []
         onDismissed: root.dismissHelp()
       }

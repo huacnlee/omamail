@@ -295,6 +295,8 @@ jobs:
           QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           $ErrorActionPreference = "Stop"
+          cargo test --locked --no-default-features --features standalone,integration-test-credentials
+          if ($LASTEXITCODE -ne 0) { throw "standalone Rust tests failed" }
           cargo build --release --locked --no-default-features --features standalone
           if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
           cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
