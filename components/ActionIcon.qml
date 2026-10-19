@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "Icons.js" as Icons
 
 // One of the app's icons, by name.
@@ -16,7 +17,7 @@ Item {
   id: root
 
   property string name: ""
-  property color color: Color.foreground
+  property color color: Commons.Color.foreground
   // Omamail keeps the envelope in the foreground and gives its M the active
   // theme accent. Provider artwork uses ProviderLogo instead of this mark.
   property color markColor: color

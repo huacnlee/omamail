@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 
 import "OAuth.js" as OAuth
 import "Credentials.js" as Credentials
@@ -37,10 +38,10 @@ Item {
   // The browser page after Google redirects is the only part of this app that
   // renders outside Quickshell, so it takes the active theme with it.
   readonly property var callbackTheme: ({
-    background: String(Color.background),
-    foreground: String(Color.foreground),
-    accent: String(Color.accent),
-    urgent: String(Color.urgent),
+    background: String(Commons.Color.background),
+    foreground: String(Commons.Color.foreground),
+    accent: String(Commons.Color.accent),
+    urgent: String(Commons.Color.urgent),
     fontFamily: Style.font.family
   })
 

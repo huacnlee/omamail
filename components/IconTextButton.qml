@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // A bordered button carrying a drawn icon beside its label.
@@ -14,8 +15,8 @@ Rectangle {
   property string iconName: ""
   property string text: ""
   property string tooltipText: ""
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property bool bordered: true
   // The look of the icon buttons it may stand beside: no fill and no border
   // at rest, a fill on hover, and the icon and label brightening to
