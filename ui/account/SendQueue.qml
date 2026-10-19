@@ -1,4 +1,5 @@
 import QtQuick
+import "../backend/Plain.js" as Plain
 
 // Rendering and callback correlation only. The backend owns undo deadlines,
 // serial delivery, cancellation and durable recovery after a restart.
@@ -238,7 +239,9 @@ QtObject {
     function onReadyChanged() {
       if (queue.available()) { queue.revision = -1; queue.sync() }
     }
-    function onNotification(method, params) { if (method === "outbox.changed") queue.apply(params) }
+    // Made plain: through the signal Qt 6.12 hands `entries` over as a
+    // sequence, which `apply` reads as none.
+    function onNotification(method, params) { if (method === "outbox.changed") queue.apply(Plain.plain(params)) }
   }
   readonly property Connections authEvents: Connections {
     target: queue.account ? queue.account.auth : null

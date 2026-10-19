@@ -24,6 +24,14 @@ Rectangle {
     ? String(root.summary.sourceLabel) : ""
 
   property bool canArchive: true
+  // What the archive and trash buttons ask for. The list asks
+  // `Model.keyActionFor`, the rule `e` and `d` follow, so in the trash the
+  // trash button restores, in Archive the archive button moves the message to
+  // the Inbox, and the key its tooltip names does the same.
+  property string archiveAction: "archive"
+  property string trashAction: "trash"
+  // Whether `e` and `d` act on this row, so its tooltips name them only then.
+  property bool namesKeys: true
   // Whether this row stands for a conversation rather than for one message.
   // Grouping is a panel rule gated on the provider's `conversations`
   // capability; a row is told, and asks nobody.
@@ -114,8 +122,8 @@ Rectangle {
         var scene = mapToGlobal(event.x, event.y)
         root.menuRequested(scene.x, scene.y)
       } else if (event.button === Qt.MiddleButton) {
-        // Middle-click archives: the one triage action worth having without
-        // moving the pointer to a button.
+        // Middle-click is the archive button, without moving the pointer to
+        // it: Archive, or in Archive, Move to Inbox (`archiveAction`).
         root.archiveRequested()
       } else if (event.modifiers & Qt.ShiftModifier) {
         // Shift selects or clears the range from the cursor to here;
@@ -298,8 +306,8 @@ Rectangle {
       // that is a move to a folder, and a server without one would have this
       // quietly do nothing.
       visible: root.hot && root.canArchive && !root.selectionMode
-      iconName: "archive"
-      tooltipText: "Archive · e"
+      iconName: root.archiveAction === "unarchive" ? "inbox" : "archive"
+      tooltipText: Model.actionName(root.archiveAction) + (root.namesKeys ? " · e" : "")
       foreground: root.dimColor
       hoverColor: root.textColor
       iconSize: Style.font.iconSmall
@@ -311,8 +319,8 @@ Rectangle {
     IconButton {
       visible: root.hot && !root.selectionMode
       objectName: "message-trash"
-      iconName: "trash"
-      tooltipText: "Move to trash · d"
+      iconName: root.trashAction === "untrash" ? "undo" : "trash"
+      tooltipText: Model.actionName(root.trashAction) + (root.namesKeys ? " · d" : "")
       foreground: root.dimColor
       hoverColor: root.textColor
       iconSize: Style.font.iconSmall

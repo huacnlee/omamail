@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Palette.js" as Palette
+.import "../account/Accounts.js" as Accounts
 
 var VERSION = 1
 var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
@@ -210,7 +211,7 @@ function withMicrosoftAccounts(list, accountSummaries) {
   var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
   for (var i = 0; i < accounts.length; i++) {
     var account = accounts[i] || {}
-    if (account.provider !== "outlook" || account.signedIn !== true) continue
+    if (Accounts.calendarProvider(account) !== "microsoft" || account.signedIn !== true) continue
     var accountId = trimmed(account.id || account.email)
     if (accountId === "") continue
     var saved = null
@@ -362,6 +363,16 @@ function forAccount(list, accountId) {
       next = add(next, values[i])
   }
   return next
+}
+
+// Whether the window should offer a calendar at all. Nothing connected means
+// the view is an empty grid that cannot hold an event, since every write needs
+// a source. A list that has not been read yet still counts as having one: the
+// entry must not vanish and reappear while the file loads. A disabled source
+// still counts, because the calendar is where it is turned back on.
+function hasNone(loaded, list) {
+  return loaded === true
+    && !(list && Array.isArray(list.sources) && list.sources.length > 0)
 }
 
 function providerLabel(kind) {

@@ -181,6 +181,23 @@ pub const ALL: &[&str] = &[
     "jmap.stream.open",
     "jmap.stream.poll",
     "jmap.stream.close",
+    "m365.signInBegin",
+    "m365.signInPoll",
+    "m365.signOut",
+    "m365.verify",
+    "m365.list",
+    "m365.messages",
+    "m365.read",
+    "m365.attachment",
+    "m365.modify",
+    "m365.trash",
+    "m365.untrash",
+    "m365.send",
+    "m365.saveDraft",
+    "m365.deleteDraft",
+    "m365.sendAs",
+    "m365.invalidate",
+    "m365.cancel",
 ];
 
 pub fn available() -> Vec<&'static str> {

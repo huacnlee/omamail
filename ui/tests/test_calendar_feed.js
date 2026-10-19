@@ -413,6 +413,8 @@ assert.strictEqual(feed.displayInAllDayLane(holiday), true)
 const travelDay = feed.weekDays(new Date(2026,8,2).getTime(),1)[2]
 assert.strictEqual(feed.allDayEventsOnDay([holiday,dailyTwo],travelDay)[0],holiday)
 assert.strictEqual(feed.timedLayout([holiday,dailyTwo],travelDay).length,1)
+assert.strictEqual(feed.dayLanes([holiday,dailyTwo],travelDay).length,1,
+  "multi-day events stay in the all-day lane after integrating timed lanes")
 assert.strictEqual(holiday.start.allDay,false,"display promotion must not mutate timed events")
 const originalTZ = process.env.TZ
 process.env.TZ = "Europe/Berlin"
@@ -770,6 +772,12 @@ console.log("test_calendar_feed.js ok")
   assert.strictEqual(feed.graphResponseError(500, "not json"), "Microsoft Graph answered 500")
   assert.strictEqual(feed.nativeRequestError("microsoft"),
     "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again")
+  // A Microsoft 365 calendar refused for consent says what the administrator does and what follows,
+  // and nothing about the sign-in page, which a calendar refresh never shows.
+  const consent = feed.nativeRequestError("microsoft", "m365:ada@example.org", { message: "auth_consent_required" })
+  assert.strictEqual(consent, "Microsoft calendar request failed. An administrator has to approve this app "
+    + "for your organization. Then sign in to this mailbox again")
+  assert.ok(!/private window|page|browser/.test(consent), consent)
   assert.strictEqual(feed.nativeRequestError("caldav"),
     "CalDAV calendar request failed. Check its server address and password in Settings")
   assert.strictEqual(feed.nativeRequestError("icloud"),
@@ -780,4 +788,55 @@ console.log("test_calendar_feed.js ok")
   const made = feed.createEvent({ title: "Plan", startMs: Date.UTC(2026, 8, 9, 9), endMs: Date.UTC(2026, 8, 9, 10) }, 1000)
   assert.strictEqual(made.graph.subject, "Plan")
   assert.strictEqual(made.recurring, false)
+}
+
+// Overlapping timed events share a day column in lanes.
+{
+  const day = { startMs: new Date(2026, 8, 28).getTime(), endMs: new Date(2026, 8, 29).getTime() }
+  const at = (h, m) => new Date(2026, 8, 28, h, m || 0).getTime()
+  const ev = (id, from, to) => ({ uid: id, start: { ms: from, allDay: false }, end: { ms: to, allDay: false } })
+  const lanes = (events) => JSON.parse(JSON.stringify(feed.dayLanes(events, day)))
+    .map(l => [l.event.uid, l.lane, l.lanes, l.span])
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10))]), [["a", 0, 1, 1]], "a lone event keeps the column")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(9), at(10)), ev("c", at(9, 30), at(11))]),
+    [["a", 0, 3, 1], ["b", 1, 3, 1], ["c", 2, 3, 1]], "three at once are three lanes")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(12)), ev("b", at(9), at(10)), ev("c", at(10), at(11))]),
+    [["a", 0, 2, 1], ["b", 1, 2, 1], ["c", 1, 2, 1]], "a lane is reused once its event has ended")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(13), at(14))]),
+    [["a", 0, 1, 1], ["b", 0, 1, 1]], "events apart are separate clusters, each whole width")
+  assert.deepStrictEqual(lanes([ev("long", at(9), at(17)), ev("x", at(9), at(10)), ev("y", at(9), at(10)), ev("z", at(12), at(13))]),
+    [["long", 0, 3, 1], ["x", 1, 3, 1], ["y", 2, 3, 1], ["z", 1, 3, 2]],
+    "a later event stretches over the lanes left free beside it")
+  const shortEvents = [ev("p", at(9), at(9, 5)), ev("q", at(9, 15), at(9, 20))]
+  assert.deepStrictEqual(lanes(shortEvents), [["p", 0, 1, 1], ["q", 0, 1, 1]],
+    "preserve main's duration-scaled short blocks")
+  assert.strictEqual(feed.eventHeight(shortEvents[0], day, 60), 5)
+  const tiny = [ev("p", at(9), at(9)), ev("q", at(9, 1), at(9, 1))]
+  assert.strictEqual(feed.dayLanes(tiny, day, 60)[0].lanes, 2)
+  assert.strictEqual(feed.dayLanes(tiny, day, 240)[0].lanes, 1,
+    "minimum-height collisions use the view's actual pixels per hour")
+  assert.deepStrictEqual(lanes([ev("zero", at(9), at(9))]), [["zero", 0, 1, 1]], "a zero-length event still takes a slot")
+  assert.deepStrictEqual(lanes([ev("p", at(9), at(9)), ev("q", at(9, 1), at(9, 1))]),
+    [["p", 0, 2, 1], ["q", 1, 2, 1]], "events that overlap as drawn share lanes, not only by the clock")
+}
+
+// Repeated local hours are distinct instants but occupy the same grid pixels.
+{
+  const previousTZ = process.env.TZ
+  process.env.TZ = 'Europe/Berlin'
+  try {
+    const day = { startMs: new Date('2026-10-25T00:00:00+02:00').getTime(),
+      endMs: new Date('2026-10-26T00:00:00+01:00').getTime() }
+    const events = ['+02:00', '+01:00'].map(offset => ({
+      start: { ms: new Date('2026-10-25T02:10:00' + offset).getTime() },
+      end: { ms: new Date('2026-10-25T02:40:00' + offset).getTime() }
+    }))
+    assert.strictEqual(feed.eventTop(events[0], day, 0, 60), feed.eventTop(events[1], day, 0, 60))
+    const layout = feed.dayLanes(events, day)
+    assert.strictEqual(layout[0].lanes, 2)
+    assert.notStrictEqual(layout[0].lane, layout[1].lane)
+  } finally {
+    if (previousTZ === undefined) delete process.env.TZ
+    else process.env.TZ = previousTZ
+  }
 }

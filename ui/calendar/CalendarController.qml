@@ -5,6 +5,7 @@ import qs.Commons
 import "Calendar.js" as Calendar
 import "Sources.js" as Sources
 import "../providers/MicrosoftOAuth.js" as Microsoft
+import "../backend/Plain.js" as Plain
 
 Item {
   id: root
@@ -74,6 +75,9 @@ Item {
   property bool eventWriting: false
   readonly property var availableSources: Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
     sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+  // Every account's calendars, not just this mailbox's: the entry hides only
+  // when no account has one and nothing was added in Settings.
+  readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView
@@ -448,7 +452,10 @@ Item {
   }
 
   // What the delete confirmation asks: named, with a button per consequence.
-  function deleteRequest(sourceId, event) {
+  // The event comes through the views' `deleteRequested` signal, and on Qt
+  // 6.12 its recurrence arrives as a sequence that reads as no series.
+  function deleteRequest(sourceId, crossed) {
+    var event = Plain.plain(crossed)
     var request = Calendar.deleteRequest(event, findSource(String(sourceId || "")),
       service.backendCanGoogleCalendars === true)
     request.sourceId = String(sourceId || "")
@@ -595,7 +602,7 @@ Item {
       if (error) {
         reason = notifyConsent(error) ? Microsoft.graphConsentMessage()
           : error.message === "calendar_conflict" ? "This event changed elsewhere. Refresh and try again."
-          : Calendar.nativeRequestError(String(source && source.kind || ""))
+          : Calendar.nativeRequestError(String(source && source.kind || ""), source && source.accountId, error)
       }
       callback(result, reason)
     })

@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Aliases.js" as Aliases
+.import "../backend/Plain.js" as Plain
 
 // The list of Gmail accounts and which one the window is showing. One account
 // was the original design; several is a list plus a selection, and every rule
@@ -57,7 +58,7 @@ function calendarProvider(raw) {
   var account = raw || {}
   var provider = trimmed(account.provider).toLowerCase()
   if (provider === "gmail" || provider === "") return "google"
-  if (provider === "outlook") return "microsoft"
+  if (provider === "outlook" || provider === "m365") return "microsoft"
   if (provider !== "imap") return ""
   var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()
   var email = trimmed(account.email).toLowerCase()
@@ -90,7 +91,7 @@ function accountId(email, provider) {
 // anything written before providers existed — is Gmail: that is what every
 // account in an upgraded install actually is, and defaulting to it is what
 // stops an upgrade from presenting a working mailbox as unconfigured.
-var PROVIDERS = ["gmail", "outlook", "hey", "imap", "jmap"]
+var PROVIDERS = ["gmail", "outlook", "m365", "hey", "imap", "jmap"]
 var DEFAULT_PROVIDER = "gmail"
 
 function normalizeProvider(value) {
@@ -519,13 +520,16 @@ function idList(value) {
 }
 
 // The watched list replaced whole: what a rename or a move leaves it as,
-// once the ids it held have followed the folders they named.
+// once the ids it held have followed the folders they named. They arrive
+// through the account's `monitoredMigrated` signal, so they are made plain
+// first: read as nothing, they emptied every watch on the account and wrote
+// that to disk.
 function setMonitored(list, id, labelIds) {
   var next = copyList(list)
   var at = indexOfId(next.accounts, id)
   if (at < 0) return next
   var entry = makeAccount(next.accounts[at])
-  entry.monitored = idList(labelIds)
+  entry.monitored = idList(Plain.plain(labelIds))
   next.accounts[at] = entry
   return next
 }
@@ -566,11 +570,11 @@ function namesSender(provider) {
   return id === "imap" || id === "outlook"
 }
 
-// One header line, so a pasted line break or tab becomes a space instead of a
-// name the send would refuse.
+// One header line, so a pasted line break, tab or other control character
+// (C1 included) becomes a space instead of a name the send would refuse.
 function senderNameText(value) {
   return trimmed(String(value === undefined || value === null ? "" : value)
-    .replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/ {2,}/g, " "))
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/ {2,}/g, " "))
 }
 
 function setSenderName(list, id, text) {

@@ -107,6 +107,7 @@ Item {
     property var sendAsAliases: []
     property var sendIdentities: []
     property var calendarController: null
+    property bool noCalendars: false
     property var selectedBody: ({ text: "Original body", source: "plain" })
     property var selectedMessage: null
     property var unavailableActions: []
@@ -268,6 +269,7 @@ Item {
       mailService.selectedId = ""
       mailService.selectedMessage = null
       mailService.unavailableActions = []
+      mailService.noCalendars = false
       mailService.selectedBody = ({ text: "Original body", source: "plain" })
       fakeAuth.credentialsPresent = false
       fakeShell.hidden = []
@@ -479,6 +481,33 @@ Item {
       app.runShortcut("help", "")
       app.runShortcut("help", "")
       compare(kinds(), "list,reader", "the key toggles")
+    }
+
+    function test_no_connected_calendar_takes_the_calendar_out_of_the_window() {
+      app.runShortcut("calendarView", "")
+      compare(kinds(), "calendar")
+      mailService.noCalendars = true
+      compare(app.calendarAvailable, false)
+      compare(kinds(), "list", "a calendar that loses its last source closes")
+
+      app.runShortcut("calendarView", "")
+      app.runShortcut("calendar", "")
+      compare(kinds(), "list", "neither shortcut opens an empty calendar")
+      compare(app.showCalendar(), false)
+
+      var menu = named(app, "app-menu")
+      menu.openAt(40, 40)
+      wait(20)
+      var row = null
+      for (var i = 0; i < menu.menuRows.length; i++)
+        if (menu.menuRows[i].objectName === "app-menu-calendar") row = menu.menuRows[i]
+      verify(row, "the menu has a calendar row")
+      compare(row.visible, false, "and does not offer it")
+      menu.close()
+
+      mailService.noCalendars = false
+      app.runShortcut("calendarView", "")
+      compare(kinds(), "calendar", "connecting one brings it back")
     }
 
     function test_the_calendar_is_the_other_root_and_back_on_a_root_closes() {
