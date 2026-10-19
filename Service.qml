@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import "account"
 import "calendar"
 
@@ -1744,9 +1745,9 @@ Item {
         return index < accounts.length ? accounts[index] : null
       }
 
-      notificationForeground: root.shell && root.shell.bar
-        ? root.shell.bar.barForeground : Color.foreground
-      notificationAccent: Color.accent
+      notificationForeground: (root.shell && root.shell.bar && root.shell.bar.barForeground)
+        ? String(root.shell.bar.barForeground) : String(Commons.Color.foreground)
+      notificationAccent: String(Commons.Color.accent)
       pluginDir: root.pluginDir
       accountId: entry ? entry.id : ""
       configuredEmail: entry ? entry.email : ""
