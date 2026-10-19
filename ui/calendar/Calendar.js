@@ -961,13 +961,12 @@ function dayLanes(events, day) {
   for (var i = 0; i < values.length; i++) {
     var event = values[i]
     if (!event || !event.start || event.start.allDay) continue
-    var start = Math.max(Number(event.start.ms), Number(day.startMs))
-    var end = event.end ? Math.min(Number(event.end.ms), Number(day.endMs)) : start + 1800000
     // Measured as drawn rather than by the clock: eventHeight never draws a
     // block shorter than MIN_BLOCK_HOURS, so two five-minute events ten
     // minutes apart overlap on screen though not in time, and have to share
     // lanes for that reason. (The point #123 made.)
-    end = Math.max(end, start + MIN_BLOCK_HOURS * 3600000)
+    var start = eventTop(event, day, 0, 60)
+    var end = start + eventHeight(event, day, 60)
     items.push({ event: event, index: i, start: start, end: end, lane: 0, lanes: 1, span: 1 })
   }
   items.sort(function(a, b) { return a.start - b.start || b.end - a.end || a.index - b.index })
@@ -976,17 +975,25 @@ function dayLanes(events, day) {
   var laneEnds = []
   var clusterEnd = -Infinity
   function close() {
+    // Each lane is sorted and non-overlapping. Find the first interval ending
+    // after this block starts instead of rescanning the entire cluster.
+    var laneItems = []
+    for (var l = 0; l < laneEnds.length; l++) laneItems.push([])
+    for (var n = 0; n < cluster.length; n++) laneItems[cluster[n].lane].push(cluster[n])
     for (var c = 0; c < cluster.length; c++) {
       var item = cluster[c]
       item.lanes = laneEnds.length
       var span = 1
       for (var next = item.lane + 1; next < laneEnds.length; next++) {
-        var free = true
-        for (var o = 0; o < cluster.length; o++) {
-          var other = cluster[o]
-          if (other.lane === next && other.start < item.end && other.end > item.start) { free = false; break }
+        var candidates = laneItems[next]
+        var low = 0
+        var high = candidates.length
+        while (low < high) {
+          var middle = Math.floor((low + high) / 2)
+          if (candidates[middle].end <= item.start) low = middle + 1
+          else high = middle
         }
-        if (!free) break
+        if (low < candidates.length && candidates[low].start < item.end) break
         span++
       }
       item.span = span

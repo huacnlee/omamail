@@ -592,8 +592,8 @@ console.log("test_calendar_feed.js ok")
 
 // Overlapping timed events share a day column in lanes.
 {
-  const day = { startMs: Date.UTC(2026, 8, 28, 0), endMs: Date.UTC(2026, 8, 29, 0) }
-  const at = (h, m) => Date.UTC(2026, 8, 28, h, m || 0)
+  const day = { startMs: new Date(2026, 8, 28).getTime(), endMs: new Date(2026, 8, 29).getTime() }
+  const at = (h, m) => new Date(2026, 8, 28, h, m || 0).getTime()
   const ev = (id, from, to) => ({ uid: id, start: { ms: from, allDay: false }, end: { ms: to, allDay: false } })
   const lanes = (events) => JSON.parse(JSON.stringify(feed.dayLanes(events, day)))
     .map(l => [l.event.uid, l.lane, l.lanes, l.span])
@@ -610,4 +610,25 @@ console.log("test_calendar_feed.js ok")
   assert.deepStrictEqual(lanes([ev("zero", at(9), at(9))]), [["zero", 0, 1, 1]], "a zero-length event still takes a slot")
   assert.deepStrictEqual(lanes([ev("p", at(9), at(9, 5)), ev("q", at(9, 15), at(9, 20))]),
     [["p", 0, 2, 1], ["q", 1, 2, 1]], "events that overlap as drawn share lanes, not only by the clock")
+}
+
+// Repeated local hours are distinct instants but occupy the same grid pixels.
+{
+  const previousTZ = process.env.TZ
+  process.env.TZ = 'Europe/Berlin'
+  try {
+    const day = { startMs: new Date('2026-10-25T00:00:00+02:00').getTime(),
+      endMs: new Date('2026-10-26T00:00:00+01:00').getTime() }
+    const events = ['+02:00', '+01:00'].map(offset => ({
+      start: { ms: new Date('2026-10-25T02:10:00' + offset).getTime() },
+      end: { ms: new Date('2026-10-25T02:40:00' + offset).getTime() }
+    }))
+    assert.strictEqual(feed.eventTop(events[0], day, 0, 60), feed.eventTop(events[1], day, 0, 60))
+    const layout = feed.dayLanes(events, day)
+    assert.strictEqual(layout[0].lanes, 2)
+    assert.notStrictEqual(layout[0].lane, layout[1].lane)
+  } finally {
+    if (previousTZ === undefined) delete process.env.TZ
+    else process.env.TZ = previousTZ
+  }
 }

@@ -281,15 +281,16 @@ Item {
                 id: eventBlock
                 required property var modelData
                 readonly property var event: modelData.event
-                readonly property real laneWidth: (dayColumn.width - Style.space(4)) / Math.max(1, modelData.lanes)
+                readonly property real laneWidth: Math.max(0, dayColumn.width - Style.space(4)) / Math.max(1, modelData.lanes)
                 // Narrow enough that the title is all that fits.
                 readonly property bool narrow: width < Style.space(44)
                 readonly property color eventColor: calendarPalette.colorFor(
                   root.controller ? root.controller.colorKeyFor(event.sourceId) : "")
                 x: Style.space(2) + modelData.lane * laneWidth
                 // A gap between lanes, none at the column's own edge.
-                width: Math.max(Style.space(6), modelData.span * laneWidth
-                  - (modelData.lane + modelData.span < modelData.lanes ? Style.space(2) : 0))
+                width: Math.max(0, modelData.span * laneWidth
+                  - (modelData.lane + modelData.span < modelData.lanes
+                    ? Math.min(Style.space(2), laneWidth / 4) : 0))
                 y: Calendar.eventTop(event, dayColumn.modelData,
                   root.firstHour, timeline.hourHeight)
                 height: Calendar.eventHeight(event, dayColumn.modelData, timeline.hourHeight)
@@ -349,9 +350,20 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: root.eventActivated(eventBlock.event)
                 }
-                ToolTip.visible: eventBlock.narrow && eventHover.containsMouse
-                ToolTip.text: String(eventBlock.event.summary || "Untitled event")
-                ToolTip.delay: 400
+                ToolTip {
+                  id: eventTip
+                  objectName: "calendar-event-tooltip"
+                  visible: eventBlock.narrow && eventHover.containsMouse
+                  text: String(eventBlock.event.summary || "Untitled event")
+                  delay: 400
+                  contentItem: Text {
+                    text: eventTip.text
+                    textFormat: Text.PlainText
+                    color: root.textColor
+                    font.family: root.panelFontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
               }
             }
 
