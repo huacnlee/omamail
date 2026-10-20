@@ -5,7 +5,10 @@ import qs.Ui
 
 // The one confirmation for destructive writes. A calendar event is gone for
 // good once the server says so, so it asks first: the opener names the target
-// in the request, and only the answer here reaches the controller.
+// in the request, and only the answer here reaches the controller. A write that
+// reaches somebody (an invitation declined) says so in the request's own `title`,
+// `message` and `dismiss` words and starts on the way out (`focus: "dismiss"`);
+// without them it asks "Delete ...?" with Cancel as the way out.
 Item {
   id: root
 
@@ -70,7 +73,8 @@ Item {
     closePolicy: QQC.Popup.CloseOnEscape
     onOpened: {
       var ordered = root.buttonsInOrder()
-      ordered[ordered.length - 1].forceActiveFocus()
+      // A request that reaches somebody starts on the way out, so a second Enter never sends it.
+      ordered[root.request && root.request.focus === "dismiss" ? 0 : ordered.length - 1].forceActiveFocus()
     }
     onClosed: root.request = null
     background: Rectangle {
@@ -98,7 +102,8 @@ Item {
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        text: "Delete \"" + String(root.request ? root.request.name : "") + "\"?"
+        text: root.request && root.request.title ? String(root.request.title)
+          : "Delete \"" + String(root.request ? root.request.name : "") + "\"?"
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.heading
@@ -121,7 +126,7 @@ Item {
         Button {
           id: cancelButton
           objectName: "delete-cancel"
-          text: "Cancel"
+          text: root.request && root.request.dismiss ? String(root.request.dismiss) : "Cancel"
           bordered: true
           foreground: root.textColor
           fontFamily: root.panelFontFamily

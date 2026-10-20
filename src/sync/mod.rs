@@ -165,6 +165,9 @@ impl Sync {
                 if account.starts_with("jmap:") {
                     return jmap.check(&account).await;
                 }
+                if account.starts_with("exchange:") {
+                    return crate::providers::exchange::check(&account).await;
+                }
                 // Without this arm a Microsoft 365 id would fall through to Gmail.
                 if account.starts_with("m365:") {
                     return crate::providers::m365::check(&account).await;
@@ -1020,6 +1023,7 @@ mod tests {
             "a@example.org",
             "jmap:a@example.org",
             "hey:a@example.org",
+            "exchange:a@example.org",
             "m365:a@example.org",
         ] {
             assert!(provider_push(account.into(), Arc::new(Notify::new())).is_none());

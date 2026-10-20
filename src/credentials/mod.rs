@@ -27,6 +27,7 @@ pub enum CredentialKind {
     OutlookRefreshToken { client_id: String },
     ImapPassword,
     JmapSecret,
+    ExchangePassword,
     M365RefreshToken { client_id: String },
     CalendarPassword,
 }
@@ -154,6 +155,7 @@ impl CredentialKey {
             CredentialKind::OutlookRefreshToken { .. } => ("outlook", "outlook-refresh-token"),
             CredentialKind::ImapPassword => ("imap", "imap-password"),
             CredentialKind::JmapSecret => ("jmap", "jmap-secret"),
+            CredentialKind::ExchangePassword => ("exchange", "exchange-password"),
             CredentialKind::M365RefreshToken { .. } => ("m365", "m365-refresh-token"),
             CredentialKind::CalendarPassword => ("caldav", "calendar-password"),
         };
