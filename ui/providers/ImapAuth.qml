@@ -46,6 +46,13 @@ Item {
   property string password: ""
   property bool passwordChecked: false
   readonly property bool loggedIn: configured && password !== ""
+  // Which password a request went out with. It moves on whenever the password
+  // in memory or in the keyring changes, so the server's refusal of an older
+  // one cannot sign out a newer one.
+  property int passwordRevision: 0
+  // Signed out because the server refused the saved password, as opposed to
+  // never having had one. The setup page says so when it opens.
+  property bool savedPasswordRefused: false
 
   // The same three names `AuthManager` exposes, because `MailAccount` reads
   // them without knowing which provider it has.
@@ -166,6 +173,8 @@ Item {
       return
     }
     password = value
+    passwordRevision++
+    savedPasswordRefused = false
     finishWaiters(settings.username + ":" + password, "")
     loginSucceeded()
   }
@@ -227,6 +236,8 @@ Item {
       return
     }
     password = pendingPassword
+    passwordRevision++
+    savedPasswordRefused = false
     pendingPassword = ""
     passwordChecked = true
     lastError = ""
@@ -243,6 +254,9 @@ Item {
     credentialWriteAccount = boundAccount
     platform.credentialPut("imap-password", boundAccount, "", value, function(ok, error) {
       value = ""
+      // A request sent while this was written may have read the keyring's
+      // previous password.
+      root.passwordRevision++
       root.credentialWriteBusy = false
       root.credentialWriteAccount = ""
       var deleteAccount = root.pendingCredentialDelete
@@ -267,6 +281,8 @@ Item {
     var boundAccount = accountId
     abandonSignIn()
     password = ""
+    passwordRevision++
+    savedPasswordRefused = false
     passwordChecked = true
     if (credentialWriteBusy && credentialWriteAccount === boundAccount)
       pendingCredentialDelete = boundAccount
@@ -275,12 +291,33 @@ Item {
   }
 
   // Kept so `MailAccount` can call the same thing on either provider. An IMAP
-  // password does not expire, so there is nothing to invalidate — but a server
-  // that has started rejecting it should not be asked a hundred more times
-  // with the same value.
+  // password does not expire, so there is nothing to invalidate; a password
+  // the server refuses goes through `refuseSavedPassword`, which does not read
+  // the refused value back from the keyring.
   function invalidateAccessToken() {
     password = ""
     passwordChecked = false
+  }
+
+  // The server refused the saved password on a request sent with it. The
+  // mailbox stops counting as signed in, so the same value is not sent again
+  // and its setup page offers Connect the mailbox. Unlike
+  // `invalidateAccessToken`, nothing reads the keyring again behind the user's
+  // back: that would load the refused password and sign straight back in. The
+  // keyring item stays, so a refusal that was only passing is over after a
+  // restart, and the next sign-in overwrites it.
+  function refuseSavedPassword(revision) {
+    if (revision !== passwordRevision || password === "") return false
+    // A replacement being checked, or being written to the keyring, decides
+    // which password counts.
+    if (loginBusy || replacementBusy || credentialWriteBusy) return false
+    passwordRevision++
+    savedPasswordRefused = true
+    lastError = "The server refused the saved password. Enter it again"
+    password = ""
+    passwordChecked = true
+    sessionUnavailable(lastError)
+    return true
   }
 
   // The Gmail manager has these; an IMAP account reaches neither, and
@@ -304,6 +341,8 @@ Item {
     // credential in front of the new one's server.
     abandonSignIn()
     password = ""
+    passwordRevision++
+    savedPasswordRefused = false
     passwordChecked = false
     lookupHandled = false
     credentialLookupSerial++
