@@ -3,6 +3,101 @@ const { load, deepEqual } = require("./load")
 
 const html = load("message/Html.js")
 
+{
+  const source = html.sanitize('<table bgcolor="#ffffff"><tr><td>Unstyled footer</td>'
+    + '<td style="color:#abcdef;background-color:#123456">Sender color</td></tr></table>',
+    {preserveFormatting: true}).document
+  const palette = {foreground: '#cccccc', background: '#111111', link: '#bb9900'}
+  const original = html.documentFor(source, {...palette, preserveFormatting: true})
+  assert(original.includes('body{color:#000000;background-color:#ffffff;}'))
+  assert(original.includes('color:#abcdef;background-color:#123456'))
+  const dark = html.sanitize('<div style="color:#ffffff;background-color:#000000">'
+    + '<blockquote>Inherited text</blockquote></div>', {preserveFormatting: true}).document
+  const darkPage = html.documentFor(dark, {...palette, preserveFormatting: true})
+  assert(darkPage.includes('color:#ffffff;background-color:#000000'))
+  assert(!darkPage.includes('blockquote{color:'), 'Original quotes inherit sender text color')
+  assert(html.documentFor(source, palette).includes('body{color:#cccccc;background-color:#111111;}'))
+}
+
+// A newsletter can make the entire status strip one link. Keep its checked
+// destination on each rebuilt label/icon, including across nested layout cells.
+{
+  const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+  const strip = '<table><tr>' + Array.from({length: 7}, (_, i) =>
+    '<td><div>' + i + '</div><img width="28" height="28" src="' + image + '"></td>').join('') + '</tr></table>'
+  const nested = '<table><tr><td>' + strip + '</td></tr></table>'
+  for (const wrapper of ['a href="https://example.com/game"', 'b']) {
+    for (const hidden of ['hidden', 'style="display:none"']) {
+      const source = '<' + wrapper + '><table><tr><td ' + hidden
+        + '>HIDDEN</td><td>Visible</td></tr></table></' + wrapper.split(' ')[0] + '>'
+      const reader = html.sanitize(source, {withReader: true}).reader.html
+      assert(!reader.includes('HIDDEN'), 'row rebuilding must still hide the cell itself')
+      assert(reader.includes('Visible'))
+    }
+  }
+  for (const destination of ['https://example.com/game', 'javascript:bad()']) {
+    const safe = destination.startsWith('https:')
+    const result = html.sanitize('<a href="' + destination + '"><p>Before</p>' + nested + '<p>After</p></a>', {withReader: true}).reader.html
+    assert.strictEqual((result.match(/<table/g) || []).length, 1, 'linked status strip stays horizontal')
+    assert.strictEqual((result.match(/<td /g) || []).length, 7)
+    assert.strictEqual((result.match(/<img /g) || []).length, 7)
+    assert(result.includes('Before') && result.includes('After'))
+    assert.strictEqual((result.match(/href="https:\/\/example.com\/game"/g) || []).length, safe ? 16 : 0)
+    assert(!result.includes('javascript:'))
+  }
+}
+
+{
+  const image = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+  const source = '<table><tr><td style="text-align:center;background-color:#ffffff">'
+    + '<div>A</div> <img src="' + image + '" width="28" height="28">'
+    + '</td></tr></table>'
+  const before = html.sanitize(source, { withReader: true })
+  const after = html.sanitize(source, { preserveFormatting: true, withReader: true })
+  assert(after.html.includes('<div align="center"> <span style="font-size:1px">\u00a0</span><img'))
+  assert(after.html.includes('background-color:#ffffff'))
+  deepEqual(before.reader, after.reader)
+  for (const align of ['left', 'right', 'justify']) {
+    assert(html.sanitize(source.replace('text-align:center', 'text-align:' + align),
+      { preserveFormatting: true }).html.includes('<div align="' + align + '">'))
+  }
+  const blocked = html.sanitize(source.replace(image, 'https://example.com/picture'),
+    { preserveFormatting: true })
+  assert(!blocked.html.includes('<img'))
+  assert(!blocked.html.includes('<div align='))
+  for (const tag of ['u', 's', 'sub', 'sup', 'code', 'tt', 'strike']) {
+    const inline = source.replace('<div>A</div>', '<' + tag + '>A</' + tag + '>')
+    const result = html.sanitize(inline, { preserveFormatting: true }).html
+    assert(result.includes('<div align="center"><' + tag + '>A</' + tag + '> <img'))
+  }
+}
+
+// Original keeps supported sender presentation; Reader remains a rebuild.
+{
+  const source = '<center><table bgcolor="#234567" cellpadding="12"><tr><td>'
+    + '<p align="center" style="color:#abcdef;text-align:center">Heading</p>'
+    + '<a href="https://example.com" style="background-color:#123456;color:#ffffff">Go</a>'
+    + '</td></tr></table></center>'
+  const before = html.sanitize(source, { withReader: true })
+  const original = html.sanitize(source, { preserveFormatting: true, withReader: true })
+  assert(original.html.includes('<center>'))
+  assert(original.html.includes('<table bgcolor="#234567" cellpadding="12">'))
+  assert(original.html.includes('align="center"'))
+  assert(original.html.includes('color:#abcdef'))
+  assert(original.html.includes('background-color:#123456'))
+  deepEqual(original.reader, before.reader)
+  assert(!html.documentFor(original.document, { preserveFormatting: true }).includes('td,th{padding:2px;}'))
+  const hostile = html.sanitize('<table background="https://example.com/track" bgcolor="#234567">'
+    + '<tr><td style="background-image:url(https://example.com/track);color:#abcdef" onclick="bad()">'
+    + '<script>bad()</script><img src="https://example.com/pixel"><a href="javascript:bad()">Go</a>'
+    + '</td></tr></table>', { preserveFormatting: true })
+  assert(!/background=|url\(|onclick|<script|<img|javascript:/i.test(hostile.html))
+  assert(hostile.html.includes('bgcolor="#234567"'))
+  const nested = '<table><tr><td>'.repeat(10) + 'Deep' + '</td></tr></table>'.repeat(10)
+  const bounded = html.sanitize(nested, { preserveFormatting: true })
+  assert.strictEqual(bounded.complexity.tableDepth, html.MAX_TABLE_DEPTH)
+}
+
 // =============================================================== the parser
 //
 // The gate is only as good as where it thinks a tag stops, so this is the part
@@ -986,7 +1081,7 @@ function reading(source, options) {
     assert.ok(pair === "a/href" || pair === "img/src"
       || pair === "img/width" || pair === "img/height"
       || pair === "table/cellspacing" || pair === "table/cellpadding"
-      || pair === "td/valign" || pair === "td/style",
+      || pair === "td/valign" || pair === "td/style" || pair === "td/align",
       "reading mode emitted " + pair + ", which is a sender attribute it cannot have")
   }
   // The attribute list is only half of it. An element the reader never built
@@ -1525,6 +1620,53 @@ function activityMail() {
       + "<img src=\"https://cdn.example.com/alice.png\" width=\"20\" height=\"20\"></a></td>"
       + "<td valign=\"middle\" style=\"padding:0px\"><strong>Alice</strong> left a comment</td>"
       + "</tr></table>")
+
+  // A compact status strip is one row even though each label sits above its
+  // icon. This is the shape of a seven-day streak, without personal mail data.
+  const statusCell = (label, width = 28) => '<td><div>' + label + '</div>'
+    + '<img src="https://cdn.example.com/status.png" width="' + width
+    + '" height="28" alt=""></td>'
+  const statusStrip = '<table><tr>'
+    + Array.from({ length: 7 }, (_, i) => statusCell(i === 6 ? '22' : '✔')).join('')
+    + '</tr></table>'
+  const strip = reading(statusStrip, { allowRemoteImages: true }).html
+  assert.strictEqual((strip.match(/<tr>/g) || []).length, 1)
+  assert.strictEqual((strip.match(/<td\b/g) || []).length, 7)
+  assert.strictEqual((strip.match(/<br>/g) || []).length, 7)
+  assert.strictEqual((strip.match(/<img\b/g) || []).length, 7)
+  const originalStrip = html.sanitize(statusStrip, { allowRemoteImages: true }).html
+  assert.strictEqual((originalStrip.match(/<td\b/g) || []).length, 7,
+    'Original mode must preserve the compact icon row too')
+  const hostileStrip = statusStrip.replace(/<td>/g,
+    '<td align="right" background="https://private.example/b.gif" '
+    + 'style="padding:999px;background-image:url(https://private.example/b.gif)">')
+  assert.strictEqual(reading(hostileStrip, { allowRemoteImages: true }).html, strip,
+    'The generated layout must not copy sender attributes')
+  const originalHostile = html.sanitize(hostileStrip, { allowRemoteImages: true }).html
+  assert.ok(!originalHostile.includes('background='))
+  assert.ok(!originalHostile.includes('url('))
+  assert.ok(!reading(statusStrip.replace(/https:\/\/cdn.example.com\/status.png/g,
+    'http://127.0.0.1/private.png'), { allowRemoteImages: true }).html.includes('<img'))
+  // Blocked pictures do not gain a new path out through a generated table.
+  const blockedStrip = reading(statusStrip).html
+  assert.ok(!blockedStrip.includes('<img'))
+  assert.ok(!blockedStrip.includes('<table'))
+  assert.ok(!html.sanitize(statusStrip).html.includes('<img'))
+  const wrappedStrip = '<table><tr><td>' + statusStrip + '</td></tr></table>'
+  assert.strictEqual(html.sanitize(wrappedStrip, { allowRemoteImages: true }).complexity.tables, 1,
+    'Only the status table survives, not its enclosing layout')
+  assert.strictEqual(html.sanitize(statusStrip, {
+    allowRemoteImages: true, keepTableDepth: 0 }).complexity.tables, 0,
+    'The existing table-depth bound still applies')
+  // Long copy, large artwork and wide strips remain ordinary flowing blocks.
+  for (const cells of [statusCell('Long description').repeat(2),
+    statusCell('1', 200).repeat(2), statusCell('1', 80).repeat(7),
+    statusCell('1').repeat(9)]) {
+    assert.ok(!reading('<table><tr>' + cells + '</tr></table>',
+      { allowRemoteImages: true }).html.includes('<table'))
+    assert.ok(!html.sanitize('<table><tr>' + cells + '</tr></table>',
+      { allowRemoteImages: true }).html.includes('<table'))
+  }
 
   // One parse answers for all three readings, which is what makes changing mode
   // free: the reader is built from the tree the sanitiser is about to clean,
