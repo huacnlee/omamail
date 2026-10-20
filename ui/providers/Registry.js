@@ -6,6 +6,7 @@
 .import "NativeDomain.js" as NativeDomain
 .import "Gmail.js" as Gmail
 .import "Outlook.js" as Outlook
+.import "Exchange.js" as Exchange
 .import "M365.js" as M365
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
@@ -70,6 +71,7 @@ function define(source) {
     summary: String(raw.SUMMARY || ""),
     auth: String(raw.AUTH || "none"),
     nativeSync: facts.nativeSync === true,
+    countsStarred: raw.COUNTS_STARRED === true,
     mark: String(raw.MARK || ""),
     logo: String(raw.LOGO || raw.MARK || ""),
     unavailable: String(raw.UNAVAILABLE || ""),
@@ -83,7 +85,7 @@ function define(source) {
   }
 }
 
-var ALL = [define(Gmail), define(Hey), define(Outlook), define(M365), define(Imap), define(Jmap)]
+var ALL = [define(Gmail), define(Hey), define(Outlook), define(M365), define(Exchange), define(Imap), define(Jmap)]
 
 var DEFAULT_ID = "gmail"
 
@@ -235,4 +237,12 @@ function clientUrl(id) {
 
 function nativeSync(id) {
   return get(id).nativeSync === true
+}
+
+// Whether this provider's listing counts its Flagged view rather than
+// estimating it, so the rail may draw that number beside Flagged. A provider
+// whose listing only estimates its size must not declare it: a number that is
+// usually wrong is noise (docs/DESIGN.md, "The bar: a dot, not a count").
+function countsStarred(id) {
+  return get(id).countsStarred
 }

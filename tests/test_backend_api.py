@@ -206,8 +206,8 @@ function storageSnapshot(directory = process.env.HOME) {
 
   await call('message.parse', {raw:17}, -32602);
   const providers = await call('providers.snapshot');
-  // The pinned release has no m365 provider; its rules are unreleased.
-  for (const id of ['gmail','outlook','hey','jmap','imap'].concat(released ? [] : ['m365'])) {
+  // The pinned release has no exchange provider; its rules are unreleased.
+  for (const id of ['gmail','outlook','hey','jmap','imap','m365'].concat(released ? [] : ['exchange'])) {
     assert.ok(providers[id] && providers[id].queries && providers[id].capabilities);
     assert.equal(typeof providers[id].nativeSync, 'boolean');
   }
@@ -329,6 +329,9 @@ def main():
              'imap': {'username': 'named@example.org'}},
             {'provider': 'hey', 'email': 'sender@example.org'},
             {'provider': 'outlook', 'email': 'sender@example.org'},
+            {'provider': 'exchange', 'email': 'sender@example.org',
+             'exchange': {'ewsUrl': 'https://mail.example.invalid/EWS/Exchange.asmx',
+                          'username': 'sender@example.org', 'authScheme': 'auto'}},
             {'provider': 'm365', 'email': 'sender@example.org',
              'clientId': '00000000-1111-2222-3333-444444444444'}]
         registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org',
