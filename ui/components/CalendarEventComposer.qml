@@ -62,6 +62,13 @@ Rectangle {
   // would save the event without them, so the controls are not offered.
   readonly property bool googleWrites: !!chosenSource && chosenSource.kind === "google"
     && !!controller && !!controller.service && controller.service.backendCanGoogleCalendars === true
+  // A repeating event is made on the calendars that take a rule from this form: not a Microsoft one
+  // (Graph spells a series another way) and not an Exchange one (appointments only; a series is made
+  // in Outlook).
+  readonly property bool repeats: !!chosenSource && chosenSource.kind !== "microsoft" && chosenSource.kind !== "exchange"
+  // An Exchange appointment's notes are not read, so the editor has no field that would show them
+  // empty and replace them: they are written when it is made, and left alone after.
+  readonly property bool notesShown: !(editing && !!chosenSource && chosenSource.kind === "exchange")
   readonly property bool guestUpdate: editing && googleWrites
     && !!editingEvent.organizer && editingEvent.organizer.self === true
     && ((Array.isArray(editingEvent.attendees) && editingEvent.attendees.some(function(attendee) { return attendee.self !== true }))
@@ -490,7 +497,7 @@ Rectangle {
       reminderMinutes: reminderField.text,
       changeRecurrence: changeRecurrence,
       recurrence: {
-        enabled: recurring && !!chosenSource && chosenSource.kind !== "microsoft",
+        enabled: recurring && repeats,
         frequency: recurrenceFrequency,
         interval: intervalField.text,
         count: countField.text
@@ -708,6 +715,7 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
+        visible: root.notesShown
         FieldLabel { text: "Description" }
         EditorField {
           id: notesField
@@ -958,7 +966,7 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
-        visible: (!root.editing && !!root.chosenSource && root.chosenSource.kind !== "microsoft")
+        visible: (!root.editing && root.repeats)
           || (root.editing && !root.editingEvent.recurringEventId && root.googleWrites)
         FieldLabel { text: "Repeat" }
         EventOption {
@@ -979,7 +987,7 @@ Rectangle {
 
       Column {
         width: parent.width
-        visible: root.recurring && !!root.chosenSource && root.chosenSource.kind !== "microsoft" && (!root.editing || root.changeRecurrence)
+        visible: root.recurring && root.repeats && (!root.editing || root.changeRecurrence)
         spacing: Style.space(8)
 
         Row {

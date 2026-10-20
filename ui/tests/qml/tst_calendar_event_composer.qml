@@ -118,6 +118,27 @@ Item {
       compare(eventController.createdFields.recurrence.enabled, false)
     }
 
+    // An Exchange calendar takes appointments: no repeat, and notes when one is made but no field for
+    // them when it is edited (they are not read, so the field would show them empty and replace them).
+    function test_an_exchange_appointment_has_no_repeat_and_notes_only_when_it_is_made() {
+      var groups = JSON.parse(JSON.stringify(initialGroups))
+      groups[0].calendars[0].kind = "exchange"
+      eventController.writableSourceGroups = groups
+      composer.begin()
+      findChild(composer, "event-title-field").text = "Dentist"
+      findChild(composer, "event-description-field").text = "Bring the card"
+      compare(findChild(composer, "event-repeat-selector").visible, false)
+      composer.recurring = true
+      composer.submit("all")
+      compare(eventController.createdFields.recurrence.enabled, false)
+      compare(eventController.createdFields.description, "Bring the card")
+      eventController.eventWriting = false
+      composer.close()
+      composer.beginEdit("google:me@example.com", { exchangeId: "one", exchangeKey: "k", sourceId: "google:me@example.com",
+        summary: "Existing", start: { ms: Date.now() }, end: { ms: Date.now() + 3600000 } })
+      compare(findChild(composer, "event-description-field").parent.visible, false)
+    }
+
     function test_guest_suggestions_reuse_mail_contacts_without_submitting() {
       var groups = JSON.parse(JSON.stringify(initialGroups))
       groups[0].calendars[0].kind = "google"

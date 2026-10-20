@@ -5,6 +5,7 @@
 
 use serde_json::{Map, Value, json};
 pub mod domain;
+pub mod exchange;
 pub mod gmail;
 pub mod gmail_credentials;
 pub mod gmail_http;
@@ -118,6 +119,13 @@ const PROVIDERS: &[Provider] = &[
         ],
     },
     Provider {
+        id: "exchange",
+        name: "Exchange",
+        summary: "On-premises Exchange, for a server that offers no IMAP.",
+        auth: "password",
+        capabilities: &["star", "batch", "search", "send"],
+    },
+    Provider {
         id: "imap",
         name: "IMAP",
         summary: "Any standard mailbox — Fastmail, iCloud, Zoho, your own server.",
@@ -184,6 +192,23 @@ mod tests {
             assert!(can(provider, "move", &Value::Null));
         }
         assert!(!can("jmap", "move", &Value::Null));
+        // Exchange has no plain archive folder, labels, threads or web view: only what EWS can do.
+        for operation in [
+            "move",
+            "labels",
+            "manageLabels",
+            "threads",
+            "conversations",
+            "archive",
+            "spam",
+            "web",
+            "webBox",
+        ] {
+            assert!(!can("exchange", operation, &Value::Null));
+        }
+        for operation in ["star", "batch", "search", "send"] {
+            assert!(can("exchange", operation, &Value::Null));
+        }
         // Microsoft 365 has Graph's well-known archive folder, but no labels, folders to move into,
         // spam report or conversations.
         for operation in ["archive", "star", "batch", "search", "send"] {
@@ -220,7 +245,9 @@ mod tests {
                 .iter()
                 .map(|p| p["id"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            ["gmail", "outlook", "m365", "hey", "jmap", "imap"]
+            [
+                "gmail", "outlook", "m365", "hey", "jmap", "exchange", "imap"
+            ]
         );
         for provider in providers {
             assert_eq!(

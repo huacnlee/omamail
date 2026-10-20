@@ -69,7 +69,7 @@ fn search(id: &str, text: &str) -> String {
     match id {
         "imap" | "outlook" => imap_search(text),
         "hey" => format!("search:{text}"),
-        "jmap" | "m365" => format!("text:{text}"),
+        "jmap" | "exchange" | "m365" => format!("text:{text}"),
         _ => text.into(),
     }
 }
@@ -136,7 +136,7 @@ pub fn resolve(p: &Value) -> Result<Value, &'static str> {
                 match id.as_str() {
                     "imap" | "outlook" => format!("folder:{}", quoted(text)),
                     "jmap" => format!("mailbox:{text}"),
-                    "m365" => String::new(),
+                    "exchange" | "m365" => String::new(),
                     _ => format!("label:{text}"),
                 }
             }
@@ -184,7 +184,9 @@ mod tests {
     use super::*;
     #[test]
     fn control_bytes_are_rejected_before_any_query_or_url_is_returned() {
-        for id in ["gmail", "outlook", "hey", "jmap", "m365", "imap"] {
+        for id in [
+            "gmail", "outlook", "m365", "hey", "jmap", "exchange", "imap",
+        ] {
             for suffix in ["\r", "\n", "\r\n", "\0", "\t", "\u{7f}"] {
                 for operation in ["labelQuery", "addressQuery", "webMessageUrl", "webBoxUrl"] {
                     assert_eq!(

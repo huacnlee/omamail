@@ -173,6 +173,7 @@ pub async fn send(
         "gmail" => gmail.call("gmail.send", &params).await?,
         "imap" | "outlook" => crate::providers::imap::call("imap.send", &params).await?,
         "jmap" => jmap.call("jmap.send", &params).await?,
+        "exchange" => crate::providers::exchange::send_queued(&params).await?,
         // The outbox waits longer than the desktop, and a large message may use that to upload.
         "m365" => Box::pin(crate::providers::m365::send_queued(&params)).await?,
         "hey" => {
@@ -204,6 +205,9 @@ pub async fn send(
             match provider.as_str() {
                 "gmail" => gmail.call("gmail.deleteDraft", &params).await.map(|_| ()),
                 "imap" | "outlook" => crate::providers::imap::call("imap.deleteDraft", &params)
+                    .await
+                    .map(|_| ()),
+                "exchange" => crate::providers::exchange::call("exchange.deleteDraft", &params)
                     .await
                     .map(|_| ()),
                 "m365" => Box::pin(crate::providers::m365::call("m365.deleteDraft", &params))
