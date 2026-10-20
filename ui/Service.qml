@@ -59,7 +59,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 7 : 0
+    bundledApiVersion: root.standalone ? 8 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -1018,7 +1018,7 @@ Item {
 
     var entry = {}
     for (var key in accounts[index]) entry[key] = accounts[index][key]
-    var keys = ["provider", "email", "clientId", "clientSecret", "imap", "jmap", "label", "senderName"]
+    var keys = ["provider", "email", "clientId", "clientSecret", "imap", "jmap", "exchange", "label", "senderName"]
     for (var k = 0; k < keys.length; k++)
       if (raw[keys[k]] !== undefined) entry[keys[k]] = raw[keys[k]]
 
@@ -2667,6 +2667,7 @@ Item {
       imapSettings: entry ? entry.imap : null
       jmapSettings: entry ? entry.jmap : null
       senderName: entry ? String(entry.senderName || "") : ""
+      exchangeSettings: entry ? entry.exchange : null
       // Only a Gmail account has a client-keyed refresh token to inherit, and
       // only the first one may claim it.
       mayAdoptLegacyToken: index === 0 && (!entry || entry.provider === "gmail")
@@ -2682,10 +2683,9 @@ Item {
         root.openNotification(accountId, messageId)
       }
       onAccountIdentified: function(email) { root.nameAccount(index, email) }
-      // What a JMAP sign-in learned about its server, written onto the entry
-      // the same way the setup form's own save is: the row keeps everything
-      // else it had, and the file follows.
-      onServerSettingsLearned: function(jmap) { root.configureAccount(index, { jmap: jmap }) }
+      // What a sign-in learned about its server, saved as the form saves:
+      // the row keeps the rest, and the file follows.
+      onServerSettingsLearned: function(values) { root.configureAccount(index, values) }
       onReadyChanged: root.recount()
       onInboxUnreadChanged: root.recount()
       onReplySent: function(sendId) { root.replySent(String(sendId || "")) }
