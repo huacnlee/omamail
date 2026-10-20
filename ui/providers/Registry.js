@@ -6,6 +6,7 @@
 .import "NativeDomain.js" as NativeDomain
 .import "Gmail.js" as Gmail
 .import "Outlook.js" as Outlook
+.import "Exchange.js" as Exchange
 .import "M365.js" as M365
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
@@ -83,7 +84,7 @@ function define(source) {
   }
 }
 
-var ALL = [define(Gmail), define(Hey), define(Outlook), define(M365), define(Imap), define(Jmap)]
+var ALL = [define(Gmail), define(Hey), define(Outlook), define(M365), define(Exchange), define(Imap), define(Jmap)]
 
 var DEFAULT_ID = "gmail"
 

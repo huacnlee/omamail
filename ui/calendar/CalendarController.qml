@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import "Calendar.js" as Calendar
+import "ExchangeEvents.js" as ExchangeEvents
 import "Sources.js" as Sources
 import "../providers/MicrosoftOAuth.js" as Microsoft
 import "../backend/Plain.js" as Plain
@@ -28,6 +29,10 @@ Item {
   property double pendingRangeStart: 0
   property double pendingRangeEnd: 0
   property string refreshAccountId: ""
+  // An answer to an invitation in flight (one at a time, never beside a write), and which event the last one
+  // was for, so the detail can say the organizer was told.
+  property bool responding: false
+  property string answeredKey: ""
   // The scope an answer belongs to, which is not always the mailbox.
   //
   // The cache is keyed by it and an in-flight refresh is checked against it, so
@@ -73,8 +78,8 @@ Item {
   // is touched and carried to the writer that runs after it.
   property string writeUrl: ""
   property bool eventWriting: false
-  readonly property var availableSources: Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-    sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+  readonly property var availableSources: Sources.withAccounts(
+    sourceList, service ? service.accountSummaries : [])
   // Every account's calendars, not just this mailbox's: the entry hides only
   // when no account has one and nothing was added in Settings.
   readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
@@ -190,8 +195,7 @@ Item {
   }
 
   function sourcesForAccount(wantedAccountId) {
-    var available = Sources.withMicrosoftAccounts(Sources.withGoogleAccounts(
-      sourceList, service ? service.accountSummaries : []), service ? service.accountSummaries : [])
+    var available = Sources.withAccounts(sourceList, service ? service.accountSummaries : [])
     return unifiedCalendarView ? available : Sources.forAccount(available, wantedAccountId)
   }
 
@@ -351,6 +355,11 @@ Item {
     if (refusal !== "") { eventCreated(false, refusal); return false }
     var built = Calendar.createEvent(fields, Date.now())
     if (!built.ok) { eventCreated(false, built.error); return false }
+    if (source.kind === "exchange") {
+      var wanted = ExchangeEvents.reminderChoice(fields, false)
+      if (!wanted.ok) { eventCreated(false, wanted.error); return false }
+      built.reminderMinutes = wanted.minutes
+    }
     if (source.kind === "google") {
       var refusedOptions = googleOptionsRefusal(fields)
       if (refusedOptions !== "") { eventCreated(false, refusedOptions); return false }
@@ -364,15 +373,17 @@ Item {
     eventSource = source
     eventDraft = built
     creatingEvent = true
-    if (source.kind === "microsoft" && built.recurring) {
+    if ((source.kind === "microsoft" || source.kind === "exchange") && built.recurring) {
       creatingEvent = false
       eventSource = null
       eventDraft = null
-      eventCreated(false, "A repeating event on a Microsoft calendar is made in Outlook")
+      eventCreated(false, "A repeating event on " + (source.kind === "exchange" ? "an Exchange" : "a Microsoft")
+        + " calendar is made in Outlook")
       return false
     }
     if (source.kind === "google") createGoogleEvent()
     else if (source.kind === "microsoft") createGraphEvent()
+    else if (source.kind === "exchange") createExchangeEvent()
     else createNativeEvent()
     return true
   }
@@ -400,9 +411,12 @@ Item {
   // Dragging writes without opening the editor, so it needs the revision
   // check only the API 6 backend sends.
   function rescheduleRefusal(event) {
-    var refusal = Calendar.writeRefusal(findSource(event && event.sourceId), event, "reschedule")
-    if (refusal === "" && service.backendCanGoogleCalendars !== true)
-      refusal = "Update the backend to move events by dragging"
+    var source = findSource(event && event.sourceId)
+    var refusal = Calendar.writeRefusal(source, event, "reschedule")
+    // An Exchange event names its version in the backend's own method, which comes with API 9.
+    var capable = !!source && source.kind === "exchange" ? ExchangeEvents.backendReady(service)
+      : service.backendCanGoogleCalendars === true
+    if (refusal === "" && !capable) refusal = "Update the backend to move events by dragging"
     return refusal
   }
 
@@ -420,6 +434,11 @@ Item {
     if (refusal !== "") { eventUpdated(false, refusal); return false }
     var built = Calendar.updateEvent(fields, event, Date.now())
     if (!built.ok) { eventUpdated(false, built.error); return false }
+    if (source.kind === "exchange") {
+      var changed = ExchangeEvents.reminderChoice(fields, true)
+      if (!changed.ok) { eventUpdated(false, changed.error); return false }
+      built.reminderMinutes = changed.minutes
+    }
     var destination = fields.destinationSourceId && fields.destinationSourceId !== sourceId
       ? findSource(fields.destinationSourceId) : null
     if (fields.destinationSourceId && fields.destinationSourceId !== sourceId) {
@@ -447,6 +466,7 @@ Item {
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
     else if (source.kind === "microsoft") startGraphWrite()
+    else if (source.kind === "exchange") startExchangeWrite()
     else startCaldavWrite()
     return true
   }
@@ -456,8 +476,9 @@ Item {
   // 6.12 its recurrence arrives as a sequence that reads as no series.
   function deleteRequest(sourceId, crossed) {
     var event = Plain.plain(crossed)
-    var request = Calendar.deleteRequest(event, findSource(String(sourceId || "")),
-      service.backendCanGoogleCalendars === true)
+    var source = findSource(String(sourceId || ""))
+    var request = source && source.kind === "exchange" && ExchangeEvents.deleteRequest(event)
+      || Calendar.deleteRequest(event, source, service.backendCanGoogleCalendars === true)
     request.sourceId = String(sourceId || "")
     request.event = event
     return request
@@ -497,7 +518,11 @@ Item {
       return false
     }
     var source = findSource(sourceId)
-    var refusal = Calendar.writeRefusal(source, event, "delete")
+    // An Exchange event says for itself what deleting it is: an appointment, or an invitation declined.
+    var refusal = source && source.kind === "exchange" ? ExchangeEvents.deleteRefusal(source, event)
+      : Calendar.writeRefusal(source, event, "delete")
+    if (refusal === "" && responding && source.kind === "exchange" && ExchangeEvents.deleteKind(event) === "decline")
+      refusal = "Another answer is still being sent"
     if (refusal !== "") { eventDeleted(false, refusal); return false }
     writeOp = "delete"
     writeSource = source
@@ -506,6 +531,7 @@ Item {
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
     else if (source.kind === "microsoft") startGraphWrite()
+    else if (source.kind === "exchange") startExchangeWrite()
     else startCaldavWrite()
     return true
   }
@@ -562,6 +588,69 @@ Item {
 
   function createGoogleEvent() { createNativeEvent() }
 
+  // An appointment is written by the backend over the mailbox's own sign-in, like the read. The backend
+  // refuses what is not a plain appointment and what changed since it was drawn, and says
+  // "unconfirmed" when it cannot know; nothing is mailed, so there are no guests to ask about.
+  function exchangeRequest(method, params, callback, describe) {
+    if (!ExchangeEvents.backendReady(service)) {
+      callback(null, ExchangeEvents.errorText("backend_needs_update"))
+      return
+    }
+    service.backend.call(method, params, function(result, error) {
+      callback(result, error ? (describe || ExchangeEvents.writeError)(error) : "")
+    })
+  }
+
+  // What an event holds beyond the list, read when it is opened: `callback(event, error)`, the event with the
+  // detail laid over it (`ExchangeEvents.withDetail`) or a sentence.
+  function exchangeDetail(source, event, callback) {
+    exchangeRequest("exchange.calendarEvent", { accountId: String(source.accountId || ""), id: String(event.exchangeId || "") },
+      function(result, error) {
+        if (error) { callback(null, error); return }
+        var merged = ExchangeEvents.withDetail(event, result)
+        callback(merged, merged ? "" : "Could not read the event details")
+      }, ExchangeEvents.detailError)
+  }
+
+  // Yes or Maybe to an invitation, sent to its organizer. The backend reads the item again and refuses what is
+  // not an invitation or changed since this screen drew it; the list is then read again, where the item stands
+  // under the id the server gave it. No also takes the meeting off the calendar and is asked about first, so it
+  // is `deleteEvent`'s and never this.
+  function respondToInvitation(sourceId, event, answer) {
+    var source = findSource(sourceId)
+    if (!source || source.kind !== "exchange" || !event || event.canRespond !== true || responding
+        || creatingEvent || eventWriting || String(event.answerKey || "") === "" || answer === "declined") return false
+    responding = true
+    exchangeRequest("exchange.calendarRespond", ExchangeEvents.respondParams(source.accountId, event, answer),
+      function(result, error) {
+        root.responding = false
+        if (error) {
+          root.lastError = error
+          root.lastErrorKind = ""
+          return
+        }
+        root.answeredKey = ExchangeEvents.stableKey(event)
+        if (root.rangeStart && root.rangeEnd) root.refresh(root.rangeStart, root.rangeEnd)
+      }, ExchangeEvents.respondError)
+    return true
+  }
+
+  function createExchangeEvent() {
+    exchangeRequest("exchange.calendarCreate", ExchangeEvents.createParams(eventSource.accountId, eventDraft),
+      function(result, error) { root.finishEvent(!error, error) })
+  }
+
+  // A delete of an invitation is its decline, which also takes it off the calendar.
+  function startExchangeWrite() {
+    var account = writeSource.accountId
+    var event = writeEvent
+    var call = writeOp !== "delete" ? ["exchange.calendarUpdate", ExchangeEvents.updateParams(account, event, writeDraft)]
+      : ExchangeEvents.deleteKind(event) === "decline"
+        ? ["exchange.calendarRespond", ExchangeEvents.declineParams(account, event), ExchangeEvents.respondError]
+      : ["exchange.calendarDelete", ExchangeEvents.deleteParams(account, event)]
+    exchangeRequest(call[0], call[1], function(result, error) { root.finishWrite(!error, error) }, call[2])
+  }
+
   // The account's primary Microsoft calendar, which is the one calendar a
   // backend from before discovery reaches: it ignores the identity and asks
   // for /me/calendarView, and that is this calendar. Discovery stores its
@@ -601,7 +690,7 @@ Item {
       var reason = ""
       if (error) {
         reason = notifyConsent(error) ? Microsoft.graphConsentMessage()
-          : error.message === "calendar_conflict" ? "This event changed elsewhere. Refresh and try again."
+          : error.message === "calendar_conflict" ? Calendar.CONFLICT
           : Calendar.nativeRequestError(String(source && source.kind || ""), source && source.accountId, error)
       }
       callback(result, reason)
@@ -988,6 +1077,7 @@ Item {
     queue = pending
     if (activeSource.kind === "google") startGoogle()
     else if (activeSource.kind === "microsoft") startGraph()
+    else if (activeSource.kind === "exchange") startExchange()
     else if (activeSource.kind === "caldav" || activeSource.kind === "icloud") startPasswordLookup()
     else failSource("The HEY CLI does not expose calendar events")
   }
@@ -1013,6 +1103,23 @@ Item {
           : Calendar.eventsFromGraph(payload, root.activeSource.id)
       }
       root.replaceActiveSourceEvents(values)
+      root.processNext()
+    })
+  }
+
+  // The mailbox's own sign-in is the backend's: it reads the saved password for this one request, so
+  // nothing here holds a credential. Writes are `exchangeRequest`.
+  function startExchange() {
+    var source = activeSource
+    if (!ExchangeEvents.backendReady(service)) {
+      failSource(ExchangeEvents.errorText("backend_needs_update"))
+      return
+    }
+    service.backend.call("exchange.calendarEvents", { accountId: String(source.accountId || ""),
+      startMs: Math.floor(rangeStart), endMs: Math.ceil(rangeEnd) }, function(result, error) {
+      if (error) { root.failSource(ExchangeEvents.errorText(error)); return }
+      root.replaceActiveSourceEvents(ExchangeEvents.eventsFromExchange(result, source.id))
+      if (result && result.truncated === true) { root.failSource(ExchangeEvents.TRUNCATED); return }
       root.processNext()
     })
   }

@@ -190,6 +190,13 @@ impl Session {
                     .cloned()
                     .ok_or("reader_message_missing")?
             }
+            "exchange" => {
+                crate::providers::exchange::call(
+                    "exchange.read",
+                    &json!({"accountId":account,"id":id,"full":true}),
+                )
+                .await?
+            }
             "m365" => {
                 crate::providers::m365::call(
                     "m365.read",
