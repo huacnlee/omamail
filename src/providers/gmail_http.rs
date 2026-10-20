@@ -187,6 +187,7 @@ async fn attempt(
         }
         if !response.status().is_success() {
             return Err(match response.status().as_u16() {
+                400 if invalid_grant(&mut response).await => "gmail_signed_out",
                 403 if rate_limited(&mut response).await => "gmail_rate_limited",
                 403 => "gmail_forbidden",
                 411 => "gmail_length_required",
@@ -220,18 +221,30 @@ async fn attempt(
     .map_err(|_| "gmail_timeout")?
 }
 
+// The token endpoint answers a revoked or expired refresh token with 400
+// invalid_grant. Only a new sign-in recovers it, unlike a transient failure.
+async fn invalid_grant(response: &mut reqwest::Response) -> bool {
+    json_body(response)
+        .await
+        .is_some_and(|body| body["error"] == "invalid_grant")
+}
+
+async fn json_body(response: &mut reqwest::Response) -> Option<Value> {
+    let mut bytes = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if chunk.len() > MAX_INPUT - bytes.len() {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
 // Gmail signals per-user throttling as 403 with a usageLimits reason, in the
 // same shape as a scope refusal. Only the reason tells the two apart, and only
 // throttling is worth a retry: a daily quota does not come back in seconds.
 async fn rate_limited(response: &mut reqwest::Response) -> bool {
-    let mut bytes = Vec::new();
-    while let Ok(Some(chunk)) = response.chunk().await {
-        if chunk.len() > MAX_INPUT - bytes.len() {
-            return false;
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let Ok(body) = serde_json::from_slice::<Value>(&bytes) else {
+    let Some(body) = json_body(response).await else {
         return false;
     };
     body["error"]["errors"]
