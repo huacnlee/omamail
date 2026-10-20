@@ -7,6 +7,7 @@
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
 .import "Jmap.js" as Jmap
+.import "Exchange.js" as Exchange
 
 // What kind of mail service an account is, and what the rest of the plugin may
 // therefore ask of it.
@@ -158,7 +159,7 @@ function define(source) {
 // speaks both is better read over JMAP — threads, a junk verb, and one round
 // trip for a batch — so somebody who has one should meet it before they settle
 // for the catch-all.
-var ALL = [define(Gmail), define(Outlook), define(M365), define(Hey), define(Jmap), define(Imap)]
+var ALL = [define(Gmail), define(Outlook), define(M365), define(Hey), define(Jmap), define(Exchange), define(Imap)]
 
 var DEFAULT_ID = "gmail"
 

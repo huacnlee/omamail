@@ -410,6 +410,8 @@ fn public_vocabulary_is_closed() {
 fn provider_vocabulary_is_closed() {
     assert_eq!(Provider::try_from("jmap").unwrap().id(), "jmap");
     assert_eq!(Provider::try_from("JMAP"), Err("mail_provider_unknown"));
+    assert_eq!(Provider::try_from("exchange"), Ok(Provider::Exchange));
+    assert_eq!(Provider::try_from("ews"), Err("mail_provider_unknown"));
 }
 
 #[test]

@@ -47,12 +47,14 @@ Column {
     return accounts.filter(function(account) {
       return account
         && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud"
+          || account.calendarProvider === "exchange"
           || (account.calendarProvider === "google" && root.service.backendCanGoogleCalendars === true))
     })
   }
 
   function providerName(account) {
     return account && account.calendarProvider === "icloud" ? "iCloud"
+      : account && account.calendarProvider === "exchange" ? "Exchange"
       : account && account.calendarProvider === "google" ? "Google" : "Microsoft"
   }
 
@@ -131,8 +133,7 @@ Column {
   function sourceDetail(source) {
     var value = source || {}
     if (value.kind === "caldav") return String(value.url || "CalDAV")
-    var provider = value.kind === "google" ? "Google"
-      : value.kind === "microsoft" ? "Microsoft" : "iCloud"
+    var provider = Sources.providerLabel(value.kind)
     var account = root.accountLabel(value)
     var detail = root.orphaned(value) ? provider + " · Mailbox removed"
       : account === "" ? provider + " calendar" : provider + " · " + account
@@ -452,7 +453,7 @@ Column {
     visible: root.discoverableAccounts().length === 0
     text: root.service && root.service.backendCanDiscoverCalendars !== true
       ? "Update the mail backend to connect account calendars."
-      : "Add a Google, Microsoft or iCloud mailbox to connect its calendars."
+      : "Add a Google, Microsoft, Exchange or iCloud mailbox to connect its calendars."
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
     color: root.dimColor
@@ -488,6 +489,8 @@ Column {
         Button {
           id: discoveryButton
           objectName: "calendar-discover-" + String(accountBlock.modelData.calendarProvider || "account")
+          // An Exchange mailbox has its default calendar and nothing to find yet; signed out, it signs in.
+          visible: accountBlock.modelData.calendarProvider !== "exchange" || accountBlock.modelData.signedIn !== true
           focusable: true
           bordered: true
           foreground: root.textColor
@@ -819,7 +822,7 @@ Column {
     SectionHeading { text: "REMINDERS"; bottomPadding: Style.space(2) }
     SettingRow {
       title: "Desktop reminders"
-      detail: "Shown while Omamail is running, even with its window closed. Google calendars only."
+      detail: "Shown while Omamail is running, even with its window closed. Google and Exchange calendars only."
       ToggleSwitch {
         objectName: "calendar-reminders-enabled"
         checked: !!root.service && root.service.calendarRemindersEnabled === true
@@ -875,7 +878,8 @@ Column {
           width: Style.space(200)
           showLabel: false
           value: root.reminderMode(reminderRow.modelData)
-          options: [{ value: "off", label: "Off" }, { value: "google", label: "Google event reminders" },
+          options: [{ value: "off", label: "Off" },
+            { value: "google", label: reminderRow.modelData.kind === "exchange" ? "Exchange event reminders" : "Google event reminders" },
             { value: "custom", label: "Custom timing" }]
           foreground: root.textColor
           accent: root.accentColor
