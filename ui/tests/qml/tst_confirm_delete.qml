@@ -68,6 +68,19 @@ Item {
       keyClick(Qt.Key_Return)
       compare(confirmed.signalArguments[0][0].choice,"all")
     }
+    // A request that reaches somebody says so in its own words and starts on the way out: a second Enter
+    // keeps the meeting and sends nothing.
+    function test_a_request_that_reaches_somebody_starts_on_the_way_out() {
+      dialog.close()
+      tryCompare(dialog,"opened",false)
+      dialog.openFor({kind:"event",name:"Planning",title:"Decline \"Planning\"?",dismiss:"Keep meeting",focus:"dismiss",
+        choices:[{value:"all",label:"Decline and remove"}]})
+      tryCompare(dialog,"opened",true)
+      compare(findChild(dialog,"delete-cancel").text,"Keep meeting")
+      keyClick(Qt.Key_Return)
+      tryCompare(dialog,"opened",false)
+      compare(confirmed.count,0)
+    }
     function test_escape_cancels() {
       keyClick(Qt.Key_Escape)
       tryCompare(dialog,"opened",false)

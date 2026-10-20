@@ -59,6 +59,7 @@ function calendarProvider(raw) {
   var provider = trimmed(account.provider).toLowerCase()
   if (provider === "gmail" || provider === "") return "google"
   if (provider === "outlook" || provider === "m365") return "microsoft"
+  if (provider === "exchange") return "exchange"
   if (provider !== "imap") return ""
   var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()
   var email = trimmed(account.email).toLowerCase()
@@ -91,7 +92,7 @@ function accountId(email, provider) {
 // anything written before providers existed — is Gmail: that is what every
 // account in an upgraded install actually is, and defaulting to it is what
 // stops an upgrade from presenting a working mailbox as unconfigured.
-var PROVIDERS = ["gmail", "outlook", "m365", "hey", "imap", "jmap"]
+var PROVIDERS = ["gmail", "outlook", "m365", "exchange", "hey", "imap", "jmap"]
 var DEFAULT_PROVIDER = "gmail"
 
 function normalizeProvider(value) {
@@ -195,6 +196,19 @@ function jmapScheme(value) {
   return name === "bearer" ? "bearer" : "basic"
 }
 
+// What an Exchange account keeps about its server and nothing that could sign
+// anyone in: the web service, the login to present and, if somebody pinned one,
+// the sign-in method (`auto` lets the backend read what the server offers).
+function makeExchangeSettings(raw) {
+  var values = raw || {}
+  var scheme = trimmed(values.authScheme).toLowerCase()
+  return {
+    ewsUrl: trimmed(values.ewsUrl),
+    username: trimmed(values.username),
+    authScheme: scheme === "ntlm" || scheme === "basic" ? scheme : "auto"
+  }
+}
+
 // The address arrives with the first successful sign-in for Gmail, and is
 // typed by hand for IMAP, so an account exists for a while with no id at all.
 // Such an entry is kept — it holds the OAuth client or the server settings the
@@ -212,6 +226,7 @@ function makeAccount(account) {
     clientSecret: trimmed(raw.clientSecret),
     imap: makeImapSettings(raw.imap),
     jmap: makeJmapSettings(raw.jmap),
+    exchange: makeExchangeSettings(raw.exchange),
     label: trimmed(raw.label),
     // The name recipients see beside this mailbox's own address. Only the
     // mailboxes `namesSender` admits read it; the others take theirs from
@@ -683,7 +698,9 @@ function carriesData(entry) {
   var raw = entry || {}
   if (trimmed(raw.id) !== "") return true
   var imap = raw.imap || {}
+  var exchange = raw.exchange || {}
   return trimmed(imap.username) !== "" || trimmed(imap.imapHost) !== ""
+    || trimmed(exchange.username) !== "" || trimmed(exchange.ewsUrl) !== ""
     || trimmed(raw.clientId) !== "" || trimmed(raw.clientSecret) !== ""
 }
 
