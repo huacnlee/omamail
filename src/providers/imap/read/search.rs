@@ -18,6 +18,8 @@ const TTL: Duration = Duration::from_secs(300);
 // visible rather than risk the 32 MiB response ceiling failing the whole search.
 const CONTENT_LIMIT: u64 = 8 * 1024 * 1024;
 const CONTENT_BATCH: usize = 64;
+// Stalwart refuses any single argument longer than this, before running it.
+const SET_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Identity {
@@ -318,11 +320,6 @@ async fn step(
             release(wire, key).await;
             return Ok(());
         }
-        let set = window
-            .iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
         let field = match identity {
             Identity::FolderUid => "",
             Identity::Content => " BODY.PEEK[]",
@@ -330,6 +327,11 @@ async fn step(
             Identity::GmailId => " X-GM-MSGID",
             Identity::Candidate => " RFC822.SIZE BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]",
         };
+        // Name exactly the matches, since a range of the inventory would also
+        // fetch every non-match in it, until they outgrow one argument. Content
+        // never does: CONTENT_BATCH UIDs fit with room to spare, and its range
+        // would read the bodies of messages that are not candidates.
+        let set = fetch_set(window, inventory);
         let data = command(
             &mut wire,
             &format!("UID FETCH {set} (UID INTERNALDATE{field})"),
@@ -641,6 +643,34 @@ pub(super) async fn call(p: &Value) -> Result<Value> {
     }
     snapshots.push(snapshot);
     Ok(result)
+}
+
+/// Sorted matches as one IMAP set, consecutive runs folded into `first:last`. A set
+/// longer than `SET_BYTES` becomes the range of the inventory the matches were
+/// searched in: still one command and at most one row per inventory UID, which
+/// `fetched` narrows back to the matches.
+fn fetch_set(matches: &[u32], inventory: &[u32]) -> String {
+    let mut set = String::new();
+    let mut at = 0;
+    while at < matches.len() {
+        let first = matches[at];
+        while at + 1 < matches.len() && matches[at + 1] == matches[at] + 1 {
+            at += 1;
+        }
+        if !set.is_empty() {
+            set.push(',');
+        }
+        if matches[at] == first {
+            set.push_str(&first.to_string());
+        } else {
+            set.push_str(&format!("{first}:{}", matches[at]));
+        }
+        at += 1;
+    }
+    if set.len() > SET_BYTES {
+        set = format!("{}:{}", inventory[0], inventory[inventory.len() - 1]);
+    }
+    set
 }
 
 fn fetched(data: &[u8], window: &[u32], identity: Identity) -> Result<Vec<Message>> {
