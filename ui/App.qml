@@ -1053,6 +1053,7 @@ Item {
     if (id === "calendarAgenda") return calendarView.setView("agenda")
     if (id === "calendarUndo") return root.service.calendarController.undoLastChange()
     if (id === "calendarMonth") return calendarView.setView("month")
+    if (id === "spellingSuggestions") return compose.openSpellingAtCaret()
     if (id === "send") return compose.submit()
     if (id === "saveEvent") return eventComposer.submit("all")
     if (id === "guestNext") return eventComposer.moveGuestSuggestion(1)
@@ -2053,6 +2054,8 @@ Item {
           popupBackgroundColor: root.popupBackground
           popupBorderColor: root.popupBorder
           panelFontFamily: root.fontFamily
+          errorColor: root.urgent
+          onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
           contentDirection: root.service ? root.service.contentDirection : ""
           // Parked sends close without emitting `closed`; navigation follows opened.
           onOpenedChanged: {

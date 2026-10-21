@@ -27,7 +27,8 @@ const QSet<QString> &allowedSettings()
         QStringLiteral("oauthPort"), QStringLiteral("undoSendSeconds"),
         QStringLiteral("unifiedCalendarView"), QStringLiteral("openOnClick"),
         QStringLiteral("showBarIcon"), QStringLiteral("suggestEvents"),
-        QStringLiteral("unifiedMailboxes")};
+        QStringLiteral("unifiedMailboxes"), QStringLiteral("spellingEnabled"),
+        QStringLiteral("spellingLanguage")};
     return keys;
 }
 
