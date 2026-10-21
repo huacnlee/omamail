@@ -15,7 +15,12 @@ pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 mod tests;
 
 pub fn parse(raw: &[u8]) -> Result<Value, &'static str> {
-    if raw.len() > MAX_MESSAGE {
+    parse_up_to(raw, MAX_MESSAGE)
+}
+
+/// `parse` for a provider whose transport carries more than `MAX_MESSAGE` and bounds the message itself.
+pub fn parse_up_to(raw: &[u8], limit: usize) -> Result<Value, &'static str> {
+    if raw.len() > limit {
         return Err("message_too_large");
     }
     let parsed = mailparse::parse_mail(raw).map_err(|_| "invalid_message")?;

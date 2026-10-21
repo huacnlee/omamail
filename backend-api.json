@@ -1,6 +1,6 @@
 {
-  "apiVersion": 7,
-  "releasedApiVersion": 7,
+  "apiVersion": 8,
+  "releasedApiVersion": 8,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -183,7 +183,24 @@
     "jmap.request",
     "jmap.stream.open",
     "jmap.stream.poll",
-    "jmap.stream.close"
+    "jmap.stream.close",
+    "m365.signInBegin",
+    "m365.signInPoll",
+    "m365.signOut",
+    "m365.verify",
+    "m365.list",
+    "m365.messages",
+    "m365.read",
+    "m365.attachment",
+    "m365.modify",
+    "m365.trash",
+    "m365.untrash",
+    "m365.send",
+    "m365.saveDraft",
+    "m365.deleteDraft",
+    "m365.sendAs",
+    "m365.invalidate",
+    "m365.cancel"
   ],
   "contractCases": [
     {
@@ -1286,6 +1303,172 @@
       },
       "types": {
         "ticket": "string"
+      }
+    },
+    {
+      "name": "Microsoft 365 provider rules",
+      "method": "providers.snapshot",
+      "params": {},
+      "equals": {
+        "m365.nativeSync": true,
+        "m365.capabilities.archive": true,
+        "m365.capabilities.spam": false,
+        "m365.capabilities.labels": false,
+        "m365.queries.archive": "role:archive",
+        "m365.queries.starred": "role:inbox flagged"
+      }
+    },
+    {
+      "name": "Microsoft 365 text search is a text query",
+      "method": "providers.resolve",
+      "params": {
+        "provider": "m365",
+        "operation": "query",
+        "search": "invoice"
+      },
+      "equals": {
+        "value": "text:invoice"
+      }
+    },
+    {
+      "name": "Microsoft 365 answers one sender identity without a request",
+      "method": "m365.sendAs",
+      "params": {
+        "accountId": "m365:sender@example.org"
+      },
+      "equals": {
+        "0.email": "sender@example.org",
+        "0.isDefault": true
+      }
+    },
+    {
+      "name": "Microsoft 365 verify names a mailbox that is not saved",
+      "method": "m365.verify",
+      "params": {
+        "accountId": "m365:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Microsoft 365 list refuses a forged page token",
+      "method": "m365.list",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "query": "role:inbox",
+        "limit": 5,
+        "pageToken": "forged"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 messages refuse an id that is not its own",
+      "method": "m365.messages",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "ids": [
+          "1:INBOX"
+        ],
+        "full": false
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 send refuses a body that is not canonical base64url",
+      "method": "m365.send",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "raw": "not base64url!"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 sign-in needs an application id",
+      "method": "m365.signInBegin",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "address": "sender@example.org"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail action rejects malformed Microsoft 365 IDs before preview",
+      "method": "mail.act",
+      "params": {
+        "account": "m365:sender@example.org",
+        "operation": "read",
+        "ids": [
+          "1:INBOX"
+        ]
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 saves a draft only from canonical base64url",
+      "method": "m365.saveDraft",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "raw": "not base64url!"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 deletes a draft only by an id of its own",
+      "method": "m365.deleteDraft",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "id": "1:Drafts"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 calendar discovery asks the mailbox's own sign-in",
+      "method": "calendar.discover",
+      "params": {
+        "accountId": "m365:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "outbox accepts the Microsoft 365 provider",
+      "method": "outbox.enqueue",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "provider": "m365",
+        "payload": {
+          "raw": "eA",
+          "unexpected": true
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "outbox_invalid_payload"
       }
     }
   ],

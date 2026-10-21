@@ -44,6 +44,25 @@ Item {
       function checkMicrosoftConnection(callback) { connectionCallback = callback }
     }
   }
+  Component {
+    id: savedAccountFactory
+    QtObject {
+      property string accountAddress: "alice@contoso.com"
+      property bool backendCanCheckMicrosoftConnection: true
+      property int starts: 0
+      property var saved: null
+      property var auth: QtObject {
+        property bool loggedIn: false
+        property bool loginBusy: false
+        property string lastError: ""
+        property string tenant: ""
+        property string configuredClientId: "12345678-1234-4abc-9def-1234567890ab"
+        property string configuredSend: ""
+      }
+      function configureCurrentAccountAndSignInOAuth(values) { saved = values; starts++ }
+      function configureCurrentAccount(values) { saved = values }
+    }
+  }
   TestCase {
     name: "OutlookBoundaryReview"
     function readyHost() {
@@ -124,6 +143,138 @@ Item {
       verify(label !== null)
       compare(label.textFormat, Text.PlainText,
         "Server error messages must not be interpreted as resource-bearing HTML")
+    }
+    function outlookValues(page, tenant) {
+      var address = findChild(page, "outlook-address-field")
+      var client = findChild(page, "outlook-client-id-field")
+      var work = findChild(page, "outlook-work-switch")
+      var tenantField = findChild(page, "outlook-tenant-field")
+      verify(address !== null)
+      verify(client !== null)
+      verify(work !== null)
+      verify(tenantField !== null)
+      address.text = "alice@marketing.contoso.com"
+      client.text = "12345678-1234-4abc-9def-1234567890ab"
+      work.checked = true
+      tenantField.text = tenant
+      return page.accountValues()
+    }
+    function test_work_account_targets_the_configured_tenant() {
+      var page = createTemporaryObject(pageFactory, parent)
+      verify(page !== null)
+      var values = outlookValues(page, "contoso.onmicrosoft.com")
+      verify(values !== null)
+      compare(values.imap.tenant, "contoso.onmicrosoft.com",
+        "the mailbox suffix need not be the single-tenant registration's authority")
+      values = outlookValues(page, "")
+      compare(values.imap.tenant, "organizations",
+        "blank keeps the generic authority for a multi-tenant registration")
+    }
+    function test_work_account_refuses_an_invalid_tenant() {
+      var page = createTemporaryObject(pageFactory, parent)
+      verify(page !== null)
+      compare(outlookValues(page, "evil.example/../consumers"), null)
+      compare(outlookValues(page, "contoso-.com"), null)
+      var error = findChild(page, "outlook-error")
+      verify(error.text.indexOf("tenant") >= 0)
+    }
+    function test_tenant_refusal_clears_once_it_no_longer_applies() {
+      var page = createTemporaryObject(pageFactory, parent)
+      var error = findChild(page, "outlook-error")
+      var work = findChild(page, "outlook-work-switch")
+      var tenantField = findChild(page, "outlook-tenant-field")
+      compare(outlookValues(page, "contoso/../consumers"), null)
+      verify(error.text !== "")
+      tenantField.text = "contoso.onmicrosoft.com"
+      compare(error.text, "", "a corrected tenant is not still refused")
+      compare(outlookValues(page, "contoso/../consumers"), null)
+      work.checked = false
+      compare(error.text, "", "a personal account has no tenant to refuse")
+      work.checked = true
+      findChild(page, "outlook-address-field").text = "not an address"
+      compare(page.accountValues(), null)
+      var addressError = error.text
+      verify(addressError !== "")
+      tenantField.text = "other.onmicrosoft.com"
+      compare(error.text, addressError, "editing the tenant leaves another field's error alone")
+    }
+    function test_work_account_setup_names_the_right_registration() {
+      var page = createTemporaryObject(pageFactory, parent)
+      verify(page !== null)
+      var work = findChild(page, "outlook-work-switch")
+      var help = findChild(page, "outlook-app-setup-help")
+      verify(work !== null)
+      verify(help !== null)
+      work.checked = false
+      verify(help.text.indexOf("personal Microsoft accounts") >= 0)
+      work.checked = true
+      verify(help.text.indexOf("this Microsoft Entra tenant, or as multitenant") >= 0)
+      verify(help.text.indexOf("Directory (tenant) ID") >= 0)
+      verify(help.text.indexOf("personal Microsoft accounts") < 0)
+    }
+    function test_personal_account_keeps_the_tenant_the_backend_reads_as_consumers() {
+      var page = createTemporaryObject(pageFactory, parent)
+      var address = findChild(page, "outlook-address-field")
+      var client = findChild(page, "outlook-client-id-field")
+      var work = findChild(page, "outlook-work-switch")
+      var tenantField = findChild(page, "outlook-tenant-field")
+      address.text = "alice@hotmail.com"
+      client.text = "12345678-1234-4abc-9def-1234567890ab"
+      work.checked = false
+      compare(tenantField.visible, false)
+      tenantField.text = "contoso.onmicrosoft.com"
+      var values = page.accountValues()
+      verify(values !== null)
+      compare(values.imap.tenant, "",
+        "a hidden tenant field must not turn a personal account into a work one")
+      compare(values.imap.smtpHost, "smtp-mail.outlook.com")
+    }
+    function test_editing_restores_the_saved_tenant_data() {
+      return [
+        {tag: "directory id", saved: "12345678-1234-4abc-9def-1234567890ab",
+          work: true, field: "12345678-1234-4abc-9def-1234567890ab"},
+        {tag: "tenant domain", saved: "contoso.onmicrosoft.com", work: true, field: "contoso.onmicrosoft.com"},
+        {tag: "multitenant", saved: "organizations", work: true, field: ""},
+        {tag: "personal", saved: "", work: false, field: ""}
+      ]
+    }
+    function test_editing_restores_the_saved_tenant(data) {
+      var service = createTemporaryObject(savedAccountFactory, parent)
+      service.auth.tenant = data.saved
+      var page = createTemporaryObject(pageFactory, parent, { service: service })
+      var work = findChild(page, "outlook-work-switch")
+      var tenantField = findChild(page, "outlook-tenant-field")
+      compare(work.checked, data.work)
+      compare(tenantField.text, data.field)
+      compare(tenantField.visible, data.work)
+      page.save()
+      verify(service.saved !== null)
+      compare(service.saved.imap.tenant, data.saved,
+        "saving an account unchanged must keep the authority it signs in at")
+    }
+    function test_enter_walks_from_the_client_id_to_the_tenant_then_signs_in() {
+      var service = createTemporaryObject(savedAccountFactory, parent)
+      service.auth.tenant = "organizations"
+      var page = createTemporaryObject(pageFactory, parent, { service: service })
+      var client = findChild(page, "outlook-client-id-field")
+      var tenantField = findChild(page, "outlook-tenant-field")
+      client.forceActiveFocus()
+      keyClick(Qt.Key_Return)
+      verify(tenantField.activeFocus, "a work account's Enter on the client ID reaches the tenant field")
+      compare(service.starts, 0)
+      keyClick(Qt.Key_Return)
+      compare(service.starts, 1)
+      compare(service.saved.imap.tenant, "organizations")
+    }
+    function test_enter_on_a_personal_client_id_signs_in() {
+      var service = createTemporaryObject(savedAccountFactory, parent)
+      service.accountAddress = "alice@hotmail.com"
+      var page = createTemporaryObject(pageFactory, parent, { service: service })
+      var client = findChild(page, "outlook-client-id-field")
+      client.forceActiveFocus()
+      keyClick(Qt.Key_Return)
+      compare(service.starts, 1)
+      compare(service.saved.imap.tenant, "")
     }
     function test_cancel_matches_google_signin_and_allows_retry() {
       var host = readyHost()

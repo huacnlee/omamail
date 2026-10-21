@@ -310,6 +310,10 @@ Item {
   readonly property string currentView: page === "reader" ? "reader"
     : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
   readonly property bool calendarVisible: currentView === "calendar"
+  // With no calendar connected anywhere the view cannot hold an event, so the
+  // window stops offering it; Settings still adds one.
+  readonly property bool calendarAvailable: !(service && service.noCalendars === true)
+  onCalendarAvailableChanged: if (!calendarAvailable && calendarVisible) backToList()
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
@@ -491,8 +495,7 @@ Item {
     if (payload.messageId) Qt.callLater(function() {
       root.openMessage(String(payload.messageId))
     })
-    if (payload.view === "calendar") {
-      showCalendar()
+    if (payload.view === "calendar" && showCalendar()) {
       Qt.callLater(function() {
         calendarView.showEvent(String(payload.eventId || ""), Number(payload.eventStart || 0))
       })
@@ -611,8 +614,10 @@ Item {
   }
 
   function showCalendar() {
+    if (!calendarAvailable) return false
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
+    return true
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -766,7 +771,7 @@ Item {
       if (warning !== "" && service && typeof service.note === "function")
         service.note(warning)
       draftSavedTimer.restart()
-      if (service.mailboxKey === "drafts") service.refresh()
+      if (currentView === "reader" && service.selectedId === "") backToList()
     })
   }
 
@@ -1001,8 +1006,7 @@ Item {
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
-    if (id === "archive") return actOnCursor("archive")
-    if (id === "trash") return actOnCursor("trash")
+    if (id === "archive" || id === "trash") return actOnCursor(list.keyActions[id])
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     //
@@ -1067,16 +1071,12 @@ Item {
     if (id === "switchAccount") return accountSwitcher.openCentered()
     if (id === "calendar") {
       if (calendarVisible) backToList()
-      else {
-        showCalendar()
-        calendarView.refresh()
-      }
+      else if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "mailView") return backToList()
     if (id === "calendarView") {
-      showCalendar()
-      calendarView.refresh()
+      if (showCalendar()) calendarView.refresh()
       return
     }
     if (id === "toggleSidebar") return toggleSidebar()
@@ -1176,95 +1176,18 @@ Item {
     // before the service has finished making the row.
   }
 
-  // The setup pages. Built by the Loader above, one at a time, so the ones not
-  // in use hold no half-typed fields and no state to go stale.
-  Component {
-    id: providerPickerPage
-
-    ProviderPicker {
-      textColor: root.foreground
-      dimColor: root.dim
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      // Back is shown wherever there is something to go back to — which on
-      // first run, where the chooser is the root, there is not.
-      onChosen: function(providerId) { root.chooseProvider(providerId) }
-    }
-  }
-
-  Component {
-    id: gmailSetupPage
-
-    SetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: heySetupPage
-
-    HeySetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: outlookSetupPage
-
-    OutlookSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: jmapSetupPage
-
-    JmapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: imapSetupPage
-
-    ImapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
+  // The setup pages live in SetupPages, one map. A new mailbox is added
+  // there, so this file does not grow.
+  SetupPages {
+    id: setupPages
+    service: root.service
+    textColor: root.foreground
+    dimColor: root.dim
+    dangerColor: root.danger
+    accentColor: root.accent
+    panelFontFamily: root.fontFamily
+    onChosen: function(providerId) { root.chooseProvider(providerId) }
+    onRemoveRequested: root.removeCurrentAccountFromEditor()
   }
 
   // Every mailbox at once. The rail it lands on has to be one they all have,
@@ -1345,12 +1268,26 @@ Item {
     if (!service) return
     var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
-    service.removeAccountAt(index)
-    // The editor's page is gone with its account. Settings is where the rest
-    // of them are, over a fresh root: the list underneath may have changed
-    // mailbox with the removal.
-    navUntouched = false
-    nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
+    // Keep the account until its saved sign-in is confirmed gone. The backend
+    // may be starting or the keyring locked; a destroyed delegate cannot retry.
+    var host = service.accountAt(index)
+    var entry = service.accountList.accounts[index]
+    var removalNav = nav
+    if (!host) return
+    host.forgetStoredCredentials(function(forgotten) {
+      if (!root || !root.service || !forgotten) return
+      var current = Accounts.confirmRemoval({ accounts: root.service.accountSummaries || [] }, request)
+      // An edit or model rebuild while cleanup was pending is a newer account.
+      if (current < 0 || root.service.accountAt(current) !== host
+          || root.service.accountList.accounts[current] !== entry) return
+      // A newer page or composer belongs to the user, not this delayed reply.
+      var stillOnRemovalPage = root.nav === removalNav
+      root.service.removeAccountAt(current)
+      if (stillOnRemovalPage) {
+        root.navUntouched = false
+        root.nav = Nav.push(Nav.resetTo(root.nav, root.rootKind()), Nav.entry("settings"))
+      }
+    })
   }
 
   // Confirm the named event or series before deleting it.
@@ -1481,6 +1418,13 @@ Item {
       enabled: !root.backendUnavailable
       anchors.fill: parent
       focus: true
+
+      MouseBack {
+        canGoBack: Nav.depth(root.nav) > 1 || root.assistantOpen
+          || root.selectionActive || searchBar.fieldFocused
+          || (!!root.service && root.service.searchQuery !== "")
+        onActivated: root.goBack()
+      }
 
       // Where the window is, and the only thing that says what a key means.
       // A page is a form before it is anything else, a draft beats reading, a
@@ -1812,6 +1756,7 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          calendarAvailable: root.calendarAvailable
           menuLabelPath: labelMenu.opened && !!root.service
             && labelMenu.accountId === root.service.activeAccountId ? labelMenu.labelPath : ""
           service: root.service
@@ -1823,8 +1768,7 @@ Item {
           numbersVisible: focusScope.ctrlHeld
           onMailboxSelected: function(key) { root.goMailbox(key) }
           onCalendarRequested: {
-            root.showCalendar()
-            calendarView.refresh()
+            if (root.showCalendar()) calendarView.refresh()
           }
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
@@ -1947,6 +1891,7 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               checkedIds: root.checkedIds
+              selectionActive: root.selectionActive
               ctrlHeld: focusScope.ctrlHeld
               urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
@@ -1954,9 +1899,9 @@ Item {
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
-              onMenuRequested: function(id, sceneX, sceneY) {
+              onMenuRequested: function(id, sceneX, sceneY, ids) {
                 root.cursorId = id
-                rowMenu.openAt(id, sceneX, sceneY)
+                rowMenu.openAt(id, sceneX, sceneY, ids)
               }
             }
           }
@@ -2034,6 +1979,8 @@ Item {
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
           contentDirection: root.service ? root.service.contentDirection : ""
+          actions: list.readerActions
+          keyActions: list.keyActions
           onBodyModeRequested: function(mode) {
             if (root.service) root.service.setBodyMode(mode)
           }
@@ -2081,9 +2028,7 @@ Item {
                 root.service.toggleStar(root.service.selectedId)
               return
             }
-            if (((root.service.conversationProjection || ({})).memberIds || []).indexOf(root.service.selectedId) < 0
-                || root.cursorId === "")
-              root.cursorId = root.service.selectedId
+            root.cursorId = Model.readerTarget(root.service.conversationProjection, root.service.selectedId, root.cursorId)
             if (action === "moveToLabel") return root.openLabelPicker(outside)
             root.actOnCursor(action, outside)
           }
@@ -2245,7 +2190,7 @@ Item {
           // Setups that share nothing but their place on screen: a chooser for
           // a mailbox whose kind is not settled yet, then whichever page that
           // kind needs — a Cloud walkthrough, a program and a button, or a
-          // server and a password. A Loader rather than four visibilities, so
+          // server and a password. A Loader rather than a visibility each, so
           // the pages not in use hold no fields and no state.
           Loader {
             id: setup
@@ -2257,12 +2202,7 @@ Item {
             // The provider is on the entry, so a service that briefly reports
             // Gmail while it rebuilds an account host cannot swap the page.
             readonly property string kind: root.editingProvider !== "" ? root.editingProvider : "gmail"
-            sourceComponent: root.showPicker
-              ? providerPickerPage
-              : (setup.kind === "imap" ? imapSetupPage
-                : (setup.kind === "jmap" ? jmapSetupPage
-                : (setup.kind === "outlook" ? outlookSetupPage
-                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))))
+            sourceComponent: setupPages.pageFor(kind, root.showPicker)
           }
           }
         }
@@ -2367,8 +2307,7 @@ Item {
                 Qt.callLater(function() { if (root.service) root.service.signIn() })
               }
               onOpenCalendarRequested: {
-                root.showCalendar()
-                calendarView.refresh()
+                if (root.showCalendar()) calendarView.refresh()
               }
               // Which kind first, then the form for it.
               onAddRequested: root.addMailbox()
@@ -2663,7 +2602,7 @@ Item {
           panelFontFamily: root.fontFamily
           hints: Keymap.hintsFor(focusScope.keyContext,
             root.service ? root.service.unavailableActions : [],
-            root.cursorId !== "")
+            root.cursorId !== "", list.keyActions)
         }
       }
 
@@ -2672,6 +2611,7 @@ Item {
         id: appMenu
         objectName: "app-menu"
         anchors.fill: parent
+        calendarAvailable: root.calendarAvailable
         textColor: root.foreground
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
@@ -2688,8 +2628,7 @@ Item {
           if (root.service) root.service.selectMailbox("inbox")
         }
         onCalendarRequested: {
-          root.showCalendar()
-          calendarView.refresh()
+          if (root.showCalendar()) calendarView.refresh()
         }
         onSetupRequested: root.openSettings()
         onSwitchAccountRequested: accountSwitcher.openCentered()
@@ -2984,8 +2923,6 @@ Item {
           var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
           if (action === "moveToLabel") return root.openLabelPicker(outside)
-          if ((action === "star" || action === "unstar") && root.selectionActive && !outside)
-            return root.actOnChecked(Model.starActionFor(Model.summariesById(root.service.messages, root.checkedIds)))
           root.actOnCursor(action, outside)
         }
         // From a stop on the rail. A member is not a row, so the cursor stays

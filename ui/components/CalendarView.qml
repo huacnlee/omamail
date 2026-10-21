@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Window
 import qs.Commons
 import "../calendar/Calendar.js" as Calendar
+import "../backend/Plain.js" as Plain
 import "../keys/Keymap.js" as Keymap
 
 Item {
@@ -205,8 +206,11 @@ Item {
     selectedEventId = Calendar.eventKey(values[index])
   }
 
-  function activateEvent(event, alreadyDetailed) {
+  // The event comes from a row's `modelData`, or through the week view's `eventActivated` signal on Qt 6.12, as a
+  // reference object whose guests are a sequence the detail reads as nobody: made plain, they are a list again.
+  function activateEvent(crossed, alreadyDetailed) {
     monthOverflow.close()
+    var event = Plain.plain(crossed)
     if (!event) return
     var serial = ++detailReadSerial
     selectedEventId = Calendar.eventKey(event)

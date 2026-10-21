@@ -61,7 +61,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 6 : 0
+    bundledApiVersion: root.standalone ? 7 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -1356,9 +1356,8 @@ Item {
   // to send the whole window back to the beginning.
   property bool anyAccountReady: false
 
-  // Instantiator.objectAt is not a property. sendIdentities has to watch
-  // something recount() updates, or From is computed once with no hosts
-  // and never lists the other signed-in mailboxes.
+  // Instantiator.objectAt is not a property, so accountSummaries and
+  // senderSources read this. It moves when a host is built and in recount().
   property int hostsEpoch: 0
 
   function recount() {
@@ -1415,6 +1414,7 @@ Item {
   }
 
   readonly property var accountSummaries: {
+    var _epoch = hostsEpoch
     var out = []
     var accounts = accountList ? accountList.accounts : []
     for (var i = 0; i < accounts.length; i++) {
@@ -1644,6 +1644,7 @@ Item {
   }
 
   readonly property alias calendarController: sharedCalendar
+  readonly property bool noCalendars: sharedCalendar.noCalendars
   readonly property var barEvents: Preview.upcomingEvents(
     barCalendar.events, Date.now(), 2)
 
@@ -2615,6 +2616,7 @@ Item {
   Instantiator {
     id: accountHosts
     model: root.accountCount
+    onObjectAdded: root.hostsEpoch++
 
     delegate: MailAccount {
       platform: root

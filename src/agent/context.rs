@@ -326,6 +326,7 @@ fn validate_ids(provider: &str, ids: &[String]) -> Result<()> {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
             "jmap" => id.len() <= 1024,
+            "m365" => crate::providers::m365::validate_message_id(id).is_ok(),
             _ => false,
         };
         if !valid {
@@ -499,6 +500,15 @@ mod tests {
     }
     fn request() -> Value {
         json!({"accountId":"imap:test@example.org","requestId":"request-1","ids":["1:INBOX"],"summaries":[{"id":"1:INBOX","subject":"First"}],"prompt":"Read","folder":"inbox"})
+    }
+    #[test]
+    fn m365_context_accepts_only_its_own_message_ids() {
+        let id = crate::providers::m365::encode_id_for_test("AAMkAGI20001AAA=");
+        assert!(validate_ids("m365", std::slice::from_ref(&id)).is_ok());
+        for bad in ["", "1:INBOX", "IFAU222BI5ETEMBQGAYUCQKBHU", "a/b"] {
+            assert!(validate_ids("m365", &[bad.to_owned()]).is_err(), "{bad}");
+        }
+        assert!(validate_ids("imap", &[id]).is_err());
     }
     #[test]
     fn payload_matches_original_js_for_one_and_many_messages() {

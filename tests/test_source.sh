@@ -1347,6 +1347,22 @@ if "selectionIsPreview" not in mark.group(0):
                      "(`root.selectionIsPreview`), or stepping a list reads it")
 PREVIEWREAD
 
+# The standalone host (`backend/Runtime.qml`) accepts its bundled backend's API
+# and the one step past it. Below apiVersion-1, `make app-run` refuses the
+# checkout's own backend as incompatible; above releasedApiVersion, a release
+# bundle claims an API it does not carry. The release pin folds only
+# backend-api.json, so the window, not equality, is what holds on main.
+python3 - <<'BUNDLEDAPI' || exit 1
+import json, pathlib, re
+contract = json.loads(pathlib.Path("../backend-api.json").read_text())
+api, released = contract["apiVersion"], contract["releasedApiVersion"]
+found = re.search(r"bundledApiVersion: root\.standalone \? (\d+) : 0", pathlib.Path("Service.qml").read_text())
+bundled = int(found.group(1)) if found else None
+if bundled is None or not api - 1 <= bundled <= released:
+    raise SystemExit(f"BUNDLEDAPI: ui/Service.qml bundledApiVersion {bundled} must be between apiVersion-1 ({api - 1}) "
+                     f"and releasedApiVersion ({released}): the standalone host accepts its bundled API and one step past it")
+BUNDLEDAPI
+
 # The backend a QML file calls is the contract's, by name: a method that is
 # not declared cannot be called at all, and one the checkout has not shipped
 # yet is declared unreleased so `Backend` can refuse it on the pinned binary.
@@ -1368,6 +1384,31 @@ if unknown:
                      + ", ".join(m + " (" + ", ".join(sorted(called[m])) + ")" for m in unknown))
 
 CONTRACTCALLS
+
+# Microsoft 365 signs in on Microsoft's own page and everything that could
+# authenticate anybody stays in Rust: the device code, the refresh token in the
+# keyring, the access token in memory. QML that named a token, assembled a header,
+# read the keyring or spoke to the network would be a second place the rule lived.
+python3 - <<'M365LITERALS'
+from pathlib import Path
+import re
+
+names = ("providers/M365Auth.qml", "providers/M365Client.qml", "providers/M365Protocol.js",
+         "providers/M365.js", "components/M365SetupPage.qml")
+for name in names:
+    code = ""
+    for token in re.finditer(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*|[^"/]+|/', Path(name).read_text()):
+        text = token.group(0)
+        if text.startswith("//"):
+            continue
+        if text.startswith('"') and re.search(
+                r"Authorization|Bearer |Basic |refresh_token|access_token|device_code|id_token|m365-refresh-token", text):
+            raise SystemExit("test_source.sh: Microsoft 365 holds no token in QML; " + name + " names one: " + text)
+        code += '""' if text.startswith('"') else text
+    if re.search(r"XMLHttpRequest|\bfetch\(|WebSocket|\bProcess\b|credentialGet|credentialPut|credentialDelete", code):
+        raise SystemExit("test_source.sh: " + name + " must not carry network, process or keyring code")
+M365LITERALS
+
 # Credential metadata and secret values cross one typed backend RPC. Provider
 # and calendar QML must never regain a platform command or keyring helper.
 if grep -E 'secret-tool|scripts/keyring-(lookup|store|clear)\.sh' \

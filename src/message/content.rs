@@ -187,10 +187,15 @@ pub fn address(value: &str) -> Value {
 pub fn addresses(value: &str) -> Vec<Value> {
     let mut quotes = false;
     let mut angled = false;
+    let mut escaped = false;
     let mut start = 0;
     let mut result = Vec::new();
     for (i, c) in value.char_indices() {
+        // Inside quotes a backslash escapes the next character, so `"O\"Neil, Pat"`
+        // stays one name.
         match c {
+            _ if escaped => escaped = false,
+            '\\' if quotes => escaped = true,
             '"' => quotes = !quotes,
             '<' => angled = true,
             '>' => angled = false,

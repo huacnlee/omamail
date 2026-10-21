@@ -550,10 +550,29 @@ function graphResponseError(status, responseText) {
   return detail !== "" ? "Microsoft Graph answered: " + detail : "Microsoft Graph answered " + status
 }
 
+var M365_SIGN_IN_AGAIN = ["auth_signed_out", "calendar_auth_refused", "auth_client_missing",
+  "auth_client_invalid", "auth_refresh_failed", "auth_secret_invalid"]
+
+var M365_CONSENT = "Microsoft calendar request failed. An administrator has to approve this app for your "
+  + "organization. Then sign in to this mailbox again"
+
 // Keep native backend diagnostics private while giving each provider an
 // actionable recovery path. This deliberately does not depend on backend
 // error-message semantics, so it remains compatible with the pinned API.
-function nativeRequestError(kind) {
+function nativeRequestError(kind, accountId, error) {
+  // A Microsoft 365 mailbox has one sign-in for mail and calendar: nothing to
+  // check in Settings, and no second permission to grant. A sign-in that is
+  // missing, refused, unreadable or made for an app ID that is gone is one to
+  // sign in again for, as on the mail side; this API knows its codes. Consent is
+  // an administrator's to give, in words of the calendar's own: the mail side's
+  // advice about the page a code is entered on is no use to a refresh.
+  if (kind === "microsoft" && String(accountId || "").indexOf("m365:") === 0) {
+    var code = error && typeof error === "object" ? String(error.message || "") : ""
+    if (code === "auth_consent_required") return M365_CONSENT
+    return M365_SIGN_IN_AGAIN.indexOf(code) >= 0
+      ? "Microsoft calendar request failed. Sign in to this mailbox again"
+      : "Microsoft calendar request failed. Try again in a moment"
+  }
   if (kind === "microsoft")
     return "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again"
   if (kind === "google")
@@ -1270,6 +1289,81 @@ function weekNowOffset(days, firstHour, lastHour, hourHeight, nowMs) {
     if (offset >= 0) return offset
   }
   return -1
+}
+
+// Side-by-side lanes for one day's timed events. Events that overlap, even
+// through a third one, form a cluster; each event takes the leftmost lane
+// free at its start, and every event in a cluster is drawn at the width of
+// the cluster's lane count - so three meetings at nine sit in three thirds
+// instead of on top of each other, and a lone meeting keeps the whole
+// column. An event then stretches over the lanes to its right that stay free
+// for its whole length, which is what keeps a short clash from narrowing a
+// long meeting beside it for the rest of the day.
+//
+// Answers [{event, lane, lanes, span}] in the order the events came; a caller
+// places an event at lane / lanes of the column, span / lanes wide.
+function dayLanes(events, day, hourHeight) {
+  var height = Math.max(1, Number(hourHeight) || 60)
+  var values = Array.isArray(events) ? events : []
+  var items = []
+  for (var i = 0; i < values.length; i++) {
+    var event = values[i]
+    if (!event || !event.start || displayInAllDayLane(event)) continue
+    // Use the actual grid scale: even a zero-length event occupies the
+    // two-pixel minimum, and repeated local hours share drawn coordinates.
+    var start = eventTop(event, day, 0, height)
+    var end = start + eventHeight(event, day, height)
+    items.push({ event: event, index: i, start: start, end: end, lane: 0, lanes: 1, span: 1 })
+  }
+  items.sort(function(a, b) { return a.start - b.start || b.end - a.end || a.index - b.index })
+  var out = []
+  var cluster = []
+  var laneEnds = []
+  var clusterEnd = -Infinity
+  function close() {
+    // Each lane is sorted and non-overlapping. Find the first interval ending
+    // after this block starts instead of rescanning the entire cluster.
+    var laneItems = []
+    for (var l = 0; l < laneEnds.length; l++) laneItems.push([])
+    for (var n = 0; n < cluster.length; n++) laneItems[cluster[n].lane].push(cluster[n])
+    for (var c = 0; c < cluster.length; c++) {
+      var item = cluster[c]
+      item.lanes = laneEnds.length
+      var span = 1
+      for (var next = item.lane + 1; next < laneEnds.length; next++) {
+        var candidates = laneItems[next]
+        var low = 0
+        var high = candidates.length
+        while (low < high) {
+          var middle = Math.floor((low + high) / 2)
+          if (candidates[middle].end <= item.start) low = middle + 1
+          else high = middle
+        }
+        if (low < candidates.length && candidates[low].start < item.end) break
+        span++
+      }
+      item.span = span
+      out.push(item)
+    }
+    cluster = []
+    laneEnds = []
+    clusterEnd = -Infinity
+  }
+  for (var k = 0; k < items.length; k++) {
+    var current = items[k]
+    if (current.start >= clusterEnd) close()
+    var lane = 0
+    while (lane < laneEnds.length && laneEnds[lane] > current.start) lane++
+    current.lane = lane
+    laneEnds[lane] = current.end
+    cluster.push(current)
+    clusterEnd = Math.max(clusterEnd, current.end)
+  }
+  close()
+  out.sort(function(a, b) { return a.index - b.index })
+  return out.map(function(item) {
+    return { event: item.event, lane: item.lane, lanes: item.lanes, span: item.span }
+  })
 }
 
 function eventsOnDay(events, day) {

@@ -123,10 +123,7 @@ QtObject {
     var messageId = account.selectedId
     var invited = account.selectedInvite
     var summary = account.selectedMessage
-    account.rsvpSending = true
-    account.clearNotice()
-
-    account.api.sendMessage(Mail.buildSendPayload({
+    var payload = Mail.buildSendPayload({
       // The ATTENDEE line claims this address; the envelope has to agree, or a
       // strict organiser drops the reply as somebody answering for a third
       // party. Gmail fills a From in for itself, and the IMAP client puts the
@@ -144,7 +141,16 @@ QtObject {
       // organiser reads as a second, unrelated mail.
       inReplyTo: summary ? summary.messageId : "",
       threadId: summary ? summary.threadId : ""
-    }), function(payload, error) {
+    })
+    // Null when an address in it cannot be written into a header.
+    if (!payload) {
+      account.fail("An address in this answer cannot be written into a message")
+      return
+    }
+    account.rsvpSending = true
+    account.clearNotice()
+
+    account.api.sendMessage(payload, function(sent, error) {
       account.rsvpSending = false
       if (error) {
         account.fail(error)

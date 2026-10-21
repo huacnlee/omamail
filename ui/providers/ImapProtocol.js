@@ -102,12 +102,23 @@ var PRESETS = [
     imapHost: "imap.zoho.com", imapPort: 993,
     smtpHost: "smtp.zoho.com", smtpPort: 465
   },
+  // GMX is two services under one name. gmx.com is the international one;
+  // gmx.de and gmx.net are GMX Germany, which documents its own servers at
+  // hilfe.gmx.net. The other country domains are not listed until someone
+  // checks which of the two they belong to.
   {
     id: "gmx",
     name: "GMX",
-    domains: ["gmx.com", "gmx.net", "gmx.de"],
+    domains: ["gmx.com"],
     imapHost: "imap.gmx.com", imapPort: 993,
     smtpHost: "mail.gmx.com", smtpPort: 465
+  },
+  {
+    id: "gmx-de",
+    name: "GMX",
+    domains: ["gmx.de", "gmx.net"],
+    imapHost: "imap.gmx.net", imapPort: 993,
+    smtpHost: "mail.gmx.net", smtpPort: 465
   },
   // Here for the note rather than the servers: imap.163.com and smtp.163.com
   // on the standard ports are exactly what `imap.<domain>` would have guessed.

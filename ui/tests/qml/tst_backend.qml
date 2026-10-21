@@ -48,6 +48,22 @@ Item {
       verify(pending[2].deadline >= before + 30000 && pending[2].deadline < before + 31000)
     }
 
+    function test_a_microsoft_365_message_waits_longer_than_another_mailbox() {
+      var backend = makeBackend()
+      makeReady(backend)
+      var before = Date.now()
+      backend.call("reader.open", {accountId: "m365:ada@example.org", id: "abc", requestId: "r", cacheOnly: false}, function() {})
+      backend.call("m365.read", {accountId: "m365:ada@example.org", id: "abc", full: true}, function() {})
+      backend.call("m365.messages", {accountId: "m365:ada@example.org", ids: ["abc"], full: false}, function() {})
+      backend.call("reader.open", {accountId: "ada@example.org", id: "abc", requestId: "r", cacheOnly: false}, function() {})
+      var pending = Object.keys(backend.pending).map(function(id) { return backend.pending[id] })
+      compare(pending.length, 4)
+      verify(pending[0].deadline >= before + 90000)
+      verify(pending[1].deadline >= before + 90000)
+      verify(pending[2].deadline >= before + 30000 && pending[2].deadline < before + 31000)
+      verify(pending[3].deadline >= before + 30000 && pending[3].deadline < before + 31000)
+    }
+
     function test_cancelled_upload_discards_staged_data_without_domain_dispatch() {
       var backend = makeBackend()
       var process = makeReady(backend)

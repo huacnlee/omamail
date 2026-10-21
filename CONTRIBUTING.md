@@ -39,6 +39,12 @@ it, described in terms of what it protects rather than what it opens.
   [docs/KEYS.md](docs/KEYS.md) the key design — read that one before touching a
   binding.
 
+## Contribution priorities
+
+Omamail's core product is substantially complete. Prefer fixes and refinements to existing functionality: reproducible bugs, small focused fixes, wording corrections, and performance improvements that preserve the intended design and workflow. New features and email providers are considered cautiously; explain the unmet need, why existing workflows are insufficient, and the ongoing interface and maintenance cost before expanding scope.
+
+Discuss large features, new providers, and substantial architectural changes with Jason before implementation. Passing tests does not establish that a capability belongs in the product.
+
 ## Project boundary
 
 Omamail has two hosts over one shared mail and calendar implementation: a [Quickshell plugin hosted by `omarchy-shell`][omarchy-shell], and the Qt host under `app/`. A shared behavior belongs under `ui/` or in the Rust backend; `ui/Service.qml`, `ui/BarWidget.qml`, and `ui/App.qml` remain the Omarchy entry points, while `app/qml/Main.qml` supplies the standalone composition and adapters.
@@ -110,8 +116,9 @@ code once and watch it fail, and say so in the pull request.
   *Popups* sections are the same rules where they are specific to this
   codebase, and `tests/test_source.sh` enforces the part of them that grep can.
 - **Test it on a screen, by hand. This is required and nothing substitutes for it.** For the plugin, register your development checkout with the Omarchy shell and follow [the development runtime instructions](docs/BACKEND-RUNTIME.md); click the envelope in the bar and drive the change with the mouse and keyboard in a light theme and a dark one, at both window sizes. For the standalone host, run `make app-run` on each affected platform and repeat the applicable mail, calendar, notification, and window checks. The offscreen QML tests prove focus and routing; they cannot see that a control hangs four pixels out of its row.
-- Put a screenshot in the pull request, and say which themes and sizes you
-  drove it in.
+- **Every UI change requires clear, detailed visual evidence.** Attach labeled before-and-after screenshots of every changed view and relevant state, captured at matching window dimensions, theme, and scale. Explain what changed and identify the platforms, themes, and sizes tested. Screenshots must be legible enough to evaluate the actual layout, labels, and states; update them whenever the UI changes.
+- **Complex features and workflows also require a detailed screen recording.** Show the complete path from entry to result, including the relevant keyboard and mouse interactions and loading, empty, error, cancellation, or recovery states. Explain the steps and expected behavior so Jason can understand and assess the change without installing or running the app. Screenshots alone are not sufficient for these changes.
+- Use synthetic or redacted data in screenshots and recordings. Upload the evidence as PR attachments rather than committing it to the repository. Visual evidence complements the required hands-on testing and regression tests; it does not replace them.
 
 ## The pull request
 
@@ -158,8 +165,7 @@ missing:
 
 - `make validate`, and that it was green on the commit you are sending.
 - The new test, and that you saw it fail against the unfixed code.
-- What you drove by hand — for an interface change, the themes and sizes, with
-  a screenshot.
+- What you drove by hand — for an interface change, the platforms, themes, and sizes, with the required before-and-after screenshots and, for complex features or workflows, a detailed recording.
 - That a fresh agent reviewed the diff, and what it found. "Nothing" is an
   answer; not having asked is not.
 
@@ -171,6 +177,14 @@ Leave the section out only when nothing a user can see changed — a test, a
 document, an internal rename.
 
 ## Review
+
+Draft pull requests are not reviewed or approved. The failing-test-only draft described above is a way to preserve a reproducible report; mark a completed change ready for review when it has the required implementation and evidence.
+
+Review existing-functionality bug fixes, small fixes, wording corrections, and performance improvements first. A reviewer may approve a reasonable, focused, low-risk change that preserves product intent once the current diff and discussion have been checked, the relevant tests and required checks pass on the latest revision, and the affected security boundaries satisfy [AGENTS.md](AGENTS.md). Missing verification must be reported, not inferred from an earlier green commit.
+
+UI, shortcuts, layout, and interaction changes need a separate product and design judgment. An objectively demonstrable correction to an established product convention, such as restoring the product's established Vim navigation conventions, may be approved after verifying the convention, checking for conflicts and regressions, and reviewing the required tests and visual evidence. Explain the evidence and recommendation. This exception does not cover new product choices: context-menu details or new menu actions, feature placement, subjective taste, and changes with multiple reasonable design tradeoffs require Jason's explicit confirmation before approval. Large features, product-direction changes, and substantial architectural changes also require deep review and product confirmation. When the distinction is unclear, ask rather than treating passing tests as a product decision.
+
+An approval is not permission to merge: Jason makes the final merge decision, and automated reviewers must never merge.
 
 Answer a review comment by changing the code or by saying why the change would
 be wrong, and re-run `make validate` after every round — a fix made under

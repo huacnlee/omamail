@@ -571,6 +571,18 @@ assert.strictEqual(calendar.replyFields(invite, me, "declined", 0).subject,
 assert.strictEqual(calendar.replyFields(invite, me, "tentative", 0).subject,
   "Tentative: Weekly sync")
 assert.strictEqual(calendar.replyFields(null, me, "accepted", 0), null)
+// The ORGANIZER address is the sender's and is not validated here. An answer to
+// one that is not printable ASCII is refused when the mail is built.
+{
+  const message = load("message/Message.js")
+  for (const email of ["ada\u0000@example.com", "ada\u0085@example.com", "adä@example.com"]) {
+    const bad = Object.assign({}, invite, { organizer: Object.assign({}, invite.organizer, { email: email }) })
+    const answered = calendar.replyFields(bad, me, "accepted", 0)
+    assert.strictEqual(answered.to, email)
+    assert.strictEqual(message.buildSendPayload({ from: me.email, fromName: me.name, to: answered.to,
+      subject: answered.subject, body: answered.body, calendar: answered.calendar }), null, JSON.stringify(email))
+  }
+}
 
 const noOrganizer = calendar.invitationFrom(
   GOOGLE_INVITE.replace("ORGANIZER;CN=Ada Lovelace:mailto:ada@example.com", "X-NOTHING:x"))

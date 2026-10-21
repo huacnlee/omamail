@@ -376,7 +376,7 @@ Item {
                 moved.end = { ms: root.pendingGesture.end }
                 return moved
               }), modelData)
-            readonly property var positionedEvents: Calendar.timedLayout(dayEvents, modelData)
+            readonly property var positionedEvents: Calendar.dayLanes(dayEvents, modelData, timeline.hourHeight)
             width: (timeline.width - root.timeRailWidth) / Math.max(1, root.days.length)
             height: parent.height
 
@@ -424,14 +424,18 @@ Item {
               delegate: Rectangle {
                 id: eventBlock
                 required property var modelData
+                readonly property real laneWidth: Math.max(0, dayColumn.width - Style.space(6)) / Math.max(1, modelData.lanes)
+                readonly property bool narrow: width < Style.space(44)
                 readonly property color eventColor: calendarPalette.colorFor(
                   root.controller ? root.controller.colorKeyFor(eventData.sourceId) : "")
                 readonly property var eventData: modelData.event
                 readonly property bool canReschedule: !!root.controller
                   && typeof root.controller.rescheduleRefusal === "function"
                   && root.controller.rescheduleRefusal(eventData) === ""
-                x: Style.space(3) + modelData.column * (dayColumn.width - Style.space(6)) / modelData.columns
-                width: (dayColumn.width - Style.space(6)) / modelData.columns - Style.space(2)
+                x: Style.space(3) + modelData.lane * laneWidth
+                width: Math.max(0, modelData.span * laneWidth
+                  - (modelData.lane + modelData.span < modelData.lanes
+                    ? Math.min(Style.space(2), laneWidth / 4) : 0))
                 y: Calendar.eventTop(eventData, dayColumn.modelData,
                   root.firstHour, timeline.hourHeight)
                 height: Calendar.eventHeight(eventData, dayColumn.modelData, timeline.hourHeight)
@@ -461,14 +465,15 @@ Item {
                     font.family: root.panelFontFamily
                     font.pixelSize: Style.font.caption
                     font.bold: true
-                    wrapMode: Text.WordWrap
-                    maximumLineCount: eventBlock.height > Style.space(70) ? 2 : 1
+                    wrapMode: eventBlock.narrow ? Text.NoWrap : Text.WordWrap
+                    maximumLineCount: eventBlock.narrow ? 1 : Math.max(1, Math.floor(
+                      (eventBlock.height - Style.space(10)) / (Style.font.caption * 1.35)) - 1)
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
                   }
                   Text {
                     width: parent.width
-                    visible: eventBlock.height >= Style.space(38)
+                    visible: !eventBlock.narrow && eventBlock.height >= Style.font.caption * 2.9 + Style.space(10)
                     text: width >= timeMetrics.advanceWidth ? timeMetrics.text
                       : Calendar.timeLabel(eventBlock.eventData.start.ms, root.timeFormat)
                     elide: Text.ElideRight
@@ -555,6 +560,7 @@ Item {
                   visible: eventBlock.canReschedule && (eventMouse.containsMouse || eventMouse.pressed)
                 }
                 ToolTip {
+                  objectName: "calendar-event-tooltip"
                   visible: eventMouse.containsMouse && !eventMouse.pressed
                   delay: 500
                   contentItem: Text {

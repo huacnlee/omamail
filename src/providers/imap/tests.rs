@@ -519,3 +519,18 @@ fn outlook_settings_ignore_persisted_credential_destination_and_identity() {
     assert_eq!(settings["username"], "owner@example.org");
     assert_eq!(settings["insecure"], false);
 }
+#[test]
+fn outlook_settings_send_a_single_tenant_mailbox_through_microsoft_365() {
+    for tenant in [
+        "12345678-1234-4abc-9def-1234567890ab",
+        "contoso.onmicrosoft.com",
+    ] {
+        let entry = json!({"imap":{"tenant":tenant}});
+        let settings = outlook_settings(&entry, "alice@contoso.com");
+        assert_eq!(settings["smtpHost"], "smtp.office365.com");
+    }
+    for personal in [json!({"imap":{"tenant":""}}), json!({"imap":{}})] {
+        let settings = outlook_settings(&personal, "alice@hotmail.com");
+        assert_eq!(settings["smtpHost"], "smtp-mail.outlook.com");
+    }
+}

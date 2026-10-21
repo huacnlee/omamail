@@ -1,4 +1,5 @@
 import QtQuick
+import "../backend/Plain.js" as Plain
 
 // Rendering and callback correlation only. The backend owns undo deadlines,
 // serial delivery, cancellation and durable recovery after a restart.
@@ -75,8 +76,11 @@ QtObject {
         done[id] = entry.state
         receipts.push(id)
         account.reportSendSuccess(entry.result || {}, id)
-        if (entry.result && entry.result.draftRemoved && String(entry.draftId || "") !== ""
-            && typeof account.sentDraftRemoved === "function") account.sentDraftRemoved(String(entry.draftId))
+        var draft = String(entry.draftId || "")
+        if (draft !== "" && entry.result && entry.result.draftRemoved
+            && typeof account.sentDraftRemoved === "function") account.sentDraftRemoved(draft)
+        // HEY keeps a sent draft, and the others do when removing it failed.
+        else if (draft !== "" && typeof account.draftKept === "function") account.draftKept()
       } else if (entry.state === "failed" || entry.state === "unknown") {
         done[id] = entry.state
         account.reportSendFailure(entry.state === "unknown"
@@ -174,6 +178,7 @@ QtObject {
     var pending = undoPending
     undoPending = null
     undoBusy = false
+    if (id && typeof account.draftKept === "function") account.draftKept()
     if (pending && typeof pending.callback === "function") pending.callback(id)
   }
   function reconcileUndo() {
@@ -234,7 +239,9 @@ QtObject {
     function onReadyChanged() {
       if (queue.available()) { queue.revision = -1; queue.sync() }
     }
-    function onNotification(method, params) { if (method === "outbox.changed") queue.apply(params) }
+    // Made plain: through the signal Qt 6.12 hands `entries` over as a
+    // sequence, which `apply` reads as none.
+    function onNotification(method, params) { if (method === "outbox.changed") queue.apply(Plain.plain(params)) }
   }
   readonly property Connections authEvents: Connections {
     target: queue.account ? queue.account.auth : null
