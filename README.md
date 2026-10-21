@@ -65,6 +65,10 @@ make app-run
 
 Choose a provider in Settings. Gmail needs a Google OAuth client; Outlook and Microsoft 365 need a Microsoft app registration. HEY uses the official [HEY CLI](https://github.com/basecamp/hey-cli). JMAP and IMAP usually use an app password or API token.
 
+The Linux Omarchy plugin offers **Connect Gmail...**: enter your Google address, select your browser, and let Omamail create a personal project, enable Gmail and Calendar, and save your own Desktop client. If you are signed out, Google sign-in opens and setup resumes automatically after you finish. Google’s permission page opens automatically after setup; approve access to finish. This experimental setup uses Google's undocumented Console HTTP endpoints and reads only Google cookies from your selected profile locally; it never drives the browser. A personal client is restricted to its owner and is never shared with another mailbox. Manual setup remains available.
+
+Automatic setup requires Google Cloud CLI and uv (`omarchy pkg aur add google-cloud-cli` and `omarchy pkg add uv`). The helper uses uv to prepare an isolated Python dependency environment on its first run. If Google Cloud CLI needs authentication, its normal Google sign-in page opens. No billing account is linked, and no client IDs belonging to another application are used. Setup progress and credentials are saved with owner-only permissions; retry resumes the same project. Cancellation leaves any created project in your Google account.
+
 See [mailbox setup](docs/MAILBOXES.md) for provider instructions and limitations, including Microsoft 365 and Proton Mail Bridge.
 
 ## Make Omamail the default mail client

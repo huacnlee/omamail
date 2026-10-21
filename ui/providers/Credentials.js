@@ -73,10 +73,18 @@ function fromObject(raw) {
       credentials: empty()
     }
 
+  var credentials = { clientId: clientId, clientSecret: clientSecret, projectId: projectId }
+  if (body.publish_state === "PERSONAL" || body.personal === true) {
+    var owner = trimmed(body.owner_email || body.ownerEmail).toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+$/.test(owner))
+      return { ok: false, error: "The personal client has no valid owner", credentials: empty() }
+    credentials.personal = true
+    credentials.ownerEmail = owner
+  }
   return {
     ok: true,
     error: "",
-    credentials: { clientId: clientId, clientSecret: clientSecret, projectId: projectId }
+    credentials: credentials
   }
 }
 
@@ -148,16 +156,26 @@ function emptyStore() {
 // sign-in has produced one, "" for a file written before accounts had names.
 function accountEntry(accountId, credentials) {
   var value = credentials || empty()
-  return {
+  var entry = {
     id: trimmed(accountId),
     clientId: trimmed(value.clientId),
     clientSecret: trimmed(value.clientSecret),
     projectId: trimmed(value.projectId)
   }
+  if (value.personal === true) {
+    entry.personal = true
+    entry.ownerEmail = trimmed(value.ownerEmail).toLowerCase()
+  }
+  return entry
 }
 
 function credentialsOf(entry) {
-  return { clientId: entry.clientId, clientSecret: entry.clientSecret, projectId: entry.projectId }
+  var value = { clientId: entry.clientId, clientSecret: entry.clientSecret, projectId: entry.projectId }
+  if (entry.personal === true) {
+    value.personal = true
+    value.ownerEmail = entry.ownerEmail
+  }
+  return value
 }
 
 function isStore(value) {
@@ -201,11 +219,14 @@ function indexOfAccount(accounts, accountId) {
 function forAccount(store, accountId) {
   var accounts = asStore(store).accounts
   var found = indexOfAccount(accounts, accountId)
-  if (found >= 0) return credentialsOf(accounts[found])
+  if (found >= 0) {
+    var own = credentialsOf(accounts[found])
+    return own.personal && accountKey(own.ownerEmail) !== accountKey(accountId) ? empty() : own
+  }
   // The pre-accounts file holds one nameless entry. An account that has since
   // learned its own address still has to find its client there, or the first
   // upgrade looks exactly like a missing client and asks for setup again.
-  if (accounts.length === 1 && !accounts[0].id) return credentialsOf(accounts[0])
+  if (accounts.length === 1 && !accounts[0].id && !accounts[0].personal) return credentialsOf(accounts[0])
   return empty()
 }
 
@@ -221,7 +242,7 @@ function withAccount(store, accountId, credentials) {
 }
 
 function installedBlock(value) {
-  return {
+  var block = {
     client_id: trimmed(value.clientId),
     project_id: trimmed(value.projectId),
     auth_uri: "https://accounts.google.com/o/oauth2/auth",
@@ -230,6 +251,11 @@ function installedBlock(value) {
     client_secret: trimmed(value.clientSecret),
     redirect_uris: ["http://localhost"]
   }
+  if (value.personal === true) {
+    block.publish_state = "PERSONAL"
+    block.owner_email = trimmed(value.ownerEmail).toLowerCase()
+  }
+  return block
 }
 
 // Compact rather than indented, and one line whether it holds one account or
@@ -292,7 +318,9 @@ function sharedClient(store) {
   var accounts = asStore(store).accounts
   for (var i = 0; i < accounts.length; i++) {
     var found = credentialsOf(accounts[i])
-    if (isConfigured(found)) return found
+    // Google's PERSONAL mode only authorizes its owner. Never offer that
+    // client to a different account or an unnamed account being added.
+    if (isConfigured(found) && !found.personal) return found
   }
   return empty()
 }

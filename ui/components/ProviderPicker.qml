@@ -5,8 +5,7 @@ import "../providers/Registry.js" as Provider
 
 // Which kind of mailbox is being added, asked once and before anything else.
 //
-// It exists because the two setups have nothing in common: one is a Google
-// Cloud walkthrough and the other is an address and a password. Guessing from
+// Providers have different sign-in methods. Guessing from
 // the address would be worse than asking — a Gmail address is a legitimate
 // IMAP account, and picking the wrong one for the user costs them the whole
 // setup before they find out.

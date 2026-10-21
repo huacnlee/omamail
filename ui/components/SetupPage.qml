@@ -5,8 +5,8 @@ import "../providers/Registry.js" as Provider
 
 // Connecting a mailbox, as two steps instead of a wall of instructions.
 //
-// Gmail has no shared application to sign in through — Google issues API
-// access per project — so there is genuinely a setup to do. The page shows one
+// Gmail uses a client owned by the user, provisioned automatically or entered
+// manually. The page shows one
 // step at a time: whichever is finished collapses to a single line with a
 // check, and only the one that needs the user is open. The detail most people
 // skip lives behind a disclosure, except the one piece that decides whether
@@ -23,6 +23,11 @@ Column {
   property int accountCount: 1
   property bool secretVisible: false
   property bool detailVisible: false
+  property bool manualSetup: !!service && service.standalone === true
+  property var setupOwner: null
+  property string pendingGoogleAccount: ""
+  property int googleSignInAttempts: 0
+  property string automaticSetupError: ""
   // A finished step can be reopened — the client changes when somebody moves
   // Cloud projects. Kept here rather than assigned onto the step, which would
   // break the binding that closes it again.
@@ -59,6 +64,9 @@ Column {
 
   function signInNamed() {
     if (!service) return
+    pendingGoogleAccount = ""
+    googleSignIn.stop()
+    automaticSetupError = ""
     saveName()
     service.signIn()
   }
@@ -97,7 +105,8 @@ Column {
     // The brand is in the heading because the heading is half the link, and
     // "Connect your mailbox" named no service at all.
     title: root.addingMailbox ? "Add a Gmail mailbox" : "Connect your Gmail mailbox"
-    detail: "Google issues Gmail API access per project, so this app signs in with an OAuth client you own. About two minutes, once."
+    detail: root.manualSetup ? "Connect a Google client you already own."
+      : "Sign in to Gmail. Omamail sets up your personal Google app along the way."
     textColor: root.textColor
     dimColor: root.dimColor
     panelFontFamily: root.panelFontFamily
@@ -148,7 +157,7 @@ Column {
 
   Step {
     number: "1"
-    title: "Create a client in Google Cloud"
+    title: root.manualSetup ? "Connect your Google app" : "Connect Gmail"
     done: root.configured && !root.clientStepReopened
     doneSummary: root.auth ? "Client connected · " + root.auth.clientDescription : ""
     reopenable: true
@@ -157,88 +166,135 @@ Column {
       width: parent.width
       spacing: Style.space(10)
 
-      Text {
+      GooglePersonalSetup {
+        id: personalSetup
         width: parent.width
-        text: "Create an OAuth client with application type Desktop app, and enable the Gmail API on the same project."
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-      }
-
-      Row {
-        spacing: Style.space(8)
-
-        Button {
-          text: "Open Google Cloud..."
-          foreground: root.textColor
-          bordered: true
-          fontSize: Style.font.bodySmall
-          onClicked: root.service.openCloudConsole()
+        visible: !root.manualSetup
+        pluginDir: root.service && root.service.standalone !== true ? String(root.service.pluginDir || "") : ""
+        initialEmail: root.auth ? String(root.auth.accountId || "") : ""
+        textColor: root.textColor
+        dimColor: root.dimColor
+        dangerColor: root.dangerColor
+        accentColor: root.accentColor
+        panelFontFamily: root.panelFontFamily
+        onSetupStarting: {
+          root.setupOwner = root.auth
+          root.automaticSetupError = ""
         }
-
-        Button {
-          text: "Enable Gmail API..."
-          foreground: root.textColor
-          bordered: true
-          fontSize: Style.font.bodySmall
-          onClicked: root.service.openGmailApiPage()
-        }
-      }
-
-      TextField {
-        id: clientIdField
-        width: parent.width
-        foreground: root.textColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.bodySmall
-        placeholderText: "Client ID — 000000-xxxx.apps.googleusercontent.com"
-        onAccepted: clientSecretField.forceActiveFocus()
-      }
-
-      Item {
-        width: parent.width
-        implicitHeight: clientSecretField.implicitHeight
-
-        TextField {
-          id: clientSecretField
-          anchors.left: parent.left
-          anchors.right: parent.right
-          // Masked by default, because a credential on a shoulder-surfable
-          // window is a worse default — but readable on demand, so it can be
-          // checked against the console.
-          password: !root.secretVisible
-          rightPadding: horizontalPadding + Style.space(26)
-          foreground: root.textColor
-          font.family: root.panelFontFamily
-          font.pixelSize: Style.font.bodySmall
-          placeholderText: "Client secret — optional"
-          onAccepted: root.save()
-        }
-
-        IconButton {
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(4)
-          anchors.verticalCenter: clientSecretField.verticalCenter
-          visible: clientSecretField.text !== ""
-          iconName: root.secretVisible ? "eyeOff" : "eye"
-          tooltipText: root.secretVisible ? "Hide the secret" : "Show the secret"
-          foreground: root.dimColor
-          hoverColor: root.textColor
-          iconSize: Style.font.iconSmall
-          size: Style.space(22)
-          fontFamily: root.panelFontFamily
-          onClicked: root.secretVisible = !root.secretVisible
+        onReady: function(account) {
+          if (root.auth !== root.setupOwner) return
+          root.saveName()
+          if (root.service && root.service.configureCurrentAccount({ email: account })) {
+            root.pendingGoogleAccount = account
+            root.googleSignInAttempts = 0
+            Qt.callLater(function() {
+              if (root.auth && typeof root.auth.reloadCredentials === "function") root.auth.reloadCredentials()
+              root.clientStepReopened = false
+              root.syncFromStore()
+              googleSignIn.start()
+            })
+          } else root.automaticSetupError = "The personal app is ready. Select its mailbox to continue signing in."
         }
       }
 
       Button {
-        text: "Save client"
-        foreground: root.textColor
-        bordered: true
-        fontSize: Style.font.bodySmall
-        enabled: !!root.auth && !root.auth.credentialsWriteBusy
-        onClicked: root.save()
+        text: root.manualSetup ? "Use automatic setup" : "Use an existing client instead..."
+        visible: !(root.service && root.service.standalone === true)
+        foreground: root.dimColor
+        bordered: false
+        fontSize: Style.font.caption
+        enabled: !personalSetup.busy && root.pendingGoogleAccount === ""
+        onClicked: root.manualSetup = !root.manualSetup
+      }
+
+      Column {
+        width: parent.width
+        visible: root.manualSetup
+        spacing: Style.space(10)
+
+        Text {
+          width: parent.width
+          text: "Create an OAuth client with application type Desktop app, and enable the Gmail API on the same project."
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        Row {
+          spacing: Style.space(8)
+
+          Button {
+            text: "Open Google Cloud..."
+            foreground: root.textColor
+            bordered: true
+            fontSize: Style.font.bodySmall
+            onClicked: root.service.openCloudConsole()
+          }
+
+          Button {
+            text: "Enable Gmail API..."
+            foreground: root.textColor
+            bordered: true
+            fontSize: Style.font.bodySmall
+            onClicked: root.service.openGmailApiPage()
+          }
+        }
+
+        TextField {
+          id: clientIdField
+          width: parent.width
+          foreground: root.textColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          placeholderText: "Client ID — 000000-xxxx.apps.googleusercontent.com"
+          onAccepted: clientSecretField.forceActiveFocus()
+        }
+
+        Item {
+          width: parent.width
+          implicitHeight: clientSecretField.implicitHeight
+
+          TextField {
+            id: clientSecretField
+            anchors.left: parent.left
+            anchors.right: parent.right
+            // Masked by default, because a credential on a shoulder-surfable
+            // window is a worse default — but readable on demand, so it can be
+            // checked against the console.
+            password: !root.secretVisible
+            rightPadding: horizontalPadding + Style.space(26)
+            foreground: root.textColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.bodySmall
+            placeholderText: "Client secret — optional"
+            onAccepted: root.save()
+          }
+
+          IconButton {
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: clientSecretField.verticalCenter
+            visible: clientSecretField.text !== ""
+            iconName: root.secretVisible ? "eyeOff" : "eye"
+            tooltipText: root.secretVisible ? "Hide the secret" : "Show the secret"
+            foreground: root.dimColor
+            hoverColor: root.textColor
+            iconSize: Style.font.iconSmall
+            size: Style.space(22)
+            fontFamily: root.panelFontFamily
+            onClicked: root.secretVisible = !root.secretVisible
+          }
+        }
+
+        Button {
+          text: "Save client"
+          foreground: root.textColor
+          bordered: true
+          fontSize: Style.font.bodySmall
+          enabled: !!root.auth && !root.auth.credentialsWriteBusy
+          onClicked: root.save()
+        }
       }
     }
   }
@@ -247,7 +303,7 @@ Column {
 
   Step {
     number: "2"
-    title: "Sign in"
+    title: "Approve Google access"
     done: root.signedIn
     doneSummary: root.service ? "Signed in as " + root.service.accountEmail : ""
     waiting: !root.configured
@@ -261,7 +317,10 @@ Column {
       // the user out every week. It belongs beside the button it affects.
       Text {
         width: parent.width
-        text: "Press \"Publish app\" on your project first, or Google expires the session every seven days. An \"unverified app\" warning is expected — you are the developer."
+        text: root.auth && root.auth.credentials && root.auth.credentials.personal
+          ? "Your personal app is ready. Sign in with its owner account: " + root.auth.credentials.ownerEmail
+          : "Press \"Publish app\" on your project first, or Google expires the session every seven days. An \"unverified app\" warning is expected — you are the developer."
+        textFormat: Text.PlainText
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
@@ -281,6 +340,7 @@ Column {
         }
 
         Button {
+          visible: !(root.auth && root.auth.credentials && root.auth.credentials.personal)
           text: "Consent screen..."
           foreground: root.dimColor
           bordered: false
@@ -343,6 +403,40 @@ Column {
 
   // ------------------------------------------------------------- footnotes
 
+  Timer {
+    id: googleSignIn
+    interval: 250
+    repeat: true
+    onTriggered: {
+      var account = root.pendingGoogleAccount
+      if (account === "") { stop(); return }
+      root.googleSignInAttempts++
+      var auth = root.auth
+      if (auth && auth.credentialsPresent && auth.credentials && auth.credentials.personal
+          && String(auth.accountId || "").toLowerCase() === account
+          && auth.credentials.ownerEmail === account && auth.backend && auth.backend.ready) {
+        stop()
+        root.pendingGoogleAccount = ""
+        if (!auth.loggedIn && !auth.loginBusy && root.service) root.service.signIn()
+      } else if (root.googleSignInAttempts >= 80) {
+        stop()
+        root.pendingGoogleAccount = ""
+        root.automaticSetupError = "Your personal app is saved. Use Sign in with Google to continue when the mail backend is ready."
+      }
+    }
+  }
+
+  Text {
+    width: parent.width
+    visible: root.automaticSetupError !== ""
+    textFormat: Text.PlainText
+    text: root.automaticSetupError
+    color: root.dangerColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+  }
+
   // Whatever went wrong. Without this a rejected client ID looks exactly like
   // a button that does nothing.
   Text {
@@ -383,7 +477,7 @@ Column {
       + "On the consent screen add the Gmail address you want to read as a test user, then press Publish app. "
       + "Under Credentials, create an OAuth client with application type Desktop app, and paste its client ID above.\n\n"
       + "Steps one and two have a CLI: run scripts/google-cloud-project.sh if you have gcloud. "
-      + "The consent screen and the client itself are console-only.\n\n"
+      + "Automatic setup handles these steps with Google's Console HTTP APIs in PERSONAL mode. It requires Google Cloud CLI, uv, and a signed-in local browser profile. These undocumented APIs may change; manual setup remains available.\n\n"
       + (root.auth ? "The client is saved to " + root.auth.credentialsPath + ", readable only by you. "
         + "You can also copy the JSON the console downloads to that path instead of pasting. " : "")
       + "The refresh token goes to GNOME Keyring; the access token never leaves memory."
