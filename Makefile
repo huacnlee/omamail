@@ -76,7 +76,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/CalendarEventDetail.qml ui/components/CalendarReminderPanel.qml \
 	ui/components/CalendarPalette.qml \
 	ui/components/ConfirmDeleteDialog.qml \
-	ui/components/SetupPage.qml \
+	ui/components/SetupPage.qml ui/components/GooglePersonalSetup.qml \
 	ui/components/SetupPages.qml \
 	ui/components/ShortcutHelp.qml \
 	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml ui/calendar/CalendarReminders.qml ui/calendar/CalendarReminderInbox.qml \
@@ -185,6 +185,7 @@ test-shell: test-shell-portable test-shell-libcurl
 # Everything here drives one of our own scripts against a fake server and
 # asserts what the script did with the answer, so any libcurl can run it.
 test-shell-portable:
+	python3 tests/test_google_setup_installer.py
 	python3 tests/test_app_make.py
 	python3 tests/test_diagnostics.py
 	python3 tests/test_network_migration.py
