@@ -317,6 +317,12 @@ Item {
   readonly property bool showSettings: page === "settings"
   readonly property bool showPicker: page === "picker"
   readonly property bool showSetup: page === "setup"
+  readonly property bool setupBusy: showSetup && !!setup.item && setup.item.busy === true
+
+  function prepareToLeaveSetup() {
+    return !showSetup || !setup.item || typeof setup.item.prepareToLeave !== "function"
+      || setup.item.prepareToLeave() !== false
+  }
   // Anything the window goes *into*. The mail chrome stands down for all of it.
   readonly property bool showPage: showSettings || showPicker || showSetup
   onComposingChanged: { if (!composing) composeAgent.close(); else agentPrompt.close() }
@@ -356,6 +362,7 @@ Item {
   }
 
   function pushEntry(kind, fields) {
+    if (setupBusy && kind !== "setup") return
     navUntouched = false
     nav = Nav.push(nav, Nav.entry(kind, fields))
   }
@@ -389,6 +396,7 @@ Item {
   // clearing a search, which is the nearer thing to leave.
   function back() {
     var leaving = Nav.top(nav)
+    if (leaving.kind === "setup" && !prepareToLeaveSetup()) return
     pendingComposeReturnTo = -1
     if (leaving.kind === "compose") return requestLeaveCompose()
     if (leaving.kind === "eventComposer") return eventComposer.close()
@@ -468,6 +476,7 @@ Item {
   // opened instead of settings, because that is the section a scroll past
   // Mailboxes lands in.
   function openSettings() {
+    if (setupBusy) return
     dismissHelp()
     if (page === "settings") return
     settingsScroll.stop()
@@ -518,6 +527,7 @@ Item {
   }
 
   function close() {
+    if (!prepareToLeaveSetup()) return
     closingFromHost = true
     composeExitDialog.close()
     // Escape at the list root closes the window without clearing what the
@@ -531,6 +541,7 @@ Item {
   }
 
   function requestClose() {
+    if (!prepareToLeaveSetup()) return
     if (shell && typeof shell.hide === "function") shell.hide(pluginId)
     else close()
   }
@@ -1212,7 +1223,7 @@ Item {
   }
 
   function switchAccount(index) {
-    if (!service) return false
+    if (!service || setupBusy) return false
     var keepCalendar = calendarVisible
     var mailbox = service.mailboxKey
     // Choosing one mailbox is choosing to be in it, so the combined view goes
@@ -2141,6 +2152,8 @@ Item {
           anchors.top: parent.top
           anchors.topMargin: Style.space(18)
           visible: root.showPage && Nav.depth(root.nav) > 1
+          enabled: !root.showSetup || !setup.item || setup.item.canLeave !== false
+          label: root.setupBusy ? "Cancel setup and go back" : "Back"
           textColor: root.foreground
           dimColor: root.dim
           panelFontFamily: root.fontFamily

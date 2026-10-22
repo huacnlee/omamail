@@ -38,6 +38,7 @@ Item {
 
   QtObject {
     id: gmailAuth
+    property var backend: ({ ready: true })
     property bool credentialsPresent: true
     property bool loggedIn: false
     property bool loginBusy: false

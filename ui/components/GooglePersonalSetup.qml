@@ -22,13 +22,21 @@ Column {
   property string error: ""
   property string pendingAccount: ""
   property bool completed: false
-  readonly property bool busy: operation.running
+  property bool active: true
+  property bool blocked: false
+  property bool stopping: false
+  readonly property bool busy: operation.running || installer.running || stopping
+  readonly property bool installing: installer.running
+  readonly property bool canEdit: !busy && !blocked
+  readonly property bool validEmail: /^[^\s@]+@[^\s@]+$/.test(emailField.text.trim())
+  readonly property bool canConnect: canEdit && !completed && toolsChecked
+    && missingTools.length === 0 && pluginDir !== "" && validEmail
   signal ready(string account)
   signal setupStarting()
   spacing: Style.space(10)
 
   function start() {
-    if (busy || !toolsChecked || missingTools.length > 0) return
+    if (!canConnect) return
     var address = emailField.text.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+$/.test(address)) {
       error = "Enter the Google account email address first"
@@ -38,7 +46,7 @@ Column {
     pendingAccount = address
     setupStarting()
     error = ""
-    progress = "Starting personal setup…"
+    progress = "Starting personal setup"
     completed = false
     operation.command = ["python3", pluginDir + "/scripts/google-personal-setup.py",
       "--account", address, "--browser", browser]
@@ -48,9 +56,9 @@ Column {
     deadline.restart()
   }
 
-  function checkTools() {
-    if (check.running || pluginDir === "") return
-    error = ""
+  function checkTools(clearError) {
+    if (check.running || busy || blocked || pluginDir === "") return
+    if (clearError !== false) error = ""
     toolsChecked = false
     check.command = ["python3", pluginDir + "/scripts/google-personal-setup.py", "--check"]
     check.running = true
@@ -58,15 +66,28 @@ Column {
   }
 
   function cancel() {
+    if (installer.running) return false
+    if (!operation.running) return true
     deadline.stop()
     completed = false
-    progress = ""
-    error = "Setup stopped. Retry to resume. Any personal project already created stays in your Google account."
+    stopping = true
+    progress = "Stopping setup"
+    error = ""
     operation.running = false
+    return true
   }
 
   Component.onDestruction: { operation.running = false }
-  Component.onCompleted: checkTools()
+  Component.onCompleted: if (active) checkTools()
+  onActiveChanged: if (active && !toolsChecked) checkTools()
+
+  function installTools() {
+    if (!canEdit || check.running || missingTools.length === 0) return
+    error = ""
+    progress = "Complete installation in the terminal. Setup will continue here automatically."
+    installer.command = ["python3", pluginDir + "/scripts/google-personal-setup.py", "--install-tools-ui"]
+    installer.running = true
+  }
 
   Text {
     width: parent.width
@@ -88,10 +109,11 @@ Column {
     foreground: root.textColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.bodySmall
-    enabled: !root.busy
+    enabled: root.canEdit && !root.completed
     onAccepted: root.start()
   }
   Dropdown {
+    objectName: "google-setup-browser"
     width: parent.width
     label: "Browser for Google sign-in"
     value: root.browser
@@ -105,26 +127,28 @@ Column {
     foreground: root.textColor
     accent: root.accentColor
     fontFamily: root.panelFontFamily
-    enabled: !root.busy
+    enabled: root.canEdit && !root.completed
     onChanged: function(value) { root.browser = value; root.browserChosen = true }
   }
   Button {
+    objectName: "google-setup-profile-toggle"
     text: root.profileDetails ? "Hide browser profile options" : "Use another browser profile..."
     foreground: root.dimColor
     bordered: false
     fontSize: Style.font.caption
-    enabled: !root.busy
+    enabled: root.canEdit && !root.completed
     onClicked: root.profileDetails = !root.profileDetails
   }
   TextField {
     id: profileField
+    objectName: "google-setup-profile"
     visible: root.profileDetails
     width: parent.width
     placeholderText: "Cookie database path — optional, for another browser profile"
     foreground: root.textColor
     font.family: root.panelFontFamily
     font.pixelSize: Style.font.bodySmall
-    enabled: !root.busy
+    enabled: root.canEdit && !root.completed
   }
   Text {
     width: parent.width
@@ -139,7 +163,7 @@ Column {
     width: parent.width
     visible: !root.toolsChecked || root.missingTools.length > 0
     textFormat: Text.PlainText
-    text: !root.toolsChecked ? "Checking setup tools…"
+    text: !root.toolsChecked ? "Checking setup tools"
       : "Install the setup tools once: " + root.missingTools.join(", ") + ". A terminal will open for installation."
     color: root.dimColor
     font.family: root.panelFontFamily
@@ -150,23 +174,22 @@ Column {
     visible: (root.toolsChecked && root.missingTools.length > 0) || (!root.toolsChecked && root.error !== "")
     spacing: Style.space(8)
     Button {
+      objectName: "google-setup-install"
       text: "Install setup tools..."
       visible: root.missingTools.length > 0
       foreground: root.textColor
       bordered: true
       fontSize: Style.font.bodySmall
-      enabled: !installer.running
-      onClicked: {
-        installer.command = ["omarchy", "launch", "terminal", "python3",
-          root.pluginDir + "/scripts/google-personal-setup.py", "--install-tools"]
-        installer.running = true
-      }
+      enabled: root.canEdit && !check.running
+      onClicked: root.installTools()
     }
     Button {
+      objectName: "google-setup-check"
       text: "Check again"
       foreground: root.dimColor
       bordered: false
       fontSize: Style.font.bodySmall
+      enabled: root.canEdit && !check.running
       onClicked: root.checkTools()
     }
   }
@@ -174,23 +197,28 @@ Column {
     spacing: Style.space(8)
     Button {
       objectName: "google-setup-start"
-      text: root.error !== "" ? "Retry connecting Gmail..." : "Connect Gmail..."
+      text: root.stopping ? "Stopping" : operation.running ? "Connecting"
+        : installer.running ? "Installing setup tools" : root.completed ? "App ready"
+        : root.error !== "" ? "Retry connecting Gmail..." : "Connect Gmail..."
       foreground: root.textColor
       bordered: true
       fontSize: Style.font.bodySmall
-      enabled: !root.busy && root.pluginDir !== "" && root.toolsChecked && root.missingTools.length === 0
+      enabled: root.canConnect
       onClicked: root.start()
     }
     Button {
-      visible: root.busy
+      objectName: "google-setup-cancel"
+      visible: operation.running || root.stopping
       text: "Cancel"
       foreground: root.dimColor
       bordered: false
       fontSize: Style.font.bodySmall
+      enabled: !root.stopping
       onClicked: root.cancel()
     }
   }
   Text {
+    objectName: "google-setup-progress"
     width: parent.width
     visible: root.progress !== "" || root.error !== ""
     textFormat: Text.PlainText
@@ -210,14 +238,25 @@ Column {
   }
   Process {
     id: installer
-    stdout: SplitParser { onRead: function(data) {} }
+    objectName: "google-tools-process"
+    stdout: SplitParser {
+      onRead: function(data) {
+        if (data.length > 4096) return
+        var result
+        try { result = JSON.parse(data) } catch (e) { return }
+        if (result.event === "error") root.error = OAuth.redact(String(result.message || "Installation failed."))
+      }
+    }
     stderr: SplitParser { onRead: function(data) {} }
     onExited: function(exitCode) {
-      if (exitCode !== 0) root.error = "Could not open the installer terminal. Retry or use manual setup."
+      root.progress = ""
+      if (exitCode !== 0 && root.error === "") root.error = "Installation did not finish. Retry the installer or use manual setup."
+      Qt.callLater(function() { root.checkTools(false) })
     }
   }
   Process {
     id: check
+    objectName: "google-check-process"
     stdout: SplitParser {
       onRead: function(data) {
         if (data.length > 4096) return
@@ -249,6 +288,7 @@ Column {
   }
   Process {
     id: operation
+    objectName: "google-setup-process"
     stdout: SplitParser {
       onRead: function(data) {
         if (data.length > 4096) return
@@ -263,12 +303,19 @@ Column {
     stderr: SplitParser { onRead: function(data) {} }
     onExited: function(exitCode) {
       deadline.stop()
+      if (root.stopping) {
+        root.stopping = false
+        root.completed = false
+        root.progress = "Setup cancelled. Retry to resume; any project already created stays in your Google account."
+        return
+      }
       if (exitCode === 0 && root.completed) {
-        root.progress = "Opening Google sign-in…"
+        root.progress = "Opening Google sign-in"
         root.ready(root.pendingAccount)
-      } else if (root.error === "") {
+      } else {
+        root.completed = false
         root.progress = ""
-        root.error = "Automatic setup did not finish. Retry or choose manual setup."
+        if (root.error === "") root.error = "Automatic setup did not finish. Retry or choose manual setup."
       }
     }
   }

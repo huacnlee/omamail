@@ -25,6 +25,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -99,11 +100,39 @@ def install_tools():
     for executable, command in [('uv', ['omarchy', 'pkg', 'add', 'uv']),
                                 ('gcloud', ['omarchy', 'pkg', 'aur', 'add', 'google-cloud-cli'])]:
         if not shutil.which(executable):
-            require(subprocess.run(command, check=False).returncode == 0,
-                    'Tool installation did not finish. Retry from Omamail.')
-    print('Setup tools are installed. Return to Omamail and choose Check again.', flush=True)
-    if sys.stdin.isatty():
-        input('Press Enter to close this terminal. ')
+            code = subprocess.run(command, check=False).returncode
+            name = 'Google Cloud CLI' if executable == 'gcloud' else 'uv'
+            require(code == 0, f'{name} installation failed (exit {code}). Check the installer terminal, then retry.')
+            require(shutil.which(executable), f'{name} was installed but is not available. Reopen Omamail and retry.')
+    print('Setup tools are installed. Return to Omamail to continue.', flush=True)
+
+
+def install_tools_ui():
+    """Keep the GUI job alive until the visible installer reports a result."""
+    require(shutil.which('omarchy'), 'Could not open the Omarchy installer terminal.')
+    with tempfile.TemporaryDirectory(prefix='omamail-tools-') as directory:
+        fd = private_dir(Path(directory))
+        try:
+            launcher = subprocess.Popen([
+                'omarchy', 'launch', 'terminal', 'python3', str(Path(__file__).resolve()),
+                '--install-tools', '--result-directory', directory,
+            ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 900
+            while time.monotonic() < deadline:
+                raw = read_private(fd, 'result.json')
+                if raw is not None:
+                    result = json.loads(raw)
+                    if result.get('ok') is not True:
+                        # Only our fixed installer messages cross into the GUI; never package output.
+                        message = str(result.get('error', ''))
+                        allowed = re.fullmatch(r'(Google Cloud CLI|uv) (installation failed \(exit -?[0-9]+\)\. Check the installer terminal, then retry\.|was installed but is not available\. Reopen Omamail and retry\.)', message)
+                        raise Refused(message if allowed else 'Installation was cancelled or failed. Check the installer terminal, then retry.')
+                    return
+                require(launcher.poll() in (None, 0), 'Could not open the installer terminal.')
+                time.sleep(1)
+            raise Refused('Installation took too long. Finish or cancel it in the terminal, then retry.')
+        finally:
+            os.close(fd)
 
 
 def stop_child():
@@ -553,6 +582,8 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--check', action='store_true')
     mode.add_argument('--install-tools', action='store_true')
+    mode.add_argument('--install-tools-ui', action='store_true')
+    parser.add_argument('--result-directory', help=argparse.SUPPRESS)
     parser.add_argument('--browser', choices=BROWSERS, default='edge')
     parser.add_argument('--profile', help='Optional cookie database path for another browser profile')
     args = parser.parse_args()
@@ -561,7 +592,38 @@ def main():
         preflight()
         return
     if args.install_tools:
-        install_tools()
+        result_fd = None
+        if args.result_directory:
+            directory = Path(args.result_directory).absolute()
+            require(directory.parent == Path(tempfile.gettempdir()).resolve()
+                    and directory.name.startswith('omamail-tools-') and directory.is_dir(),
+                    'Invalid installer result directory.')
+            result_fd = private_dir(directory)
+            require(read_private(result_fd, 'result.json') is None,
+                    'The installer result already exists; no packages were installed.')
+        ok = False
+        failure = ''
+        signal.signal(signal.SIGTERM, cancelled)
+        try:
+            install_tools()
+            ok = True
+        except Refused as error:
+            failure = str(error)
+            print(failure, flush=True)
+            raise
+        finally:
+            if result_fd is not None:
+                try:
+                    write_private(result_fd, 'result.json', {'ok': ok, 'error': failure}, None)
+                finally:
+                    os.close(result_fd)
+            if not ok and sys.stdin.isatty():
+                with contextlib.suppress(EOFError, KeyboardInterrupt):
+                    input('Press Enter to close this installer. The error above can help diagnose the failure. ')
+        return
+    if args.install_tools_ui:
+        signal.signal(signal.SIGTERM, cancelled)
+        install_tools_ui()
         return
     require(args.account, 'Enter the Google account email address first.')
     require(shutil.which('gcloud'), 'Install Google Cloud CLI first: omarchy pkg aur add google-cloud-cli')

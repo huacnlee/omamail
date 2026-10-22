@@ -38,6 +38,30 @@ Column {
   readonly property var auth: service ? service.auth : null
   readonly property bool configured: !!auth && auth.credentialsPresent
   readonly property bool signedIn: !!auth && auth.loggedIn
+  readonly property bool authBusy: !!auth && (auth.loginBusy === true || auth.refreshBusy === true
+    || auth.sessionBusy === true || auth.credentialsWriteBusy === true)
+  readonly property bool busy: personalSetup.busy || pendingGoogleAccount !== "" || authBusy
+  readonly property bool canLeave: !personalSetup.installing && !(auth && auth.credentialsWriteBusy)
+  readonly property bool backendReady: !!auth && !!auth.backend && auth.backend.ready === true
+
+  function prepareToLeave() {
+    // Package-manager prompts belong to the visible terminal; finish or
+    // cancel there. Client-file writes must finish before retiring the owner.
+    if (!canLeave) return false
+    personalSetup.cancel()
+    pendingGoogleAccount = ""
+    googleSignIn.stop()
+    if (auth && auth.loginBusy && service) service.cancelSignIn()
+    return true
+  }
+
+  function cancelConnection() {
+    if (personalSetup.busy) { personalSetup.cancel(); return }
+    pendingGoogleAccount = ""
+    googleSignIn.stop()
+    automaticSetupError = "Sign-in cancelled. Your personal app is saved; sign in when you are ready."
+    if (auth && auth.loginBusy && service) service.cancelSignIn()
+  }
   // A further mailbox signs in with the client that is already set up, so the
   // page is an account chooser rather than the console walkthrough.
   readonly property bool addingMailbox: configured && !signedIn
@@ -63,7 +87,7 @@ Column {
   }
 
   function signInNamed() {
-    if (!service) return
+    if (!service || !configured || busy || signedIn || !backendReady) return
     pendingGoogleAccount = ""
     googleSignIn.stop()
     automaticSetupError = ""
@@ -72,7 +96,7 @@ Column {
   }
 
   function save() {
-    if (!auth) return
+    if (!auth || busy) return
     saveName()
     var secret = clientSecretField.text.trim()
     // The secret stays in the field. Clearing it on success looked exactly
@@ -81,6 +105,7 @@ Column {
   }
 
   Component.onCompleted: syncFromStore()
+  onVisibleChanged: if (!visible) prepareToLeave()
 
   Connections {
     target: root.auth
@@ -110,7 +135,8 @@ Column {
     textColor: root.textColor
     dimColor: root.dimColor
     panelFontFamily: root.panelFontFamily
-    onWebsiteRequested: if (root.service) root.service.openProviderWebsite("gmail")
+    enabled: !root.busy
+    onWebsiteRequested: if (root.service && !root.busy) root.service.openProviderWebsite("gmail")
   }
 
   // Above the steps rather than in one: the OAuth client is shared by every
@@ -118,6 +144,7 @@ Column {
   // when a second mailbox is being added and wants a name.
   AccountNameField {
     id: nameField
+    enabled: !root.busy
     service: root.service
     width: parent.width
     foreground: root.textColor
@@ -158,7 +185,7 @@ Column {
   Step {
     number: "1"
     title: root.manualSetup ? "Connect your Google app" : "Connect Gmail"
-    done: root.configured && !root.clientStepReopened
+    done: root.configured && !root.clientStepReopened && !personalSetup.busy
     doneSummary: root.auth ? "Client connected · " + root.auth.clientDescription : ""
     reopenable: true
 
@@ -168,8 +195,11 @@ Column {
 
       GooglePersonalSetup {
         id: personalSetup
+        objectName: "google-personal-setup"
         width: parent.width
         visible: !root.manualSetup
+        active: !root.manualSetup && (!root.configured || root.clientStepReopened)
+        blocked: root.authBusy || root.pendingGoogleAccount !== ""
         pluginDir: root.service && root.service.standalone !== true ? String(root.service.pluginDir || "") : ""
         initialEmail: root.auth ? String(root.auth.accountId || "") : ""
         textColor: root.textColor
@@ -198,16 +228,18 @@ Column {
       }
 
       Button {
+        objectName: "google-setup-mode"
         text: root.manualSetup ? "Use automatic setup" : "Use an existing client instead..."
         visible: !(root.service && root.service.standalone === true)
         foreground: root.dimColor
         bordered: false
         fontSize: Style.font.caption
-        enabled: !personalSetup.busy && root.pendingGoogleAccount === ""
-        onClicked: root.manualSetup = !root.manualSetup
+        enabled: !root.busy
+        onClicked: if (!root.busy) root.manualSetup = !root.manualSetup
       }
 
       Column {
+        enabled: !root.busy
         width: parent.width
         visible: root.manualSetup
         spacing: Style.space(10)
@@ -288,11 +320,12 @@ Column {
         }
 
         Button {
+          objectName: "google-client-save"
           text: "Save client"
           foreground: root.textColor
           bordered: true
           fontSize: Style.font.bodySmall
-          enabled: !!root.auth && !root.auth.credentialsWriteBusy
+          enabled: !!root.auth && !root.busy
           onClicked: root.save()
         }
       }
@@ -306,7 +339,7 @@ Column {
     title: "Approve Google access"
     done: root.signedIn
     doneSummary: root.service ? "Signed in as " + root.service.accountEmail : ""
-    waiting: !root.configured
+    waiting: !root.configured || personalSetup.busy
 
     Column {
       width: parent.width
@@ -331,11 +364,13 @@ Column {
         spacing: Style.space(8)
 
         Button {
-          text: "Sign in with Google..."
+          objectName: "google-sign-in"
+          text: root.pendingGoogleAccount !== "" ? "Preparing sign-in"
+            : root.auth && root.auth.loginBusy ? "Waiting for Google" : "Sign in with Google..."
           foreground: root.textColor
           bordered: true
           fontSize: Style.font.bodySmall
-          enabled: !!root.auth && !root.auth.loginBusy
+          enabled: root.configured && !root.busy && !root.signedIn && root.backendReady
           onClicked: root.signInNamed()
         }
 
@@ -345,23 +380,40 @@ Column {
           foreground: root.dimColor
           bordered: false
           fontSize: Style.font.bodySmall
+          enabled: !root.busy
           onClicked: root.service.openConsentScreen()
         }
 
         Button {
-          visible: !!root.auth && root.auth.loginBusy
+          objectName: "google-sign-in-cancel"
+          visible: root.pendingGoogleAccount !== "" || (!!root.auth && root.auth.loginBusy)
           text: "Cancel"
           foreground: root.dimColor
           bordered: false
           fontSize: Style.font.bodySmall
-          onClicked: root.service.cancelSignIn()
+          onClicked: root.cancelConnection()
         }
       }
 
       Text {
         width: parent.width
-        visible: !!root.service && root.service.signInProgress !== ""
-        text: root.service ? root.service.signInProgress : ""
+        visible: root.pendingGoogleAccount !== "" || (!!root.auth && root.auth.loginBusy)
+          || (!!root.service && root.service.signInProgress !== "")
+        textFormat: Text.PlainText
+        text: root.pendingGoogleAccount !== "" ? "Your app is saved. Preparing Google’s permission page"
+          : root.auth && root.auth.loginBusy ? "Approve Gmail and Calendar access in the Google browser window."
+          : root.service ? String(root.service.signInProgress || "") : ""
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        width: parent.width
+        visible: !root.backendReady && root.pendingGoogleAccount === "" && !root.authBusy
+        textFormat: Text.PlainText
+        text: "Waiting for the mail backend before opening Google sign-in."
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
@@ -382,6 +434,7 @@ Column {
 
     Button {
       id: signOutButton
+      enabled: !root.busy
       visible: root.signedIn
       text: "Sign out"
       foreground: root.textColor
@@ -392,12 +445,13 @@ Column {
 
     Button {
       id: removeButton
+      enabled: !root.busy
       visible: root.accountCount > 1
       text: "Remove account"
       foreground: root.dangerColor
       bordered: false
       fontSize: Style.font.bodySmall
-      onClicked: root.removeRequested()
+      onClicked: if (!root.busy) root.removeRequested()
     }
   }
 
@@ -414,7 +468,8 @@ Column {
       var auth = root.auth
       if (auth && auth.credentialsPresent && auth.credentials && auth.credentials.personal
           && String(auth.accountId || "").toLowerCase() === account
-          && auth.credentials.ownerEmail === account && auth.backend && auth.backend.ready) {
+          && auth.credentials.ownerEmail === account && root.backendReady
+          && !auth.refreshBusy && !auth.sessionBusy && !auth.credentialsWriteBusy && !auth.loginBusy) {
         stop()
         root.pendingGoogleAccount = ""
         if (!auth.loggedIn && !auth.loginBusy && root.service) root.service.signIn()
@@ -536,6 +591,7 @@ Column {
 
     Button {
       id: reopen
+      objectName: "google-client-change"
       anchors.right: parent.right
       anchors.top: parent.top
       visible: step.done && step.reopenable
@@ -543,7 +599,8 @@ Column {
       foreground: root.dimColor
       bordered: false
       fontSize: Style.font.caption
-      onClicked: root.clientStepReopened = true
+      enabled: !root.busy
+      onClicked: if (!root.busy) root.clientStepReopened = true
     }
 
     Column {
