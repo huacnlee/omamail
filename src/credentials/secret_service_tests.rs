@@ -59,6 +59,10 @@ impl Service {
     fn read_alias(&self, _name: &str) -> OwnedObjectPath {
         path("/org/freedesktop/secrets/collection/default")
     }
+    #[zbus(property)]
+    fn collections(&self) -> Vec<OwnedObjectPath> {
+        vec![path("/org/freedesktop/secrets/collection/default")]
+    }
     fn search_items(
         &self,
         _attributes: HashMap<String, String>,
@@ -526,7 +530,7 @@ fn credentials_native_linux_silently_unlocks_a_locked_item() {
         let service = SecretService::connect_with_existing(EncryptionType::Dh, connection)
             .await
             .unwrap();
-        find(&service, &attrs).await.map(|item| item.is_some())
+        find(&service, &attrs, Operation::Get).await.map(|item| item.is_some())
     });
 
     assert!(matches!(found, Ok(true)));
@@ -565,6 +569,32 @@ fn credentials_native_linux_a_locked_collection_is_unlocked_before_a_write() {
         fixture.creates.load(Ordering::SeqCst),
         1,
         "the write never reached CreateItem"
+    );
+}
+
+/// A read on a locked collection answers unavailable immediately rather than
+/// mistaking the locked entries for a missing secret or prompting on an
+/// unattended startup.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_a_locked_collection_returns_unavailable_for_get() {
+    let fixture = Fixture::with_locked_collection();
+    let shared = Shared::new().unwrap();
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Get,
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Unavailable)
+    ));
+    assert_eq!(
+        fixture.searches.load(Ordering::SeqCst),
+        0,
+        "searched items while collection was locked"
     );
 }
 
