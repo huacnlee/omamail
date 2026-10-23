@@ -17,7 +17,7 @@ Item {
       verify(invite)
       compare(invite.start.ms, Date.UTC(2026, 7, 21, 9, 0, 0))
       compare(invite.start.resolved, false)
-      verify(Calendar.formatWhen(invite).indexOf("09:00 (Europe/Stockholm)") > 0)
+      verify(Calendar.formatWhen(invite).indexOf(Calendar.clockOf(Date.UTC(2026, 7, 21, 9), true) + " (Europe/Stockholm)") > 0)
     }
   }
 }

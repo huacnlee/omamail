@@ -62,7 +62,7 @@ for file in "${JS_FILES[@]}"; do
 done
 
 # Calendar display clocks use the locale's short format. The composer's
-# HH:mm entry convention and its validation error are deliberately separate.
+# localized entry parser also accepts HH:mm; its validation error names that form.
 python3 - <<'PY_CALENDAR_TIME'
 import re
 from pathlib import Path
@@ -73,7 +73,7 @@ for path in files:
         if re.match(r"\s*//", line):
             continue
         for match in re.finditer(r'"([^"\n]*(?:hh|HH):mm[^"\n]*)"', line):
-            if path == Path("calendar/Calendar.js") and match.group(1) == "Enter valid dates (YYYY-MM-DD) and times (HH:mm)":
+            if path == Path("calendar/Calendar.js") and match.group(1) == "Enter valid dates (YYYY-MM-DD) and local times (or HH:mm)":
                 continue
             raise SystemExit("test_source.sh: %s:%d hard-codes a calendar clock; use the locale short time format" % (path, number))
 PY_CALENDAR_TIME

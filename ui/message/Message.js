@@ -1,4 +1,5 @@
 .pragma library
+.import "Clock.js" as Clock
 .import "Direction.js" as Direction
 .import "Signature.js" as Signature
 
@@ -820,6 +821,11 @@ function fullTime(date) {
   if (!date) return ""
   return MONTHS[date.getMonth()] + " " + date.getDate() + ", " + date.getFullYear()
     + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+}
+
+// Display only: durable summaries and quote dates retain their original text.
+function displayTimeLabel(value, timestamp) {
+  return Clock.displayLabel(value, timestamp)
 }
 
 // ------------------------------------------------------------- row summary

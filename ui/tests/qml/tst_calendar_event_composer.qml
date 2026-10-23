@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../../components" as Omamail
+import "../../calendar/Calendar.js" as Calendar
 
 Item {
   width: 900
@@ -305,7 +306,8 @@ Item {
         location: "Luigi's", description: "Table for four" })
       compare(composer.opened, true)
       compare(composer.titleText(), "Dinner with Bob")
-      compare(composer.whenText(), "2026-09-12 19:00 21:00")
+      compare(composer.whenText(), "2026-09-12 " + Calendar.timeLabel(new Date(2026, 8, 12, 19).getTime(), Qt.locale().timeFormat(Locale.ShortFormat))
+        + " " + Calendar.timeLabel(new Date(2026, 8, 12, 21).getTime(), Qt.locale().timeFormat(Locale.ShortFormat)))
       compare(composer.locationText(), "Luigi's")
       compare(composer.notesText(), "Table for four")
       compare(eventController.createCalls, 0, "nothing is written until the owner says so")
@@ -315,6 +317,16 @@ Item {
 
     // A form the owner is in the middle of is not replaced by a suggestion;
     // an empty one is. The suggestion's own mailbox chooses the calendar.
+    function test_localized_prefill_is_valid_and_fits_time_fields() {
+      composer.beginAt(new Date(2026, 9, 22, 23, 5).getTime())
+      verify(composer.dateRange.ok, composer.dateRange.error)
+      var fields = [findChild(composer, "event-start-time-field"), findChild(composer, "event-end-time-field")]
+      for (var i = 0; i < fields.length; i++) {
+        var field = fields[i]
+        verify(field.contentWidth <= field.width - field.leftPadding - field.rightPadding,
+          "localized time must fit inside its field: " + field.text)
+      }
+    }
     function test_a_suggestion_does_not_clobber_a_form_in_use() {
       composer.beginAt(new Date(2026, 7, 25, 9, 0).getTime())
       compare(composer.pristine, true)

@@ -449,15 +449,17 @@ Item {
       // carries — so a right-click on the line can name any of them.
       Text {
         id: toLine
+        objectName: "message-full-time"
         width: parent.width
         textFormat: Text.PlainText
         text: root.summary
-          ? "to " + Mail.formatAddressList(root.summary.to, 3) + " · " + root.summary.fullTime
+          ? "to " + Mail.formatAddressList(root.summary.to, 3) + " · " + Mail.displayTimeLabel(root.summary.fullTime, root.summary.date)
           : ""
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
+        // Keep the complete date/day period visible beside long recipient lists.
+        wrapMode: Text.Wrap
         horizontalAlignment: root.headerAlignment
 
         TapHandler {

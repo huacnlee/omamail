@@ -218,8 +218,7 @@ Rectangle {
   }
 
   function localTime(date) {
-    var hour = date.getHours(), minute = date.getMinutes()
-    return (hour < 10 ? "0" : "") + hour + ":" + (minute < 10 ? "0" : "") + minute
+    return Calendar.timeLabel(date.getTime(), Qt.locale().timeFormat(Locale.ShortFormat))
   }
 
   function beginAt(startMs) {

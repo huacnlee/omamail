@@ -2,6 +2,7 @@ QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml ui/compose/PendingCompose.qml \
 	ui/tests/compatibility/tst_published_agent.qml \
+	ui/tests/qml/tst_locale_clock.qml ui/tests/qml/tst_native_locale_clock.qml \
 	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
 	ui/tests/qml/tst_reader_subject_menu.qml ui/tests/qml/tst_drafts_refresh.qml ui/tests/qml/tst_account_hosts.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
@@ -260,6 +261,7 @@ test-qml:
 		exit 1; }
 	cargo build --locked --bin omamail
 	python3 tests/run_qml_native.py "$(QMLTESTRUNNER)" -input ui/tests/qml
+	python3 tests/test_locale_clock.py "$(QMLTESTRUNNER)"
 	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
 	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
 	python3 tests/test_tooltip_text.py "$(QMLTESTRUNNER)"

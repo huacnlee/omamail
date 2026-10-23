@@ -21,6 +21,14 @@ function load(relativePath) {
 
   const context = {}
   vm.createContext(context)
+  // Node has no Qt Date overloads. Keep legacy unit tests in a fixed 24-hour
+  // boundary; tests/test_locale_clock.py exercises actual Qt formatting/parsing.
+  if (relativePath === "message/Clock.js") {
+    context.Qt = { locale() { return { timeFormat() { return "HH:mm" } } } }
+    vm.runInContext(`Date.prototype.toLocaleTimeString = function() {
+      return String(this.getHours()).padStart(2, "0") + ":" + String(this.getMinutes()).padStart(2, "0")
+    }; Date.fromLocaleTimeString = function() { return new Date(NaN) }`, context)
+  }
 
   // Every match is collected before any of them is followed. A global regexp
   // carries `lastIndex` between calls, so recursing out of the middle of an
