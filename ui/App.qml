@@ -2850,6 +2850,9 @@ Item {
         panelFontFamily: root.fontFamily
         labels: root.service ? root.service.labels : []
         currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
+        folders: root.service
+          ? !Provider.can(root.service.providerId, "labels") && Provider.can(root.service.providerId, "move")
+          : false
         onLabelChosen: function(labelId) {
           root.actOnCursor("label:" + labelId, root.labelPickerOnlyCursor)
         }
