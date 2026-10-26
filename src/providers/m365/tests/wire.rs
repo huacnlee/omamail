@@ -445,11 +445,20 @@ async fn confirmed_mutations_do_not_wait_for_or_fail_on_an_unused_response_body(
     isolated!();
     let world = World::new().await;
     inbox(&world, 2);
-    world.deadlines(200, 3000);
+    // This checks response-body handling, not authentication speed. Keep the normal
+    // request budget and exercise a cold refresh slower than the former 200 ms budget.
+    let token = world.fake.state().issue(None);
     for stall in [false, true] {
-        world
-            .fake
-            .hook(move |req| (req.method == "PATCH").then(|| Resp::UnfinishedBody(200, stall)));
+        let token = token.clone();
+        world.fake.hook(move |req| {
+            if req.path.ends_with("/token") {
+                return Some(Resp::Wait(
+                    Duration::from_millis(300),
+                    Box::new(Resp::json(200, token.clone())),
+                ));
+            }
+            (req.method == "PATCH").then(|| Resp::UnfinishedBody(200, stall))
+        });
         let done = world
             .call(
                 "m365.modify",
@@ -462,10 +471,18 @@ async fn confirmed_mutations_do_not_wait_for_or_fail_on_an_unused_response_body(
         assert_eq!(
             done["succeededIds"],
             json!([super::oid(1)]),
-            "confirmed PATCH, stall={stall}"
+            "confirmed PATCH, stall={stall}: {done}; login requests={}, Graph requests={}",
+            world.fake.login().len(),
+            world.fake.graph().len()
         );
         assert_eq!(done["failedIds"], json!([]));
     }
+    assert_eq!(
+        world.fake.login().len(),
+        1,
+        "the cold refresh was exercised"
+    );
+    assert_eq!(world.fake.graph().len(), 2, "each PATCH was sent once");
 }
 
 #[tokio::test]
@@ -473,9 +490,18 @@ async fn an_accepted_send_does_not_become_unknown_when_the_unused_body_stalls() 
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     isolated!();
     let world = World::new().await;
-    world.deadlines(200, 3000);
+    // This checks response-body handling, not authentication speed. Keep the normal
+    // request budget and exercise a cold refresh slower than the former 200 ms budget.
+    let token = world.fake.state().issue(None);
     for stall in [false, true] {
+        let token = token.clone();
         world.fake.hook(move |req| {
+            if req.path.ends_with("/token") {
+                return Some(Resp::Wait(
+                    Duration::from_millis(300),
+                    Box::new(Resp::json(200, token.clone())),
+                ));
+            }
             req.path
                 .ends_with("/sendMail")
                 .then(|| Resp::UnfinishedBody(202, stall))
@@ -485,6 +511,11 @@ async fn an_accepted_send_does_not_become_unknown_when_the_unused_body_stalls() 
         assert!(sent.is_ok(), "confirmed 202, stall={stall}: {sent:?}");
         assert_eq!(sent.unwrap()["sent"], true);
     }
+    assert_eq!(
+        world.fake.login().len(),
+        1,
+        "the cold refresh was exercised"
+    );
     assert_eq!(
         world
             .fake
