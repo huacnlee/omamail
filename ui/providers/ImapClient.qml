@@ -49,6 +49,7 @@ Item {
     var code = String(error && error.message || "")
     if (code === "smtp_delivery_unknown") return "The server did not confirm delivery. Check Sent before sending again."
     if (code === "mail_auth_failed" || code === "auth_signed_out") return "The server rejected the sign-in. Sign in again."
+    if (code === "mail_dns_failed") return "Could not find the mail server. Check the server address and your internet connection."
     if (code === "mail_tls_failed") return "The mail server's secure connection could not be verified"
     if (code === "request_timed_out") return "The mail server did not answer in time"
     if (code === "imap_search_expired") return "This search has expired. Refresh to search again."
