@@ -207,6 +207,9 @@ impl Session {
         if method.starts_with("jmap.") {
             return Box::pin(self.jmap.call(method, params)).await;
         }
+        if method.starts_with("exchange.") {
+            return Box::pin(crate::providers::exchange::call(method, params)).await;
+        }
         if method.starts_with("m365.") {
             return Box::pin(crate::providers::m365::call(method, params)).await;
         }
@@ -480,7 +483,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 8, "methods": methods::available(),
+            "protocol": 1, "apiVersion": 9, "methods": methods::available(),
             "capabilities": {"agent": cfg!(all(feature = "agent", unix))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),

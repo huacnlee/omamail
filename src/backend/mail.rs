@@ -63,6 +63,9 @@ impl crate::mail::send::IdentityLookup for ProviderIdentities<'_> {
                     let checked = crate::providers::hey_access::checked_params(&json!({"accountId":account.id,"program":crate::providers::hey_access::program()?})).await?;
                     crate::providers::hey::call("hey.sendAs", &checked).await
                 }
+                Provider::Exchange => {
+                    crate::providers::exchange::call("exchange.sendAs", &params).await
+                }
                 Provider::M365 => Box::pin(m365_call("m365.sendAs", &params)).await,
                 Provider::Imap | Provider::Outlook => {
                     let account = account.clone();
@@ -109,6 +112,9 @@ impl MutationAdapter for ProviderMutation<'_> {
                 params["program"] = json!(crate::providers::hey_access::program()?);
                 let checked = crate::providers::hey_access::checked_params(&params).await?;
                 crate::providers::hey_actions::call(method, &checked).await
+            } else if method.starts_with("exchange.") {
+                // Detached by the provider itself: a caller that gives up cannot leave a batch half applied.
+                crate::providers::exchange::call(method, &params).await
             } else if method.starts_with("m365.") {
                 // Detached like IMAP: a caller that gives up cannot leave a half-sent batch behind.
                 m365_call(method, &params).await
@@ -202,6 +208,7 @@ pub(crate) async fn mutate_plan(
             }
             Provider::Jmap if plan.operation == "trash" => "jmap.trash",
             Provider::Imap | Provider::Outlook if plan.operation == "trash" => "imap.trash",
+            Provider::Exchange if plan.operation == "trash" => "exchange.trash",
             Provider::M365 if plan.operation == "trash" => "m365.trash",
             provider => {
                 params["addLabelIds"] = json!(plan.add_label_ids);
@@ -210,6 +217,7 @@ pub(crate) async fn mutate_plan(
                     Provider::Gmail => "gmail.batchModify",
                     Provider::Jmap => "jmap.batchModify",
                     Provider::Imap | Provider::Outlook => "imap.modify",
+                    Provider::Exchange => "exchange.modify",
                     Provider::M365 => "m365.modify",
                     Provider::Hey => unreachable!(),
                 }
@@ -359,6 +367,22 @@ async fn imap_call(method: &str, params: &Value) -> Result<Value, &'static str> 
         .map_err(|_| "worker_failed")?
 }
 
+/// `exchange.list` answers the page and its header-only rows together, so there is no second
+/// per-id request as in the Gmail and IMAP paths; `ids[i] == rows[i].id` is rechecked after
+/// summarizing.
+fn exchange_page(reply: &Value) -> Result<Value, &'static str> {
+    let page = &reply["page"];
+    let rows = reply["rows"]
+        .as_array()
+        .ok_or("exchange_invalid_response")?;
+    Ok(json!({
+        "ids":page["ids"],
+        "messages":summaries(rows)?,
+        "nextPageToken":page["nextPageToken"].as_str().unwrap_or(""),
+        "estimate":page["estimate"].as_u64().unwrap_or(0),
+    }))
+}
+
 async fn m365_call(method: &str, params: &Value) -> Result<Value, &'static str> {
     let method = method.to_owned();
     let params = params.clone();
@@ -466,6 +490,7 @@ impl Session {
             Provider::Outlook | Provider::Imap => {
                 Box::pin(self.imap_list(&params, request.limit)).await
             }
+            Provider::Exchange => Box::pin(self.exchange_list(&params, request.limit)).await,
             Provider::M365 => Box::pin(self.m365_list(&params, request.limit)).await,
         }
     }
@@ -548,6 +573,18 @@ impl Session {
             "nextPageToken":data["nextPageToken"].as_str().unwrap_or(""),
             "estimate":data["estimate"].as_u64().unwrap_or(0),
         }))
+    }
+
+    async fn exchange_list(&self, params: &Value, limit: u16) -> Result<Value, &'static str> {
+        let reply = Box::pin(crate::providers::exchange::call(
+            "exchange.list",
+            &json!({
+                "accountId":params["accountId"],"query":params["query"],"limit":limit,
+                "pageToken":params["pageToken"],
+            }),
+        ))
+        .await?;
+        exchange_page(&reply)
     }
 
     /// `m365.list` answers the page and its header-only rows in one reply, so there is no second
@@ -1017,6 +1054,33 @@ mod tests {
         assert_eq!(
             result["message"]["nativeContent"]["body"]["bodyDirection"],
             ""
+        );
+    }
+
+    #[test]
+    fn exchange_pages_carry_their_rows_as_summaries_in_step_with_the_ids() {
+        let row = json!({"id":"aa","threadId":"aa","labelIds":["INBOX","UNREAD"],"internalDate":"1","sizeEstimate":3,"snippet":"",
+            "payload":{"headers":[{"name":"Subject","value":"Hi"}]}});
+        let reply = json!({"page":{"ids":["aa"],"nextPageToken":"t","estimate":9},"rows":[row],"warning":null});
+        let page = exchange_page(&reply).unwrap();
+        assert_eq!(
+            (
+                page["ids"].clone(),
+                page["nextPageToken"].clone(),
+                page["estimate"].clone()
+            ),
+            (json!(["aa"]), json!("t"), json!(9))
+        );
+        assert_eq!(
+            (
+                page["messages"][0]["subject"].clone(),
+                page["messages"][0]["unread"].clone()
+            ),
+            (json!("Hi"), json!(true))
+        );
+        assert_eq!(
+            exchange_page(&json!({"page":{}})),
+            Err("exchange_invalid_response")
         );
     }
 
