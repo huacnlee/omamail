@@ -249,7 +249,7 @@ async fn tls_with_config(w: Wire, host: &str, config: ClientConfig) -> Result<Wi
     Ok(BufReader::new(Box::new(stream)))
 }
 mod bridge_tls;
-async fn dial_host(host: &str, port: u16) -> Result<TcpStream> {
+pub(crate) async fn dial_host(host: &str, port: u16) -> Result<TcpStream> {
     let addresses = async {
         if let Ok(ip) = host.parse::<std::net::IpAddr>() {
             return Ok(vec![ip]);

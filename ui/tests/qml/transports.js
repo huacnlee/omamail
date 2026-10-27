@@ -27,6 +27,8 @@ function transports(client) {
       && request.method !== "jmap.cancel" && request.method !== "jmap.invalidate"
       && request.method !== "jmap.watch" && request.method.indexOf("jmap.stream.") !== 0)
       || request.method.indexOf("imap.") === 0
+      || (request.method.indexOf("exchange.") === 0
+        && request.method !== "exchange.cancel" && request.method !== "exchange.invalidate")
       || request.method === "smtp.send" || request.method === "outlook.graphSend"
   })
 }
