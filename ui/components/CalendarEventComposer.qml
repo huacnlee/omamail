@@ -123,6 +123,27 @@ Rectangle {
     onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealField, input)
   }
 
+  component StartField: EditorField {
+    id: input
+    // Keep the duration from before typing, including while the input is
+    // incomplete. Programmatic prefills never emit textEdited.
+    property real durationMs: 0
+    onActiveFocusChanged: {
+      if (!activeFocus) return
+      durationMs = !root.allDay && root.dateRange.ok
+        ? root.dateRange.endMs - root.dateRange.startMs : 0
+      Qt.callLater(root.revealField, input)
+    }
+    onTextEdited: {
+      if (root.allDay || durationMs <= 0) return
+      var start = Calendar.editorDateTime(dateField.text, startField.text)
+      if (!start) return
+      var end = new Date(start.getTime() + durationMs)
+      endDateField.text = root.localDate(end)
+      endField.text = root.localTime(end)
+    }
+  }
+
   component EventOption: QQC.ComboBox {
     id: option
     property string value: ""
@@ -746,7 +767,7 @@ Rectangle {
       Row {
         width: parent.width
         spacing: Style.space(8)
-        EditorField {
+        StartField {
           id: dateField
           objectName: "event-start-date-field"
           width: parent.width - (startField.visible ? startField.width + parent.spacing : 0)
@@ -755,7 +776,7 @@ Rectangle {
           placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
         }
 
-        EditorField {
+        StartField {
           id: startField
           objectName: "event-start-time-field"
           visible: !root.editingAllDay

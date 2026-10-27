@@ -59,6 +59,7 @@ Item {
     function updateEvent(_sourceId, _event, _fields) {
       if (creatingEvent || eventWriting) return false
       updateCalls++
+      createdFields = _fields
       eventWriting = true
       return true
     }
@@ -238,6 +239,58 @@ Item {
       compare(save.enabled,false)
       findChild(composer,"event-end-date-field").text = "2026-09-09"
       compare(save.enabled,true)
+    }
+
+    function typeField(name, text) {
+      var field = findChild(composer, name)
+      field.forceActiveFocus()
+      field.selectAll()
+      for (var i = 0; i < text.length; i++) keyClick(text[i])
+    }
+
+    function test_start_edit_keeps_duration_through_incomplete_input_and_save() {
+      composer.beginEdit("google:me@example.com", {summary:"Half hour",
+        start:{ms:new Date(2026,9,28,15,0).getTime()},end:{ms:new Date(2026,9,28,15,30).getTime()}})
+      wait(0)
+      typeField("event-start-time-field", "1")
+      compare(findChild(composer,"event-end-time-field").text, "15:30")
+      verify(!composer.dateRange.ok)
+      for (var i = 0; i < "6:00".length; i++) keyClick("6:00"[i])
+      compare(findChild(composer,"event-end-time-field").text, "16:30")
+      keyClick(Qt.Key_Return)
+      compare(eventController.updateCalls, 1)
+      compare(eventController.createdFields.startMs, new Date(2026,9,28,16,0).getTime())
+      compare(eventController.createdFields.endMs, new Date(2026,9,28,16,30).getTime())
+    }
+
+    function test_start_edit_rolls_end_date_and_uses_manually_changed_duration() {
+      composer.beginAt(new Date(2026,9,28,15,0).getTime())
+      wait(0)
+      typeField("event-end-time-field", "15:45")
+      compare(findChild(composer,"event-start-time-field").text, "15:00")
+      typeField("event-start-time-field", "23:45")
+      compare(findChild(composer,"event-end-time-field").text, "00:30")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-29")
+      typeField("event-start-date-field", "2026-10-30")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-31")
+      compare(composer.dateRange.endMs - composer.dateRange.startMs, 45 * 60000)
+      typeField("event-start-time-field", "10:00")
+      compare(findChild(composer,"event-end-time-field").text, "10:45")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-30")
+    }
+
+    function test_start_edit_does_not_shift_all_day_or_invalid_ranges() {
+      composer.beginWith({startMs:new Date(2026,9,28).getTime(),endMs:new Date(2026,9,30).getTime(),allDay:true})
+      wait(0)
+      typeField("event-start-date-field", "2026-10-27")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-29")
+      composer.close()
+      composer.beginAt(new Date(2026,9,28,15,0).getTime())
+      wait(0)
+      typeField("event-end-time-field", "14:00")
+      typeField("event-start-time-field", "13:00")
+      compare(findChild(composer,"event-end-time-field").text, "14:00")
+      verify(composer.dateRange.ok)
     }
 
     // A suggestion from a message opens the form filled in, on the
