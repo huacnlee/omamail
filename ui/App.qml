@@ -36,6 +36,19 @@ Item {
   function syncWindowVisibility() {
     window.visible = root.opened
   }
+  function nativeWindowClosed() {
+    if (!opened || closingFromHost) return
+    if (requestClose() === false) Qt.callLater(restoreBlockedWindow)
+  }
+  function restoreBlockedWindow() {
+    if (!opened) return
+    // A native close can hide Quickshell's backing window while its requested
+    // visibility stays true. Reset that request before showing it again.
+    closingFromHost = true
+    window.visible = false
+    window.visible = true
+    closingFromHost = false
+  }
   onOpenedChanged: Qt.callLater(syncWindowVisibility)
   property string draftSavedToast: ""
   property string composeRecoveryNotice: ""
@@ -541,9 +554,10 @@ Item {
   }
 
   function requestClose() {
-    if (!prepareToLeaveSetup()) return
+    if (!prepareToLeaveSetup()) return false
     if (shell && typeof shell.hide === "function") shell.hide(pluginId)
     else close()
+    return true
   }
 
   // The rich-document override belongs to one message.
@@ -1399,7 +1413,14 @@ Item {
     Component.onCompleted: root.syncWindowVisibility()
 
     onVisibleChanged: {
-      if (!visible && root.opened && !root.closingFromHost) root.requestClose()
+      if (!visible) root.nativeWindowClosed()
+    }
+
+    Connections {
+      target: window
+      // The standalone adapter is an Item; its ApplicationWindow owns closing.
+      ignoreUnknownSignals: true
+      function onClosed() { root.nativeWindowClosed() }
     }
 
     Rectangle {

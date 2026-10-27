@@ -69,6 +69,8 @@ The Linux Omarchy plugin offers **Connect Gmail...**: enter your Google address,
 
 Automatic setup requires Google Cloud CLI and uv. The setup page offers **Install setup tools...** if either is missing, opening a terminal for package installation and any password prompt; you can also install them yourself with `omarchy pkg aur add google-cloud-cli` and `omarchy pkg add uv`. The helper uses uv to prepare an isolated Python dependency environment on its first run. If Google Cloud CLI needs authentication, its normal Google sign-in page opens. No billing account is linked, and no client IDs belonging to another application are used. Setup progress and credentials are saved with owner-only permissions; retry resumes the same project. Cancellation leaves any created project in your Google account.
 
+Automatic mode is the new default for Gmail in the Linux plugin; the standalone host keeps manual setup. See [Personal Google onboarding](docs/GOOGLE-ONBOARDING.md) for the complete flow, disabled controls, persistence, recovery, and experimental support boundaries.
+
 See [mailbox setup](docs/MAILBOXES.md) for provider instructions and limitations, including Microsoft 365 and Proton Mail Bridge.
 
 ## Make Omamail the default mail client
