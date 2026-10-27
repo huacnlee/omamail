@@ -94,6 +94,7 @@ pub const ALL: &[&str] = &[
     "calendar.request",
     "calendar.discover",
     "calendar.attendance",
+    "calendar.saveInvitation",
     "calendar.reminders",
     "auth.form",
     "auth.begin",

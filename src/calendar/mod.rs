@@ -5,6 +5,7 @@ use std::{sync::OnceLock, time::Duration};
 
 pub mod attendance;
 mod discovery;
+pub mod invitations;
 pub mod reminders;
 pub use discovery::discover;
 pub use discovery::google as discover_google;
@@ -97,7 +98,7 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
     let op = text(params, "operation")?;
     let method = match op {
         "list" | "get" | "lookup" | "instances" => Method::GET,
-        "create" | "move" => Method::POST,
+        "create" | "move" | "import" => Method::POST,
         "update" => Method::PATCH,
         "delete" => Method::DELETE,
         _ => return Err("calendar_invalid_operation"),
@@ -180,6 +181,9 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
                     .unwrap();
                 }
             }
+            if op == "import" {
+                request.url.path_segments_mut().unwrap().push("import");
+            }
             if matches!(op, "get" | "update" | "delete" | "instances" | "move") {
                 let id = text(params, "eventId")?;
                 if id == "." || id == ".." {
@@ -253,7 +257,7 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
                     ]);
                 }
             }
-            if op == "create" || op == "update" {
+            if op == "create" || op == "update" || op == "import" {
                 let value: Value =
                     serde_json::from_str(&request.body).map_err(|_| "calendar_invalid_input")?;
                 if !value.is_object() {

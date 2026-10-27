@@ -3,6 +3,8 @@ import "../message/Message.js" as Mail
 import "../message/Calendar.js" as Calendar
 import "../providers/Registry.js" as Provider
 import "../calendar/Calendar.js" as Events
+import "../calendar/Invitations.js" as Invitations
+import "../backend/Plain.js" as Plain
 
 // Native attendance is authoritative where the provider supports it. Other
 // providers send an RFC 5546 reply through their mail transport.
@@ -16,6 +18,22 @@ QtObject {
   property bool reconciling: false
   property int attendanceRevision: 0
   property string fallbackMessageId: ""
+  property bool calendarSaving: false
+  property bool calendarDone: false
+  property string calendarMessage: ""
+  readonly property var destination: Provider.calendarAttendanceMethod(account.providerId) === ""
+    ? Invitations.destination(account.platform ? account.platform.settings : null, account.accountId) : null
+  readonly property bool calendarSupported: !!account.backend && account.backend.ready && account.backend.apiVersion >= 9
+  onDestinationChanged: { calendarDone = false; calendarMessage = "" }
+  readonly property var calendarState: ({
+    visible: !!destination && !!account.selectedInvite,
+    busy: calendarSaving,
+    text: calendarMessage || (calendarSupported ? "Accepted invitations → " + String(destination && destination.name || "Google Calendar")
+      : "Update the backend to save accepted invitations"),
+    canSave: !!destination && calendarSupported && !calendarSaving && !calendarDone && !account.rsvpSending && !!account.selectedInvite
+      && (Calendar.normalizedResponse(Calendar.responseOf(account.selectedInvite, account.receivedAsAddress)) !== ""
+        || account.selectedInvite.method === "CANCEL" || account.selectedInvite.status === "CANCELLED")
+  })
   readonly property bool fallbackAvailable: (fallbackMessageId !== "" && fallbackMessageId === account.selectedId)
     || (!!account.selectedInvite && account.selectedId !== ""
       && Provider.calendarAttendanceMethod(account.providerId) !== ""
@@ -23,8 +41,8 @@ QtObject {
       && account.backend.apiVersion > 0 && account.backend.apiVersion < 6)
   property Connections selection: Connections {
     target: rsvpAction.account
-    function onSelectedIdChanged() { rsvpAction.reconciledKey = ""; rsvpAction.attendanceRevision++; rsvpAction.fallbackMessageId = "" }
-    function onSelectedInviteChanged() { Qt.callLater(rsvpAction.reconcile) }
+    function onSelectedIdChanged() { rsvpAction.reconciledKey = ""; rsvpAction.attendanceRevision++; rsvpAction.fallbackMessageId = ""; rsvpAction.calendarMessage = ""; rsvpAction.calendarDone = false }
+    function onSelectedInviteChanged() { rsvpAction.calendarDone = false; Qt.callLater(rsvpAction.reconcile) }
   }
   property Timer reconcileTimer: Timer {
     interval: 60000
@@ -99,7 +117,7 @@ QtObject {
   // emits `replySent`, which closes it. This finishes with a card that has
   // changed its mind.
   function run(response, mailOnly) {
-    if (!account.ready || account.rsvpSending || !account.canRespondToInvite) return
+    if (!account.ready || account.rsvpSending || calendarSaving || !account.canRespondToInvite) return
     var answer = String(response || "")
     var method = Provider.calendarAttendanceMethod(account.providerId)
     if (mailOnly === true && !fallbackAvailable) return
@@ -122,6 +140,9 @@ QtObject {
     // reader has moved on does not mark a different message answered.
     var messageId = account.selectedId
     var invited = account.selectedInvite
+    var identity = account.accountId
+    var target = destination ? Plain.plain(destination) : null
+    var answeredBody = inviteBody(Calendar.withResponse(invited, answeringAs, answer))
     var summary = account.selectedMessage
     var payload = Mail.buildSendPayload({
       // The ATTENDEE line claims this address; the envelope has to agree, or a
@@ -148,6 +169,7 @@ QtObject {
       return
     }
     account.rsvpSending = true
+    calendarDone = false
     account.clearNotice()
 
     account.api.sendMessage(payload, function(sent, error) {
@@ -158,8 +180,47 @@ QtObject {
       }
       account.note(mailOnly === true ? "Reply email sent; Calendar attendance is not confirmed" : "Answer sent to " + fields.to)
       if (mailOnly === true) return
-      if (account.selectedId !== messageId) return
-      rememberResponse(messageId, invited, answeringAs, answer)
+      if (account.accountId !== identity) return
+      account.bodies.put(messageId, answeredBody)
+      if (account.selectedId === messageId) account.selectedInvite = answeredBody.invite
+      if (target) saveToCalendar(target, identity, messageId, invited, Calendar.normalizedResponse(answer))
+    })
+  }
+
+  function retryCalendar() {
+    if (!calendarState.canSave) return
+    var invited = account.selectedInvite
+    var response = invited.method === "CANCEL" || invited.status === "CANCELLED" ? "cancelled"
+      : Calendar.normalizedResponse(Calendar.responseOf(invited, account.receivedAsAddress))
+    saveToCalendar(Plain.plain(destination), account.accountId, account.selectedId, invited, response)
+  }
+
+  function saveToCalendar(target, identity, messageId, invited, response) {
+    if (!calendarSupported || calendarSaving) {
+      if (account.selectedId === messageId) calendarMessage = "Reply sent; update the backend to save to calendar"
+      return
+    }
+    var params = Invitations.params(target, identity, invited, response)
+    if (!params) {
+      if (account.selectedId === messageId) calendarMessage = "Not saved: the invitation has incomplete dates or an unresolved time zone"
+      return
+    }
+    calendarSaving = true
+    if (account.selectedId === messageId) calendarMessage = "Saving to calendar…"
+    account.backend.call("calendar.saveInvitation", params, function(result, error) {
+      rsvpAction.calendarSaving = false
+      if (!error && result && account.platform && typeof account.platform.invitationCalendarSaved === "function")
+        account.platform.invitationCalendarSaved()
+      if (identity !== account.accountId || messageId !== account.selectedId
+          || !rsvpAction.destination || rsvpAction.destination.id !== target.id
+          || !account.selectedInvite || account.selectedInvite.uid !== invited.uid
+          || Number(account.selectedInvite.sequence || 0) !== Number(invited.sequence || 0)) return
+      rsvpAction.calendarDone = !error && !!result
+      rsvpAction.calendarMessage = error || !result
+        ? "Not saved to calendar. Check calendar access, then retry; your reply will not be resent."
+        : Invitations.outcome(result.status)
+      if (error && error.message === "calendar_invitation_series_required")
+        rsvpAction.calendarMessage = "Save the original series invitation before updating this occurrence"
     })
   }
 
@@ -214,7 +275,11 @@ QtObject {
 
   function cacheInvite(messageId, updated) {
     account.selectedInvite = updated
-    account.bodies.put(messageId, ({
+    account.bodies.put(messageId, inviteBody(updated))
+  }
+
+  function inviteBody(updated) {
+    return {
       text: account.selectedBody.text,
       source: account.selectedBody.source,
       html: "",
@@ -222,6 +287,6 @@ QtObject {
       images: account.selectedImages,
       invite: updated,
       unsubscribe: account.selectedUnsubscribe
-    }))
+    }
   }
 }

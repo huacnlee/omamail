@@ -337,6 +337,18 @@ impl Session {
             };
             return Box::pin(crate::calendar::call(params, token.as_deref())).await;
         }
+        if method == "calendar.saveInvitation" {
+            crate::calendar::invitations::validate(params)?;
+            let token = self
+                .gmail
+                .access_token(
+                    params["source"]["accountId"]
+                        .as_str()
+                        .ok_or("invalid_params")?,
+                )
+                .await?;
+            return crate::calendar::invitations::google(params, &token).await;
+        }
         if method == "calendar.attendance" {
             crate::calendar::attendance::validate(params)?;
             let token = self
@@ -480,7 +492,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 8, "methods": methods::available(),
+            "protocol": 1, "apiVersion": 9, "methods": methods::available(),
             "capabilities": {"agent": cfg!(all(feature = "agent", unix))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),

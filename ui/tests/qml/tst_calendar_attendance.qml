@@ -18,6 +18,7 @@ TestCase {
   QtObject {
     id: owner
     property var backend: null
+    property var platform: null
     property bool ready: true
     property bool rsvpSending: false
     property bool canRespondToInvite: true
