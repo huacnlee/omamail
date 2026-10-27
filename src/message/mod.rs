@@ -18,7 +18,7 @@ pub fn parse(raw: &[u8]) -> Result<Value, &'static str> {
     parse_up_to(raw, MAX_MESSAGE)
 }
 
-/// `parse` for a provider whose transport carries more than `MAX_MESSAGE` and bounds the message itself.
+/// `parse` for a provider that reads more than `MAX_MESSAGE` and bounds the message itself.
 pub fn parse_up_to(raw: &[u8], limit: usize) -> Result<Value, &'static str> {
     if raw.len() > limit {
         return Err("message_too_large");

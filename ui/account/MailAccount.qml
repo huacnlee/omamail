@@ -60,6 +60,9 @@ Item {
   // what a hand edit could have written, so it is normalised before anything
   // sends a credential to it.
   property var jmapSettings: null
+  // And for an Exchange account: its web service and login, normalised before
+  // a password goes to either.
+  property var exchangeSettings: null
   // Only the mailbox that predates multi-account may claim the old
   // client-keyed refresh token. See AuthManager.mayAdoptLegacyToken.
   property bool mayAdoptLegacyToken: true
@@ -2691,14 +2694,14 @@ Item {
 
   signal accountIdentified(string email)
 
-  // The server settings a sign-in learned, for the account list to write onto
-  // this account's entry. The same shape as `accountIdentified`: a fact the
-  // sign-in found out that belongs on the entry, which only the list owns.
-  // This object is built *from* the entry — its `jmapSettings` come down from
-  // it — so writing here would be writing to a copy that the next read of the
-  // file replaces, and a mailbox that had signed in perfectly well would open
-  // on its setup page again after every restart.
-  signal serverSettingsLearned(var jmap)
+  // The server settings a sign-in learned (`{ jmap }` or `{ exchange }`), for
+  // the account list to write onto this account's entry. The same shape as
+  // `accountIdentified`: a fact the sign-in found out that belongs on the entry,
+  // which only the list owns. This object is built *from* the entry — its
+  // settings come down from it — so writing here would be writing to a copy
+  // that the next read of the file replaces, and a mailbox that had signed in
+  // perfectly well would open on its setup page again after every restart.
+  signal serverSettingsLearned(var values)
 
   // Which pair of objects this account actually runs on. Both loaders build the
   // same two shapes — something that signs in, and something that fetches — and
@@ -2711,9 +2714,10 @@ Item {
     id: authLoader
     sourceComponent: root.providerId === "imap" ? imapAuthComponent
       : (root.providerId === "jmap" ? jmapAuthComponent
+      : (root.providerId === "exchange" ? exchangeAuthComponent
       : (root.providerId === "outlook" ? outlookAuthComponent
       : (root.providerId === "m365" ? m365AuthComponent
-        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent))))
+        : (root.providerId === "hey" ? heyAuthComponent : gmailAuthComponent)))))
   }
 
   // The client takes the manager as a required property, so it cannot be built
@@ -2728,8 +2732,9 @@ Item {
       : (root.providerId === "imap" || root.providerId === "outlook"
         ? imapClientComponent
         : (root.providerId === "jmap" ? jmapClientComponent
-        : (root.providerId === "m365" ? m365ClientComponent
-          : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent))))
+          : (root.providerId === "exchange" ? exchangeClientComponent
+          : (root.providerId === "m365" ? m365ClientComponent
+            : (root.providerId === "hey" ? heyClientComponent : gmailClientComponent)))))
   }
 
   Component {
@@ -2796,7 +2801,7 @@ Item {
       // this object: `configured` reads `settings`, and `settings` is bound to
       // the entry, so the entry is the only place the answer can land and stay.
       onSessionVerified: function(result) {
-        root.serverSettingsLearned(Accounts.jmapSettingsAfterSignIn(settings, result))
+        root.serverSettingsLearned({ jmap: Accounts.jmapSettingsAfterSignIn(settings, result) })
       }
       onLoginSucceeded: {
         root.lastError = lastError
@@ -2805,6 +2810,29 @@ Item {
       onLoggedOut: root.clearNotice()
       onCredentialsSaved: root.note("Mailbox saved")
       onSessionUnavailable: function(reason) { root.fail(reason) }
+    }
+  }
+
+  Component {
+    id: exchangeAuthComponent
+
+    ExchangeAuth {
+      backend: root.backend
+      platform: root.platform
+      pluginDir: root.pluginDir
+      accountId: root.accountId
+      // The login is the address until another is typed.
+      address: root.configuredEmail
+      settings: Accounts.makeExchangeSettings(root.exchangeSettings)
+
+      onLoginSucceeded: {
+        root.lastError = lastError
+        root.afterSignIn()
+      }
+      onLoggedOut: root.clearNotice()
+      onCredentialsSaved: root.note("Mailbox saved")
+      onSessionUnavailable: function(reason) { root.fail(reason) }
+      onSettingsLearned: function(values) { root.serverSettingsLearned({ exchange: values }) }
     }
   }
 
@@ -2880,6 +2908,15 @@ Item {
   Component {
     id: imapClientComponent
     ImapClient {
+      auth: authLoader.item
+      email: root.configuredEmail
+      backend: root.backend
+    }
+  }
+
+  Component {
+    id: exchangeClientComponent
+    ExchangeClient {
       auth: authLoader.item
       email: root.configuredEmail
       backend: root.backend
