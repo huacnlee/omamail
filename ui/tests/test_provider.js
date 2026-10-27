@@ -17,18 +17,21 @@ for (const method of ["query", "cachedSummaryInSearch", "labelQuery", "addressQu
 
 // ------------------------------------------------------------- the registry
 //
-// Six providers, and the ids are what an accounts.json holds — renaming one
+// Seven providers, and the ids are what an accounts.json holds — renaming one
 // silently orphans every account already written with the old name.
 //
 // The order is the order the chooser lists them in: the four hosted mailboxes
-// with a service of their own, then the two that are every other mailbox, IMAP
+// with a service of their own, then Exchange, which is a particular kind of
+// server rather than a service, then the two that are every other mailbox, IMAP
 // first because it is the one nearly every server speaks.
-deepEqual(provider.ids(), ["gmail", "hey", "outlook", "m365", "imap", "jmap"])
+deepEqual(provider.ids(), ["gmail", "hey", "outlook", "m365", "exchange", "imap", "jmap"])
 assert.strictEqual(provider.get("gmail").name, "Gmail")
 assert.strictEqual(provider.get("outlook").name, "Outlook")
 assert.strictEqual(provider.get("imap").name, "IMAP")
 assert.strictEqual(provider.get("hey").name, "HEY")
 assert.strictEqual(provider.get("jmap").name, "JMAP")
+assert.strictEqual(provider.get("exchange").name, "Exchange")
+assert.strictEqual(provider.get("exchange").id, "exchange", "it is a provider, not Gmail by fallback")
 assert.strictEqual(provider.exists("jmap"), true)
 
 // An id from a newer build, or a hand-edited file, still has to open a window.
@@ -111,6 +114,15 @@ assert.strictEqual(provider.webBoxUrl("gmail", "in:inbox"),
   "https://mail.google.com/mail/u/0/#search/in%3Ainbox")
 assert.strictEqual(provider.can("gmail", "invented"), false, "an unknown capability is a no")
 
+// Exchange's ceiling: it reads and sends, flags, and acts on many messages at
+// once. Archive is not among them: Microsoft documents no plain archive folder
+// name, and folder names are never guessed.
+for (const capability of ["star", "batch", "search", "send"])
+  assert.strictEqual(provider.can("exchange", capability), true, "Exchange can " + capability)
+for (const capability of ["archive", "labels", "move", "threads", "conversations", "spam", "web", "webBox",
+    "manageLabels"])
+  assert.strictEqual(provider.can("exchange", capability), false, "Exchange cannot " + capability)
+
 // HEY's own shape. The two that are off are off because HEY has no such verb —
 // a star that quietly moved a thread out of the Imbox, or an archive that filed
 // it in Paper Trail, would be a promise the provider cannot keep.
@@ -180,6 +192,14 @@ assert.strictEqual(provider.refusal("gmail", "archive"), "")
 assert.strictEqual(provider.refusal("hey", "archive", { archive: "not this way" }), "",
   "a ceiling that never offered it has nothing to explain")
 
+// An account without a Sent folder withdraws sending, the one refusal its check can send.
+const exchangeRefusals = { send: "No Sent folder was found" }
+assert.strictEqual(provider.can("exchange", "send", exchangeRefusals), false)
+assert.strictEqual(provider.refusal("exchange", "send", exchangeRefusals), exchangeRefusals.send)
+for (const capability of ["star", "batch"])
+  assert.strictEqual(provider.can("exchange", capability, exchangeRefusals), true, "a refusal takes away only what it names")
+assert.strictEqual(provider.refusal("exchange", "archive", { archive: "no" }), "", "a ceiling that never offered it has nothing to explain")
+
 // Every provider here can be connected to. The `unavailable` seam is kept for
 // the next one that cannot be, which is what HEY was until `hey` shipped.
 assert.strictEqual(provider.isConnectable("gmail"), true)
@@ -224,6 +244,23 @@ for (const id of ["gmail", "imap"]) {
   assert.ok(spam[0].optional, id + "/spam yields the strip before the inbox does")
 }
 assert.strictEqual(provider.mailboxes("hey").filter(box => box.key === "spam").length, 0)
+
+// Exchange's rail is its folders by role, in the queries the backend resolves.
+// Junk and Trash are the two a server may not have; there is no Archive row.
+deepEqual(provider.mailboxes("exchange").map(box => box.key + "=" + box.query), ["inbox=role:inbox",
+  "unread=role:inbox unseen", "starred=role:inbox flagged", "drafts=role:drafts", "sent=role:sent",
+  "spam=role:junk", "trash=role:trash"])
+deepEqual(provider.mailboxes("exchange").filter(box => box.optional).map(box => box.key), ["spam", "trash"])
+deepEqual(provider.mailboxes("exchange", ["spam"]).map(box => box.key),
+  ["inbox", "unread", "starred", "drafts", "sent", "trash"], "a folder the server lacks loses its row")
+assert.strictEqual(provider.mailboxFor("exchange", "starred").label, "Flagged")
+assert.strictEqual(provider.mailboxFor("exchange", "spam").label, "Junk")
+assert.strictEqual(provider.unreadQuery("exchange"), "role:inbox unseen")
+
+// Only Exchange declares that its listing counts the Flagged view rather than
+// estimating it, so only its Flagged row may carry a number.
+for (const id of provider.ids())
+  assert.strictEqual(provider.countsStarred(id), id === "exchange", id)
 
 // A mutation of the returned list must not reach the provider definition.
 const boxes = provider.mailboxes("gmail")
@@ -309,6 +346,15 @@ assert.strictEqual(provider.query("imap", "inbox", "", "in:inbox"), "folder:INBO
 assert.strictEqual(provider.query("hey", "inbox", "", "in:inbox"), "box:imbox")
 assert.strictEqual(provider.query("outlook", "inbox", "", "in:inbox"), "folder:INBOX")
 
+// Exchange's are roles, which the backend resolves to this account's folders,
+// and a typed search is the text filter with the words unaltered.
+assert.strictEqual(provider.query("exchange", "inbox", "", "in:inbox"), "role:inbox",
+  "the inherited Gmail default gives way to the provider's own Inbox")
+assert.strictEqual(provider.query("exchange", "trash", "say \"hi\": it's from:jane", ""),
+  "text:say \"hi\": it's from:jane", "no operator is interpreted and no quote is added")
+assert.strictEqual(provider.labelQuery("exchange", "Projects"), "", "it has no folders of its own to open")
+assert.strictEqual(provider.cachedSummaryInSearch("exchange", "text:x", { labelIds: ["TRASH"] }), false)
+
 // HEY's own queries, which the client reads back as commands.
 assert.strictEqual(provider.query("hey", "inbox", "", ""), "box:imbox")
 assert.strictEqual(provider.query("hey", "feed", "", ""), "box:feedbox")
@@ -378,6 +424,7 @@ assert.strictEqual(provider.webHomeUrl("gmail"), "https://mail.google.com/mail/u
 assert.strictEqual(provider.webHomeUrl("hey"), "https://app.hey.com")
 assert.strictEqual(provider.webHomeUrl("imap"), "", "an IMAP server is not a website")
 assert.strictEqual(provider.webHomeUrl("outlook"), "https://outlook.live.com/mail/")
+assert.strictEqual(provider.webHomeUrl("exchange"), "", "an organization's server is not one website")
 
 // ------------------------------------------------------------------ logos
 
@@ -395,6 +442,7 @@ assert.strictEqual(provider.mark("imap"), "")
 assert.strictEqual(provider.logo("imap"), "")
 assert.strictEqual(provider.mark("outlook"), "outlook.svg")
 assert.strictEqual(provider.logo("outlook"), "outlook.svg", "one square mark serves both")
+assert.strictEqual(provider.logo("exchange"), "", "no brand artwork is borrowed for it")
 
 // ------------------------------------------------------------------- auth
 
@@ -413,6 +461,8 @@ assert.strictEqual(provider.usesOAuth("outlook"), true)
 assert.strictEqual(provider.usesOAuth("imap"), false)
 assert.strictEqual(provider.usesPassword("imap"), true)
 assert.strictEqual(provider.usesPassword("gmail"), false)
+assert.strictEqual(provider.usesPassword("exchange"), true)
+assert.strictEqual(provider.nativeSync("exchange"), true, "the backend polls it")
 
 assert.strictEqual(provider.badge("imap"), "IMAP")
 assert.strictEqual(provider.badge("jmap"), "JMAP", "the switcher badge is the protocol, no host")
@@ -430,6 +480,10 @@ assert.strictEqual(
 assert.strictEqual(provider.detail("jmap", {}), "JMAP",
   "a mailbox that has not signed in yet still says what kind it is")
 assert.strictEqual(provider.detail("jmap", null), "JMAP")
+assert.strictEqual(provider.detail("exchange", { exchange: { ewsUrl: "https://mail.example.org:8443/EWS/Exchange.asmx" } }),
+  "Exchange · mail.example.org:8443", "a port that is not the usual one is part of the server")
+assert.strictEqual(provider.detail("exchange", {}), "Exchange",
+  "a mailbox that has not signed in yet still says what kind it is")
 assert.strictEqual(provider.DEFAULT_ID, "gmail",
   "an account written before providers existed is a Gmail account")
 

@@ -8,7 +8,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/tests/qml/tst_credential_store_retry.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
-	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/DraftList.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
+	ui/account/MailAccount.qml ui/account/StarredCount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/DraftList.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
 	ui/providers/OutlookAuth.qml \
@@ -16,10 +16,12 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/providers/ImapAuth.qml ui/providers/ImapClient.qml \
 	ui/providers/HeyAuth.qml ui/providers/HeyClient.qml \
 	ui/providers/JmapAuth.qml ui/providers/JmapClient.qml ui/providers/JmapPush.qml \
+	ui/providers/ExchangeAuth.qml ui/providers/ExchangeClient.qml \
 	ui/components/ImapSetupPage.qml \
 	ui/components/OutlookSetupPage.qml \
 	ui/components/M365SetupPage.qml \
 	ui/components/JmapSetupPage.qml \
+	ui/components/ExchangeSetupPage.qml \
 	ui/components/HeySetupPage.qml \
 	ui/components/ProviderPicker.qml \
 	ui/components/GmailIcon.qml \
@@ -133,6 +135,7 @@ test-js:
 	node ui/tests/test_backend_runtime.js
 	node ui/tests/test_backend_chunks.js
 	node tests/test_imap_backend.js
+	node tests/test_exchange_backend.js
 	node tests/test_hey_backend.js
 	node tests/test_gmail_backend.js
 	node ui/tests/test_compose_recovery.js
@@ -180,6 +183,7 @@ test-js:
 	node ui/tests/test_jmap.js
 	node ui/tests/test_jmap_threads.js
 	node ui/tests/test_jmap_helpers.js
+	node ui/tests/test_exchange.js
 	node ui/tests/test_hey.js
 
 test-shell: test-shell-portable test-shell-libcurl
