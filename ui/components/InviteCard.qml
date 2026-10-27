@@ -246,42 +246,16 @@ Rectangle {
 
     // --------------------------------------------------------------- RSVP
 
-    Row {
+    RsvpRow {
       id: rsvpRow
-      spacing: Style.space(6)
       visible: root.canRespond && !root.fallbackAvailable
-
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        text: "Going?"
-        color: root.dimColor
-        font.family: root.panelFontFamily
-        font.pixelSize: Style.font.caption
-      }
-
-      Repeater {
-        model: [
-          { answer: "accepted", label: "Yes" },
-          { answer: "tentative", label: "Maybe" },
-          { answer: "declined", label: "No" }
-        ]
-
-        IconTextButton {
-          required property var modelData
-          anchors.verticalCenter: parent.verticalCenter
-          enabled: !root.sending
-          selected: root.response === modelData.answer
-          // The fill alone must never carry this: a theme can put the selected
-          // colour close enough to the normal one to say nothing at all.
-          iconName: root.response === modelData.answer ? "check" : ""
-          text: modelData.label
-          foreground: root.textColor
-          accent: root.accentColor
-          fontFamily: root.panelFontFamily
-          fontSize: Style.font.caption
-          onClicked: root.respondRequested(modelData.answer)
-        }
-      }
+      response: root.response
+      sending: root.sending
+      textColor: root.textColor
+      accentColor: root.accentColor
+      dimColor: root.dimColor
+      panelFontFamily: root.panelFontFamily
+      onAnswered: function(answer) { root.respondRequested(answer) }
     }
 
     Column {
