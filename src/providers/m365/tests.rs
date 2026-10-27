@@ -697,6 +697,19 @@ impl World {
         std::fs::write(path.join("accounts.json"), registry.to_string()).unwrap();
     }
 
+    /// Establish authentication before a fixture times only Graph's response or upload.
+    /// Loading the native trust store for the login client can itself exceed the
+    /// deliberately short 200–300 ms operation clock on macOS.
+    pub(super) async fn warm_token(&self) {
+        crate::auth::access_token("m365", ACCOUNT, "graph")
+            .await
+            .unwrap();
+        assert!(
+            self.fake.graph().is_empty(),
+            "warming auth must not send mail requests"
+        );
+    }
+
     /// Deadlines for the calls that follow: an operation's and a call's, in milliseconds.
     pub(super) fn deadlines(&self, operation: u64, call: u64) {
         *super::graph::SHORT_OPERATION.lock().unwrap() =
