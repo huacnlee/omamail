@@ -188,6 +188,7 @@ test-shell: test-shell-portable test-shell-libcurl
 # asserts what the script did with the answer, so any libcurl can run it.
 test-shell-portable:
 	python3 tests/test_google_setup_installer.py
+	python3 tests/test_google_setup_cookies.py
 	python3 tests/test_app_make.py
 	python3 tests/test_diagnostics.py
 	python3 tests/test_network_migration.py

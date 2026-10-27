@@ -11,10 +11,12 @@ Cloud Console APIs are undocumented: fail closed when their schema changes.
 """
 
 import argparse
+import configparser
 import contextlib
 import fcntl
 import hashlib
-import importlib.util
+import http.cookiejar
+import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -22,6 +24,7 @@ import re
 import secrets
 import shutil
 import signal
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -47,6 +50,14 @@ BROWSERS = {
     'firefox': ('firefox', None),
 }
 child = None
+COOKIE_READER_VERSION = '0.20.1'
+
+
+def cookie_dependency_available():
+    try:
+        return importlib.metadata.version('browser-cookie3') == COOKIE_READER_VERSION
+    except importlib.metadata.PackageNotFoundError:
+        return False
 
 
 class Refused(Exception):
@@ -77,7 +88,7 @@ def preflight():
     missing = []
     if not shutil.which('gcloud'):
         missing.append('Google Cloud CLI')
-    if not shutil.which('uv') and importlib.util.find_spec('browser_cookie3') is None:
+    if not shutil.which('uv') and not cookie_dependency_available():
         missing.append('uv')
     browser = 'edge'
     command = (['omarchy-cmd-default-browser'] if shutil.which('omarchy-cmd-default-browser')
@@ -258,19 +269,104 @@ def cookie_database(browser, profile):
     default_path = BROWSERS[browser][1]
     if not default_path:
         if browser == 'firefox':
-            import browser_cookie3
-            try:
-                # Resolve the same default profile the cookie loader uses;
-                # constructing the reader does not load its cookies.
-                return Path(browser_cookie3.Firefox(domain_name='.google.com').cookie_file)
-            except Exception:
+            # Resolve only profile metadata; never read Firefox sessionstore
+            # files, which contain unrelated tabs and session cookies.
+            directory = Path.home() / '.mozilla' / 'firefox'
+            if not (directory / 'profiles.ini').is_file():
                 return None
+            config = configparser.ConfigParser(interpolation=None)
+            with (directory / 'profiles.ini').open(encoding='utf-8') as source:
+                metadata = source.read(65537)
+            require(len(metadata) <= 65536, 'Firefox profile metadata is too large. Choose a profile explicitly.')
+            config.read_string(metadata)
+            installed = {config[s].get('Default') for s in config.sections()
+                         if s.startswith('Install') and config[s].get('Default')}
+            profiles = [config[s] for s in config.sections()
+                        if s.startswith('Profile') and config[s].get('Path')]
+            selected = [p for p in profiles if p['Path'] in installed] if installed else [
+                p for p in profiles if p.get('Default') == '1']
+            if not selected and len(profiles) == 1:
+                selected = profiles
+            require(len(selected) == 1, 'Choose the Firefox cookie database for the profile signed in to Google.')
+            selected = selected[0]
+            directory = (Path(selected['Path']) if selected.get('IsRelative') == '0'
+                         else directory / selected['Path'])
+            return directory.absolute() / 'cookies.sqlite'
         return None
     config = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
     path = config / default_path
     if not path.exists() and (path.parent / 'Network' / 'Cookies').is_file():
         path = path.parent / 'Network' / 'Cookies'
     return path
+
+
+def google_cookies(browser, database):
+    """Read Google records in place; no snapshots, backup API or lock bypass.
+
+    browser-cookie3 is pinned and used ONLY for Chromium key derivation and
+    decryption. Its load(), database connection and Firefox session readers
+    must never be called: those own broader access and copying fallbacks.
+    """
+    jar = http.cookiejar.CookieJar()
+    decryptor = None
+    try:
+        # mode=ro preserves SQLite locking/WAL semantics. immutable/nolock
+        # would silently ignore live changes or bypass the browser's locks.
+        with contextlib.closing(sqlite3.connect(database.as_uri() + '?mode=ro',
+                                               uri=True, timeout=1)) as connection:
+            connection.execute('PRAGMA query_only=ON')
+            connection.execute('PRAGMA temp_store=MEMORY')
+            connection.execute('BEGIN')
+            host_column = 'host' if browser == 'firefox' else 'host_key'
+            domain = f"({host_column} = 'google.com' OR {host_column} GLOB '*.google.com')"
+            if browser == 'firefox':
+                # Never mix container/private identities into the normal
+                # browser profile. Unknown/older schemas fail closed.
+                rows = connection.execute(
+                    'SELECT host, path, isSecure, expiry, name, value, isHttpOnly '
+                    'FROM moz_cookies WHERE ' + domain + " AND originAttributes = '' LIMIT 513")
+                integrity = False
+            else:
+                version = connection.execute("SELECT value FROM meta WHERE key = 'version'").fetchone()
+                require(version and str(version[0]).isdigit(), 'Unsupported browser cookie schema.')
+                integrity = int(version[0]) >= 24
+                rows = connection.execute(
+                    'SELECT host_key, path, is_secure, expires_utc, name, value, is_httponly, encrypted_value '
+                    'FROM cookies WHERE ' + domain + ' LIMIT 513')
+            for index, row in enumerate(rows):
+                require(index < 512, 'Too many Google cookies in this profile.')
+                host, path, secure, expires, name, value, http_only = row[:7]
+                if browser != 'firefox':
+                    expires = expires / 1000000 - 11644473600 if expires else None
+                if expires is not None and expires <= time.time():
+                    continue
+                if browser != 'firefox' and row[7]:
+                    require(row[7][:3] in (b'v10', b'v11'), 'Unsupported browser cookie encryption.')
+                    if decryptor is None:
+                        require(cookie_dependency_available(), 'The pinned browser decryption dependency is unavailable.')
+                        import browser_cookie3
+                        reader = {'edge': browser_cookie3.Edge, 'chrome': browser_cookie3.Chrome,
+                                  'chromium': browser_cookie3.Chromium, 'brave': browser_cookie3.Brave}[browser]
+                        # Supplying cookie_file avoids profile discovery. These
+                        # pinned constructors derive keys, but do not load DBs.
+                        decryptor = reader(cookie_file=str(database), domain_name='.google.com')
+                    value = decryptor._decrypt(value, row[7], integrity)
+                require(all(isinstance(item, str) and len(item) <= 16384
+                            and not any(ord(c) < 32 or ord(c) == 127 for c in item)
+                            for item in (host, path, name, value)), 'Invalid browser cookie record.')
+                jar.set_cookie(http.cookiejar.Cookie(
+                    0, name, value, None, False, host, host.startswith('.'), host.startswith('.'),
+                    path, True, bool(secure), expires, expires is None, None, None,
+                    {'HTTPOnly': ''} if http_only else {}))
+        return jar
+    except Exception:
+        # No database path, row value, keyring error or third-party exception
+        # crosses the JSON progress boundary. Cancellation still closes SQLite.
+        recovery = ('Firefox needs a saved sign-in outside private windows and containers. '
+                    if browser == 'firefox' else 'Unlock your desktop keyring. ')
+        raise Refused('Could not read Google sign-in from this browser profile. '
+                      + recovery + 'If the profile is busy, close the browser and retry. '
+                      'You can also use an existing client.') from None
 
 
 def open_google_sign_in(account, browser, profile, destination):
@@ -331,25 +427,10 @@ class ConsoleSession:
     origin = 'https://console.cloud.google.com'
 
     def __init__(self, account, browser, profile):
-        import browser_cookie3
-
-        loader_name = BROWSERS[browser][0]
-        kwargs = {'domain_name': '.google.com'}
         database = cookie_database(browser, profile)
-        if browser == 'firefox' and database is None:
+        if database is None or not database.is_file():
             raise GoogleSignInRequired()
-        if database:
-            if not database.is_file():
-                raise GoogleSignInRequired()
-            kwargs['cookie_file'] = str(database)
-        try:
-            self.jar = getattr(browser_cookie3, loader_name)(**kwargs)
-        except Exception:
-            raise Refused('Could not read this browser profile. Unlock your desktop '
-                          'keyring and choose a profile signed in to Google.') from None
-        for cookie in list(self.jar):
-            if not (cookie.domain == 'google.com' or cookie.domain.endswith('.google.com')):
-                self.jar.clear(cookie.domain, cookie.path, cookie.name)
+        self.jar = google_cookies(browser, database)
         if not any(c.name in ('SAPISID', '__Secure-1PAPISID', '__Secure-3PAPISID')
                    and not c.is_expired() for c in self.jar):
             raise GoogleSignInRequired()
@@ -630,9 +711,7 @@ def main():
     signal.signal(signal.SIGTERM, cancelled)
     signal.signal(signal.SIGINT, cancelled)
     # uv prepares a cached, isolated environment; never install into system Python.
-    try:
-        import browser_cookie3  # noqa: F401
-    except ImportError:
+    if not cookie_dependency_available():
         require(shutil.which('uv'), 'Install the setup dependency manager first: omarchy pkg add uv')
         require(not os.environ.get('OMAMAIL_GOOGLE_SETUP_DEPS'), 'Could not load the setup dependency.')
         os.environ['OMAMAIL_GOOGLE_SETUP_DEPS'] = '1'
