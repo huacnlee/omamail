@@ -102,6 +102,17 @@ fn ttl_clock_reversal_and_quoted_imap_scope() {
     assert!(!eligible("imap", "folder:Custom", &json!({"inSpam":true})));
     assert!(eligible("outlook", "folder:\"INBOX\" UNSEEN", &json!({})));
     assert!(!eligible("jmap", "role:junk", &json!({})));
+    // Exchange follows JMAP: a message lives in one folder and its labels say which.
+    assert!(!eligible(
+        "exchange",
+        "role:trash",
+        &json!({"labelIds":["TRASH"]})
+    ));
+    assert!(eligible(
+        "exchange",
+        "role:inbox",
+        &json!({"labelIds":["INBOX"]})
+    ));
     assert!(eligible("hey", "role:junk", &json!({})));
 }
 #[tokio::test]

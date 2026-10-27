@@ -11,6 +11,7 @@ Read the relevant document before changing its area; these contain constraints t
 | HEY | [docs/providers/hey.md](docs/providers/hey.md) |
 | IMAP, SMTP and Proton Bridge | [docs/providers/imap.md](docs/providers/imap.md) |
 | JMAP discovery and streaming | [docs/providers/jmap.md](docs/providers/jmap.md) |
+| Exchange (EWS), NTLM sign-in, its calendar and its boundaries | [docs/providers/exchange.md](docs/providers/exchange.md) |
 | Microsoft 365 over Graph | [docs/providers/m365.md](docs/providers/m365.md) |
 | Message HTML, images, direction and outgoing MIME | [docs/MESSAGE-RENDERING.md](docs/MESSAGE-RENDERING.md) |
 | Network requests, credentials, subprocesses and security reviews | [docs/SECURITY-BOUNDARIES.md](docs/SECURITY-BOUNDARIES.md) |
