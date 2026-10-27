@@ -355,7 +355,7 @@ Rectangle {
     // organiser of.
     Text {
       width: parent.width
-      visible: !root.canRespond && root.response !== ""
+      visible: !root.cancelled && !root.canRespond && root.response !== ""
       textFormat: Text.PlainText
       text: root.response === "accepted" ? "You are going"
         : (root.response === "declined" ? "You are not going" : "You might be going")
