@@ -1,5 +1,5 @@
 {
-  "apiVersion": 8,
+  "apiVersion": 9,
   "releasedApiVersion": 8,
   "protocolVersion": 1,
   "methods": [
@@ -89,6 +89,7 @@
     "cache.calendarRead",
     "cache.calendarPut",
     "contacts.suggest",
+    "contacts.google",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -1306,6 +1307,17 @@
       }
     },
     {
+      "name": "Google Contacts refuses an account that is not a Gmail address",
+      "method": "contacts.google",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
       "name": "Microsoft 365 provider rules",
       "method": "providers.snapshot",
       "params": {},
@@ -1473,7 +1485,11 @@
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": [
+      "contacts.google"
+    ],
+    "cases": [
+      "Google Contacts refuses an account that is not a Gmail address"
+    ]
   }
 }

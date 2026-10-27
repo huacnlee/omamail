@@ -397,7 +397,8 @@ Item {
     if (!backend || !backend.ready) { failLogin("Mail backend unavailable"); return }
     var serial = ++tokenRequestSerial
     backend.call("auth.begin", { clientId: clientId, clientSecret: credentials.clientSecret,
-      port: OAuth.normalizedPort(oauthPort), scopes: scopes, loginHint: loginHint }, function(result, error) {
+      port: OAuth.normalizedPort(oauthPort), scopes: scopes.concat(OAuth.OPTIONAL_SCOPES),
+      loginHint: loginHint }, function(result, error) {
       if (serial !== root.tokenRequestSerial || !root.loginBusy) {
         if (result && result.id) root.backend.call("auth.cancel", { id: result.id }, function() {})
         return

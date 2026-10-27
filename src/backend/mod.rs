@@ -262,6 +262,22 @@ impl Session {
                 .await
                 .map_err(|_| "worker_failed")?;
         }
+        if method == "contacts.google" {
+            let account = params["accountId"]
+                .as_str()
+                .filter(|id| {
+                    id.contains('@')
+                        && !id.contains(':')
+                        && id.len() <= 1024
+                        && !id.chars().any(|c| c.is_control() || c.is_whitespace())
+                })
+                .ok_or("invalid_params")?;
+            if params.as_object().is_none_or(|fields| fields.len() != 1) {
+                return Err("invalid_params");
+            }
+            let token = self.gmail.access_token(account).await?;
+            return crate::contacts::suggest_google(&token).await;
+        }
         if matches!(method, "public.image" | "public.unsubscribe") {
             let fields = params.as_object().ok_or("invalid_params")?;
             if fields.len() != 1 {
@@ -480,7 +496,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
-            "protocol": 1, "apiVersion": 8, "methods": methods::available(),
+            "protocol": 1, "apiVersion": 9, "methods": methods::available(),
             "capabilities": {"agent": cfg!(all(feature = "agent", unix))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),

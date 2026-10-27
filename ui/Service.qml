@@ -59,7 +59,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 7 : 0
+    bundledApiVersion: root.standalone ? 9 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -101,6 +101,7 @@ Item {
   readonly property bool backendNeedsUpdate: backend.needsUpdate
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
+  readonly property bool backendCanSuggestGoogleContacts: backend.ready && backend.apiVersion >= 9
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
@@ -440,20 +441,11 @@ Item {
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
-  // Thunderbird and Betterbird keep both explicit and learned addresses in
-  // their local profile. The helper reads those databases without modifying
-  // them. Nothing is copied into Omamail's settings or cache.
-  property var recipientContacts: []
-  property bool contactsLoading: false
-
-  function refreshRecipientContacts() {
-    if (contactsLoading || !backend || !backend.ready) return
-    contactsLoading = true
-    backend.call("contacts.suggest", {}, function(result, error) {
-      root.contactsLoading = false
-      if (!error && Array.isArray(result)) root.recipientContacts = result
-    })
-  }
+  // Local address books and Google Contacts; see account/ContactBook.qml.
+  ContactBook { id: contactBook; service: root }
+  readonly property var recipientContacts: contactBook.contacts
+  readonly property bool contactsLoading: contactBook.loading
+  function refreshRecipientContacts() { contactBook.refresh() }
 
   function registerMailtoHandler() {
     if (!hasMailto || pluginDir === "" || mailtoInstaller.running) return
@@ -2889,7 +2881,7 @@ Item {
         else root.restoreAccountRegistry()
         root.refreshRecipientContacts()
       }
-      else root.contactsLoading = false
+      else contactBook.loading = false
     }
   }
 
