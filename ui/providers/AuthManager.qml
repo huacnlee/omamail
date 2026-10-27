@@ -86,6 +86,9 @@ Item {
   property bool exchangingCode: false
   property var tokenRequest: null
   property int tokenRequestSerial: 0
+  // API 9: Google's refusal of the saved grant answers gmail_signed_out.
+  readonly property bool backendReportsRevokedGrant: !!backend && !!backend.ready
+    && Number(backend.apiVersion) >= 9
   property bool logoutPendingClear: false
   property string loginHint: ""
 
@@ -201,14 +204,19 @@ Item {
     credentialsChecked = true
     if (changed) {
       // A different client means a different keyring entry and a different
-      // grant; whatever is in memory belongs to the old one.
+      // grant; whatever is in memory belongs to the old one, and so does the
+      // answer to a refresh still in flight.
+      if (refreshBusy) abandonTokenRequest()
       resetMemorySession()
       savedSessionPresent = false
       refreshRetryAttempt = 0
       refreshRetry.stop()
       sessionChecked = false
       if (Credentials.isConfigured(loaded)) restoreSession()
-      else sessionChecked = true
+      else {
+        sessionChecked = true
+        finishWaiters("", "Connect a Google Cloud OAuth client first")
+      }
     }
   }
 
@@ -295,18 +303,30 @@ Item {
       if (!ok && boundAccount === root.accountId && boundClient === root.clientId)
         root.lastError = "Signed in, but the session could not be saved. You may need to sign in again after a restart"
       if (root.logoutPendingClear) {
+        // The grant this write saved, not whatever client is current now.
         root.logoutPendingClear = false
-        root.clearStoredToken()
+        root.deleteGrant(boundAccount, boundClient)
       }
     })
   }
 
-  function clearStoredToken(attributes) {
-    if (!clientId || !accountId || !platform || typeof platform.credentialDelete !== "function") return
-    platform.credentialDelete("google-refresh-token", accountId, clientId, function() {})
+  function clearStoredToken() {
+    deleteGrant(accountId, clientId)
+  }
+
+  function deleteGrant(account, client) {
+    if (!client || !account || !platform || typeof platform.credentialDelete !== "function") return
+    platform.credentialDelete("google-refresh-token", account, client, function() {})
   }
 
   // ---------------------------------------------------------------- tokens
+
+  function abandonTokenRequest() {
+    tokenRequestSerial++
+    if (tokenRequest && tokenRequest.abort) tokenRequest.abort()
+    tokenRequest = null
+    refreshBusy = false
+  }
 
   // Native requests have a bounded deadline in the backend.
   function postTokenRequest(body, previousRefreshToken, callback) {
@@ -318,12 +338,18 @@ Item {
       return
     }
     if (!accountId) { callback(OAuth.parseTokenResponse(0, "", "")); return }
+    var revocable = backendReportsRevokedGrant
     backend.call("auth.token", { provider: "gmail", accountId: accountId, resource: "mail" }, function(result, error) {
       if (serial !== root.tokenRequestSerial) return
       root.tokenRequest = null
-      var signedOut = error === "gmail_invalid_token" || error === "gmail_token_invalid" || error === "gmail_token_missing" || error === "gmail_unauthorized"
+      var code = error ? String(error.message || "") : ""
+      // Only Google's refusal of the grant signs the mailbox out. Anything
+      // else may pass: a keyring that is not open yet (it reads as a missing
+      // entry), a malformed answer or a refused client (401 invalid_client).
+      var reason = revocable && code === "gmail_signed_out" ? "invalid_grant"
+        : (code === "gmail_unauthorized" ? "invalid_client" : "temporarily_unavailable")
       callback(OAuth.parseTokenResponse(error ? 400 : 200,
-        error ? JSON.stringify({ error: signedOut ? "invalid_grant" : "temporarily_unavailable" }) : JSON.stringify(result), ""))
+        error ? JSON.stringify({ error: reason }) : JSON.stringify(result), ""))
     })
   }
 
@@ -342,18 +368,23 @@ Item {
         root.resetMemorySession()
         root.lastError = root.safeError(result.error)
         if (OAuth.refreshFailureDisposition(result) === "signed_out") {
-          // A revoked or expired grant is never coming back. Dropping it here
-          // means the panel offers "Sign in" instead of retrying forever.
+          // A revoked or expired grant is never coming back: the panel offers
+          // "Sign in" instead of retrying forever. The grant stays in the
+          // keyring, so the next launch hears the same refusal rather than a
+          // missing entry; signing in replaces it and signing out deletes it.
+          // Nothing deletes on a refusal, so no refusal can delete a grant it
+          // is not about.
           root.savedSessionPresent = false
           refreshRetry.stop()
-          root.clearStoredToken()
         } else {
           // The keyring token is still valid evidence of a saved session. Keep
           // it and retry until the network can exchange it for an access token.
           root.scheduleRefreshRetry()
         }
-        if (purpose === "request") root.finishWaiters("", root.lastError)
-        else root.sessionUnavailable(root.lastError)
+        // A restore can carry waiters too, when a client change replaced
+        // the request they joined.
+        root.finishWaiters("", root.lastError)
+        if (purpose !== "request") root.sessionUnavailable(root.lastError)
         return
       }
       root.acceptToken(result)
@@ -403,7 +434,7 @@ Item {
         return
       }
       if (error) {
-        root.failLogin(error === "auth_port_unavailable"
+        root.failLogin(error.message === "auth_port_unavailable"
           ? "Could not listen on port " + OAuth.normalizedPort(root.oauthPort) + ". Close the other listener or change the port in settings"
           : "Could not start secure Google sign-in")
         return
@@ -486,10 +517,7 @@ Item {
     authTimeout.stop()
     nativePoll.stop()
     stopNativeLogin()
-    tokenRequestSerial++
-    if (tokenRequest && tokenRequest.abort) tokenRequest.abort()
-    tokenRequest = null
-    refreshBusy = false
+    abandonTokenRequest()
     loginBusy = false
     exchangingCode = false
     callbackHandled = false

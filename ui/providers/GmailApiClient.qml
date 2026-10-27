@@ -59,7 +59,7 @@ Item {
       return /^(gmail\.(modify|batchModify|createLabel|renameLabel|deleteLabel|trash|untrash|send|saveDraft|updateDraft|deleteDraft))$/.test(method)
         ? "Gmail did not answer in time. The submitted change may have completed."
         : "Gmail did not answer in time"
-    if (code === "gmail_unauthorized" || code === "gmail_invalid_token")
+    if (code === "gmail_unauthorized" || code === "gmail_invalid_token" || code === "gmail_signed_out")
       return "Gmail authorization expired. Sign in again."
     if (code === "gmail_forbidden") return "Gmail refused this request (HTTP 403). Check account permissions."
     if (code === "gmail_length_required") return "Gmail rejected the request format (HTTP 411)."
