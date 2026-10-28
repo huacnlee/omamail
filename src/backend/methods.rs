@@ -104,6 +104,7 @@ pub const ALL: &[&str] = &[
     "auth.token",
     "auth.store",
     "auth.clear",
+    "auth.builtinClient",
     "outlook.graphSend",
     "outlook.connectionCheck",
     "hey.probe",

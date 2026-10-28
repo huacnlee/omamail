@@ -107,6 +107,7 @@
     "auth.token",
     "auth.store",
     "auth.clear",
+    "auth.builtinClient",
     "outlook.graphSend",
     "outlook.connectionCheck",
     "hey.probe",
@@ -354,6 +355,21 @@
         "notifications.0.key": "string",
         "notifications.1.key": "string"
       }
+    },
+    {
+      "name": "Built-in Google client is reported as strings",
+      "method": "auth.builtinClient",
+      "params": {},
+      "types": {
+        "clientId": "string",
+        "clientSecret": "string"
+      }
+    },
+    {
+      "name": "Built-in Google client takes no parameters",
+      "method": "auth.builtinClient",
+      "params": {"clientId": "123-other.apps.googleusercontent.com"},
+      "errorCode": -32602
     },
     {
       "name": "Invitation import rejects non-Google destinations before authentication",
@@ -1489,7 +1505,7 @@
     }
   ],
   "unreleased": {
-    "methods": ["calendar.saveInvitation"],
-    "cases": ["Invitation import rejects non-Google destinations before authentication", "Google import validates destination before authentication"]
+    "methods": ["calendar.saveInvitation", "auth.builtinClient"],
+    "cases": ["Invitation import rejects non-Google destinations before authentication", "Google import validates destination before authentication", "Built-in Google client is reported as strings", "Built-in Google client takes no parameters"]
   }
 }
