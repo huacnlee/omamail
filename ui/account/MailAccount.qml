@@ -2414,6 +2414,8 @@ Item {
   // See `Rsvp.qml`: the account file is at its size ceiling.
   function rsvp(response) { rsvpAction.run(response) }
   readonly property bool rsvpFallbackAvailable: rsvpAction.fallbackAvailable
+  readonly property var invitationCalendarState: rsvpAction.calendarState
+  function saveInvitationCalendar() { rsvpAction.retryCalendar() }
   function rsvpMailOnly(response) { rsvpAction.run(response, true) }
   readonly property alias bodies: bodyCache
 

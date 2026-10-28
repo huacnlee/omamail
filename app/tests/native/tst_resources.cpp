@@ -164,7 +164,7 @@ void ResourcesTest::smokeTestLoadsQmlHandshakesAndWritesReadyFile()
     QVERIFY(ready.open(QIODevice::ReadOnly));
     const QJsonObject value = QJsonDocument::fromJson(ready.readAll()).object();
     QCOMPARE(value.value(QStringLiteral("version")).toString(), QStringLiteral(OMAMAIL_APP_VERSION));
-    QCOMPARE(value.value(QStringLiteral("apiVersion")).toInt(), 8);
+    QCOMPARE(value.value(QStringLiteral("apiVersion")).toInt(), OMAMAIL_BACKEND_API_VERSION);
 }
 
 void ResourcesTest::smokeRejectsMismatchedBackendApi()
@@ -172,12 +172,14 @@ void ResourcesTest::smokeRejectsMismatchedBackendApi()
     QTemporaryDir directory;
     ResourcePaths paths = completeLayout(directory);
     paths.backend = QCoreApplication::applicationFilePath();
-    qputenv("OMAMAIL_SMOKE_FIXTURE", "stale-api");
-    QString error;
-    QVERIFY(!runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error));
-    qunsetenv("OMAMAIL_SMOKE_FIXTURE");
-    QVERIFY(error.contains(QStringLiteral("does not match")));
-    QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("ready.json"))));
+    for (const QByteArray fixture : {QByteArrayLiteral("stale-api"), QByteArrayLiteral("future-api")}) {
+        qputenv("OMAMAIL_SMOKE_FIXTURE", fixture);
+        QString error;
+        QVERIFY(!runSmokeTest(paths, directory.filePath(QStringLiteral("ready.json")), &error));
+        qunsetenv("OMAMAIL_SMOKE_FIXTURE");
+        QVERIFY(error.contains(QStringLiteral("does not match")));
+        QVERIFY(!QFile::exists(directory.filePath(QStringLiteral("ready.json"))));
+    }
 }
 
 void ResourcesTest::smokeRejectsOversizedStdoutFrame()
@@ -344,7 +346,9 @@ int main(int argc, char *argv[])
                 result = {{QStringLiteral("name"), QStringLiteral("omamail")},
                           {QStringLiteral("version"), QStringLiteral(OMAMAIL_APP_VERSION)},
                           {QStringLiteral("protocol"), 1},
-                          {QStringLiteral("apiVersion"), fixture == QByteArrayLiteral("stale-api") ? 7 : 8}};
+                          {QStringLiteral("apiVersion"), OMAMAIL_BACKEND_API_VERSION
+                              + (fixture == QByteArrayLiteral("stale-api") ? -1
+                                  : fixture == QByteArrayLiteral("future-api") ? 1 : 0)}};
             } else {
                 result = {{QStringLiteral("quitReady"), true}};
             }

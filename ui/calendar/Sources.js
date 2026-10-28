@@ -351,7 +351,7 @@ function applyDiscovery(list, result) {
   return next
 }
 
-function forAccount(list, accountId) {
+function forAccount(list, accountId, invitationCalendarId) {
   var source = list || emptyList()
   var wanted = trimmed(accountId)
   if (wanted === "") return copyList(source)
@@ -359,7 +359,8 @@ function forAccount(list, accountId) {
   var values = Array.isArray(source.sources) ? source.sources : []
   for (var i = 0; i < values.length; i++) {
     if (!values[i]) continue
-    if (!comesWithAccount(values[i]) || trimmed(values[i].accountId) === wanted)
+    if (!comesWithAccount(values[i]) || trimmed(values[i].accountId) === wanted
+        || (invitationCalendarId && values[i].id === invitationCalendarId))
       next = add(next, values[i])
   }
   return next

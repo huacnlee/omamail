@@ -40,7 +40,17 @@ Item {
 
   property var credentials: Credentials.effective("")
   property bool credentialsChecked: false
-  property bool usingBuiltinClient: Credentials.hasBuiltin()
+  property bool usingBuiltinClient: false
+  // The OAuth client a release backend was built with, from `auth.builtinClient`.
+  // Empty until the backend answers, and for good on a development build or a
+  // backend older than API 9. Once it arrives, credentials are re-resolved, so
+  // an account whose grant belongs to this client restores its session then.
+  property var builtinClient: Credentials.empty()
+  property bool builtinClientPending: true
+  property string credentialsText: ""
+  readonly property bool backendReady: !!backend && backend.ready === true
+  onBackendReadyChanged: loadBuiltinClient()
+  Component.onCompleted: loadBuiltinClient()
   readonly property bool credentialsPresent: Credentials.isConfigured(credentials)
   readonly property string clientId: credentials ? String(credentials.clientId || "") : ""
   readonly property string clientDescription: Credentials.describe(credentials)
@@ -190,12 +200,34 @@ Item {
     return true
   }
 
-  // The user's own client file wins; a client shipped with the plugin is the
-  // fallback. Today nothing is shipped, so this resolves to the file or to
-  // nothing at all — see Credentials.BUILTIN for why.
+  function loadBuiltinClient() {
+    if (!builtinClientPending || !backendReady) return
+    if (!(backend.apiVersion >= 9)) {
+      settleBuiltinClient(Credentials.empty())
+      return
+    }
+    var asked = backend
+    backend.call("auth.builtinClient", {}, function(result, error) {
+      if (asked !== root.backend) return
+      root.settleBuiltinClient(error ? Credentials.empty() : Credentials.builtin(result))
+    })
+  }
+
+  function settleBuiltinClient(client) {
+    builtinClient = client
+    builtinClientPending = false
+    // Before the client file has been read there is nothing to re-resolve;
+    // its first load picks the shipped client up.
+    if (credentialsChecked) applyCredentials(credentialsText)
+  }
+
+  // The user's own client file wins; the client a release backend was built
+  // with is the fallback. Development builds ship none, so there this resolves
+  // to the file or to nothing at all.
   function applyCredentials(raw) {
-    var loaded = Credentials.effective(raw, accountId)
-    usingBuiltinClient = Credentials.usingBuiltin(raw, accountId)
+    credentialsText = String(raw || "")
+    var loaded = Credentials.effective(raw, accountId, builtinClient)
+    usingBuiltinClient = Credentials.usingBuiltin(raw, accountId, builtinClient)
     var changed = String(loaded.clientId) !== String(credentials.clientId)
     credentials = loaded
     credentialsChecked = true

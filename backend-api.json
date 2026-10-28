@@ -1,6 +1,6 @@
 {
-  "apiVersion": 8,
-  "releasedApiVersion": 8,
+  "apiVersion": 9,
+  "releasedApiVersion": 9,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -97,6 +97,7 @@
     "calendar.request",
     "calendar.discover",
     "calendar.attendance",
+    "calendar.saveInvitation",
     "calendar.reminders",
     "auth.form",
     "auth.begin",
@@ -106,6 +107,7 @@
     "auth.token",
     "auth.store",
     "auth.clear",
+    "auth.builtinClient",
     "outlook.graphSend",
     "outlook.connectionCheck",
     "hey.probe",
@@ -353,6 +355,53 @@
         "notifications.0.key": "string",
         "notifications.1.key": "string"
       }
+    },
+    {
+      "name": "Built-in Google client is reported as strings",
+      "method": "auth.builtinClient",
+      "params": {},
+      "types": {
+        "clientId": "string",
+        "clientSecret": "string"
+      }
+    },
+    {
+      "name": "Built-in Google client takes no parameters",
+      "method": "auth.builtinClient",
+      "params": {
+        "clientId": "123-other.apps.googleusercontent.com"
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "Invitation import rejects non-Google destinations before authentication",
+      "method": "calendar.saveInvitation",
+      "params": {
+        "source": {
+          "kind": "caldav",
+          "url": "https://attacker.example/calendar"
+        },
+        "mailbox": "imap:owner@example.org",
+        "uid": "meeting",
+        "organizer": "host@example.org",
+        "response": "cancelled",
+        "sequence": 0
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "Google import validates destination before authentication",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "google",
+          "accountId": "missing@example.org",
+          "calendarId": ".."
+        },
+        "operation": "import",
+        "body": "{}"
+      },
+      "errorCode": -32000
     },
     {
       "name": "Google attendance rejects unsupported answers before authentication",
