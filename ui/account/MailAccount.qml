@@ -2977,10 +2977,13 @@ Item {
   // component completes.
   onAuthChanged: if (auth) auth.restoreSession()
 
-  // Coalesce quick image completions without waiting for a slow next request.
+  // Coalesce image completions into one repaint per interval. Each repaint
+  // rebuilds the whole document with every image fetched so far, and Qt decodes
+  // them on the GUI thread, so a repaint per completion stalls the shell while
+  // a message with many large images loads.
   Timer {
     id: imagePaintTimer
-    interval: 100
+    interval: 3000
     repeat: false
     onTriggered: root.flushRemoteImages()
   }

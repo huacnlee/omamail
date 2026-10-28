@@ -113,7 +113,7 @@ Item {
       compare(backend.requests.length, 2)
       account.accountId = "account-two"
       backend.requests[1].callback({data: png}, null)
-      wait(150)
+      wait(3200)
       compare(Object.keys(account.remoteImageData).length, 0, "old account bytes must be discarded")
       compare(account.readerSourceKey, "")
       compare(account.selectedDocument, null)
@@ -138,7 +138,7 @@ Item {
       account.prepareRemoteImages()
       backend.requests[0].callback({data: png}, null)
       compare(backend.requests.length, 2)
-      tryVerify(function() { return backend.requests.length === 3 }, 1000)
+      tryVerify(function() { return backend.requests.length === 3 }, 5000)
       compare(backend.requests[2].method, "reader.render")
       account.clearSelection()
       backend.requests[1].callback({data: png}, null)
@@ -182,6 +182,28 @@ Item {
       backend.complete(2, "stale images", null)
       compare(account.selectedDocument, null)
       compare(Object.keys(account.remoteImageData).length, 0)
+    }
+
+    function test_images_arriving_apart_repaint_once_per_interval() {
+      account.selectedId = "message-one"
+      account.readerSourceKey = "native-key"
+      account.remoteImagesAllowed = true
+      account.selectedRemoteImageSources = ["https://example.org/one", "https://example.org/two",
+        "https://example.org/three"]
+      var png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="
+      function ofMethod(method) {
+        return backend.requests.filter(function(call) { return call.method === method })
+      }
+      account.prepareRemoteImages()
+      ofMethod("public.image")[0].callback({data: png}, null)
+      wait(400)
+      compare(ofMethod("reader.render").length, 0,
+        "a repaint per completed image rebuilds the document with every image so far")
+      tryVerify(function() { return ofMethod("reader.render").length === 1 }, 5000,
+        "images still appear while later ones load")
+      ofMethod("public.image")[1].callback({data: png}, null)
+      ofMethod("public.image")[2].callback({data: png}, null)
+      compare(ofMethod("reader.render").length, 2, "the last image paints without waiting for the interval")
     }
 
     function test_image_policy_change_only_rerenders_the_opaque_native_source() {
