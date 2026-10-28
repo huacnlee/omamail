@@ -634,6 +634,142 @@ function recurrenceIntervalUnit(frequency, interval) {
   return Number(interval) === 1 ? unit : unit + "s"
 }
 
+// What the event editor's date field understands, beside YYYY-MM-DD: today,
+// tomorrow, yesterday, +N / -N days, a weekday (the next one, today
+// included), a numeric date with or without its year, and a day with a month
+// name. English and French words both: the form is English, its owner may not
+// be. A date given without a year that has already passed this year is next
+// year's. Returns YYYY-MM-DD, or "" for text it cannot read; `dayFirst` false
+// reads 11/3 as November 3rd.
+var EDITOR_WEEKDAYS = [["sun", "sunday", "dim", "dimanche"], ["mon", "monday", "lun", "lundi"],
+  ["tue", "tues", "tuesday", "mar", "mardi"], ["wed", "wednesday", "mer", "mercredi"],
+  ["thu", "thur", "thurs", "thursday", "jeu", "jeudi"], ["fri", "friday", "ven", "vendredi"],
+  ["sat", "saturday", "sam", "samedi"]]
+var EDITOR_MONTHS = [["jan", "january", "janv", "janvier"], ["feb", "february", "fev", "fevr", "fevrier"],
+  ["mar", "march", "mars"], ["apr", "april", "avr", "avril"], ["may", "mai"], ["jun", "june", "juin"],
+  ["jul", "july", "juil", "juillet"], ["aug", "august", "aou", "aout"],
+  ["sep", "sept", "september", "septembre"], ["oct", "october", "octobre"],
+  ["nov", "november", "novembre"], ["dec", "december", "decembre"]]
+
+function editorWord(text) {
+  return String(text).toLowerCase().replace(/[éèê]/g, "e").replace(/û/g, "u").replace(/\.$/, "")
+}
+
+function editorIndex(table, word) {
+  for (var i = 0; i < table.length; i++) if (table[i].indexOf(word) >= 0) return i
+  return -1
+}
+
+function parseEditorDate(text, nowMs, dayFirst) {
+  var raw = String(text || "").trim()
+  var now = new Date(nowMs === undefined || nowMs === null ? Date.now() : Number(nowMs))
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  function shifted(days) { return isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() + days)) }
+  function exact(year, month, day) {
+    var value = new Date(year, month, day)
+    return value.getFullYear() === year && value.getMonth() === month && value.getDate() === day ? value : null
+  }
+  function dated(year, month, day) {
+    if (year !== null && year < 100) year += 2000
+    var value = exact(year !== null ? year : today.getFullYear(), month, day)
+    if (value && year === null && value < today) value = exact(today.getFullYear() + 1, month, day)
+    return value ? isoDate(value) : ""
+  }
+  var word = editorWord(raw)
+  var match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(raw)
+  if (match) return dated(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  if (["today", "aujourd'hui", "auj"].indexOf(word) >= 0) return shifted(0)
+  if (["tomorrow", "tmr", "demain"].indexOf(word) >= 0) return shifted(1)
+  if (["yesterday", "hier"].indexOf(word) >= 0) return shifted(-1)
+  match = /^([+-])\s*(\d{1,3})\s*(d|j|days?|jours?)?$/.exec(word)
+  if (match) return shifted((match[1] === "-" ? -1 : 1) * Number(match[2]))
+  var weekday = editorIndex(EDITOR_WEEKDAYS, word)
+  if (weekday >= 0) return shifted((weekday - today.getDay() + 7) % 7)
+  match = /^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2}|\d{4}))?$/.exec(raw)
+  if (match) {
+    var first = Number(match[1]), second = Number(match[2])
+    var year = match[3] ? Number(match[3]) : null
+    return dayFirst === false ? dated(year, first - 1, second) : dated(year, second - 1, first)
+  }
+  // "3 nov", "3 novembre 2026", "nov 3", "Tuesday, November 3, 2026". A
+  // leading weekday is dropped only before a full date: "mar 3" is March.
+  var parts = word.replace(/,/g, " ").split(/\s+/).filter(function(part) { return part !== "" })
+  if (parts.length > 2 && editorIndex(EDITOR_WEEKDAYS, parts[0]) >= 0) parts.shift()
+  var day = -1, month = -1, givenYear = null
+  for (var i = 0; i < parts.length; i++) {
+    var number = parts[i].replace(/(st|nd|rd|th|er)$/, "")
+    if (/^\d{4}$/.test(number) && givenYear === null) givenYear = Number(number)
+    else if (/^\d{1,2}$/.test(number) && day < 0) day = Number(number)
+    else if (month < 0 && editorIndex(EDITOR_MONTHS, parts[i]) >= 0) month = editorIndex(EDITOR_MONTHS, parts[i])
+    else return ""
+  }
+  return day > 0 && month >= 0 ? dated(givenYear, month, day) : ""
+}
+
+// The time field's half: 14:30, 14h30, 14h, 14.30, 1430, 930, 9, 2pm,
+// 2:30 pm, noon, midi. Returns HH:mm, or "" for text it cannot read.
+function parseEditorTime(text) {
+  var raw = String(text || "").trim().toLowerCase().replace(/\s+/g, "")
+  if (raw === "noon" || raw === "midi") return "12:00"
+  if (raw === "midnight" || raw === "minuit") return "00:00"
+  var match = /^(\d{1,2})(?:[:h.](\d{2})?)?(am|pm|a|p)?$/.exec(raw) || /^(\d{1,2})(\d{2})(am|pm|a|p)?$/.exec(raw)
+  if (!match) return ""
+  var hour = Number(match[1]), minute = match[2] ? Number(match[2]) : 0
+  if (match[3]) {
+    if (hour < 1 || hour > 12) return ""
+    hour = hour % 12 + (match[3].charAt(0) === "p" ? 12 : 0)
+  }
+  if (hour > 23 || minute > 59) return ""
+  return two(hour) + ":" + two(minute)
+}
+
+// The arrow keys in a date field (days) and a time field (minutes). A time
+// lands on the step's grid, so 10:07 goes up to 10:15, and wraps within the
+// day. Text the parser cannot read is left as it is.
+function stepEditorDate(text, days, nowMs, dayFirst) {
+  var value = parseEditorDate(text, nowMs, dayFirst)
+  if (value === "") return String(text || "")
+  var parts = value.split("-").map(Number)
+  return isoDate(new Date(parts[0], parts[1] - 1, parts[2] + days))
+}
+
+function stepEditorTime(text, minutes) {
+  var value = parseEditorTime(text)
+  if (value === "") return String(text || "")
+  var total = Number(value.substring(0, 2)) * 60 + Number(value.substring(3))
+  var step = Math.abs(minutes)
+  var next = minutes > 0 ? (Math.floor(total / step) + 1) * step : (Math.ceil(total / step) - 1) * step
+  next = (next % 1440 + 1440) % 1440
+  return two(Math.floor(next / 60)) + ":" + two(next % 60)
+}
+
+// Where the end goes when the start moves: the same length later. An all-day
+// event keeps its number of days, counted on the calendar so a daylight-saving
+// change inside it cannot add or drop one. Returns the end fields' text.
+function shiftedEditorEnd(oldStartMs, oldEndMs, newStartMs, allDay) {
+  var start = new Date(newStartMs)
+  if (allDay) {
+    var from = new Date(oldStartMs), to = new Date(oldEndMs)
+    var days = Math.round((Date.UTC(to.getFullYear(), to.getMonth(), to.getDate())
+      - Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) / 86400000)
+    return { date: isoDate(new Date(start.getFullYear(), start.getMonth(), start.getDate() + days - 1)), time: "" }
+  }
+  var end = new Date(newStartMs + (oldEndMs - oldStartMs))
+  return { date: isoDate(end), time: two(end.getHours()) + ":" + two(end.getMinutes()) }
+}
+
+// The length shown under the fields: "45 min", "1 h", "1 h 30", "3 days".
+function editorDurationLabel(startMs, endMs, allDay) {
+  var minutes = Math.round((endMs - startMs) / 60000)
+  if (allDay || minutes % 1440 === 0) {
+    var days = Math.round(minutes / 1440)
+    return days === 1 ? "1 day" : days + " days"
+  }
+  if (minutes < 60) return minutes + " min"
+  var hours = Math.floor(minutes / 60), rest = minutes % 60
+  return hours + " h" + (rest ? " " + two(rest) : "")
+}
+
 function editorDateRange(firstDate, firstTime, lastDate, lastTime, allDay) {
   function parse(dateText, timeText) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)) return null
@@ -644,7 +780,9 @@ function editorDateRange(firstDate, firstTime, lastDate, lastTime, allDay) {
   }
   var start = parse(String(firstDate), allDay ? "00:00" : String(firstTime))
   var end = parse(String(lastDate), allDay ? "00:00" : String(lastTime))
-  if (!start || !end) return {ok:false,error:allDay ? "Enter valid dates (YYYY-MM-DD)" : "Enter valid dates (YYYY-MM-DD) and times (HH:mm)"}
+  if (!start || !end) return {ok:false,error:allDay
+    ? "Enter valid dates, like 2026-11-03, 3/11 or tomorrow"
+    : "Enter valid dates and times, like 3/11 or tomorrow and 14:30 or 2pm"}
   if (allDay) end.setDate(end.getDate() + 1)
   if (end.getTime() <= start.getTime()) return {ok:false,error:allDay
     ? "Last day must be on or after the first day" : "End date and time must be after the start"}

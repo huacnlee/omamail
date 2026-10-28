@@ -557,6 +557,89 @@ assert.strictEqual(feed.editorDateRange("2026-09-09","24:15","2026-09-10","11:15
 assert.strictEqual(feed.editorDateRange("2026-09-09","","2026-09-09","",true).ok,true)
 assert.strictEqual(feed.editorDateRange("2026-09-10","","2026-09-09","",true).ok,false)
 
+// The editor reads the forms people type, and writes back YYYY-MM-DD / HH:mm.
+// "Now" is Wednesday 28 October 2026, mid-morning.
+{
+  const now = new Date(2026, 9, 28, 10, 0).getTime()
+  const date = function(text, dayFirst) { return feed.parseEditorDate(text, now, dayFirst) }
+  assert.strictEqual(date("2026-11-03"), "2026-11-03")
+  assert.strictEqual(date("2026-2-3"), "2026-02-03")
+  assert.strictEqual(date("2026-02-30"), "")
+  assert.strictEqual(date("today"), "2026-10-28")
+  assert.strictEqual(date("Demain"), "2026-10-29")
+  assert.strictEqual(date("hier"), "2026-10-27")
+  assert.strictEqual(date("+7"), "2026-11-04")
+  assert.strictEqual(date("+2j"), "2026-10-30")
+  assert.strictEqual(date("-1 day"), "2026-10-27")
+  // A weekday is the next one, today included.
+  assert.strictEqual(date("wednesday"), "2026-10-28")
+  assert.strictEqual(date("mardi"), "2026-11-03")
+  assert.strictEqual(date("fri"), "2026-10-30")
+  // Numbers are day first unless the locale puts the month first.
+  assert.strictEqual(date("3/11"), "2026-11-03")
+  assert.strictEqual(date("3.11.26"), "2026-11-03")
+  assert.strictEqual(date("11/3", false), "2026-11-03")
+  assert.strictEqual(date("31/11"), "")
+  // A date without its year that has passed is next year's; one with it is not.
+  assert.strictEqual(date("15/1"), "2027-01-15")
+  assert.strictEqual(date("28/10"), "2026-10-28")
+  assert.strictEqual(date("15/1/2026"), "2026-01-15")
+  assert.strictEqual(date("3 nov"), "2026-11-03")
+  assert.strictEqual(date("3 novembre 2027"), "2027-11-03")
+  assert.strictEqual(date("November 3rd"), "2026-11-03")
+  assert.strictEqual(date("Tuesday, November 3, 2026"), "2026-11-03")
+  assert.strictEqual(date("mardi 3 nov."), "2026-11-03")
+  assert.strictEqual(date("1er décembre"), "2026-12-01")
+  assert.strictEqual(date("mar 3"), "2027-03-03")
+  assert.strictEqual(date("3 blah"), "")
+  assert.strictEqual(date("soon"), "")
+  assert.strictEqual(date(""), "")
+
+  assert.strictEqual(feed.parseEditorTime("14:30"), "14:30")
+  assert.strictEqual(feed.parseEditorTime("14h30"), "14:30")
+  assert.strictEqual(feed.parseEditorTime("14h"), "14:00")
+  assert.strictEqual(feed.parseEditorTime("9"), "09:00")
+  assert.strictEqual(feed.parseEditorTime("930"), "09:30")
+  assert.strictEqual(feed.parseEditorTime("1430"), "14:30")
+  assert.strictEqual(feed.parseEditorTime("9.15"), "09:15")
+  assert.strictEqual(feed.parseEditorTime("2pm"), "14:00")
+  assert.strictEqual(feed.parseEditorTime("2:30 PM"), "14:30")
+  assert.strictEqual(feed.parseEditorTime("12am"), "00:00")
+  assert.strictEqual(feed.parseEditorTime("12pm"), "12:00")
+  assert.strictEqual(feed.parseEditorTime("midi"), "12:00")
+  assert.strictEqual(feed.parseEditorTime("24:00"), "")
+  assert.strictEqual(feed.parseEditorTime("13pm"), "")
+  assert.strictEqual(feed.parseEditorTime("9:5"), "")
+  assert.strictEqual(feed.parseEditorTime("later"), "")
+
+  assert.strictEqual(feed.stepEditorDate("2026-10-31", 1, now), "2026-11-01")
+  assert.strictEqual(feed.stepEditorDate("demain", -1, now), "2026-10-28")
+  assert.strictEqual(feed.stepEditorDate("nonsense", 1, now), "nonsense")
+  assert.strictEqual(feed.stepEditorTime("10:07", 15), "10:15")
+  assert.strictEqual(feed.stepEditorTime("10:15", 15), "10:30")
+  assert.strictEqual(feed.stepEditorTime("10:07", -15), "10:00")
+  assert.strictEqual(feed.stepEditorTime("10:00", -15), "09:45")
+  assert.strictEqual(feed.stepEditorTime("23:50", 15), "00:00")
+  assert.strictEqual(feed.stepEditorTime("00:00", -15), "23:45")
+
+  // Moving the start keeps the length; an all-day event keeps its days.
+  const at = function(d, h, m) { return new Date(2026, 10, d, h || 0, m || 0).getTime() }
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(feed.shiftedEditorEnd(at(3, 14), at(3, 15, 30), at(4, 9), false))),
+    { date: "2026-11-04", time: "10:30" })
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(feed.shiftedEditorEnd(at(3, 23), at(4, 1), at(5, 23), false))),
+    { date: "2026-11-06", time: "01:00" })
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(feed.shiftedEditorEnd(at(3), at(6), at(10), true))), { date: "2026-11-12", time: "" })
+  // Across the end of summer time (25 October 2026 in Europe) the day count holds.
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(feed.shiftedEditorEnd(new Date(2026, 9, 20).getTime(), new Date(2026, 9, 21).getTime(),
+    new Date(2026, 9, 25).getTime(), true))), { date: "2026-10-25", time: "" })
+
+  assert.strictEqual(feed.editorDurationLabel(at(3, 14), at(3, 14, 45), false), "45 min")
+  assert.strictEqual(feed.editorDurationLabel(at(3, 14), at(3, 15), false), "1 h")
+  assert.strictEqual(feed.editorDurationLabel(at(3, 14), at(3, 15, 30), false), "1 h 30")
+  assert.strictEqual(feed.editorDurationLabel(at(3), at(4), true), "1 day")
+  assert.strictEqual(feed.editorDurationLabel(at(3), at(6), true), "3 days")
+}
+
 // A CalDAV update replaces the whole resource, so fields this editor does not
 // draw must survive a change to the ones it does. In particular, editing the
 // title must not remove the organiser, attendees, alarms, timezone rules or a

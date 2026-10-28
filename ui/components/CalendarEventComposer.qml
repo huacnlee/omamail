@@ -93,8 +93,64 @@ Rectangle {
   // down, because writing them back would turn the event into a timed one.
   property bool allDay: false
   readonly property bool editingAllDay: allDay
-  readonly property var dateRange: Calendar.editorDateRange(dateField.text, startField.text,
-    endDateField.text, endField.text, allDay)
+  // The fields take what people type — 3/11, demain, mardi, 14h30, 2pm — and
+  // the range is read from what that means, so Return saves without first
+  // leaving the field. Leaving it writes the date or time back in full.
+  readonly property bool dayFirst: {
+    var format = Qt.locale().dateFormat(Locale.ShortFormat)
+    return format.indexOf("M") < 0 || format.indexOf("d") < format.indexOf("M")
+  }
+  function readDate(text) { return Calendar.parseEditorDate(text, Date.now(), dayFirst) }
+  readonly property var dateRange: Calendar.editorDateRange(readDate(dateField.text),
+    Calendar.parseEditorTime(startField.text), readDate(endDateField.text),
+    Calendar.parseEditorTime(endField.text), allDay)
+  readonly property string dateSummary: {
+    if (!dateRange.ok) return ""
+    var start = new Date(dateRange.startMs)
+    var last = new Date(allDay ? dateRange.endMs - 1 : dateRange.endMs)
+    var day = Qt.locale().dateFormat(Locale.LongFormat), clock = Qt.locale().timeFormat(Locale.ShortFormat)
+    var sameDay = Calendar.isoDate(start) === Calendar.isoDate(last)
+    var text = Qt.formatDate(start, day)
+    if (allDay) text += sameDay ? "" : " → " + Qt.formatDate(last, day)
+    else text += ", " + Qt.formatTime(start, clock) + " → "
+      + (sameDay ? "" : Qt.formatDate(last, day) + ", ") + Qt.formatTime(last, clock)
+    text += " · " + Calendar.editorDurationLabel(dateRange.startMs, dateRange.endMs, allDay)
+    return allDay ? text : text + " · " + Qt.formatDateTime(start, "t")
+  }
+
+  // The range as it stood when a start field took the focus. Moving the start
+  // carries the end with it, the same length later, so a meeting moved to the
+  // next day is not first refused for ending before it starts.
+  property var heldRange: null
+  function holdRange() {
+    heldRange = dateRange.ok ? { startMs: dateRange.startMs, endMs: dateRange.endMs } : null
+  }
+  function followStart() {
+    var date = readDate(dateField.text), time = allDay ? "00:00" : Calendar.parseEditorTime(startField.text)
+    if (!heldRange || date === "" || time === "") return
+    var end = Calendar.shiftedEditorEnd(heldRange.startMs, heldRange.endMs,
+      new Date(date + "T" + time + ":00").getTime(), allDay)
+    endDateField.text = end.date
+    if (!allDay) endField.text = end.time
+  }
+  // Set a field from the picker or the arrow keys, as if it had been typed.
+  function setWhen(field, text) {
+    if (field.leads && !field.activeFocus) holdRange()
+    field.text = text
+    if (field.leads) followStart()
+  }
+  function stepWhen(field, direction) {
+    setWhen(field, field.time ? Calendar.stepEditorTime(field.text, direction * 15)
+      : Calendar.stepEditorDate(field.text, direction, Date.now(), dayFirst))
+  }
+  function tidyWhen(field) {
+    var value = field.time ? Calendar.parseEditorTime(field.text) : readDate(field.text)
+    if (value !== "" && value !== field.text) field.text = value
+  }
+  function pickDate(field) {
+    datePicker.target = field
+    datePicker.openFor(field, readDate(field.text))
+  }
   color: root.backgroundColor
 
   component FieldLabel: Text {
@@ -121,6 +177,43 @@ Rectangle {
     id: input
     font.pixelSize: Style.font.bodySmall
     onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealField, input)
+  }
+
+  // A date or time field of the range. ↑ and ↓ move it a day or 15 minutes;
+  // a date field carries a button that opens the month picker.
+  component WhenField: TextField {
+    id: whenInput
+    property bool time: false
+    // A start field: the end follows it.
+    property bool leads: false
+    foreground: root.textColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.bodySmall
+    rightPadding: time ? horizontalPadding : pickerButton.width + Style.space(4)
+    onActiveFocusChanged: {
+      if (!activeFocus) return
+      Qt.callLater(root.revealField, whenInput)
+      if (leads) root.holdRange()
+    }
+    onTextChanged: if (leads && activeFocus) root.followStart()
+    onEditingFinished: root.tidyWhen(whenInput)
+    Keys.onUpPressed: root.stepWhen(whenInput, 1)
+    Keys.onDownPressed: root.stepWhen(whenInput, -1)
+
+    IconButton {
+      id: pickerButton
+      objectName: whenInput.objectName + "-picker"
+      visible: !whenInput.time
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(2)
+      anchors.verticalCenter: parent.verticalCenter
+      iconName: "calendar"
+      iconSize: Style.font.iconSmall
+      tooltipText: "Pick a date"
+      foreground: root.textColor
+      accent: root.accentColor
+      onClicked: root.pickDate(whenInput)
+    }
   }
 
   component EventOption: QQC.ComboBox {
@@ -746,22 +839,21 @@ Rectangle {
       Row {
         width: parent.width
         spacing: Style.space(8)
-        EditorField {
+        WhenField {
           id: dateField
           objectName: "event-start-date-field"
+          leads: true
           width: parent.width - (startField.visible ? startField.width + parent.spacing : 0)
-          foreground: root.textColor
-          font.family: root.panelFontFamily
-          placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
+          placeholderText: root.editingAllDay ? "First day: 3/11, tomorrow, Tuesday" : "3/11, tomorrow, Tuesday"
         }
 
-        EditorField {
+        WhenField {
           id: startField
           objectName: "event-start-time-field"
+          time: true
+          leads: true
           visible: !root.editingAllDay
           width: Style.space(120)
-          foreground: root.textColor
-          font.family: root.panelFontFamily
           placeholderText: "Start"
         }
       }
@@ -769,22 +861,34 @@ Rectangle {
       Row {
         width: parent.width
         spacing: Style.space(8)
-        EditorField {
+        WhenField {
           id: endDateField
           objectName: "event-end-date-field"
           width: parent.width - (endField.visible ? endField.width + parent.spacing : 0)
-          foreground: root.textColor
-          font.family: root.panelFontFamily
-          placeholderText: "YYYY-MM-DD"
+          placeholderText: "3/11, tomorrow, Tuesday"
         }
-        EditorField {
+        WhenField {
           id: endField
           objectName: "event-end-time-field"
+          time: true
           visible: !root.editingAllDay
           width: Style.space(120)
-          foreground: root.textColor
-          font.family: root.panelFontFamily
           placeholderText: "End"
+        }
+      }
+
+      DatePicker {
+        id: datePicker
+        objectName: "event-date-picker"
+        property Item target: null
+        textColor: root.textColor
+        backgroundColor: root.backgroundColor
+        accentColor: root.accentColor
+        fontFamily: root.panelFontFamily
+        onPicked: function(isoDate) {
+          if (!target) return
+          root.setWhen(target, isoDate)
+          target.forceActiveFocus()
         }
       }
 
@@ -800,9 +904,14 @@ Rectangle {
         font.pixelSize: Style.font.caption
       }
 
+      // What the fields mean, spelled out: the weekday is the check people
+      // make, and the zone says the times are this computer's.
       Text {
-        visible: !root.allDay && root.dateRange.ok
-        text: "Times shown in " + Qt.formatDateTime(new Date(root.dateRange.startMs || Date.now()), "t") + " (local time)"
+        objectName: "event-date-summary"
+        width: parent.width
+        visible: root.dateRange.ok
+        text: root.dateSummary
+        wrapMode: Text.Wrap
         textFormat: Text.PlainText
         color: root.dimColor
         font.family: root.panelFontFamily
