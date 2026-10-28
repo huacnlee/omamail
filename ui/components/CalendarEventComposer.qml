@@ -64,6 +64,13 @@ Rectangle {
   // would save the event without them, so the controls are not offered.
   readonly property bool googleWrites: !!chosenSource && chosenSource.kind === "google"
     && !!controller && !!controller.service && controller.service.backendCanGoogleCalendars === true
+  // A scheduling CalDAV server sends the invitations once the event names its
+  // guests; editing them needs this user to be the event's organizer.
+  readonly property bool caldavGuestWrites: !!chosenSource
+    && (chosenSource.kind === "caldav" || chosenSource.kind === "icloud")
+    && !!controller && controller.canInviteCalDavGuests === true
+  readonly property bool caldavOrganizer: caldavGuestWrites && editing
+    && (!editingEvent.organizer || controller.isOwnCaldavAddress(editingSourceId, editingEvent.organizer.email))
   readonly property bool guestUpdate: editing && googleWrites
     && !!editingEvent.organizer && editingEvent.organizer.self === true
     && ((Array.isArray(editingEvent.attendees) && editingEvent.attendees.some(function(attendee) { return attendee.self !== true }))
@@ -355,6 +362,8 @@ Rectangle {
     timeZoneField.text = String(event.timeZone || "")
     conferenceRequestId = "omamail-" + Date.now().toString(36) + "-" + Math.random().toString(36).substring(2)
     editingSourceId = String(sourceId || "")
+    if (controller && event.organizer && typeof controller.loadCaldavAddresses === "function")
+      controller.loadCaldavAddresses(controller.findSource(editingSourceId))
     writePending = false
     titleField.text = String(event.summary || "")
     dateField.text = localDate(start)
@@ -893,13 +902,14 @@ Rectangle {
       Column {
         width: parent.width
         spacing: Style.space(6)
-        visible: root.googleWrites
+        visible: root.googleWrites || root.caldavGuestWrites
         FieldLabel { text: "Guests"; visible: guestsField.visible }
         EditorField {
           id: guestsField
           objectName: "event-guests-field"
           width: parent.width
-          visible: !root.editing || (!!root.editingEvent.organizer && root.editingEvent.organizer.self === true)
+          visible: !root.editing || root.caldavOrganizer
+            || (root.googleWrites && !!root.editingEvent.organizer && root.editingEvent.organizer.self === true)
           placeholderText: "Guest email addresses, separated by commas"
           foreground: root.textColor
           accent: root.accentColor
@@ -926,8 +936,20 @@ Rectangle {
           panelFontFamily: root.panelFontFamily
           onChosen: function(contact) { root.acceptGuest(contact) }
         }
+        Text {
+          objectName: "event-guests-caldav-note"
+          width: parent.width
+          visible: root.caldavGuestWrites && guestsField.visible
+          text: "Your calendar server emails the invitations."
+          textFormat: Text.PlainText
+          wrapMode: Text.WordWrap
+          color: root.dimColor
+          font.family: root.panelFontFamily
+          font.pixelSize: Style.font.caption
+        }
         IconTextButton {
           objectName: "event-more-options"
+          visible: root.googleWrites
           text: "More options..."
           selected: root.advancedOptionsOpen
           foreground: root.textColor
@@ -938,7 +960,7 @@ Rectangle {
         Column {
           width: parent.width
           spacing: Style.space(6)
-          visible: root.advancedOptionsOpen
+          visible: root.googleWrites && root.advancedOptionsOpen
           FieldLabel { text: "Time zone for repeating events" }
           EditorField {
             id: timeZoneField
@@ -973,8 +995,10 @@ Rectangle {
             onChosen: function(value) { root.eventVisibility = value; root.visibilityChanged = true }
           }
         }
-        FieldLabel { text: "Event reminders" }
+        FieldLabel { text: "Event reminders"; visible: root.googleWrites }
         Flow {
+          objectName: "event-reminders"
+          visible: root.googleWrites
           width: parent.width
           spacing: Style.space(6)
           Repeater {
@@ -992,7 +1016,7 @@ Rectangle {
           }
         }
         Row {
-          visible: root.reminderMode === "custom"
+          visible: root.googleWrites && root.reminderMode === "custom"
           width: parent.width
           spacing: Style.space(8)
           EditorField {

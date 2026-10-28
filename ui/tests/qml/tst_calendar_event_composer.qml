@@ -23,6 +23,13 @@ Item {
     property int updateCalls: 0
     property var createdFields: null
     property var transferCallback: null
+    property bool canInviteCalDavGuests: true
+    property var caldavAddresses: ({})
+    property int addressLoads: 0
+    function isOwnCaldavAddress(sourceId, email) {
+      return (caldavAddresses[sourceId] || []).indexOf(String(email).toLowerCase()) >= 0
+    }
+    function loadCaldavAddresses(source) { addressLoads++ }
     function findSource(id) {
       for (var i=0;i<writableSourceGroups.length;i++)
         for (var j=0;j<writableSourceGroups[i].calendars.length;j++)
@@ -112,6 +119,39 @@ Item {
       composer.writePending = false
       contacts.recipientContacts = []
       contacts.refreshCalls = 0
+      eventController.canInviteCalDavGuests = true
+      eventController.caldavAddresses = {}
+      eventController.addressLoads = 0
+    }
+
+    function test_caldav_calendars_offer_guests_only_to_their_organizer() {
+      var groups = JSON.parse(JSON.stringify(initialGroups))
+      groups[0].calendars[0].kind = "caldav"
+      eventController.writableSourceGroups = groups
+      composer.begin()
+      var guests = findChild(composer, "event-guests-field")
+      verify(guests.visible)
+      verify(findChild(composer, "event-guests-caldav-note").visible)
+      verify(!findChild(composer, "event-more-options").visible)
+      verify(!findChild(composer, "event-reminders").visible, "CalDAV events carry no reminder choice")
+      guests.text = "guest@example.org"
+      findChild(composer, "event-title-field").text = "Planning"
+      composer.submit("all")
+      compare(eventController.createdFields.guestEmails, "guest@example.org")
+      init()
+      eventController.writableSourceGroups = groups
+      eventController.canInviteCalDavGuests = false
+      composer.begin()
+      verify(!findChild(composer, "event-guests-field").visible)
+      init()
+      eventController.writableSourceGroups = groups
+      var event = {uid:"planning",summary:"Planning",start:{ms:Date.UTC(2026,9,27,10)},end:{ms:Date.UTC(2026,9,27,11)},
+        organizer:{email:"host@example.org"},attendees:[{email:"me@example.org"}]}
+      composer.beginEdit("google:me@example.com", event)
+      compare(eventController.addressLoads, 1)
+      verify(!findChild(composer, "event-guests-field").visible)
+      eventController.caldavAddresses = {"google:me@example.com": ["host@example.org"]}
+      verify(findChild(composer, "event-guests-field").visible)
     }
 
     function test_microsoft_creation_keeps_basic_fields_without_repetition() {

@@ -6,6 +6,7 @@ use std::{sync::OnceLock, time::Duration};
 pub mod attendance;
 pub(crate) mod diagnostics;
 mod discovery;
+mod ics;
 pub mod invitations;
 pub mod reminders;
 pub use discovery::discover;
@@ -92,6 +93,7 @@ struct Request {
     username: String,
     account_id: String,
     if_match: Option<String>,
+    if_none_match: bool,
 }
 
 fn prepare(params: &Value) -> Result<Request, &'static str> {
@@ -103,6 +105,7 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         "create" | "move" | "import" => Method::POST,
         "update" => Method::PATCH,
         "delete" => Method::DELETE,
+        "addresses" if matches!(kind, "caldav" | "icloud") => Method::GET,
         _ => return Err("calendar_invalid_operation"),
     };
     let body = params["body"].as_str().unwrap_or("").to_owned();
@@ -122,6 +125,12 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
             .get("ifMatch")
             .map(|_| text(params, "ifMatch").map(str::to_owned))
             .transpose()?,
+        // Creating a resource that must not exist yet; nothing else is sent.
+        if_none_match: match params.get("ifNoneMatch") {
+            None => false,
+            Some(value) if value == "*" => true,
+            Some(_) => return Err("calendar_invalid_input"),
+        },
     };
     match kind {
         "google" | "microsoft" => {
@@ -269,7 +278,7 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
             }
         }
         "caldav" | "icloud" => {
-            if !matches!(op, "list" | "create" | "update" | "delete") {
+            if !matches!(op, "list" | "create" | "update" | "delete" | "addresses") {
                 return Err("calendar_invalid_operation");
             }
             let base = if kind == "icloud" {
@@ -280,16 +289,20 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
                 request.username = text(source, "username")?.into();
                 configured_url(text(source, "url")?)?
             };
-            request.url = if op == "list" {
+            request.url = if matches!(op, "list" | "addresses") {
                 base
             } else {
                 event_url(&base, text(params, "href")?)?
             };
             request.method = match op {
                 "list" => Method::from_bytes(b"REPORT").unwrap(),
+                "addresses" => Method::from_bytes(b"PROPFIND").unwrap(),
                 "create" | "update" => Method::PUT,
                 _ => Method::DELETE,
             };
+            if op == "addresses" {
+                request.body = discovery::PRINCIPAL.into();
+            }
         }
         _ => return Err("calendar_provider_unsupported"),
     }
@@ -427,6 +440,14 @@ where
     } else {
         None
     };
+    if params["operation"] == "addresses" {
+        let secret = password
+            .as_ref()
+            .map(|value| value.text())
+            .transpose()
+            .map_err(|_| "calendar_password_invalid")?;
+        return addresses(client()?, request, secret).await;
+    }
     let paginated = matches!(
         params["operation"].as_str(),
         Some("list" | "lookup" | "instances")
@@ -555,11 +576,19 @@ async fn execute(
     if let Some(etag) = request.if_match {
         builder = builder.header("If-Match", etag);
     }
+    if request.if_none_match {
+        builder = builder.header("If-None-Match", "*");
+    }
     if matches!(request.kind.as_str(), "caldav" | "icloud") {
         builder = builder.basic_auth(request.username, password);
-        if request.method.as_str() == "REPORT" {
+        if matches!(request.method.as_str(), "REPORT" | "PROPFIND") {
+            let depth = if request.method.as_str() == "REPORT" {
+                "1"
+            } else {
+                "0"
+            };
             builder = builder
-                .header("Depth", "1")
+                .header("Depth", depth)
                 .header("Content-Type", "application/xml; charset=utf-8");
         } else {
             builder = builder.header("Content-Type", "text/calendar; charset=utf-8");
@@ -620,6 +649,72 @@ async fn execute(
     let body = String::from_utf8(bytes)
         .map_err(|_| diagnostics::record("calendar_invalid_response", details))?;
     Ok(json!({"body":body,"status":status.as_u16()}))
+}
+
+const ADDRESS_SET: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><c:calendar-user-address-set/></d:prop></d:propfind>";
+
+/// The mail addresses the server schedules as this user (RFC 6638). An event
+/// whose ORGANIZER is one of them is what makes the server invite its guests.
+async fn addresses(
+    client: &Client,
+    request: Request,
+    password: Option<&str>,
+) -> Result<Value, &'static str> {
+    let base = request.url.clone();
+    let principal_request = Request {
+        operation: request.operation.clone(),
+        url: base.clone(),
+        method: request.method.clone(),
+        body: request.body.clone(),
+        kind: request.kind.clone(),
+        source_id: request.source_id.clone(),
+        username: request.username.clone(),
+        account_id: request.account_id.clone(),
+        if_match: None,
+        if_none_match: false,
+    };
+    let answer = execute(client, principal_request, None, password).await?;
+    let body = answer["body"].as_str().ok_or("calendar_invalid_response")?;
+    let principal = event_url(
+        &base,
+        &discovery::nested_href(body, b"current-user-principal")?,
+    )?;
+    let address_request = Request {
+        url: principal,
+        body: ADDRESS_SET.into(),
+        if_match: None,
+        if_none_match: false,
+        ..request
+    };
+    let answer = execute(client, address_request, None, password).await?;
+    let body = answer["body"].as_str().ok_or("calendar_invalid_response")?;
+    Ok(
+        json!({"addresses": mail_addresses(&discovery::nested_hrefs(body, b"calendar-user-address-set")?)}),
+    )
+}
+
+fn mail_addresses(hrefs: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for href in hrefs {
+        let Some(address) = href
+            .get(..7)
+            .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+            .map(|_| href[7..].trim())
+        else {
+            continue;
+        };
+        let valid = address.len() <= 320
+            && address.split_once('@').is_some_and(|(local, domain)| {
+                !local.is_empty() && domain.contains('.') && !domain.contains('@')
+            })
+            && !address
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace() || "<>\",;:".contains(c));
+        if valid && out.len() < 32 && !out.iter().any(|seen| seen.eq_ignore_ascii_case(address)) {
+            out.push(address.to_owned());
+        }
+    }
+    out
 }
 
 #[cfg(test)]

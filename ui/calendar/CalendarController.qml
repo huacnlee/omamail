@@ -77,6 +77,11 @@ Item {
   property var writeSource: null
   property var writeEvent: null
   property var writeDraft: null
+  // The addresses each CalDAV server schedules as this user, by source id.
+  property var caldavAddresses: ({})
+  // Guests on CalDAV events need the server's own address: API 10.
+  readonly property bool canInviteCalDavGuests: !!service && !!service.backend
+    && service.backend.ready === true && service.backend.apiVersion >= 10
   // The address the current CalDAV write goes to, judged before the keyring
   // is touched and carried to the writer that runs after it.
   property string writeUrl: ""
@@ -374,6 +379,59 @@ Item {
     return null
   }
 
+  function isCaldav(source) { return !!source && (source.kind === "caldav" || source.kind === "icloud") }
+
+  function isOwnCaldavAddress(sourceId, email) {
+    var known = caldavAddresses[String(sourceId || "")] || []
+    var wanted = String(email || "").toLowerCase()
+    return wanted !== "" && known.some(function(address) { return String(address).toLowerCase() === wanted })
+  }
+
+  function loadCaldavAddresses(source, callback) {
+    var done = callback || function() {}
+    if (!isCaldav(source) || canInviteCalDavGuests !== true) { done([], ""); return }
+    var known = caldavAddresses[source.id]
+    if (known) { done(known, ""); return }
+    nativeRequest(source, "addresses", {}, function(result, error) {
+      var list = !error && result && result.addresses ? Plain.plain(result.addresses) : []
+      if (!error) {
+        var next = Plain.plain(root.caldavAddresses)
+        next[source.id] = list
+        root.caldavAddresses = next
+      }
+      done(list, error)
+    })
+  }
+
+  // The guests a CalDAV write carries, or null when it leaves them alone.
+  function caldavGuests(source, fields, existing) {
+    if (!isCaldav(source) || fields.guestEmails === undefined) return null
+    var hadGuests = !!existing && (existing.attendees || []).length > 0
+    if (String(fields.guestEmails).trim() === "" && !hadGuests) return null
+    if (canInviteCalDavGuests !== true)
+      return { ok: false, error: "Update the backend to invite guests from this calendar" }
+    return Calendar.guestEmails(fields.guestEmails)
+  }
+
+  // Writes the guest list into the draft's ICS once the server has named this
+  // user's address, then hands the ICS on.
+  function withGuests(source, draft, guests, existing, next) {
+    if (!guests.emails.length) {
+      next(Calendar.withCaldavGuests(draft.ics, draft.uid, "", [], []), "")
+      return
+    }
+    loadCaldavAddresses(source, function(addresses, error) {
+      var organizer = Calendar.caldavOrganizer(addresses, existing)
+      if (error || organizer === "") {
+        next("", error || "This calendar's server names no email address to send invitations from")
+        return
+      }
+      var ics = Calendar.withCaldavGuests(draft.ics, draft.uid, organizer, guests.emails,
+        existing ? existing.attendees : [])
+      next(ics, ics === "" ? "The event could not be written with its guests" : "")
+    })
+  }
+
   function createEvent(sourceId, fields) {
     if (creatingEvent || eventWriting) {
       eventCreated(false, "Another event change is still in progress")
@@ -384,6 +442,8 @@ Item {
     if (refusal !== "") { eventCreated(false, refusal); return false }
     var built = Calendar.createEvent(fields, Date.now())
     if (!built.ok) { eventCreated(false, built.error); return false }
+    var guests = caldavGuests(source, fields, null)
+    if (guests && !guests.ok) { eventCreated(false, guests.error); return false }
     if (source.kind === "google") {
       var refusedOptions = googleOptionsRefusal(fields)
       if (refusedOptions !== "") { eventCreated(false, refusedOptions); return false }
@@ -406,6 +466,12 @@ Item {
     }
     if (source.kind === "google") createGoogleEvent()
     else if (source.kind === "microsoft") createGraphEvent()
+    else if (guests) withGuests(source, built, guests, null, function(ics, error) {
+      if (error) { root.finishEvent(false, error); return }
+      built.ics = ics
+      root.eventDraft = built
+      root.createNativeEvent()
+    })
     else createNativeEvent()
     return true
   }
@@ -453,6 +519,8 @@ Item {
     if (refusal !== "") { eventUpdated(false, refusal); return false }
     var built = Calendar.updateEvent(fields, event, Date.now())
     if (!built.ok) { eventUpdated(false, built.error); return false }
+    var guests = caldavGuests(source, fields, event)
+    if (guests && !guests.ok) { eventUpdated(false, guests.error); return false }
     var destination = fields.destinationSourceId && fields.destinationSourceId !== sourceId
       ? findSource(fields.destinationSourceId) : null
     if (fields.destinationSourceId && fields.destinationSourceId !== sourceId) {
@@ -480,6 +548,12 @@ Item {
     eventWriting = true
     if (source.kind === "google") startGoogleWrite()
     else if (source.kind === "microsoft") startGraphWrite()
+    else if (guests) withGuests(source, built, guests, event, function(ics, error) {
+      if (error) { root.finishWrite(false, error); return }
+      built.ics = ics
+      root.writeDraft = built
+      root.startCaldavWrite()
+    })
     else startCaldavWrite()
     return true
   }

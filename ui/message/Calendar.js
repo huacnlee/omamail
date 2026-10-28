@@ -956,6 +956,7 @@ function eventFromComponent(calendar, event, fallbackMethod) {
       dtend: rawLine(event, "DTEND"),
       duration: rawLine(event, "DURATION"),
       recurrenceId: rawLine(event, "RECURRENCE-ID"),
+      exdates: exclusionLines.map(function(line) { return String(line.raw || "") }),
       timezones: timezoneBlocks(calendar)
     }
   }

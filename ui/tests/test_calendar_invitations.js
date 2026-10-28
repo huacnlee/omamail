@@ -43,6 +43,34 @@ const cancel = invitations.params(source,"mailbox",{uid:"test",organizer:invite.
 assert.equal(cancel.event,undefined)
 assert.equal(invitations.destination({},"mailbox"),null)
 assert.equal(invitations.destination({invitationCalendars:{mailbox:{...source,readOnly:true}}},"mailbox"),null)
+const dav = {kind:"caldav",id:"personal",name:"Personal",url:"https://dav.example.org/cal/",username:"me"}
+assert.equal(invitations.destination({invitationCalendars:{mailbox:dav}},"mailbox").id,"personal")
+assert.equal(invitations.minimumApi(dav),10)
+assert.equal(invitations.minimumApi(source),9)
+const zoned = {...invite,description:"Agenda; notes",location:"Room 1, floor 2",
+  source:{dtstart:"DTSTART;TZID=Europe/Stockholm:20261027T100000",dtend:"DTEND;TZID=Europe/Stockholm:20261027T110000",
+    exdates:["EXDATE;TZID=Europe/Stockholm:20261103T100000"],
+    timezones:["BEGIN:VTIMEZONE\r\nTZID:Europe/Stockholm\r\nX-MICROSOFT-CDO-TZID:4\r\nBEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nEND:VTIMEZONE"]},
+  attendees:[{email:"me@example.org"}]}
+const copy = invitations.params(dav,"imap:me@example.org",zoned,"accepted")
+assert.equal(copy.event,undefined)
+const text = copy.calendar.replace(/\r\n /g,"")
+for (const line of ["UID:test","SEQUENCE:2","DTSTART;TZID=Europe/Stockholm:20261027T100000","DTEND;TZID=Europe/Stockholm:20261027T110000",
+  "RRULE:FREQ=WEEKLY;COUNT=4","EXDATE;TZID=Europe/Stockholm:20261103T100000","TZID:Europe/Stockholm","TZOFFSETTO:+0100",
+  "DESCRIPTION:Agenda\\; notes\\nhttps://meet.example.org/join","LOCATION:Room 1\\, floor 2"])
+  assert.ok(text.split("\r\n").includes(line),line)
+assert.ok(!/ORGANIZER|ATTENDEE|X-MICROSOFT/.test(text))
+assert.ok(copy.calendar.split("\r\n").every(line => line.length <= 75))
+const davOccurrence = invitations.params(dav,"mailbox",{...zoned,recurrenceRule:"",recurrenceIdMs:Date.UTC(2026,10,3,9),
+  source:{...zoned.source,recurrenceId:"RECURRENCE-ID;TZID=Europe/Stockholm:20261103T100000"}},"declined")
+assert.equal(davOccurrence.originalStart,"2026-11-03T09:00:00.000Z")
+assert.ok(davOccurrence.calendar.includes("RECURRENCE-ID;TZID=Europe/Stockholm:20261103T100000"))
+assert.ok(!davOccurrence.calendar.includes("RRULE"))
+const removed = invitations.params(dav,"mailbox",{uid:"test",organizer:invite.organizer},"cancelled")
+assert.equal(removed.calendar,undefined)
+assert.equal(invitations.params(dav,"mailbox",{uid:"test",organizer:invite.organizer},"accepted"),null)
+const cached = invitations.params(dav,"mailbox",{...invite,source:{dtstart:"DTSTART:20261027T100000Z",dtend:"DTEND:20261027T110000Z"}},"accepted")
+assert.ok(cached.calendar.includes("EXDATE:20261103T100000Z"))
 console.log("calendar invitations ok")
 const sources = load("calendar/Sources.js")
 const calendars = {version:1,sources:[source,{kind:"google",id:"google:other",accountId:"other@example.org"}]}

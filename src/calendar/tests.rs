@@ -244,6 +244,7 @@ pub(super) fn local_request(url: Url) -> Request {
     Request {
         operation: "lookup".into(),
         if_match: None,
+        if_none_match: false,
         url,
         method: Method::GET,
         body: String::new(),
@@ -593,5 +594,88 @@ async fn credentials_are_not_read_for_a_cross_origin_calendar_href() {
         })
         .await
         .is_err()
+    );
+}
+
+async fn dav_server(bodies: Vec<String>) -> (Url, tokio::task::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = Url::parse(&format!(
+        "http://{}/calendars/me/personal/",
+        listener.local_addr().unwrap()
+    ))
+    .unwrap();
+    let handle = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        for body in bodies {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; 8192];
+            let n = socket.read(&mut bytes).await.unwrap();
+            seen.push(String::from_utf8_lossy(&bytes[..n]).to_lowercase());
+            let response = format!(
+                "HTTP/1.1 207 Multi-Status\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+        seen
+    });
+    (url, handle)
+}
+
+fn caldav_addresses_request(url: Url) -> Request {
+    let mut request = prepare(
+        &json!({"source":{"kind":"caldav","id":"personal","username":"me",
+        "url":"https://dav.example.org/calendars/me/personal/"},"operation":"addresses"}),
+    )
+    .unwrap();
+    request.url = url;
+    request
+}
+
+#[tokio::test]
+async fn caldav_addresses_read_the_principal_on_the_same_origin_and_keep_mail_only() {
+    let client = Client::builder().no_proxy().build().unwrap();
+    let principal = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/calendars/me/personal/</d:href><d:propstat><d:prop><d:current-user-principal><d:href>/principals/me/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>"#;
+    let addresses_xml = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/principals/me/</d:href><d:propstat><d:prop><c:calendar-user-address-set><d:href>mailto:me@example.org</d:href><d:href>/principals/me/</d:href><d:href>MAILTO:ME@example.org</d:href><d:href>mailto:bad address@example.org</d:href><d:href>mailto:alias@example.org</d:href></c:calendar-user-address-set></d:prop></d:propstat></d:response></d:multistatus>"#;
+    let (url, task) = dav_server(vec![principal.into(), addresses_xml.into()]).await;
+    let result = super::addresses(&client, caldav_addresses_request(url), Some("synthetic"))
+        .await
+        .unwrap();
+    assert_eq!(
+        result["addresses"],
+        json!(["me@example.org", "alias@example.org"])
+    );
+    let seen = task.await.unwrap();
+    assert!(seen[0].starts_with("propfind /calendars/me/personal/ "));
+    assert!(seen[0].contains("depth: 0") && seen[0].contains("current-user-principal"));
+    assert!(seen[1].starts_with("propfind /principals/me/ "));
+    assert!(seen[1].contains("calendar-user-address-set"));
+    assert!(seen[1].contains("authorization: basic"));
+}
+
+#[tokio::test]
+async fn caldav_addresses_never_send_credentials_to_another_origin() {
+    let client = Client::builder().no_proxy().build().unwrap();
+    let principal = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/</d:href><d:propstat><d:prop><d:current-user-principal><d:href>https://evil.example/principals/me/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>"#;
+    let (url, task) = dav_server(vec![principal.into()]).await;
+    assert_eq!(
+        super::addresses(&client, caldav_addresses_request(url), Some("synthetic")).await,
+        Err("calendar_origin_refused")
+    );
+    assert_eq!(task.await.unwrap().len(), 1);
+}
+
+#[test]
+fn only_a_create_may_require_an_absent_resource() {
+    let source = json!({"kind":"caldav","id":"personal","username":"me","url":"https://dav.example.org/cal/"});
+    let request = prepare(
+        &json!({"source":source,"operation":"create","href":"a.ics","body":"x","ifNoneMatch":"*"}),
+    )
+    .unwrap();
+    assert!(request.if_none_match);
+    assert!(prepare(&json!({"source":source,"operation":"create","href":"a.ics","body":"x","ifNoneMatch":"\"v1\""})).is_err());
+    assert_eq!(
+        prepare(&json!({"source":{"kind":"google"},"operation":"addresses"})).err(),
+        Some("calendar_invalid_operation")
     );
 }

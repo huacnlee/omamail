@@ -20,6 +20,7 @@ Item {
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: true
     property bool backendCanSaveInvitations: true
+    property var backend: ({ ready: true, apiVersion: 9 })
     property var settings: ({})
     function persistSetting(name, value) { var next = {}; next[name] = value; mailService.settings = next }
     property bool calendarRemindersEnabled: true
@@ -144,6 +145,26 @@ Item {
       mailService.backendCanSaveInvitations = true
       picker.changed("")
       compare(picker.value,"")
+    }
+
+    function test_caldav_invitation_destinations_need_api_10() {
+      mailService.settings = {}
+      mailService.backend = { ready: true, apiVersion: 9 }
+      mailService.accountSummaries = [{id:"imap:me@example.org",email:"me@example.org",provider:"imap"}]
+      calendarController.sourceList = {version:1,sources:[{id:"personal",kind:"caldav",name:"Personal",
+        url:"https://dav.example.org/cal/",username:"me",readOnly:false},
+        {id:"shared",kind:"caldav",name:"Shared",url:"https://dav.example.org/shared/",username:"me",readOnly:true}]}
+      wait(1)
+      var picker = findChild(settings,"invitation-calendar-picker")
+      compare(picker.options.length,1)
+      mailService.backend = { ready: true, apiVersion: 10 }
+      wait(1)
+      compare(picker.options.length,2)
+      compare(picker.options[1].value,"personal")
+      compare(picker.options[1].label,"Personal · me")
+      picker.changed("personal")
+      compare(mailService.settings.invitationCalendars["imap:me@example.org"].kind,"caldav")
+      mailService.backend = { ready: true, apiVersion: 9 }
     }
 
     function test_existing_icloud_account_is_discovered_and_selected_in_calendars() {

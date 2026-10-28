@@ -1,7 +1,61 @@
-//! A private Google copy of an invitation answered through another mailbox.
+//! A private calendar copy of an invitation answered through another mailbox.
 //! RSVP remains mail; import and silent patches never notify the guests again.
+//! Google copies use its import API. A CalDAV copy is the invitation's own
+//! event without ORGANIZER or ATTENDEE lines, so the server has nothing to
+//! schedule and sends no second reply.
+use super::ics::{self, Component};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::future::Future;
+
+const COPY_LIMIT: usize = 512 * 1024;
+const CALENDAR_PROPERTIES: &[&str] = &["VERSION", "PRODID", "CALSCALE"];
+const ZONE_PROPERTIES: &[&str] = &["TZID", "LAST-MODIFIED", "TZURL", "X-LIC-LOCATION"];
+const RULE_PROPERTIES: &[&str] = &[
+    "DTSTART",
+    "TZOFFSETFROM",
+    "TZOFFSETTO",
+    "RRULE",
+    "RDATE",
+    "TZNAME",
+    "COMMENT",
+];
+// No ORGANIZER, ATTENDEE, VALARM or URL: the sender does not get to put
+// people, alarms or links into the copy beyond the text the card shows.
+const EVENT_PROPERTIES: &[&str] = &[
+    "UID",
+    "DTSTAMP",
+    "SEQUENCE",
+    "DTSTART",
+    "DTEND",
+    "DURATION",
+    "RECURRENCE-ID",
+    "SUMMARY",
+    "DESCRIPTION",
+    "LOCATION",
+    "RRULE",
+    "RDATE",
+    "EXDATE",
+    "STATUS",
+    "TRANSP",
+];
+const SINGLE_PROPERTIES: &[&str] = &[
+    "UID",
+    "DTSTAMP",
+    "SEQUENCE",
+    "DTSTART",
+    "DTEND",
+    "DURATION",
+    "RECURRENCE-ID",
+    "SUMMARY",
+    "DESCRIPTION",
+    "LOCATION",
+    "STATUS",
+    "TRANSP",
+];
+const MAILBOX: &str = "X-OMAMAIL-MAILBOX";
+const ORGANIZER: &str = "X-OMAMAIL-ORGANIZER";
+const SEQUENCE: &str = "X-OMAMAIL-SEQUENCE";
 
 static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -16,6 +70,7 @@ pub fn validate(p: &Value) -> Result<(), &'static str> {
             "response",
             "sequence",
             "event",
+            "calendar",
             "originalStart",
         ]
         .contains(&k.as_str())
@@ -23,14 +78,24 @@ pub fn validate(p: &Value) -> Result<(), &'static str> {
         return Err("invalid_params");
     }
     let source = &p["source"];
-    if source["kind"] != "google" || source["readOnly"] == true {
+    if source["readOnly"] == true {
         return Err("invalid_params");
     }
-    let account = super::text(source, "accountId")?;
-    if !account.contains('@') || account.contains(':') || account.chars().any(char::is_whitespace) {
-        return Err("invalid_params");
+    let google = match source["kind"].as_str() {
+        Some("google") => true,
+        Some("caldav" | "icloud") => false,
+        _ => return Err("invalid_params"),
+    };
+    if google {
+        let account = super::text(source, "accountId")?;
+        if !account.contains('@')
+            || account.contains(':')
+            || account.chars().any(char::is_whitespace)
+        {
+            return Err("invalid_params");
+        }
+        destination_owner(source)?;
     }
-    destination_owner(source)?;
     super::text(p, "mailbox")?;
     super::text(p, "uid")?;
     let organizer = super::text(p, "organizer")?;
@@ -51,6 +116,26 @@ pub fn validate(p: &Value) -> Result<(), &'static str> {
         {
             return Err("invalid_params");
         }
+    }
+    if !google {
+        if p.get("event").is_some() {
+            return Err("invalid_params");
+        }
+        let removal = matches!(p["response"].as_str(), Some("cancelled" | "declined"));
+        match p.get("calendar") {
+            Some(text) => {
+                copy(text.as_str().ok_or("invalid_params")?, p)?;
+            }
+            // A removed series needs only its UID; anything else is written
+            // from, or matched against, the invitation's own event.
+            None if removal && p.get("originalStart").is_none() => {}
+            None => return Err("invalid_params"),
+        }
+        return super::validate(&json!({"source":source,"operation":"list","body":"lookup"}))
+            .map_err(|_| "invalid_params");
+    }
+    if p.get("calendar").is_some() {
+        return Err("invalid_params");
     }
     if !matches!(p["response"].as_str(), Some("cancelled" | "declined")) {
         let event = p["event"].as_object().ok_or("invalid_params")?;
@@ -288,6 +373,283 @@ where
     Ok(json!({"status":if remove { "removed" } else { "saved" }}))
 }
 
+/// The invitation's event as the copy will hold it, refused outright if it
+/// carries anything outside the fields an invitation copy keeps.
+fn copy(text: &str, p: &Value) -> Result<Component, &'static str> {
+    if text.len() > COPY_LIMIT || text.contains('\0') {
+        return Err("invalid_params");
+    }
+    let calendar = Component::parse(text).map_err(|_| "invalid_params")?;
+    let allowed = |c: &Component, names: &[&str]| {
+        c.lines
+            .iter()
+            .all(|line| names.contains(&ics::name(line).as_str()))
+    };
+    let mut events = 0;
+    for child in &calendar.children {
+        let valid = match child.name.as_str() {
+            "VTIMEZONE" => {
+                allowed(child, ZONE_PROPERTIES)
+                    && child.property("TZID").is_some()
+                    && child.children.iter().all(|rule| {
+                        matches!(rule.name.as_str(), "STANDARD" | "DAYLIGHT")
+                            && rule.children.is_empty()
+                            && allowed(rule, RULE_PROPERTIES)
+                    })
+            }
+            "VEVENT" => {
+                events += 1;
+                allowed(child, EVENT_PROPERTIES)
+                    && child.children.is_empty()
+                    && SINGLE_PROPERTIES.iter().all(|wanted| {
+                        child
+                            .lines
+                            .iter()
+                            .filter(|l| ics::name(l) == *wanted)
+                            .count()
+                            <= 1
+                    })
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err("invalid_params");
+        }
+    }
+    let event = calendar
+        .children
+        .iter()
+        .find(|c| c.name == "VEVENT")
+        .ok_or("invalid_params")?;
+    if events != 1
+        || !allowed(&calendar, CALENDAR_PROPERTIES)
+        || event.text("UID").as_deref() != p["uid"].as_str()
+        || event.property("DTSTART").is_none()
+        || event.property("RECURRENCE-ID").is_some() != p.get("originalStart").is_some()
+    {
+        return Err("invalid_params");
+    }
+    Ok(calendar)
+}
+
+fn recurrence_key(event: &Component) -> Option<(String, String)> {
+    let line = event.property("RECURRENCE-ID")?;
+    Some((
+        ics::param(line, "TZID").unwrap_or_default(),
+        ics::value(line).trim().to_ascii_uppercase(),
+    ))
+}
+
+fn copy_organizer(event: &Component) -> Option<String> {
+    event.text(ORGANIZER).or_else(|| {
+        let address = ics::value(event.property("ORGANIZER")?);
+        let address = address
+            .get(..7)
+            .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+            .map_or(address, |_| &address[7..]);
+        Some(address.trim().to_owned())
+    })
+}
+
+fn copy_sequence(event: &Component) -> u64 {
+    event
+        .text(SEQUENCE)
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// The invitation's event, marked as this mailbox's managed copy.
+fn managed(event: &Component, p: &Value) -> Component {
+    let mut event = event.clone();
+    event.remove(&["STATUS", "TRANSP", MAILBOX, ORGANIZER, SEQUENCE]);
+    let status = if p["response"] == "tentative" {
+        "TENTATIVE"
+    } else {
+        "CONFIRMED"
+    };
+    event.lines.extend([
+        format!("STATUS:{status}"),
+        "TRANSP:OPAQUE".into(),
+        format!(
+            "{MAILBOX}:{}",
+            ics::escape(p["mailbox"].as_str().unwrap_or(""))
+        ),
+        format!(
+            "{ORGANIZER}:{}",
+            ics::escape(p["organizer"].as_str().unwrap_or(""))
+        ),
+        format!("{SEQUENCE}:{}", p["sequence"].as_u64().unwrap_or(0)),
+    ]);
+    event
+}
+
+pub async fn caldav(p: &Value) -> Result<Value, &'static str> {
+    validate(p)?;
+    tokio::time::timeout(std::time::Duration::from_secs(50), async {
+        let _guard = WRITES.lock().await;
+        save_caldav(p, |params| async move { super::call(&params, None).await }).await
+    })
+    .await
+    .map_err(|_| "calendar_timeout")?
+}
+
+fn uid_query(uid: &str) -> String {
+    let uid = uid
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?><c:calendar-query xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name=\"VCALENDAR\"><c:comp-filter name=\"VEVENT\"><c:prop-filter name=\"UID\"><c:text-match collation=\"i;octet\">{uid}</c:text-match></c:prop-filter></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>"
+    )
+}
+
+async fn save_caldav<F, Fut>(p: &Value, mut request: F) -> Result<Value, &'static str>
+where
+    F: FnMut(Value) -> Fut,
+    Fut: Future<Output = Result<Value, &'static str>>,
+{
+    validate(p)?;
+    let source = &p["source"];
+    let uid = p["uid"].as_str().unwrap();
+    let organizer = p["organizer"].as_str().unwrap();
+    let sequence = p["sequence"].as_u64().unwrap();
+    let remove = matches!(p["response"].as_str(), Some("cancelled" | "declined"));
+    let invitation = p["calendar"]
+        .as_str()
+        .map(|text| copy(text, p))
+        .transpose()?;
+    let found = request(json!({"source":source,"operation":"list","body":uid_query(uid)})).await?;
+    let body = found["body"].as_str().ok_or("calendar_invalid_response")?;
+    // text-match is a substring match: keep only resources holding this UID.
+    let mut matching = Vec::new();
+    for object in super::discovery::dav_objects(body)? {
+        let Ok(calendar) = Component::parse(&object.data) else {
+            continue;
+        };
+        if calendar
+            .children
+            .iter()
+            .any(|c| c.name == "VEVENT" && c.text("UID").as_deref() == Some(uid))
+        {
+            matching.push((object, calendar));
+        }
+    }
+    if matching.len() > 1 {
+        return Err("calendar_ambiguous_invitation");
+    }
+    let existing = matching.into_iter().next();
+    if let Some((_, calendar)) = &existing {
+        let events: Vec<&Component> = calendar
+            .children
+            .iter()
+            .filter(|c| c.name == "VEVENT")
+            .collect();
+        let master = events
+            .iter()
+            .find(|e| e.property("RECURRENCE-ID").is_none())
+            .or(events.first())
+            .unwrap();
+        if copy_organizer(master).is_none_or(|found| !found.eq_ignore_ascii_case(organizer)) {
+            return Err("calendar_organizer_mismatch");
+        }
+        // An existing native/manual copy belongs to its calendar, not this importer.
+        if master.text(MAILBOX).as_deref() != p["mailbox"].as_str() {
+            return Ok(json!({"status":"existing"}));
+        }
+        let key = invitation
+            .as_ref()
+            .and_then(|c| c.children.iter().find(|c| c.name == "VEVENT"))
+            .and_then(recurrence_key);
+        let current = match &key {
+            Some(key) => events
+                .iter()
+                .find(|e| recurrence_key(e).as_ref() == Some(key))
+                .copied(),
+            None => Some(*master),
+        };
+        if current.is_some_and(|e| copy_sequence(e) > sequence) {
+            return Ok(json!({"status":"newer"}));
+        }
+    }
+    let event = invitation
+        .as_ref()
+        .and_then(|c| c.children.iter().find(|c| c.name == "VEVENT"))
+        .cloned();
+    let occurrence = event.as_ref().and_then(recurrence_key);
+    let Some((object, mut calendar)) = existing else {
+        if occurrence.is_some() {
+            return Err("calendar_invitation_series_required");
+        }
+        if remove {
+            return Ok(json!({"status":"absent"}));
+        }
+        let invitation = invitation.ok_or("invalid_params")?;
+        let mut copy = Component::new("VCALENDAR");
+        copy.lines = vec![
+            "VERSION:2.0".into(),
+            "PRODID:-//Omamail//Invitation copy//EN".into(),
+        ];
+        for child in &invitation.children {
+            copy.children.push(if child.name == "VEVENT" {
+                managed(child, p)
+            } else {
+                child.clone()
+            });
+        }
+        let digest = Sha256::digest(uid.as_bytes());
+        let href = format!("omamail-invitation-{:x}.ics", digest);
+        request(json!({"source":source,"operation":"create","href":href,"ifNoneMatch":"*","body":copy.write()})).await?;
+        return Ok(json!({"status":"saved"}));
+    };
+    if object.etag.is_empty() {
+        return Err("calendar_invalid_response");
+    }
+    let target = json!({"source":source,"href":object.href,"ifMatch":object.etag});
+    if remove && occurrence.is_none() {
+        request(json!({"operation":"delete","source":target["source"],"href":target["href"],"ifMatch":target["ifMatch"]})).await?;
+        return Ok(json!({"status":"removed"}));
+    }
+    let invitation = invitation.ok_or("invalid_params")?;
+    let event = event.ok_or("invalid_params")?;
+    match &occurrence {
+        // A whole series or single event replaces the saved one.
+        None => {
+            calendar.children.retain(|c| c.name != "VEVENT");
+            calendar.children.push(managed(&event, p));
+        }
+        Some(key) => {
+            calendar
+                .children
+                .retain(|c| c.name != "VEVENT" || recurrence_key(c).as_ref() != Some(key));
+            if remove {
+                let line = event.property("RECURRENCE-ID").unwrap();
+                let exdate = format!("EXDATE{}", &line["RECURRENCE-ID".len()..]);
+                let master = calendar
+                    .children
+                    .iter_mut()
+                    .find(|c| c.name == "VEVENT" && c.property("RECURRENCE-ID").is_none())
+                    .ok_or("calendar_invitation_series_required")?;
+                master.lines.push(exdate);
+            } else {
+                calendar.children.push(managed(&event, p));
+            }
+        }
+    }
+    for zone in invitation.children.iter().filter(|c| c.name == "VTIMEZONE") {
+        let tzid = zone.text("TZID");
+        if !calendar
+            .children
+            .iter()
+            .any(|c| c.name == "VTIMEZONE" && c.text("TZID") == tzid)
+        {
+            calendar.children.insert(0, zone.clone());
+        }
+    }
+    request(json!({"operation":"update","source":target["source"],"href":target["href"],"ifMatch":target["ifMatch"],"body":calendar.write()})).await?;
+    Ok(json!({"status":if remove { "removed" } else { "saved" }}))
+}
+
 fn check_owner(event: &Value, p: &Value) -> Result<(), &'static str> {
     if event["organizer"]["email"]
         .as_str()
@@ -462,6 +824,204 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(calls[1]["operation"], "instances");
         assert_eq!(calls[2]["eventId"], "instance");
+    }
+    const ZONE: &str = "BEGIN:VTIMEZONE\r\nTZID:Europe/Stockholm\r\nBEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n";
+    fn invitation(extra: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n{ZONE}BEGIN:VEVENT\r\nUID:meeting\r\nSEQUENCE:2\r\nDTSTART;TZID=Europe/Stockholm:20261027T100000\r\nDTEND;TZID=Europe/Stockholm:20261027T110000\r\nSUMMARY:Plan\\, review\r\nRRULE:FREQ=WEEKLY\r\n{extra}END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    }
+    fn caldav_params() -> Value {
+        json!({"source":{"kind":"caldav","id":"personal","username":"me","url":"https://dav.example.org/calendars/me/personal/"},
+            "mailbox":"imap:me@example.org","uid":"meeting","organizer":"host@example.org","response":"accepted","sequence":2,
+            "calendar":invitation("")})
+    }
+    fn report(objects: &[(&str, &str)]) -> Value {
+        let mut xml = String::from(
+            "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">",
+        );
+        for (href, data) in objects {
+            xml.push_str(&format!("<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:getetag>\"v1\"</d:getetag><c:calendar-data>{}</c:calendar-data></d:prop></d:propstat></d:response>",
+                data.replace('&', "&amp;").replace('<', "&lt;")));
+        }
+        xml.push_str("</d:multistatus>");
+        json!({"body":xml,"status":207})
+    }
+    fn saved(mailbox: &str, sequence: u64) -> String {
+        invitation(&format!(
+            "X-OMAMAIL-MAILBOX:{mailbox}\r\nX-OMAMAIL-ORGANIZER:host@example.org\r\nX-OMAMAIL-SEQUENCE:{sequence}\r\n"
+        ))
+    }
+    async fn run_caldav(
+        p: &Value,
+        replies: Vec<Value>,
+    ) -> (Result<Value, &'static str>, Vec<Value>) {
+        let mut replies = replies.into_iter();
+        let mut calls = Vec::new();
+        let result = save_caldav(p, |request| {
+            calls.push(request);
+            std::future::ready(Ok(replies.next().expect("unexpected request")))
+        })
+        .await;
+        (result, calls)
+    }
+    #[tokio::test]
+    async fn caldav_copy_is_created_once_without_guests_then_updated_in_place() {
+        let mut p = caldav_params();
+        p["response"] = json!("tentative");
+        let (result, calls) = run_caldav(&p, vec![report(&[]), json!({})]).await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        assert_eq!(calls[0]["operation"], "list");
+        assert!(
+            calls[0]["body"]
+                .as_str()
+                .unwrap()
+                .contains(">meeting</c:text-match>")
+        );
+        assert_eq!(calls[1]["operation"], "create");
+        assert_eq!(calls[1]["ifNoneMatch"], "*");
+        assert!(
+            calls[1]["href"]
+                .as_str()
+                .unwrap()
+                .starts_with("omamail-invitation-")
+        );
+        let body = calls[1]["body"].as_str().unwrap();
+        for line in [
+            "STATUS:TENTATIVE",
+            "TRANSP:OPAQUE",
+            "X-OMAMAIL-MAILBOX:imap:me@example.org",
+            "X-OMAMAIL-ORGANIZER:host@example.org",
+            "X-OMAMAIL-SEQUENCE:2",
+            "TZID:Europe/Stockholm",
+            "DTSTART;TZID=Europe/Stockholm:20261027T100000",
+            "RRULE:FREQ=WEEKLY",
+        ] {
+            assert!(body.contains(line), "{line}");
+        }
+        assert!(!body.contains("ATTENDEE") && !body.contains("ORGANIZER:mailto"));
+        let (result, calls) = run_caldav(
+            &p,
+            vec![
+                report(&[(
+                    "/calendars/me/personal/copy.ics",
+                    &saved("imap:me@example.org", 1),
+                )]),
+                json!({}),
+            ],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        assert_eq!(calls[1]["operation"], "update");
+        assert_eq!(calls[1]["href"], "/calendars/me/personal/copy.ics");
+        assert_eq!(calls[1]["ifMatch"], "\"v1\"");
+        assert_eq!(
+            calls[1]["body"]
+                .as_str()
+                .unwrap()
+                .matches("BEGIN:VEVENT")
+                .count(),
+            1
+        );
+        assert_eq!(
+            calls[1]["body"]
+                .as_str()
+                .unwrap()
+                .matches("BEGIN:VTIMEZONE")
+                .count(),
+            1
+        );
+    }
+    #[tokio::test]
+    async fn caldav_copies_refuse_guests_alarms_and_foreign_or_newer_events() {
+        for extra in [
+            "ATTENDEE:mailto:victim@example.org\r\n",
+            "ORGANIZER:mailto:host@example.org\r\n",
+            "BEGIN:VALARM\r\nACTION:EMAIL\r\nEND:VALARM\r\n",
+            "UID:other\r\n",
+            "URL:https://example.org\r\n",
+        ] {
+            let mut p = caldav_params();
+            p["calendar"] = json!(invitation(extra));
+            let (result, calls) = run_caldav(&p, vec![]).await;
+            assert!(result.is_err(), "{extra}");
+            assert!(calls.is_empty());
+        }
+        let mut p = caldav_params();
+        p["event"] = json!({});
+        assert!(validate(&p).is_err());
+        let p = caldav_params();
+        let native =
+            invitation("ORGANIZER:mailto:host@example.org\r\nATTENDEE:mailto:me@example.org\r\n");
+        let foreign = invitation("ORGANIZER:mailto:other@example.org\r\n");
+        let newer = saved("imap:me@example.org", 3);
+        let cases = [
+            (native, Ok("existing")),
+            (foreign, Err("calendar_organizer_mismatch")),
+            (newer, Ok("newer")),
+        ];
+        for (data, expected) in cases {
+            let (result, calls) = run_caldav(&p, vec![report(&[("/x.ics", &data)])]).await;
+            assert_eq!(
+                result.map(|v| v["status"].as_str().unwrap().to_owned()),
+                expected.map(str::to_owned)
+            );
+            assert_eq!(calls.len(), 1, "no write");
+        }
+        let (result, calls) = run_caldav(
+            &p,
+            vec![report(&[
+                ("/a.ics", &saved("imap:me@example.org", 1)),
+                ("/b.ics", &saved("imap:me@example.org", 1)),
+            ])],
+        )
+        .await;
+        assert_eq!(result, Err("calendar_ambiguous_invitation"));
+        assert_eq!(calls.len(), 1);
+    }
+    #[tokio::test]
+    async fn caldav_declines_remove_only_the_managed_copy() {
+        let mut p = caldav_params();
+        p["response"] = json!("declined");
+        p.as_object_mut().unwrap().remove("calendar");
+        let (result, calls) = run_caldav(&p, vec![report(&[])]).await;
+        assert_eq!(result.unwrap()["status"], "absent");
+        assert_eq!(calls.len(), 1);
+        let (result, calls) = run_caldav(
+            &p,
+            vec![
+                report(&[("/copy.ics", &saved("imap:me@example.org", 1))]),
+                json!({}),
+            ],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "removed");
+        assert_eq!(calls[1]["operation"], "delete");
+        assert_eq!(calls[1]["ifMatch"], "\"v1\"");
+    }
+    #[tokio::test]
+    async fn caldav_occurrences_join_their_saved_series() {
+        let occurrence = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:meeting\r\nRECURRENCE-ID;TZID=Europe/Stockholm:20261103T100000\r\nDTSTART;TZID=Europe/Stockholm:20261103T120000\r\nDTEND;TZID=Europe/Stockholm:20261103T130000\r\nSUMMARY:Moved\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let mut p = caldav_params();
+        p["calendar"] = json!(occurrence);
+        p["originalStart"] = json!("2026-11-03T09:00:00Z");
+        let (result, calls) = run_caldav(&p, vec![report(&[])]).await;
+        assert_eq!(result, Err("calendar_invitation_series_required"));
+        assert_eq!(calls.len(), 1);
+        let series = saved("imap:me@example.org", 1);
+        let (result, calls) =
+            run_caldav(&p, vec![report(&[("/copy.ics", &series)]), json!({})]).await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        let body = calls[1]["body"].as_str().unwrap();
+        assert_eq!(body.matches("BEGIN:VEVENT").count(), 2);
+        assert!(body.contains("RRULE:FREQ=WEEKLY") && body.contains("SUMMARY:Moved"));
+        p["response"] = json!("declined");
+        let (result, calls) =
+            run_caldav(&p, vec![report(&[("/copy.ics", &series)]), json!({})]).await;
+        assert_eq!(result.unwrap()["status"], "removed");
+        let body = calls[1]["body"].as_str().unwrap();
+        assert_eq!(body.matches("BEGIN:VEVENT").count(), 1);
+        assert!(body.contains("EXDATE;TZID=Europe/Stockholm:20261103T100000"));
     }
     #[test]
     fn import_transport_is_fixed_origin_post_and_contains_no_notification_parameter() {

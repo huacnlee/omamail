@@ -728,6 +728,56 @@ function googleEventPatch(fields, allDay, existingAllDay) {
   return body
 }
 
+// The guest field's addresses, once each, in the order typed.
+function guestEmails(text) {
+  var emails = String(text || "").split(/[,;\n]/).map(function(email) { return email.trim() }).filter(function(email) { return email !== "" })
+  if (emails.length > 200 || emails.some(function(email) { return !/^[^\s<>@"]+@[^\s<>@"]+\.[^\s<>@"]+$/.test(email) }))
+    return { ok: false, error: "Enter valid guest email addresses separated by commas" }
+  var seen = {}, out = []
+  for (var i = 0; i < emails.length; i++) {
+    var key = emails[i].toLowerCase()
+    if (seen[key]) continue
+    seen[key] = true
+    out.push(emails[i])
+  }
+  return { ok: true, emails: out }
+}
+
+function sameGuest(attendees, email) {
+  var wanted = String(email || "").toLowerCase()
+  var matched = (attendees || []).filter(function(attendee) { return String(attendee.email || "").toLowerCase() === wanted })
+  return matched.length ? matched[0] : null
+}
+
+// The organizer a CalDAV event is written with: its current one when that is
+// still this user, otherwise the first address the server schedules as them.
+function caldavOrganizer(addresses, existing) {
+  var list = Array.isArray(addresses) ? addresses : []
+  var current = existing && existing.organizer ? String(existing.organizer.email || "") : ""
+  for (var i = 0; i < list.length; i++)
+    if (current !== "" && String(list[i]).toLowerCase() === current.toLowerCase()) return String(list[i])
+  return list.length ? String(list[0]) : ""
+}
+
+// A scheduling CalDAV server (RFC 6638) invites the ATTENDEEs of an event
+// whose ORGANIZER is its own user, so the guests are written into the event
+// and the server sends the invitations, updates and cancellations. Guests
+// already on the event keep their answers.
+function withCaldavGuests(ics, uid, organizer, emails, previous) {
+  var lines = []
+  if (emails.length) {
+    lines.push("ORGANIZER:mailto:" + organizer)
+    for (var i = 0; i < emails.length; i++) {
+      var kept = sameGuest(previous, emails[i])
+      var partstat = kept && /^[A-Z-]+$/.test(String(kept.partstat || "")) ? kept.partstat : "NEEDS-ACTION"
+      var name = kept && kept.name && kept.name !== kept.email ? ";CN=" + Ics.quoteParam(kept.name) : ""
+      lines.push("ATTENDEE" + name + ";ROLE=" + (kept && kept.optional ? "OPT-PARTICIPANT" : "REQ-PARTICIPANT")
+        + ";PARTSTAT=" + partstat + ";RSVP=TRUE:mailto:" + emails[i])
+    }
+  }
+  return Ics.rewriteEvent(ics, uid, lines, ["ORGANIZER", "ATTENDEE"])
+}
+
 function googleOptions(body, fields, source, existing) {
   var next = JSON.parse(JSON.stringify(body))
   if (existing && fields.changeRecurrence === true) {
@@ -744,18 +794,13 @@ function googleOptions(body, fields, source, existing) {
     next.end.timeZone = zone
   }
   if (fields.guestEmails !== undefined) {
-    var emails = String(fields.guestEmails).split(/[,;\n]/).map(function(email) { return email.trim() }).filter(function(email) { return email !== "" })
-    if (emails.length > 200 || emails.some(function(email) { return !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email) }))
-      return { ok: false, error: "Enter valid guest email addresses separated by commas" }
-    var seen = {}, previous = existing && Array.isArray(existing.attendees) ? existing.attendees : []
-    next.attendees = []
-    for (var i = 0; i < emails.length; i++) {
-      var email = emails[i].toLowerCase()
-      if (seen[email]) continue
-      seen[email] = true
-      var matched = previous.filter(function(attendee) { return String(attendee.email || "").toLowerCase() === email })
-      next.attendees.push(matched.length ? matched[0] : { email: emails[i] })
-    }
+    var guests = guestEmails(fields.guestEmails)
+    if (!guests.ok) return guests
+    var previous = existing && Array.isArray(existing.attendees) ? existing.attendees : []
+    next.attendees = guests.emails.map(function(email) {
+      var matched = sameGuest(previous, email)
+      return matched || { email: email }
+    })
   }
   if (fields.transparency === "opaque" || fields.transparency === "transparent") next.transparency = fields.transparency
   if (["default", "public", "private"].indexOf(fields.visibility) >= 0) next.visibility = fields.visibility

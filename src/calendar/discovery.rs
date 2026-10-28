@@ -393,7 +393,7 @@ fn append_reference(target: &mut String, reference: &BytesRef<'_>) -> Result<(),
     Ok(())
 }
 
-fn nested_href(xml: &str, container: &[u8]) -> Result<String, &'static str> {
+pub(super) fn nested_href(xml: &str, container: &[u8]) -> Result<String, &'static str> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
     let mut stack: Vec<Vec<u8>> = Vec::new();
@@ -433,6 +433,100 @@ fn nested_href(xml: &str, container: &[u8]) -> Result<String, &'static str> {
                 stack.pop();
             }
             Ok(Event::Eof) => return Err("calendar_invalid_response"),
+            Err(_) => return Err("calendar_invalid_response"),
+            _ => {}
+        }
+    }
+}
+
+/// Every href inside `container`, in document order.
+pub(super) fn nested_hrefs(xml: &str, container: &[u8]) -> Result<Vec<String>, &'static str> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut text = String::new();
+    let mut out = Vec::new();
+    loop {
+        let in_href = stack.last().is_some_and(|name| name.as_slice() == b"href");
+        match reader.read_event() {
+            Ok(Event::Start(event)) => {
+                stack.push(local_name(event.name().as_ref()).to_vec());
+                text.clear();
+            }
+            Ok(Event::Text(event)) if in_href => {
+                text.push_str(&event.decode().map_err(|_| "calendar_invalid_response")?);
+            }
+            Ok(Event::CData(event)) if in_href => {
+                text.push_str(&event.decode().map_err(|_| "calendar_invalid_response")?);
+            }
+            Ok(Event::GeneralRef(event)) if in_href => append_reference(&mut text, &event)?,
+            Ok(Event::End(_)) => {
+                if in_href
+                    && stack.iter().any(|entry| entry.as_slice() == container)
+                    && !text.trim().is_empty()
+                {
+                    out.push(text.trim().to_owned());
+                }
+                stack.pop();
+            }
+            Ok(Event::Eof) => return Ok(out),
+            Err(_) => return Err("calendar_invalid_response"),
+            _ => {}
+        }
+    }
+}
+
+/// One calendar object resource from a CalDAV REPORT.
+#[derive(Debug, Default)]
+pub(super) struct DavObject {
+    pub href: String,
+    pub etag: String,
+    pub data: String,
+}
+
+pub(super) fn dav_objects(xml: &str) -> Result<Vec<DavObject>, &'static str> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut current = DavObject::default();
+    let mut text = String::new();
+    let mut out = Vec::new();
+    loop {
+        let leaf = stack
+            .last()
+            .is_some_and(|name| matches!(name.as_slice(), b"href" | b"getetag" | b"calendar-data"));
+        match reader.read_event() {
+            Ok(Event::Start(event)) => {
+                let name = local_name(event.name().as_ref()).to_vec();
+                if name == b"response" {
+                    current = DavObject::default();
+                }
+                stack.push(name);
+                text.clear();
+            }
+            Ok(Event::Text(event)) if leaf => {
+                text.push_str(&event.decode().map_err(|_| "calendar_invalid_response")?);
+            }
+            Ok(Event::CData(event)) if leaf => {
+                text.push_str(&event.decode().map_err(|_| "calendar_invalid_response")?);
+            }
+            Ok(Event::GeneralRef(event)) if leaf => append_reference(&mut text, &event)?,
+            Ok(Event::End(_)) => {
+                let name = stack.pop().unwrap_or_default();
+                // Only the response's own href names it; a nested one does not.
+                match name.as_slice() {
+                    b"href" if stack.last().is_some_and(|n| n.as_slice() == b"response") => {
+                        current.href = text.trim().to_owned()
+                    }
+                    b"getetag" => current.etag = text.trim().to_owned(),
+                    b"calendar-data" => current.data = std::mem::take(&mut text),
+                    b"response" if !current.href.is_empty() && !current.data.is_empty() => {
+                        out.push(std::mem::take(&mut current))
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => return Ok(out),
             Err(_) => return Err("calendar_invalid_response"),
             _ => {}
         }
@@ -578,7 +672,7 @@ fn dav_calendars(
     }
 }
 
-const PRINCIPAL: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:current-user-principal/></d:prop></d:propfind>";
+pub(super) const PRINCIPAL: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:current-user-principal/></d:prop></d:propfind>";
 const HOME: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><c:calendar-home-set/></d:prop></d:propfind>";
 const COLLECTIONS: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\" xmlns:a=\"http://apple.com/ns/ical/\"><d:prop><d:displayname/><d:resourcetype/><c:supported-calendar-component-set/><d:current-user-privilege-set/><a:calendar-color/></d:prop></d:propfind>";
 

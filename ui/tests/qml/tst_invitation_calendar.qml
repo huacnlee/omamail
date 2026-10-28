@@ -134,6 +134,29 @@ TestCase {
     compare(backend.calls.length,0)
     verify(!action.calendarState.canSave)
   }
+  function test_caldav_destination_saves_the_invitation_without_guests_from_api_10() {
+    platform.settings = {invitationCalendars:{"imap:me@example.org":{id:"personal",name:"Personal",kind:"caldav",
+      url:"https://dav.example.org/cal/",username:"me"}}}
+    owner.selectedInvite.source = {dtstart:"DTSTART:20261027T100000Z",dtend:"DTEND:20261027T110000Z"}
+    action.run("accepted")
+    compare(owner.sent.length,1)
+    compare(backend.calls.length,0)
+    verify(action.calendarMessage.indexOf("update the backend") >= 0)
+    init()
+    platform.settings = {invitationCalendars:{"imap:me@example.org":{id:"personal",name:"Personal",kind:"caldav",
+      url:"https://dav.example.org/cal/",username:"me"}}}
+    owner.selectedInvite.source = {dtstart:"DTSTART:20261027T100000Z",dtend:"DTEND:20261027T110000Z"}
+    backend.apiVersion = 10
+    action.run("accepted")
+    compare(backend.calls.length,1)
+    compare(backend.calls[0].method,"calendar.saveInvitation")
+    compare(backend.calls[0].params.source.kind,"caldav")
+    compare(backend.calls[0].params.event,undefined)
+    verify(backend.calls[0].params.calendar.indexOf("DTSTART:20261027T100000Z") >= 0)
+    verify(!/ATTENDEE|ORGANIZER/.test(backend.calls[0].params.calendar))
+    backend.callback({status:"saved"},null)
+    compare(action.calendarMessage,"Saved to calendar")
+  }
   function test_cancellation_removes_only_on_explicit_action_and_sends_no_reply() {
     owner.selectedInvite = {uid:"meeting",method:"CANCEL",sequence:2,organizer:{email:"host@example.org"}}
     wait(1)

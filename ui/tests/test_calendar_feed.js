@@ -876,3 +876,28 @@ console.log("test_calendar_feed.js ok")
     else process.env.TZ = previousTZ
   }
 }
+
+{
+  // CalDAV guests: the server invites the ATTENDEEs of its own user's event.
+  assert.deepStrictEqual(Array.from(feed.guestEmails("a@example.org, B@example.org;\nA@example.org").emails), ["a@example.org", "B@example.org"])
+  assert.strictEqual(feed.guestEmails("not an address").ok, false)
+  assert.strictEqual(feed.guestEmails("\"x\"@example.org").ok, false)
+  assert.strictEqual(feed.caldavOrganizer(["me@example.org", "alias@example.org"], {organizer:{email:"ALIAS@example.org"}}), "alias@example.org")
+  assert.strictEqual(feed.caldavOrganizer(["me@example.org"], {organizer:{email:"other@example.org"}}), "me@example.org")
+  assert.strictEqual(feed.caldavOrganizer([], null), "")
+  const created = feed.createEvent({title:"Plan",startMs:Date.UTC(2026,9,27,10),endMs:Date.UTC(2026,9,27,11)}, 1)
+  const invited = feed.withCaldavGuests(created.ics, created.uid, "me@example.org", ["guest@example.org"], [])
+  const lines = invited.split("\r\n")
+  assert.ok(lines.includes("ORGANIZER:mailto:me@example.org"))
+  assert.ok(lines.includes("ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:guest@example.org"))
+  const previous = [{email:"guest@example.org",name:"Guest Person",partstat:"ACCEPTED"},{email:"gone@example.org",partstat:"ACCEPTED"}]
+  const withGone = feed.withCaldavGuests(created.ics, created.uid, "me@example.org", ["guest@example.org","gone@example.org"], [])
+  const kept = feed.withCaldavGuests(withGone, created.uid, "me@example.org", ["guest@example.org","new@example.org"], previous)
+  assert.ok(kept.includes("ATTENDEE;CN=\"Guest Person\";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:guest@example.org"))
+  assert.ok(kept.includes("PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:new@example.org"))
+  assert.ok(!kept.includes("gone@example.org"))
+  assert.strictEqual(kept.match(/^ORGANIZER/mg).length, 1)
+  const cleared = feed.withCaldavGuests(kept, created.uid, "", [], previous)
+  assert.ok(!/ORGANIZER|ATTENDEE/.test(cleared))
+  assert.ok(cleared.includes("SUMMARY:Plan"))
+}

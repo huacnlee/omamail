@@ -23,12 +23,12 @@ QtObject {
   property string calendarMessage: ""
   readonly property var destination: Provider.calendarAttendanceMethod(account.providerId) === ""
     ? Invitations.destination(account.platform ? account.platform.settings : null, account.accountId) : null
-  readonly property bool calendarSupported: !!account.backend && account.backend.ready && account.backend.apiVersion >= 9
+  readonly property bool calendarSupported: Invitations.supported(account.backend, destination)
   onDestinationChanged: { calendarDone = false; calendarMessage = "" }
   readonly property var calendarState: ({
     visible: !!destination && !!account.selectedInvite,
     busy: calendarSaving,
-    text: calendarMessage || (calendarSupported ? "Accepted invitations → " + String(destination && destination.name || "Google Calendar")
+    text: calendarMessage || (calendarSupported ? "Accepted invitations → " + String(destination && destination.name || "Calendar")
       : "Update the backend to save accepted invitations"),
     canSave: !!destination && calendarSupported && !calendarSaving && !calendarDone && !account.rsvpSending && !!account.selectedInvite
       && (Calendar.normalizedResponse(Calendar.responseOf(account.selectedInvite, account.receivedAsAddress)) !== ""

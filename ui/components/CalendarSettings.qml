@@ -126,7 +126,9 @@ Column {
     return Sources.nativeCalendarFeatures(source) && !root.orphaned(source)
   })
   readonly property var invitationSources: settingsSources.filter(function(source) {
-    return source.kind === "google" && !source.readOnly && !root.orphaned(source)
+    if (source.readOnly || root.orphaned(source)) return false
+    return source.kind === "google" || ((source.kind === "caldav" || source.kind === "icloud")
+      && !!root.service && Invitations.supported(root.service.backend, source))
   })
 
   function reminderMode(source) {
@@ -840,7 +842,7 @@ Column {
     SectionHeading { text: "ACCEPTED INVITATIONS" }
     Text {
       width: parent.width
-      text: "Save Yes and Maybe replies from a mail-only mailbox to Google Calendar. Replies still use the invited address."
+      text: "Save Yes and Maybe replies from a mail-only mailbox to a calendar. Replies still use the invited address."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
       color: root.dimColor
@@ -858,7 +860,7 @@ Column {
         readonly property var target: Invitations.destination(root.service.settings, String(modelData.id))
         title: String(modelData.email || modelData.label || modelData.id)
         detail: root.service.backendCanSaveInvitations !== true ? "Update the backend to choose a calendar"
-          : root.invitationSources.length ? "Save accepted invitations to" : "Connect a writable Google calendar above"
+          : root.invitationSources.length ? "Save accepted invitations to" : "Connect a writable calendar above"
         Dropdown {
           objectName: "invitation-calendar-picker"
           width: Style.space(240)
@@ -872,7 +874,7 @@ Column {
             var sources = root.invitationSources
             var choices = [{value:"",label:"Don't save to a calendar"}]
             for (var i = 0; i < sources.length; i++) choices.push({value:sources[i].id,
-              label:root.displayName(sources[i]) + " · " + sources[i].accountId})
+              label:root.displayName(sources[i]) + " · " + (sources[i].accountId || sources[i].username || "CalDAV")})
             if (invitationMailbox.target && !sources.some(function(source) { return source.id === invitationMailbox.target.id }))
               choices.push({value:invitationMailbox.target.id,label:"Unavailable calendar — choose another"})
             return choices

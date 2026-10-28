@@ -112,6 +112,46 @@ Item {
       mailService.settings = saved
     }
 
+    function test_caldav_guests_are_written_with_the_servers_own_organizer() {
+      var original = mailService.backend
+      var calls = []
+      var created = []
+      var record = function(ok, error) { created.push({ ok: ok, error: error }) }
+      var writes = function() { return calls.filter(function(call) { return call.method === "calendar.request" && call.operation !== "list" }) }
+      mailService.backend = { ready: true, apiVersion: 10, call: function(method, params, callback) {
+        var copy = JSON.parse(JSON.stringify(params || {}))
+        copy.method = method
+        calls.push(copy)
+        if (method !== "calendar.request") return
+        callback(params.operation === "addresses" ? { addresses: ["work@example.com"] } : { body: "", status: 201 }, null)
+      } }
+      controller.eventCreated.connect(record)
+      try {
+        controller.createEvent("caldav:team", { title: "Planning", startMs: Date.UTC(2026, 9, 27, 10),
+          endMs: Date.UTC(2026, 9, 27, 11), guestEmails: "guest@example.org" })
+        compare(writes().length, 2)
+        compare(writes()[0].operation, "addresses")
+        compare(writes()[1].operation, "create")
+        verify(writes()[1].body.indexOf("ORGANIZER:mailto:work@example.com") >= 0)
+        verify(writes()[1].body.indexOf("PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:guest@example.org") >= 0)
+        compare(created[0].ok, true)
+        // The address is kept: a second invitation asks the server only to write.
+        controller.createEvent("caldav:team", { title: "Again", startMs: Date.UTC(2026, 9, 28, 10),
+          endMs: Date.UTC(2026, 9, 28, 11), guestEmails: "guest@example.org" })
+        compare(writes().length, 3)
+        verify(controller.isOwnCaldavAddress("caldav:team", "WORK@example.com"))
+        mailService.backend = { ready: true, apiVersion: 9, call: original.call }
+        controller.createEvent("caldav:team", { title: "Old", startMs: Date.UTC(2026, 9, 29, 10),
+          endMs: Date.UTC(2026, 9, 29, 11), guestEmails: "guest@example.org" })
+        compare(created[2].ok, false)
+        verify(created[2].error.indexOf("Update the backend") === 0)
+      } finally {
+        controller.eventCreated.disconnect(record)
+        controller.caldavAddresses = {}
+        mailService.backend = original
+      }
+    }
+
     function test_settings_can_target_another_accounts_calendar() {
       controller.accountId = "one@gmail.com"
       verify(controller.findSource("google:two@gmail.com") === null,

@@ -363,6 +363,9 @@ impl Session {
             crate::calendar::invitations::validate(params).map_err(|e| {
                 crate::calendar::diagnostics::local(params, "saveInvitation", "validation", e)
             })?;
+            if params["source"]["kind"] != "google" {
+                return Box::pin(crate::calendar::invitations::caldav(params)).await;
+            }
             let token = self
                 .gmail
                 .access_token(
