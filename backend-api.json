@@ -1,6 +1,6 @@
 {
   "apiVersion": 9,
-  "releasedApiVersion": 8,
+  "releasedApiVersion": 9,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -368,22 +368,39 @@
     {
       "name": "Built-in Google client takes no parameters",
       "method": "auth.builtinClient",
-      "params": {"clientId": "123-other.apps.googleusercontent.com"},
+      "params": {
+        "clientId": "123-other.apps.googleusercontent.com"
+      },
       "errorCode": -32602
     },
     {
       "name": "Invitation import rejects non-Google destinations before authentication",
       "method": "calendar.saveInvitation",
       "params": {
-        "source": {"kind":"caldav", "url":"https://attacker.example/calendar"},
-        "mailbox":"imap:owner@example.org", "uid":"meeting", "organizer":"host@example.org", "response":"cancelled", "sequence":0
+        "source": {
+          "kind": "caldav",
+          "url": "https://attacker.example/calendar"
+        },
+        "mailbox": "imap:owner@example.org",
+        "uid": "meeting",
+        "organizer": "host@example.org",
+        "response": "cancelled",
+        "sequence": 0
       },
       "errorCode": -32602
     },
     {
       "name": "Google import validates destination before authentication",
       "method": "calendar.request",
-      "params": {"source":{"kind":"google","accountId":"missing@example.org","calendarId":".."},"operation":"import","body":"{}"},
+      "params": {
+        "source": {
+          "kind": "google",
+          "accountId": "missing@example.org",
+          "calendarId": ".."
+        },
+        "operation": "import",
+        "body": "{}"
+      },
       "errorCode": -32000
     },
     {
@@ -1505,7 +1522,7 @@
     }
   ],
   "unreleased": {
-    "methods": ["calendar.saveInvitation", "auth.builtinClient"],
-    "cases": ["Invitation import rejects non-Google destinations before authentication", "Google import validates destination before authentication", "Built-in Google client is reported as strings", "Built-in Google client takes no parameters"]
+    "methods": [],
+    "cases": []
   }
 }
