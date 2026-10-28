@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(omamail-app VERSION 0.11.2 LANGUAGES CXX)
+project(omamail-app VERSION 0.11.3 LANGUAGES CXX)
 
 # The smoke-test handshake follows the same contract as the bundled backend.
 set(OMAMAIL_API_CONTRACT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../backend-api.json")
