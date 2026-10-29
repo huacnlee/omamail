@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::{sync::OnceLock, time::Duration};
 
 pub mod attendance;
+pub(crate) mod diagnostics;
 mod discovery;
 pub mod invitations;
 pub mod reminders;
@@ -82,6 +83,7 @@ fn event_url(base: &Url, href: &str) -> Result<Url, &'static str> {
 }
 
 struct Request {
+    operation: String,
     url: Url,
     method: Method,
     body: String,
@@ -108,6 +110,7 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         return Err("calendar_input_too_large");
     }
     let mut request = Request {
+        operation: op.into(),
         url: Url::parse("https://www.googleapis.com/calendar/v3/calendars/primary/events").unwrap(),
         method,
         body,
@@ -463,6 +466,7 @@ async fn execute(
     token: Option<&str>,
     password: Option<&str>,
 ) -> Result<Value, &'static str> {
+    let details = diagnostics::context(&request.kind, &request.operation, "request");
     let mut builder = client.request(request.method.clone(), request.url);
     // Google's empty-body POST endpoints (events.move) require an explicit
     // length. reqwest/hyper may otherwise omit framing for a zero-byte body.
@@ -492,39 +496,50 @@ async fn execute(
             builder = builder.header("Prefer", "outlook.timezone=\"UTC\"");
         }
     }
-    let mut response = builder
-        .body(request.body)
-        .send()
-        .await
-        .map_err(|_| "calendar_network_failed")?;
+    let mut response = builder.body(request.body).send().await.map_err(|error| {
+        diagnostics::record(
+            if error.is_timeout() {
+                "calendar_timeout"
+            } else {
+                "calendar_network_failed"
+            },
+            details.clone(),
+        )
+    })?;
     let status = response.status();
-    if status.as_u16() == 412 {
-        return Err("calendar_conflict");
-    }
-    if status.as_u16() == 404 {
-        return Err("calendar_not_found");
-    }
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err("calendar_auth_refused");
-    }
     if !status.is_success() {
-        return Err("calendar_request_failed");
+        let message = match status.as_u16() {
+            412 => "calendar_conflict",
+            404 => "calendar_not_found",
+            401 | 403 => "calendar_auth_refused",
+            _ => "calendar_request_failed",
+        };
+        return Err(diagnostics::http(response, details, message).await);
     }
+    let mut details = details;
+    details["stage"] = json!("response");
+    details["httpStatus"] = json!(status.as_u16());
     if response.content_length().is_some_and(|n| n > LIMIT as u64) {
-        return Err("calendar_response_too_large");
+        return Err(diagnostics::record("calendar_response_too_large", details));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| "calendar_network_failed")?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        diagnostics::record(
+            if error.is_timeout() {
+                "calendar_timeout"
+            } else {
+                "calendar_network_failed"
+            },
+            details.clone(),
+        )
+    })? {
         if chunk.len() > LIMIT - bytes.len() {
-            return Err("calendar_response_too_large");
+            return Err(diagnostics::record("calendar_response_too_large", details));
         }
         bytes.extend_from_slice(&chunk);
     }
-    let body = String::from_utf8(bytes).map_err(|_| "calendar_invalid_response")?;
+    let body = String::from_utf8(bytes)
+        .map_err(|_| diagnostics::record("calendar_invalid_response", details))?;
     Ok(json!({"body":body,"status":status.as_u16()}))
 }
 

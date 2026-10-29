@@ -152,6 +152,34 @@ worker_failed'''.split()) | {
 }
 METHODS = set(json.loads((ROOT / 'backend-api.json').read_text())['methods']) | {'backend.request'}
 
+DETAIL_FIELDS = {
+    'provider': {'google', 'microsoft', 'caldav', 'icloud'},
+    'operation': {'list', 'get', 'lookup', 'instances', 'create', 'update', 'delete', 'move', 'import', 'saveInvitation', 'attendance'},
+    'stage': {'validation', 'authentication', 'request', 'response'},
+    'field': {'start', 'end', 'start.dateTime', 'end.dateTime', 'start.timeZone', 'end.timeZone', 'recurrence', 'iCalUID', 'calendarId', 'eventId', 'timeMin', 'timeMax'},
+    'reason': set('''badRequest invalid invalidParameter required authError
+        forbidden insufficientPermissions notFound duplicate conditionNotMet
+        rateLimitExceeded userRateLimitExceeded quotaExceeded dailyLimitExceeded
+        usageLimits backendError internalError timeRangeEmpty updatedMinTooLongAgo
+        fullSyncRequired forbiddenForNonOrganizer participantIsNeitherOrganizerNorAttendee accessNotConfigured
+        ErrorInvalidRequest ErrorInvalidProperty ErrorInvalidIdMalformed
+        ErrorAccessDenied InvalidAuthenticationToken ErrorItemNotFound
+        ErrorIrresolvableConflict TooManyRequests ErrorQuotaExceeded
+        ErrorInternalServerError ErrorServiceUnavailable'''.split()),
+}
+DETAIL_METHODS = {'calendar.request', 'calendar.saveInvitation', 'calendar.attendance', 'request.upload'}
+
+
+def clean_details(data):
+    if not isinstance(data, dict):
+        return {}
+    result = {key: data[key] for key, allowed in DETAIL_FIELDS.items()
+              if isinstance(data.get(key), str) and data[key] in allowed}
+    status = data.get('httpStatus')
+    if type(status) is int and 100 <= status <= 599:
+        result['httpStatus'] = status
+    return result
+
 
 def clean(event, existing=False):
     if not isinstance(event, dict):
@@ -165,10 +193,15 @@ def clean(event, existing=False):
     timestamp = event.get('time') if existing else None
     if not isinstance(timestamp, str) or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', timestamp):
         timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    return {'time': timestamp,
+    result = {'time': timestamp,
             'method': method if isinstance(method, str) and method in METHODS else 'backend.request',
             'code': code if type(code) is int and -32768 <= code <= 32767 else None,
-            'message': message if isinstance(message, str) and message in MESSAGES else 'unknown_error'}
+             'message': message if isinstance(message, str) and message in MESSAGES else 'unknown_error'}
+    if result['method'] in DETAIL_METHODS and result['message'] != 'unknown_error':
+        details = clean_details(error.get('data'))
+        if details:
+            result['data'] = details
+    return result
 
 
 def check(fd, directory=False):
@@ -269,7 +302,7 @@ def main(mode):
         report += 'plugin: ' + str(manifest['version']) + '\n'
         report += 'pinned backend: ' + (ROOT / 'backend-version').read_text().strip() + '\n'
         report += 'API revision: ' + str(json.loads((ROOT / 'backend-api.json').read_text())['apiVersion']) + '\n'
-        report += '\nRecent backend errors (only known error identifiers are retained):\n'
+        report += '\nRecent backend errors (known identifiers and allowlisted calendar context only; no raw provider text):\n'
         report += '\n'.join(json.dumps(event, ensure_ascii=True) for event in entries) or '(none recorded)'
         write(fd, 'report.txt', report + '\n')
     prompt = ('Diagnose an Omamail error using the local report at ' + str(folder / 'report.txt')
