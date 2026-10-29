@@ -145,6 +145,17 @@ Column {
 
   onRejectedChanged: if (rejected) clearSecret()
 
+  // A save the service refused because the address is already a mailbox.
+  // Said under the button that was pressed: the status bar is too far away,
+  // and without it Connect looks like it did nothing.
+  Connections {
+    target: root.service
+    ignoreUnknownSignals: true
+    function onDuplicateAccount(email) {
+      errorText.text = email + " is already added. Use Edit in Settings to change it"
+    }
+  }
+
   Connections {
     target: root.auth
     ignoreUnknownSignals: true
