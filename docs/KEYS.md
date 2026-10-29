@@ -42,6 +42,7 @@ readonly property string keyContext:
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `eventCompose` | Creating or editing an event | `Enter` saves and closes after success; `Escape` closes; modified keys remain available |
+| `eventDescription` | Writing an event description | `Enter` inserts a line break; `Ctrl+Enter` saves; `Escape` closes |
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
@@ -68,7 +69,7 @@ event is left alone, preserving normal typing, IME input and line breaks.
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
 
-**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in the single-line event editor.**
+**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in single-line event fields.** The multiline event description keeps Return/Enter for line breaks, including pasted paragraphs; Ctrl+Return/Enter saves from either type of field. Its native text area forwards keys through the same router as the AI input.
 There is no "is the user typing" question anywhere in the code, because there is
 nothing left for it to answer: if a bare letter is not bound in `compose`, it
 cannot fire there, and the field gets it the way any other character arrives.
@@ -143,7 +144,7 @@ used to exist, and they had.
 | `calendarUndo` | `u` | calendar | Undo the last event change |
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
-| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose | Save and close the event |
+| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |
 | `guestPrevious` | `Up` | eventGuests | Previous guest suggestion |
 | `guestChoose` | `Return`, `Enter` | eventGuests | Choose guest suggestion |

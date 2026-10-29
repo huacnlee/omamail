@@ -290,6 +290,29 @@ Item {
               { tag: "compose-body", context: "compose", field: "compose-body-editor" }]
     }
 
+    function test_event_description_context_keeps_focus_and_multiline_typing() {
+      app.runShortcut("createEvent", "")
+      var scope = having(app, function(item) { return item.keyContext !== undefined })
+      tryCompare(scope, "keyContext", "eventCompose")
+      wait(0)
+      var notes = named(app, "event-description-field")
+      notes.forceActiveFocus()
+      tryCompare(scope, "keyContext", "eventDescription")
+      wait(0)
+      verify(notes.activeFocus, "the new context must not send focus back to the title")
+      keyClick(Qt.Key_A)
+      keyClick(Qt.Key_Return)
+      keyClick(Qt.Key_B)
+      compare(notes.text, "a\nb")
+      keyClick(Qt.Key_Tab)
+      tryCompare(scope, "keyContext", "eventCompose")
+      verify(!notes.activeFocus)
+      notes.forceActiveFocus()
+      keyClick(Qt.Key_Escape)
+      tryCompare(scope, "keyContext", "list")
+      compare(kinds(), "list")
+    }
+
     function test_control_comma_opens_settings(data) {
       if (data.context === "reader") app.openMessage("message-1")
       if (data.context === "compose") app.startCompose("new")

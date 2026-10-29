@@ -26,6 +26,8 @@ Rectangle {
   property string conferenceRequestId: ""
   property string originalGuestText: ""
   property bool advancedOptionsOpen: false
+  readonly property bool descriptionFocused: notesField.activeFocus
+  signal keyPressed(var event)
   readonly property var contactService: controller && controller.service ? controller.service : null
   readonly property var contactBook: contactService && Array.isArray(contactService.recipientContacts)
     ? contactService.recipientContacts : []
@@ -115,6 +117,17 @@ Rectangle {
     if (top < composerFlick.contentY) composerFlick.contentY = top
     else if (bottom > composerFlick.contentY + composerFlick.height)
       composerFlick.contentY = Math.max(0, Math.min(top, bottom - composerFlick.height))
+  }
+
+  function revealDescriptionCursor() {
+    if (!notesField.activeFocus) return
+    var cursor = notesField.cursorRectangle
+    var top = notesField.mapToItem(composerFlick.contentItem, cursor.x, cursor.y).y
+    var margin = Style.space(10)
+    if (top - margin < composerFlick.contentY)
+      composerFlick.contentY = Math.max(0, top - margin)
+    else if (top + cursor.height + margin > composerFlick.contentY + composerFlick.height)
+      composerFlick.contentY = top + cursor.height + margin - composerFlick.height
   }
 
   component EditorField: TextField {
@@ -730,15 +743,39 @@ Rectangle {
         width: parent.width
         spacing: Style.space(6)
         FieldLabel { text: "Description" }
-        EditorField {
+        QQC.TextArea {
           id: notesField
           objectName: "event-description-field"
           width: parent.width
-          foreground: root.textColor
-          accent: root.accentColor
+          // Grow with the document; the form owns scrolling, including keeping
+          // the caret visible in descriptions taller than the window.
+          height: Math.max(Style.space(96), contentHeight + topPadding + bottomPadding)
+          textFormat: TextEdit.PlainText
+          wrapMode: TextEdit.Wrap
+          selectByMouse: true
+          KeyNavigation.priority: KeyNavigation.BeforeItem
+          KeyNavigation.tab: dateField
+          KeyNavigation.backtab: titleField
+          color: root.textColor
+          selectionColor: root.accentColor
+          selectedTextColor: root.backgroundColor
+          placeholderTextColor: root.dimColor
           font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          padding: Style.space(10)
           placeholderText: "Add event details"
           Accessible.name: "Description"
+          Keys.onPressed: function(event) { root.keyPressed(event) }
+          onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealDescriptionCursor)
+          onCursorRectangleChanged: Qt.callLater(root.revealDescriptionCursor)
+          onHeightChanged: Qt.callLater(root.revealDescriptionCursor)
+          background: Rectangle {
+            color: Style.normalFillFor(root.textColor, root.accentColor)
+            border.width: Style.normalBorderWidth
+            border.color: notesField.activeFocus ? root.accentColor
+              : Style.normalBorderFor(root.textColor, root.accentColor)
+            radius: Style.cornerRadius
+          }
         }
       }
 

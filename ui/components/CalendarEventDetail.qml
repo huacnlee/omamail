@@ -105,12 +105,51 @@ Rectangle {
     dimColor: root.dimColor
   }
 
+  Item {
+    id: detailHeader
+    objectName: "event-detail-header"
+    anchors.top: parent.top
+    anchors.topMargin: Style.space(18)
+    anchors.horizontalCenter: parent.horizontalCenter
+    width: Math.min(parent.width - Style.space(36), Style.space(720))
+    height: Math.max(backBar.implicitHeight, editButton.visible ? editButton.implicitHeight : 0)
+
+    BackBar {
+      id: backBar
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      label: "Calendar"
+      textColor: root.textColor
+      dimColor: root.dimColor
+      panelFontFamily: root.panelFontFamily
+      onActivated: root.closed()
+    }
+
+    IconTextButton {
+      id: editButton
+      objectName: "event-edit-button"
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      visible: root.canWrite
+      text: "Edit..."
+      iconName: "edit"
+      foreground: root.textColor
+      accent: root.eventColor
+      fontFamily: root.panelFontFamily
+      onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
+    }
+  }
+
   Flickable {
     id: detailFlick
+    objectName: "event-detail-scroll"
 
     WheelScroller { view: detailFlick }
 
-    anchors.fill: parent
+    anchors.top: detailHeader.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
     anchors.margins: Style.space(18)
     contentWidth: width
     contentHeight: content.implicitHeight + Style.space(18)
@@ -123,14 +162,6 @@ Rectangle {
       anchors.horizontalCenter: parent.horizontalCenter
       width: Math.min(parent.width, Style.space(720))
       spacing: Style.space(14)
-
-      BackBar {
-        label: "Calendar"
-        textColor: root.textColor
-        dimColor: root.dimColor
-        panelFontFamily: root.panelFontFamily
-        onActivated: root.closed()
-      }
 
       CalendarReminderPanel {
         width: parent.width
@@ -178,16 +209,19 @@ Rectangle {
 
         Text {
           anchors.verticalCenter: parent.verticalCenter
+          width: parent.width - Style.space(18)
           text: root.source
             ? String(root.source.name || root.source.id || "Calendar") : "Calendar"
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
+          wrapMode: Text.Wrap
           textFormat: Text.PlainText
         }
       }
 
       Flow {
+        visible: root.meetingLink !== ""
         width: parent.width
         spacing: Style.space(8)
         IconTextButton {
@@ -198,15 +232,6 @@ Rectangle {
           accent: root.eventColor
           fontFamily: root.panelFontFamily
           onClicked: if (root.controller) root.controller.openExternal(root.meetingLink)
-        }
-        IconTextButton {
-          visible: root.canWrite
-          text: "Edit..."
-          iconName: "edit"
-          foreground: root.textColor
-          accent: root.eventColor
-          fontFamily: root.panelFontFamily
-          onClicked: root.editRequested(String(root.event.sourceId || ""), root.event)
         }
       }
 
@@ -319,6 +344,7 @@ Rectangle {
       }
 
       Text {
+        objectName: "event-description-text"
         visible: String(root.event && root.event.description || "") !== ""
         width: parent.width
         text: String(root.event && root.event.description || "")
