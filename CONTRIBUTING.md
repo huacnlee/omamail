@@ -112,15 +112,20 @@ code once and watch it fail, and say so in the pull request.
   application before it is a mail client, and its look is not a matter of taste
   per pull request. If your agent does not carry that skill, take the existing
   components as the specification and change nothing about the visual language
-  that the change did not require. `AGENTS.md`'s *Colors*, *UI labels* and
-  *Popups* sections are the same rules where they are specific to this
+  that the change did not require. [AGENTS.md's UI section](AGENTS.md#ui)
+  gives the same rules where they are specific to this
   codebase, and `tests/test_source.sh` enforces the part of them that grep can.
 - **Test it on a screen, by hand. This is required and nothing substitutes for it.** For the plugin, register your development checkout with the Omarchy shell and follow [the development runtime instructions](docs/BACKEND-RUNTIME.md); click the envelope in the bar and drive the change with the mouse and keyboard in a light theme and a dark one, at both window sizes. For the standalone host, run `make app-run` on each affected platform and repeat the applicable mail, calendar, notification, and window checks. The offscreen QML tests prove focus and routing; they cannot see that a control hangs four pixels out of its row.
 - **Every UI change requires clear, detailed visual evidence.** Attach labeled before-and-after screenshots of every changed view and relevant state, captured at matching window dimensions, theme, and scale. Explain what changed and identify the platforms, themes, and sizes tested. Screenshots must be legible enough to evaluate the actual layout, labels, and states; update them whenever the UI changes.
-- **Complex features and workflows also require a detailed screen recording.** Show the complete path from entry to result, including the relevant keyboard and mouse interactions and loading, empty, error, cancellation, or recovery states. Explain the steps and expected behavior so Jason can understand and assess the change without installing or running the app. Screenshots alone are not sufficient for these changes.
+- **Multi-stage or stateful workflows also require a detailed screen recording, including bug fixes to existing workflows.** Show the complete path from entry to result, including the relevant keyboard and mouse interactions and loading, empty, error, cancellation, or recovery states. Show observable side effects and retry invariants rather than only the final status: for an invitation-calendar change, record invitation import, update of the same existing event, and a failed save followed by calendar-only retry, with evidence that retry sends no second RSVP. Add steps or timestamps and expected results so Jason can assess the interaction without installing or running the app. Screenshots alone are not sufficient for these changes.
+- Identify the capture's host (Omarchy plugin, standalone app, or component/test harness), platform, UI commit, theme, dimensions and scale, plus the backend version, API revision and source commit when built locally. For mocked backends, identify the fixture contract/API revision and explicitly say that no real backend/provider ran. Label synthetic component recordings and any fixture-only controls or side-effect counters; distinguish UI-flow evidence from real backend/provider verification. Refresh affected recordings after interaction changes and check that uploaded attachments play before requesting review or re-review.
 - Use synthetic or redacted data in screenshots and recordings. Upload the evidence as PR attachments rather than committing it to the repository. Visual evidence complements the required hands-on testing and regression tests; it does not replace them.
 
 ## The pull request
+
+This document is the source of truth for commit and pull request guidelines. Read it before committing or creating, updating, reviewing, or requesting review of a pull request, including review follow-ups.
+
+Keep runtime assets, source, tests and maintained documentation in the tree, and planning notes outside it. Tracked files must stay under 128 KiB. Markdown prose uses one source line per paragraph.
 
 **One change per pull request.** A refactor travelling with a bug fix makes the
 fix impossible to review and impossible to revert on its own.
@@ -132,14 +137,16 @@ sentence case, naming what is different afterwards — no `fix:` or `feat:`
 prefix:
 
 ```
-Read a body as UTF-8 when the bytes say so and the header does not
-Find Exchange's Junk folder by the name Exchange gives it
-Keep an attachment, not only open it once
+Fix MIME decoding for bodies declared as UTF-8
+Fix Exchange junk folder lookup using its declared name
+Add an action to save an attachment
 ```
 
 Not `fix imap bug`, not `Update ImapClient.qml`.
 
-Choose a scope prefix from the final change: `ai: ` for AI features, `docs: ` for documentation only, `website: ` for the website, and `chore: ` for repository maintenance such as release workflows, CI, builds, dependency upkeep and developer tooling. Other changes have no scope prefix. For mixed changes, use the primary outcome: a release-flow PR with README cleanup uses `chore: `, for example `chore: Fix backend release ordering with a single release PR`. These rules also apply to individual commit subjects. See [the naming rules](AGENTS.md#commits-and-pull-requests).
+Commit and PR titles name the concrete machinery and action: use `Fix ` for bugs, `Add ` for features, otherwise an accurate imperative. Choose a scope prefix from the final change: `ai: ` for AI changes, `docs: ` for repository documentation, `website: ` for the website, and `chore: ` for repository maintenance such as release workflows, CI, builds, dependency upkeep and developer tooling. Other changes have no scope prefix. For mixed changes, choose one prefix from the primary outcome: a release-flow PR with README cleanup uses `chore: `, for example `chore: Fix backend release ordering with a single release PR`. These rules also apply to individual commit subjects.
+
+Reconcile the title and description with the complete final diff whenever scope changes. Describe shipped behavior, architectural reasons and verification actually performed.
 
 **The body is prose, with two headings that are read by a machine.** Say what
 was wrong and why this is the fix; a paragraph of reasoning is worth more than
@@ -165,7 +172,7 @@ missing:
 
 - `make validate`, and that it was green on the commit you are sending.
 - The new test, and that you saw it fail against the unfixed code.
-- What you drove by hand — for an interface change, the platforms, themes, and sizes, with the required before-and-after screenshots and, for complex features or workflows, a detailed recording.
+- What you drove by hand, with the evidence and provenance required under [If you touched the interface](#if-you-touched-the-interface).
 - That a fresh agent reviewed the diff, and what it found. "Nothing" is an
   answer; not having asked is not.
 

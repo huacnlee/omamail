@@ -1,5 +1,5 @@
 {
-  "apiVersion": 9,
+  "apiVersion": 10,
   "releasedApiVersion": 9,
   "protocolVersion": 1,
   "methods": [
@@ -1505,6 +1505,45 @@
       }
     },
     {
+      "name": "Calendar validation errors preserve safe context",
+      "method": "calendar.saveInvitation",
+      "params": {
+        "source": {
+          "kind": "google",
+          "accountId": "synthetic@example.org"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_input",
+        "data": {
+          "provider": "google",
+          "operation": "saveInvitation",
+          "stage": "validation"
+        }
+      }
+    },
+    {
+      "name": "Calendar authentication errors preserve safe context",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "google"
+        },
+        "operation": "lookup",
+        "uid": "synthetic"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params",
+        "data": {
+          "provider": "google",
+          "operation": "lookup",
+          "stage": "authentication"
+        }
+      }
+    },
+    {
       "name": "outbox accepts the Microsoft 365 provider",
       "method": "outbox.enqueue",
       "params": {
@@ -1523,6 +1562,9 @@
   ],
   "unreleased": {
     "methods": [],
-    "cases": []
+    "cases": [
+      "Calendar validation errors preserve safe context",
+      "Calendar authentication errors preserve safe context"
+    ]
   }
 }

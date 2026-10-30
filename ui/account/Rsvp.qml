@@ -189,6 +189,7 @@ QtObject {
 
   function retryCalendar() {
     if (!calendarState.canSave) return
+    account.clearNotice()
     var invited = account.selectedInvite
     var response = invited.method === "CANCEL" || invited.status === "CANCELLED" ? "cancelled"
       : Calendar.normalizedResponse(Calendar.responseOf(invited, account.receivedAsAddress))
@@ -217,10 +218,9 @@ QtObject {
           || Number(account.selectedInvite.sequence || 0) !== Number(invited.sequence || 0)) return
       rsvpAction.calendarDone = !error && !!result
       rsvpAction.calendarMessage = error || !result
-        ? "Not saved to calendar. Check calendar access, then retry; your reply will not be resent."
+        ? Invitations.failure(error, account.backend.apiVersion)
         : Invitations.outcome(result.status)
-      if (error && error.message === "calendar_invitation_series_required")
-        rsvpAction.calendarMessage = "Save the original series invitation before updating this occurrence"
+      if (error || !result) account.fail(rsvpAction.calendarMessage.split("\n")[0])
     })
   }
 
