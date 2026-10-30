@@ -42,6 +42,7 @@ readonly property string keyContext:
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `eventCompose` | Creating or editing an event | `Enter` saves and closes after success; `Escape` closes; modified keys remain available |
+| `eventDescription` | Writing an event description | `Enter` inserts a line break; `Ctrl+Enter` saves; `Escape` closes |
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
@@ -50,7 +51,7 @@ readonly property string keyContext:
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
 
-While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock. An open command suggestion or history view is left first.
+While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock before leaving the underlying mail or draft and restores the previous focus. An open command suggestion or history view is left first.
 
 The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts a newline. Ctrl+Return/Enter also sends for compatibility. Typing `/` offers `/clear` (new chat), `/history` (conversation history), and `/diagnose` (diagnostics). Up/Down selects a suggestion; Return/Enter completes a partial command or executes an exact command immediately; choosing `/history` always opens the history at once. Commands stay local. Outside suggestions, Up/Down retain normal text navigation.
 
@@ -68,7 +69,7 @@ event is left alone, preserving normal typing, IME input and line breaks.
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
 
-**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in the single-line event editor.**
+**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in single-line event fields.** The multiline event description keeps Return/Enter for line breaks, including pasted paragraphs; Ctrl+Return/Enter saves from either type of field. Its native text area forwards keys through the same router as the AI input.
 There is no "is the user typing" question anywhere in the code, because there is
 nothing left for it to answer: if a bare letter is not bound in `compose`, it
 cannot fire there, and the field gets it the way any other character arrives.
@@ -143,7 +144,7 @@ used to exist, and they had.
 | `calendarUndo` | `u` | calendar | Undo the last event change |
 | `calendarMonth` | `m` | calendar | Show month view |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
-| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose | Save and close the event |
+| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |
 | `guestPrevious` | `Up` | eventGuests | Previous guest suggestion |
 | `guestChoose` | `Return`, `Enter` | eventGuests | Choose guest suggestion |
@@ -361,5 +362,3 @@ it changed no behaviour.
 **User-configurable bindings.** The table makes it possible — the rows are data
 — but nothing has asked for it, and a config file for bindings needs a merge
 story and a conflict story this does not need.
-
-The AI dock occupies the right side and reduces the mail/composer area. Its own text-entry context prevents mailbox keys from firing while asking AI. Clicking back into the draft restores its normal editing context. Escape closes the dock before leaving the underlying mail or draft, and restores the previous focus.

@@ -13,7 +13,7 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "eventCompose", "eventGuests", "page", "calendar", "assistant", "assistantCommands"]
+var CONTEXTS = ["list", "reader", "search", "compose", "eventCompose", "eventDescription", "eventGuests", "page", "calendar", "assistant", "assistantCommands"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -148,8 +148,10 @@ var BINDINGS = [
   // a hand on the numpad expects the same thing of them.
   { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
-  { id: "saveEvent", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["eventCompose"],
-    group: "Writing", label: "Save and close the event", hint: { eventCompose: "save" } },
+  { id: "saveEvent", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["eventCompose", "eventDescription"],
+    sequenceContexts: { "Return": ["eventCompose"], "Enter": ["eventCompose"] },
+    hintKey: "Ctrl+Enter",
+    group: "Writing", label: "Save and close the event", hint: { eventCompose: "save", eventDescription: "save" } },
   { id: "guestNext", keys: ["Down"], contexts: ["eventGuests"],
     group: "Writing", label: "Next guest suggestion" },
   { id: "guestPrevious", keys: ["Up"], contexts: ["eventGuests"],
@@ -239,7 +241,7 @@ var BINDINGS = [
   { id: "back", keys: ["Escape"], contexts: ANY,
     survivesOverlay: true,
     group: "Mailbox", label: "Back, or close the window",
-    hint: { reader: "back", page: "back", compose: "close", eventCompose: "close", search: "leave" } }
+    hint: { reader: "back", page: "back", compose: "close", eventCompose: "close", eventDescription: "close", search: "leave" } }
 ]
 
 // A pending send is a transient action over the screen, not a screen of its
@@ -249,7 +251,8 @@ function contextFor(state) {
   var value = state || ({})
   if (value.assistantEditing) return value.assistantCommands ? "assistantCommands" : "assistant"
   if (value.showPage) return "page"
-  if (value.eventComposing) return value.guestSuggestions ? "eventGuests" : "eventCompose"
+  if (value.eventComposing) return value.guestSuggestions ? "eventGuests"
+    : value.eventDescriptionFocused ? "eventDescription" : "eventCompose"
   if (value.composing) return "compose"
   if (value.searchFocused) return "search"
   if (value.calendarVisible) return "calendar"

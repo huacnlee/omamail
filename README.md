@@ -63,7 +63,7 @@ make app-run
 
 ## Add your mailbox
 
-Choose a provider in Settings. Gmail needs a Google OAuth client; Outlook and Microsoft 365 need a Microsoft app registration. HEY uses the official [HEY CLI](https://github.com/basecamp/hey-cli). JMAP and IMAP usually use an app password or API token.
+Choose a provider in Settings. Released builds of Gmail sign in with an included Google OAuth client, and you can use your own instead; Outlook and Microsoft 365 need a Microsoft app registration. HEY uses the official [HEY CLI](https://github.com/basecamp/hey-cli). JMAP and IMAP usually use an app password or API token.
 
 The Linux Omarchy plugin offers **Connect Gmail...**: enter your Google address, select your browser, and let Omamail create a personal project, enable Gmail and Calendar, and save your own Desktop client. If you are signed out, Google sign-in opens and setup resumes automatically after you finish. Google’s permission page opens automatically after setup; approve access to finish. This experimental setup uses Google's undocumented Console HTTP endpoints and queries Google cookie records directly from your selected profile without copying its cookie database or reading browser session files; it never drives the browser. If the database cannot be read safely, setup stops so you can close the browser and retry or use manual setup. A personal client is restricted to its owner and is never shared with another mailbox. Manual setup remains available.
 

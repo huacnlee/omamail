@@ -35,6 +35,9 @@ Item {
     property string agentShownId: ""
     property string agentShownOutput: ""
     property var agentShownTranscript: []
+    property bool backendCanAgentProposals: true
+    property var agentShownProposals: []
+    property int sendRequests: 0
     property int agentRequests: 0
     property string lastAgentPrompt: ""
     function askAgentDraft(fields, prompt) { agentRequests++; lastAgentPrompt = prompt; return true }
@@ -157,6 +160,7 @@ Item {
       callback(loaded, "")
     }
     function send(_fields) {
+      sendRequests++
       sendPending = true
       return true
     }
@@ -362,6 +366,9 @@ Item {
       app.preferredAssistantWidth = 0
       mailService.draftAgentJobs = []; mailService.cancelledAgentId = ""
       mailService.readerAgentJob = null
+      mailService.agentShownProposals = []
+      mailService.agentShownTranscript = []
+      mailService.sendRequests = 0
       mailService.agentRequests = 0
       mailService.lastAgentPrompt = ""
       mailService.sending = false
@@ -817,6 +824,67 @@ Item {
       named(app,"agent-prompt").close()
       app.startCompose("replyAll")
       compare(app.assistantOpen,false)
+    }
+    function test_reader_edit_ai_draft_opens_composer_data() {
+      return [{tag:"first-draft",previousChat:false}, {tag:"previous-draft-chat",previousChat:true}]
+    }
+    function test_reader_edit_ai_draft_opens_composer(data) {
+      app.open("{}")
+      var reader = named(app, "agent-prompt")
+      var compose = composeView()
+      if (data.previousChat) {
+        app.startCompose("new")
+        app.composeAgent.open()
+        tryCompare(named(app.composeAgent, "agent-prompt-field"), "activeFocus", true)
+        compose.finish()
+      }
+      app.pushEntry("reader", {})
+      var job = {id:"reader-chat",messageId:mailService.selectedId,
+        accountId:mailService.composeAccountId,state:"done",canContinue:true}
+      mailService.readerAgentJob = job
+      reader.openCenteredFor(mailService.selectedId, "Original message")
+      var quote = "On Monday, Sender wrote:\n> Original body"
+      var card = {id:"reply-proposal",jobId:job.id,applicable:true,
+        subject:"Re: Original subject",body:"Thursday works for me.",
+        envelope:{accountId:job.accountId,from:"me@example.com",to:"sender@example.com",
+          cc:"copy@example.com",bcc:"",replyTo:"",subject:"Old subject",body:"Old body",
+          attachments:[],threadId:"thread-1",inReplyTo:"<message-1@example.com>",
+          replyMessageId:mailService.selectedId,replyQuote:quote,draftId:""}}
+      mailService.agentShownProposals = [card]
+      var edit = named(reader, "agent-apply-draft")
+      verify(edit !== null)
+      verify(waitForRendering(edit))
+      verify(edit.enabled)
+      mouseClick(edit)
+      tryCompare(app, "composing", true)
+      compare(compose.visible, true)
+      compare(reader.opened, false)
+      compare(app.navKinds.join(","), "list,reader,compose")
+      compare(compose.accountId, job.accountId)
+      compare(compose.fromEmail, card.envelope.from)
+      compare(named(compose, "compose-to-field").text, card.envelope.to)
+      compare(named(compose, "compose-cc-field").text, card.envelope.cc)
+      compare(named(compose, "compose-subject-field").text, card.subject)
+      var body = named(compose, "compose-body-editor")
+      compare(body.text, card.body + "\n\n" + quote)
+      compare(compose.threadId, card.envelope.threadId)
+      compare(compose.inReplyTo, card.envelope.inReplyTo)
+      compare(compose.replyMessageId, card.envelope.replyMessageId)
+      compare(compose.agentParentJobId, job.id)
+      tryCompare(body, "activeFocus", true)
+      compare(named(app, "key-router").context, "compose")
+      compare(app.composeAgent.opened, true)
+      compare(app.composeAgent.job.id, job.id)
+      keyClick(Qt.Key_E)
+      compare(body.text, "e" + card.body + "\n\n" + quote)
+      keyClick(Qt.Key_Escape)
+      tryCompare(app.composeAgent, "opened", false)
+      compare(app.composing, true)
+      tryCompare(body, "activeFocus", true)
+      compare(mailService.sendRequests, 0)
+      compare(mailService.sendPending, false)
+      compose.finish()
+      compare(app.navKinds.join(","), "list,reader")
     }
     function test_ai_dock_resizes_from_left_edge_and_keeps_width() {
       app.open("{}")
