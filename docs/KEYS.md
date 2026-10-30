@@ -363,3 +363,5 @@ it changed no behaviour.
 story and a conflict story this does not need.
 
 The AI dock occupies the right side and reduces the mail/composer area. Its own text-entry context prevents mailbox keys from firing while asking AI. Clicking back into the draft restores its normal editing context. Escape closes the dock before leaving the underlying mail or draft, and restores the previous focus.
+
+Choosing Edit draft on an AI reply in the reader opens that reply in the composer and focuses its body. The conversation stays available beside it, while typing edits the email immediately.
