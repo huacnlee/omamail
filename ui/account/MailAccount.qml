@@ -2943,7 +2943,11 @@ Item {
     // sequence, which `summarizeResources` reads as none.
     onUpdated: function(crossed) {
       var snapshot = Plain.plain(crossed)
-      if (snapshot.error) return
+      if (snapshot.error) {
+        if (snapshot.error === "mail_auth_failed" && api && typeof api.recheckSavedPassword === "function")
+          api.recheckSavedPassword()
+        return
+      }
       root.summarizeResources(snapshot.messages || [], function(prepared, preparationError) {
       if (preparationError) return
       var before = root.inboxUnread
