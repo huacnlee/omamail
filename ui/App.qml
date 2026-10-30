@@ -2120,7 +2120,12 @@ Item {
             // follows it.
             onDetailOpenChanged: {
               if (detailOpen) { if (root.page !== "calendarDetail") root.pushEntry("calendarDetail", {}) }
-              else if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+              else {
+                if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+                // Closing a preview keeps the calendar context, so restore its
+                // focus explicitly rather than leaving hidden text selected.
+                if (focusScope.focusWithin(calendarView)) Qt.callLater(focusScope.applyContextFocus)
+              }
             }
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }

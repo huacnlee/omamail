@@ -211,6 +211,7 @@ Item {
     service: mailService
     shell: fakeShell
   }
+  TextEdit { id: clipboard; visible: false; textFormat: TextEdit.PlainText }
 
   TestCase {
     name: "AppNavigation"
@@ -311,6 +312,49 @@ Item {
       keyClick(Qt.Key_Escape)
       tryCompare(scope, "keyContext", "list")
       compare(kinds(), "list")
+    }
+
+    function test_event_preview_mouse_copy_and_close_restore_calendar_navigation_data() {
+      return [{tag:"escape"}, {tag:"back-button"}]
+    }
+
+    function test_event_preview_mouse_copy_and_close_restore_calendar_navigation(data) {
+      app.runShortcut("calendarView", "")
+      var view = having(app, function(item) { return typeof item.activateEvent === "function" })
+      verify(view !== null)
+      view.activateEvent({sourceId:"shared",uid:"preview",summary:"Shared planning session",
+        description:"Read-only notes",start:{ms:Date.now()},end:{ms:Date.now()+3600000}}, true)
+      tryCompare(app, "page", "calendarDetail")
+      wait(0)
+      var title = named(view, "event-title-text")
+      mouseDrag(title, 1, 1, title.width - 3, title.height - 3, Qt.LeftButton)
+      compare(title.selectedText, "Shared planning session")
+      keyClick(Qt.Key_C, Qt.ControlModifier)
+      clipboard.text = ""
+      clipboard.paste()
+      compare(clipboard.text, "Shared planning session")
+      compare(app.composing, false)
+      if (data.tag === "escape") keyClick(Qt.Key_Escape)
+      else {
+        var back = having(view, function(item) { return item.label === "Calendar" && typeof item.activated === "function" })
+        mouseClick(back, back.width / 2, back.height / 2)
+      }
+      tryCompare(view, "detailOpen", false)
+      wait(0)
+      keyClick(Qt.Key_A, Qt.ControlModifier)
+      keyClick(Qt.Key_C, Qt.ControlModifier)
+      clipboard.text = ""
+      clipboard.paste()
+      compare(clipboard.text, "Shared planning session", "closed preview text must not receive selection keys")
+      compare(title.activeFocus, false)
+      keyClick(Qt.Key_C)
+      tryCompare(app, "overlay", "eventComposer")
+      var input = named(app, "event-title-field")
+      tryCompare(input, "activeFocus", true)
+      keyClick(Qt.Key_X)
+      compare(input.text, "x")
+      keyClick(Qt.Key_Escape)
+      tryCompare(app, "composing", false)
     }
 
     function test_control_comma_opens_settings(data) {
