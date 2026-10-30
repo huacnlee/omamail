@@ -130,6 +130,17 @@ Item {
     target: root.backend
     ignoreUnknownSignals: true
     function onReadyChanged() { root.reconcile() }
+    function onMailWatchStopped(account) {
+      if (!root.enabled || !root.backend || !root.backend.ready
+          || root.registeredBackend !== root.backend
+          || root.accountId !== account || root.registeredAccount !== account) return
+      // Also invalidate an outstanding replacement's reply: it can arrive
+      // after the retired owner's unwatch already removed that registration.
+      root.epoch++
+      root.registrationKey = ""
+      root.registered = false
+      root.scheduleReconcile()
+    }
     function onNotification(method, params) {
       if (method === "mail.updated") root.accept(params)
     }
