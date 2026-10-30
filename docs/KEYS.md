@@ -50,7 +50,7 @@ readonly property string keyContext:
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
 
-While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock. An open command suggestion or history view is left first.
+While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock before leaving the underlying mail or draft and restores the previous focus. An open command suggestion or history view is left first.
 
 The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts a newline. Ctrl+Return/Enter also sends for compatibility. Typing `/` offers `/clear` (new chat), `/history` (conversation history), and `/diagnose` (diagnostics). Up/Down selects a suggestion; Return/Enter completes a partial command or executes an exact command immediately; choosing `/history` always opens the history at once. Commands stay local. Outside suggestions, Up/Down retain normal text navigation.
 
@@ -361,7 +361,3 @@ it changed no behaviour.
 **User-configurable bindings.** The table makes it possible — the rows are data
 — but nothing has asked for it, and a config file for bindings needs a merge
 story and a conflict story this does not need.
-
-The AI dock occupies the right side and reduces the mail/composer area. Its own text-entry context prevents mailbox keys from firing while asking AI. Clicking back into the draft restores its normal editing context. Escape closes the dock before leaving the underlying mail or draft, and restores the previous focus.
-
-Choosing Edit draft on an AI reply in the reader opens that reply in the composer and focuses its body. The conversation stays available beside it, while typing edits the email immediately.
