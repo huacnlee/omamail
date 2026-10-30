@@ -43,7 +43,7 @@ it, described in terms of what it protects rather than what it opens.
 
 Omamail's core product is substantially complete. Prefer fixes and refinements to existing functionality: reproducible bugs, small focused fixes, wording corrections, and performance improvements that preserve the intended design and workflow. New features and email providers are considered cautiously; explain the unmet need, why existing workflows are insufficient, and the ongoing interface and maintenance cost before expanding scope.
 
-Discuss large features, new providers, and substantial architectural changes with Jason before implementation. Passing tests does not establish that a capability belongs in the product.
+Discuss large features, new providers, and substantial architectural changes with @huacnlee or @klaudworks before implementation. Passing tests does not establish that a capability belongs in the product.
 
 ## Project boundary
 
@@ -69,7 +69,11 @@ make validate    # node tests, source regressions, QML tests, qmllint, manifest
 
 `make app-build` needs Rust, CMake 3.21 or newer, and Qt 6.5 or newer. On Linux, the Qt DBus development component is also required. It builds the backend with `--no-default-features --features standalone`, so the resulting process has no AI worker surface. `make app-run` sets only the development resource and bundled-backend overrides needed to run that build.
 
-`make validate` needs `node`, `python3`, Qt 6 QML test tooling (`qt6-declarative` on Arch, `qt6-declarative-dev-tools` and `qml6-module-qttest` on Debian and Ubuntu) and the `omarchy` CLI. It has to be green before you open the pull request, and green on your machine — nothing in CI runs it for you. Standalone changes must also pass `make test-app-qml` and the native platform gates described in [Backend runtime](docs/BACKEND-RUNTIME.md).
+`make validate` needs `node`, `python3`, Qt 6 QML test tooling (`qt6-declarative` on Arch, `qt6-declarative-dev-tools` and `qml6-module-qttest` on Debian and Ubuntu) and the `omarchy` CLI. It has to be green before you open the pull request, and green on your machine — nothing in CI runs it for you. Standalone changes must also pass `make test-app-qml` locally.
+
+Linux verification satisfies contributor and reviewer platform-testing requirements. Testing on macOS or Windows is optional; reviewers must not request it as a prerequisite or block a PR because those local or hands-on results are absent. Required automated CI still needs to pass, including its native platform jobs described in [Backend runtime](docs/BACKEND-RUNTIME.md#standalone-security-gates). Report the platform actually tested without claiming verification on others.
+
+Contributors are not required to test anything by hand. Use reproducible automated checks and generated visual evidence appropriate to the changed behavior. If verification is missing, the review comment must identify the specific behavior, expected result and automated test or evidence to add, so the contributor's agent can address it.
 
 ## How the change gets made
 
@@ -77,11 +81,7 @@ In this order, and none of the steps fold into each other:
 
 1. **Implement it.** One change, finished — not a sketch with the hard half
    left for review to find.
-2. **Test it, then test it again.** Run `make validate` until it is green, run
-   the new test against the unfixed code and watch it fail, and exercise the
-   real path by hand. A suite that passed once on a machine that has since
-   changed is not evidence; run it again before you open the pull request, and
-   again after every round of review.
+2. **Verify the changed behavior.** Run `make validate`, confirm the regression fails against the unfixed code, and use automated interaction or integration checks where needed. Record results for the submitted revision; rerun affected checks after review fixes.
 3. **Have a fresh agent review it.** Open a *new* agent — an empty context,
    nothing of the conversation that wrote the code — hand it the diff and
    `AGENTS.md`, and ask it to find what is wrong. The agent that wrote a patch
@@ -99,7 +99,7 @@ A change without a test that fails without it is not finished. Where one goes:
 | Parsing, formatting, or a decision rule in `.js` | `tests/test_*.js`, run by `node` — no compositor needed |
 | A script in `scripts/` | `tests/test_*.sh` or `tests/test_*.py` |
 | Focus, key routing, layout, or anything needing the QML engine | `tests/qml/tst_*.qml`, run offscreen |
-| Standalone host, adapter, packaging, or installer behavior | `app/tests/`, run on every affected native platform |
+| Standalone host, adapter, packaging, or installer behavior | `app/tests/`, run locally on Linux |
 | A rule that grep can enforce — no literal colours, no `LayoutMirroring` | `tests/test_source.sh` |
 
 Add the new file to the `Makefile` in the same commit; a test nothing runs is
@@ -115,11 +115,11 @@ code once and watch it fail, and say so in the pull request.
   that the change did not require. [AGENTS.md's UI section](AGENTS.md#ui)
   gives the same rules where they are specific to this
   codebase, and `tests/test_source.sh` enforces the part of them that grep can.
-- **Test it on a screen, by hand. This is required and nothing substitutes for it.** For the plugin, register your development checkout with the Omarchy shell and follow [the development runtime instructions](docs/BACKEND-RUNTIME.md); click the envelope in the bar and drive the change with the mouse and keyboard in a light theme and a dark one, at both window sizes. For the standalone host, run `make app-run` on each affected platform and repeat the applicable mail, calendar, notification, and window checks. The offscreen QML tests prove focus and routing; they cannot see that a control hangs four pixels out of its row.
+- **Automate verification of the changed interaction.** Exercise the applicable mouse, keyboard, focus and state transitions with QML or host integration checks. Use generated captures to inspect layout in the relevant light/dark themes and compact/wide sizes. Component harnesses using production components are valid evidence for the behavior they exercise; request broader integration coverage only for a concrete gap they leave. Hands-on testing is optional.
 - **Every UI change requires clear, detailed visual evidence.** Attach labeled before-and-after screenshots of every changed view and relevant state, captured at matching window dimensions, theme, and scale. Explain what changed and identify the platforms, themes, and sizes tested. Screenshots must be legible enough to evaluate the actual layout, labels, and states; update them whenever the UI changes.
-- **Multi-stage or stateful workflows also require a detailed screen recording, including bug fixes to existing workflows.** Show the complete path from entry to result, including the relevant keyboard and mouse interactions and loading, empty, error, cancellation, or recovery states. Show observable side effects and retry invariants rather than only the final status: for an invitation-calendar change, record invitation import, update of the same existing event, and a failed save followed by calendar-only retry, with evidence that retry sends no second RSVP. Add steps or timestamps and expected results so Jason can assess the interaction without installing or running the app. Screenshots alone are not sufficient for these changes.
-- Identify the capture's host (Omarchy plugin, standalone app, or component/test harness), platform, UI commit, theme, dimensions and scale, plus the backend version, API revision and source commit when built locally. For mocked backends, identify the fixture contract/API revision and explicitly say that no real backend/provider ran. Label synthetic component recordings and any fixture-only controls or side-effect counters; distinguish UI-flow evidence from real backend/provider verification. Refresh affected recordings after interaction changes and check that uploaded attachments play before requesting review or re-review.
-- Use synthetic or redacted data in screenshots and recordings. Upload the evidence as PR attachments rather than committing it to the repository. Visual evidence complements the required hands-on testing and regression tests; it does not replace them.
+- **Multi-stage or stateful workflows also require a detailed screen recording, including bug fixes to existing workflows.** Show the complete path from entry to result, including the relevant keyboard and mouse interactions and loading, empty, error, cancellation, or recovery states. Show observable side effects and retry invariants rather than only the final status: for an invitation-calendar change, record invitation import, update of the same existing event, and a failed save followed by calendar-only retry, with evidence that retry sends no second RSVP. Add steps or timestamps and expected results so maintainers can assess the interaction without installing or running the app. Screenshots alone are not sufficient for these changes.
+- Identify the capture's host (Omarchy plugin, standalone app, or component/test harness), platform, UI commit, theme, dimensions and scale, plus the backend version, API revision and source commit when built locally. For mocked backends, identify the fixture contract/API revision and explicitly say that no real backend/provider ran. Label synthetic component recordings and any fixture-only controls or side-effect counters; distinguish UI-flow evidence from real backend/provider verification. Automated screenshots and recordings are acceptable. Refresh affected recordings after interaction changes and verify uploaded attachments are accessible and decodable before requesting review or re-review.
+- Use synthetic or redacted data in screenshots and recordings. Upload the evidence as PR attachments rather than committing it to the repository. Visual evidence complements regression tests; neither requires a contributor to operate the app by hand.
 
 ## The pull request
 
@@ -157,8 +157,8 @@ Then:
 ## Verification
 
 `make validate` green. `tests/test_message.js` covers the 8-bit body with an
-accent in it, and fails with the change reverted. Live: a Fastmail mailbox
-whose French subjects rendered as mojibake before and read correctly after.
+accent in it, and fails with the change reverted. An automated rendering
+fixture confirms the French subject displays correctly.
 
 ## Release Notes
 
@@ -172,7 +172,7 @@ missing:
 
 - `make validate`, and that it was green on the commit you are sending.
 - The new test, and that you saw it fail against the unfixed code.
-- What you drove by hand, with the evidence and provenance required under [If you touched the interface](#if-you-touched-the-interface).
+- The relevant automated behavior checks and visual evidence, with provenance required under [If you touched the interface](#if-you-touched-the-interface).
 - That a fresh agent reviewed the diff, and what it found. "Nothing" is an
   answer; not having asked is not.
 
@@ -191,13 +191,15 @@ Review existing-functionality bug fixes, small fixes, wording corrections, and p
 
 Judge product and interaction design independently of implementation quality: necessity, fit with existing workflows, discoverability, keyboard/focus behavior, defaults, and relevant loading, empty, error and cancellation states. Consider simpler alternatives and interface or maintenance cost when they affect the recommendation. Correctness, tests, performance and affected security boundaries remain requirements; passing checks alone does not justify expanding the product.
 
-Routine improvements within existing functionality do not need a separate product-direction decision. This includes focused bug fixes, small workflow refinements, wording, performance, text selection/copy, focus recovery and minor layout or spacing tradeoffs. Several reasonable implementation or UI choices do not by themselves make a change fundamental. Review the actual behavior, conflicts, regressions and applicable evidence before recommending approval; missing hands-on or visual verification must be reported rather than inferred from tests.
+Routine improvements within existing functionality do not need a separate product-direction decision. This includes focused bug fixes, small workflow refinements, wording, performance, text selection/copy, focus recovery and minor layout or spacing tradeoffs. Several reasonable implementation or UI choices do not by themselves make a change fundamental. Review the actual behavior, conflicts, regressions and applicable evidence before recommending approval; identify concrete gaps in automated or visual evidence rather than demanding hands-on testing.
 
-Large new capabilities or workflows, new providers, substantial architecture changes and integrations beyond the project boundary require Jason's explicit product confirmation. Ask a focused question when that boundary is unclear, and resolve explicit maintainer objections before proceeding. Scope acceptance never waives correctness, security or the verification requirements above.
+Large new capabilities or workflows, new providers, substantial architecture changes and integrations beyond the project boundary require explicit product confirmation from a maintainer. Tag @huacnlee or @klaudworks with the focused decision question; either may confirm the direction. Resolve explicit maintainer objections before proceeding. Scope acceptance never waives correctness, security or the verification requirements above.
 
 Keep review summaries easy to act on, using **Status → Summary → Findings → Next step**. State whether this is a request for missing information or a completed review. Explain the user-visible change, who benefits and the recommendation, then give the actual findings in plain language. The next step names who should act, what they should do and what result or evidence to report. Prefer a short paragraph or a few bullets; group related requests and link evidence when it helps resolve a finding. Omit passed CI/check summaries already visible in the PR. Keep detailed investigation in logs or linked code rather than repeating file inventories, every reviewed criterion, speculative alternatives or caveats that do not affect the decision. State the affected security result as required by [AGENTS.md](AGENTS.md#security), and retain limitations that materially affect the recommendation. These priorities also apply when recommending deferral or skipping a review.
 
-An approval is not permission to merge: Jason makes the final merge decision, and automated reviewers must never merge.
+Make missing-verification requests actionable by the contributor's agent: name the scenario, the observable assertion or capture needed and where the result should be reported. For example, ask for an automated selection → copy → Escape regression that asserts clipboard contents and restored focus, rather than asking someone to test the app manually. Inspect existing coverage first and request only the uncovered behavior.
+
+An approval is not permission to merge: maintainers make the final merge decision, and automated reviewers must never merge.
 
 Answer a review comment by changing the code or by saying why the change would
 be wrong, and re-run `make validate` after every round — a fix made under
