@@ -249,6 +249,29 @@ deepEqual(model.movableLabels(labelSet, "", "L3").map(l => l.id), ["L1", "L2"],
   "the current Gmail label or IMAP folder is not a move destination")
 deepEqual(model.movableLabels(null, ""), [])
 
+// A folder mailbox: the rail draws its folders too, but a message read in Junk
+// has no one-key way back to the Inbox — `e` files into Archive from everywhere
+// but Archive. So the Inbox is offered there, and the folders keep their tree.
+const folderSet = [
+  { id: "INBOX", name: "INBOX", system: true, delimiter: "/" },
+  { id: "Junk", name: "Junk", system: true, delimiter: "/" },
+  { id: "Sent Messages/Notes", name: "Sent Messages/Notes", system: false, delimiter: "/" }
+]
+deepEqual(model.movableLabels(folderSet, "").map(l => l.id), ["Sent Messages/Notes"],
+  "without the folders flag the system folders stay out, as they do on Gmail")
+deepEqual(model.movableLabels(folderSet, "", "", true).map(l => l.id), ["INBOX", "Sent Messages/Notes"],
+  "a folder provider offers the Inbox, and its own folders keep their place in the tree")
+deepEqual(model.movableLabels(folderSet, "", "INBOX", true).map(l => l.id), ["Sent Messages/Notes"],
+  "the folder already on screen is still not a destination")
+deepEqual(model.movableLabels(folderSet, "in", "", true).map(l => l.id), ["INBOX"],
+  "typing reaches the Inbox on a folder provider")
+deepEqual(model.movableLabels(folderSet, "in").map(l => l.id), [],
+  "and typing still cannot reach a system label without the folders flag")
+deepEqual(model.movableLabels(folderSet, "junk", "", true).map(l => l.id), [],
+  "the folders flag lets the Inbox through alone: Junk is not a destination")
+deepEqual(model.labelTree(folderSet, []).filter(row => row.id === "INBOX"), [],
+  "the rail still draws no system label, the Inbox included")
+
 // The optimistic update has to move the derived flags too, or a row shows a
 // filled star with `starred: false` underneath it until the next refresh.
 const row = { id: "a", labelIds: ["INBOX", "UNREAD"], unread: true, starred: false, inInbox: true }
