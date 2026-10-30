@@ -1870,16 +1870,24 @@ Item {
             WheelScroller { view: listFlick }
             anchors.fill: parent
             contentWidth: width
-            contentHeight: list.implicitHeight + Style.space(12)
+            contentHeight: list.y + list.implicitHeight + Style.space(6)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+            // Gmail only; the unified view mixes providers.
+            DateFilterBar {
+              id: dateFilters
+              y: Style.space(6)
+              account: root.service && !root.service.unified ? root.service.current : null
+              textColor: root.foreground
+              accentColor: root.accent
+            }
             MessageList {
               id: list
               scroller: listFlick
               // Match the sidebar's first row inset below the header.
-              y: Style.space(6)
+              y: Style.space(6) + (dateFilters.visible ? dateFilters.height + Style.space(6) : 0)
               // Full width, so selected and hovered rows meet the splitter.
               // Text and action breathing room belongs inside MessageRow;
               // shrinking the whole list leaves a conspicuous dead strip.

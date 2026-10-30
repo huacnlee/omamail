@@ -11,6 +11,7 @@ import "../message/Calendar.js" as Calendar
 import "../message/Unsubscribe.js" as Unsub
 import "../message/Outbox.js" as Outbox
 import "Model.js" as Model
+import "DateFilter.js" as DateFilter
 import "Accounts.js" as Accounts
 import "Aliases.js" as Aliases
 import "../providers/Registry.js" as Provider
@@ -501,10 +502,19 @@ Item {
   readonly property string providerQueryInput: JSON.stringify([providerId, mailboxKey, searchQuery, defaultQuery])
   readonly property bool providerQueryNeedsResolution: searchQuery.trim() !== ""
     || (mailboxKey === "inbox" && defaultQuery.trim() !== "" && defaultQuery.trim() !== Provider.get(providerId).inheritedDefault)
-  readonly property string effectiveQuery: rawQuery !== "" ? rawQuery
+  // An inbox date filter (DateFilter.js), kept across mailboxes and searches;
+  // its days count from dateFilterAt, moved on at local midnight. The unified
+  // view has no filter row, so it lists every account unfiltered.
+  property string dateFilter: ""
+  property real dateFilterAt: 0
+  readonly property bool canFilterByDate: providerId === "gmail"
+  readonly property bool dateFilterOff: !!(platform && platform.unified)
+  readonly property string activeDateFilter: dateFilterOff ? "" : dateFilter
+  onDateFilterOffChanged: if (dateFilter !== "") setDateFilter(dateFilter)
+  readonly property string effectiveQuery: DateFilter.apply(rawQuery !== "" ? rawQuery
     : searchRaw !== "" ? searchRaw
     : resolvedProviderInput === providerQueryInput ? resolvedProviderQuery
-    : Provider.mailboxFor(providerId, mailboxKey).query
+    : Provider.mailboxFor(providerId, mailboxKey).query, activeDateFilter, providerId, dateFilterAt)
   readonly property bool hasMore: nextPageToken !== ""
   // A cached search can already have rows on screen while this stays true.
   // Kept separate from the generic list state so the view can say that the
@@ -2483,6 +2493,19 @@ Item {
     loadMessages(false)
   }
 
+  function setDateFilter(key) {
+    key = String(key || "")
+    if (!canFilterByDate || !DateFilter.isKnown(key) || (key === dateFilter && key === "")) return
+    dateFilter = key
+    dateFilterAt = Date.now()
+    clearSelection()
+    messages = []
+    previewMessages = []
+    loadedDepth = 0
+    listLoaded = false
+    loadMessages(false)
+  }
+
   // `raw`: an app-built query in the provider's words, sent as it is.
   function search(text, raw) {
     providerLabelSerial++
@@ -2985,6 +3008,17 @@ Item {
     interval: 100
     repeat: false
     onTriggered: root.flushRemoteImages()
+  }
+
+  Timer {
+    interval: 60000
+    running: root.activeDateFilter !== ""
+    repeat: true
+    onTriggered: root.moveDateFilterOn(Date.now())
+  }
+  function moveDateFilterOn(nowMs) {
+    if (activeDateFilter !== "" && DateFilter.midnight(nowMs, 0) !== DateFilter.midnight(dateFilterAt, 0))
+      setDateFilter(dateFilter)
   }
 
   // Only ages the "synced" label; nothing else depends on it.

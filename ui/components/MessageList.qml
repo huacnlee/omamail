@@ -177,7 +177,8 @@ Column {
       width: parent.width - Style.space(20)
       horizontalAlignment: Text.AlignHCenter
       text: root.service.listLoaded
-          ? (root.service.searchQuery !== "" ? "Nothing matches that search" : "Nothing here")
+          ? (root.service.activeDateFilter ? "Nothing in this date range"
+            : root.service.searchQuery !== "" ? "Nothing matches that search" : "Nothing here")
           : ""
       color: root.dimColor
       font.family: root.panelFontFamily

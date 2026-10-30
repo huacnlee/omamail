@@ -17,6 +17,10 @@ Item {
     }
   }
   Component {
+    id: platformFactory
+    QtObject { property bool unified: false }
+  }
+  Component {
     id: accountFactory
     Account.MailAccount {
       pluginDir: "/synthetic/provider-domain"
@@ -72,6 +76,54 @@ Item {
       backend.requests[1].done({ value: "stale" }, null)
       compare(account.effectiveQuery, "in:trash")
       compare(account.searchQuery, "")
+    }
+    function test_date_filter_narrows_gmail_and_leaves_other_providers_alone() {
+      var backend = createTemporaryObject(backendFactory, parent)
+      var gmail = createTemporaryObject(accountFactory, parent, { backend: backend, providerId: "gmail" })
+      verify(gmail.canFilterByDate)
+      var before = gmail.loads
+      gmail.setDateFilter("today")
+      compare(gmail.dateFilter, "today")
+      compare(gmail.loads, before + 1, "a new filter reloads the list")
+      verify(/^in:inbox after:\d+$/.test(gmail.effectiveQuery), gmail.effectiveQuery)
+      gmail.selectMailbox("starred")
+      verify(/^is:starred after:\d+$/.test(gmail.effectiveQuery), "the filter survives a mailbox change")
+      gmail.setDateFilter("bogus")
+      compare(gmail.dateFilter, "today")
+      gmail.setDateFilter("")
+      compare(gmail.effectiveQuery, "is:starred")
+
+      var imap = createTemporaryObject(accountFactory, parent, { backend: backend })
+      verify(!imap.canFilterByDate)
+      imap.setDateFilter("today")
+      compare(imap.dateFilter, "")
+      compare(imap.effectiveQuery, "folder:INBOX")
+    }
+    function test_date_filter_moves_on_at_midnight_and_sleeps_in_the_unified_view() {
+      var backend = createTemporaryObject(backendFactory, parent)
+      var platform = createTemporaryObject(platformFactory, parent)
+      var gmail = createTemporaryObject(accountFactory, parent,
+        { backend: backend, providerId: "gmail", platform: platform })
+      gmail.setDateFilter("today")
+      var today = gmail.effectiveQuery
+      var loads = gmail.loads
+      gmail.moveDateFilterOn(Date.now())
+      compare(gmail.loads, loads, "the same day keeps the list")
+      gmail.dateFilterAt = Date.now() - 2 * 86400000
+      verify(gmail.effectiveQuery !== today)
+      gmail.moveDateFilterOn(Date.now())
+      compare(gmail.loads, loads + 1, "a new day reloads the list")
+      compare(gmail.effectiveQuery, today, "today is today again")
+
+      platform.unified = true
+      compare(gmail.effectiveQuery, "in:inbox", "the unified view lists the account unfiltered")
+      compare(gmail.loads, loads + 2)
+      compare(gmail.dateFilter, "today", "the choice is kept for when the row comes back")
+      gmail.moveDateFilterOn(Date.now() + 2 * 86400000)
+      compare(gmail.loads, loads + 2, "no reload for a filter that is off")
+      platform.unified = false
+      compare(gmail.effectiveQuery, today)
+      compare(gmail.loads, loads + 3)
     }
     function test_label_query_is_native_and_late_navigation_reply_is_ignored() {
       var backend = createTemporaryObject(backendFactory, parent)
