@@ -2707,7 +2707,11 @@ Item {
               proposalComposer: compose
               onApplyProposalRequested: function(envelope, parentId) {
                 compose.beginProposal(envelope, parentId)
-                Qt.callLater(function() { root.composeAgent.open() })
+                // Keep the conversation alongside the draft, with typing in the editor.
+                Qt.callLater(function() {
+                  focusScope.applyContextFocus()
+                  root.composeAgent.open(false)
+                })
               }
               onOpenedChanged: if (opened) root.composeAgent.close()
               objectName: "agent-prompt"
