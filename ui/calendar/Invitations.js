@@ -1,6 +1,7 @@
 .pragma library
 
 .import "../message/Calendar.js" as Calendar
+.import "../diagnostics/Details.js" as Details
 
 function destination(settings, mailbox) {
   var targets = settings && settings.invitationCalendars || {}
@@ -22,6 +23,7 @@ function params(source, mailbox, invite, response) {
   if (response === "cancelled" || response === "declined") return result
   if (!invite.start || !invite.end || invite.start.resolved === false || invite.end.resolved === false
       || !(invite.end.ms > invite.start.ms)) return null
+  var recurringSeries = !!invite.recurrenceRule && !invite.recurrenceIdMs
   function time(value, raw) {
     if (value.allDay) {
       var date = /:(\d{4})(\d{2})(\d{2})$/.exec(String(raw || ""))
@@ -31,7 +33,10 @@ function params(source, mailbox, invite, response) {
         : d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2)}
     }
     var result = {dateTime: new Date(value.ms).toISOString()}
-    if (value.tzid) result.timeZone = value.tzid
+    // Resolved one-off times already include the exact UTC instant. An ICS
+    // TZID can be a Windows/custom VTIMEZONE name that Google does not support.
+    // Only a recurring series needs the named zone for future DST transitions.
+    if (recurringSeries && value.tzid) result.timeZone = value.tzid
     return result
   }
   var original = invite.source || {}
@@ -39,7 +44,7 @@ function params(source, mailbox, invite, response) {
     location: String(invite.location || ""), start: time(invite.start, original.dtstart), end: time(invite.end, original.dtend)}
   if (invite.meetLink && result.event.description.indexOf(invite.meetLink) < 0)
     result.event.description += "\n" + invite.meetLink
-  if (invite.recurrenceRule && !invite.recurrenceIdMs) {
+  if (recurringSeries) {
     // Google requires an explicit recurrence zone. UTC events keep UTC; local
     // floating recurrences need the organiser's zone before they can be saved.
     if (!invite.start.allDay && !result.event.start.timeZone) {
@@ -63,4 +68,44 @@ function outcome(status) {
   if (status === "newer") return "A newer invitation is already saved"
   if (status === "removed" || status === "absent") return "Removed from the saved calendar"
   return "Saved to calendar"
+}
+
+function failure(error, apiVersion) {
+  var code = error && error.message || ""
+  var data = Details.clean(apiVersion >= 10 && error ? error.data : null)
+  var status = data.httpStatus || 0
+  var reason = data.reason || ""
+  var advice = "The calendar request failed. See the diagnostic report for details."
+  if (status === 429 || ["rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "dailyLimitExceeded", "usageLimits", "TooManyRequests", "ErrorQuotaExceeded"].indexOf(reason) >= 0)
+    advice = "The calendar service is limiting requests. Wait before retrying."
+  else if (status >= 500)
+    advice = "The calendar service is temporarily unavailable. Try again later."
+  else if (status === 401 || code === "calendar_auth_required" || code === "gmail_unauthorized" || code === "auth_signed_out")
+    advice = "Sign in to the destination calendar account again, then retry."
+  else if (status === 403 || code === "calendar_auth_refused")
+    advice = "The calendar service refused access. Check account permissions and the selected calendar."
+  else if (reason === "participantIsNeitherOrganizerNorAttendee")
+    advice = "The imported event is missing the destination calendar owner. Update Omamail before retrying."
+  else if ((status === 400 || status === 422) && (data.field === "start.timeZone" || data.field === "end.timeZone"))
+    advice = "The calendar service rejected the invitation's time zone. Check its time zone before retrying."
+  else if (status === 400 || status === 422 || code === "calendar_invalid_input" || code === "Invalid params")
+    advice = "The calendar request is invalid. Check the error details before retrying."
+  else if (status === 409 || status === 412 || code === "calendar_conflict")
+    advice = "The calendar event changed or conflicts with an existing event. Refresh the calendar, then retry."
+  else if (status === 404 || status === 410 || code === "calendar_not_found")
+    advice = "The calendar or event is no longer available. Check the destination and refresh."
+  else if (code === "calendar_timeout" || code === "request_timed_out")
+    advice = "The calendar request timed out; the save could not be confirmed. Refresh before retrying."
+  else if (code === "calendar_network_failed")
+    advice = "The calendar connection failed; the save could not be confirmed. Check the connection and refresh before retrying."
+  else if (code === "gmail_http_failed" || data.stage === "authentication")
+    advice = "Could not authenticate with the calendar account. Check the sign-in failure in the diagnostic report."
+  else if (code === "calendar_invitation_series_required")
+    advice = "Save the original series invitation before updating this occurrence."
+  else if (code === "calendar_organizer_mismatch" || code === "calendar_ambiguous_invitation")
+    advice = "The invitation could not be matched safely. Check the existing event in your calendar."
+  var detail = Details.summary(data)
+  var uncertain = status >= 500 || code === "calendar_timeout" || code === "request_timed_out" || code === "calendar_network_failed"
+  return (uncertain ? "Calendar save not confirmed. " : "Not saved to calendar. ") + advice + " Retrying will not resend your reply."
+    + (detail ? "\n" + detail : "")
 }

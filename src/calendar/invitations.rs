@@ -30,6 +30,7 @@ pub fn validate(p: &Value) -> Result<(), &'static str> {
     if !account.contains('@') || account.contains(':') || account.chars().any(char::is_whitespace) {
         return Err("invalid_params");
     }
+    destination_owner(source)?;
     super::text(p, "mailbox")?;
     super::text(p, "uid")?;
     let organizer = super::text(p, "organizer")?;
@@ -161,6 +162,17 @@ pub async fn google(p: &Value, token: &str) -> Result<Value, &'static str> {
     .map_err(|_| "calendar_timeout")?
 }
 
+fn destination_owner(source: &Value) -> Result<&str, &'static str> {
+    let calendar = source["calendarId"]
+        .as_str()
+        .filter(|s| !s.is_empty() && *s != "primary");
+    let owner = calendar.unwrap_or(super::text(source, "accountId")?);
+    if !owner.contains('@') || owner.chars().any(char::is_whitespace) {
+        return Err("calendar_invalid_input");
+    }
+    Ok(owner)
+}
+
 async fn save<F, Fut>(p: &Value, mut request: F) -> Result<Value, &'static str>
 where
     F: FnMut(Value) -> Fut,
@@ -249,7 +261,9 @@ where
     } else {
         p["event"].clone()
     };
-    // Never copy attendees: this is a private schedule entry, not a new invitation.
+    // Google import requires the destination calendar to be a participant.
+    // Include only that calendar, never guests from the invitation. This remains
+    // a private import; updates suppress notifications and preserve other guests.
     if !remove {
         body["status"] = json!(if p["response"] == "tentative" {
             "tentative"
@@ -257,6 +271,11 @@ where
             "confirmed"
         });
         body["transparency"] = json!("opaque");
+        body["attendees"] =
+            json!([{"email":destination_owner(source)?,"responseStatus":p["response"]}]);
+        if existing.is_some() {
+            body["attendeesOmitted"] = json!(true);
+        }
     }
     body["extendedProperties"] = json!({"private":{"omamailMailbox":p["mailbox"],"omamailSequence":p["sequence"].to_string()}});
     if let Some(event) = existing {
@@ -313,13 +332,59 @@ mod tests {
         assert_eq!(body["iCalUID"], "meeting");
         assert_eq!(body["organizer"]["email"], "host@example.org");
         assert_eq!(body["description"], "Line one\nLine two");
-        assert!(body.get("attendees").is_none());
+        assert_eq!(
+            body["attendees"],
+            json!([{"email":"work@example.org","responseStatus":"accepted"}])
+        );
         let (result, calls) = run(&p, vec![json!({"items":[existing()]}), existing()]).await;
         assert_eq!(result.unwrap()["status"], "saved");
         assert_eq!(calls[1]["operation"], "update");
         assert_eq!(calls[1]["eventId"], "copy");
         assert_eq!(calls[1]["ifMatch"], "\"version\"");
         assert_eq!(calls[1]["sendUpdates"], "none");
+        let body: Value = serde_json::from_str(calls[1]["body"].as_str().unwrap()).unwrap();
+        assert_eq!(body["attendeesOmitted"], true);
+        assert_eq!(
+            body["attendees"],
+            json!([{"email":"work@example.org","responseStatus":"accepted"}])
+        );
+    }
+    #[tokio::test]
+    async fn private_import_adds_only_the_destination_calendar_participant() {
+        for (calendar, owner) in [
+            (None, "calendar@example.org"),
+            (Some("primary"), "calendar@example.org"),
+            (
+                Some("shared@group.calendar.google.com"),
+                "shared@group.calendar.google.com",
+            ),
+        ] {
+            let mut p = params();
+            if let Some(calendar) = calendar {
+                p["source"]["calendarId"] = json!(calendar);
+            } else {
+                p["source"].as_object_mut().unwrap().remove("calendarId");
+            }
+            p["response"] = json!("tentative");
+            let (_, calls) = run(&p, vec![json!({"items":[]}), existing()]).await;
+            let body: Value = serde_json::from_str(calls[1]["body"].as_str().unwrap()).unwrap();
+            assert_eq!(calls[1]["operation"], "import");
+            assert!(calls[1].get("sendUpdates").is_none());
+            assert_eq!(
+                body["attendees"],
+                json!([{"email":owner,"responseStatus":"tentative"}])
+            );
+            assert!(body.get("attendeesOmitted").is_none());
+            assert_eq!(body["organizer"]["email"], "host@example.org");
+        }
+        let mut p = params();
+        p["source"]["calendarId"] = json!("not-an-email");
+        let (result, calls) = run(&p, vec![]).await;
+        assert!(result.is_err());
+        assert!(
+            calls.is_empty(),
+            "refuse an invalid participant before network access"
+        );
     }
     #[tokio::test]
     async fn mismatched_organizer_duplicates_manual_copies_and_old_updates_never_write() {
