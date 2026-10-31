@@ -45,10 +45,9 @@ function capabilities(values) {
     // A server-side conversation id.
     threads: raw.threads === true,
     // A different question: whether the *listing* collapses to one row per
-    // conversation. Having thread ids does not settle it — Gmail has them and
-    // still lists messages, because collapsing its list would cost a
-    // `threads.get` per thread — while HEY's rows already are conversations
-    // with nothing here to do. Grouping is a rule above this seam, and this is
+    // conversation. Having thread ids does not settle it — Gmail collapses its
+    // listing through `threads.list` in the backend, while HEY's rows already
+    // are conversations with nothing here to do. Grouping is a rule above this seam, and this is
     // what gates it.
     conversations: raw.conversations === true,
     // "Archive" means something.

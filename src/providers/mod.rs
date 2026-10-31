@@ -61,6 +61,7 @@ const PROVIDERS: &[Provider] = &[
             "manageLabels",
             "move",
             "threads",
+            "conversations",
             "archive",
             "spam",
             "star",
@@ -234,7 +235,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(providers[0]["capabilities"]["conversations"], false);
+        assert_eq!(providers[0]["capabilities"]["conversations"], true);
         assert_eq!(providers[3]["capabilities"]["conversations"], true);
         assert_eq!(providers[2]["name"], "Microsoft 365");
     }
