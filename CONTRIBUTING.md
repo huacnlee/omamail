@@ -89,7 +89,7 @@ In this order, and none of the steps fold into each other:
 
 1. **Implement it.** One change, finished — not a sketch with the hard half
    left for review to find.
-2. **Verify the changed behavior.** Run `make validate`, confirm the regression fails against the unfixed code, and use automated interaction or integration checks where needed. Record results for the submitted revision; rerun affected checks after review fixes.
+2. **Verify the changed behavior.** Run `make validate`, confirm any bug regression fails against the unfixed behavior, and use automated interaction or integration checks where needed. Follow [testing standards](docs/TESTING.md) to decide whether to extend an existing test, add one or rely on existing coverage. Record results for the submitted revision; rerun affected checks after review fixes.
 3. **Have a fresh agent review it.** Open a *new* agent — an empty context,
    nothing of the conversation that wrote the code — hand it the diff and
    `AGENTS.md`, and ask it to find what is wrong. The agent that wrote a patch
@@ -100,19 +100,18 @@ In this order, and none of the steps fold into each other:
 
 ## Tests
 
-A change without a test that fails without it is not finished. Where one goes:
+A test earns its place by catching a meaningful failure, not by accompanying every changed line. Read [Testing standards](docs/TESTING.md) before adding, changing or reviewing tests: it defines useful assertions, appropriate test boundaries and when to consolidate or remove coverage. Bug fixes need a regression that fails on the unfixed behavior; extending an existing test is preferred when it covers the same scenario. Documentation-only changes and low-risk mechanical edits do not need invented behavioral tests.
 
 | What you changed | Where the test goes |
 |------------------|---------------------|
-| Parsing, formatting, or a decision rule in `.js` | `tests/test_*.js`, run by `node` — no compositor needed |
+| Rust rules or process/CLI behavior | Module tests in `src/` or integration tests in `tests/*.rs`, run by Cargo |
+| Parsing, formatting, or a decision rule in `.js` | `ui/tests/test_*.js`, run by `node` — no compositor needed |
 | A script in `scripts/` | `tests/test_*.sh` or `tests/test_*.py` |
-| Focus, key routing, layout, or anything needing the QML engine | `tests/qml/tst_*.qml`, run offscreen |
+| Focus, key routing, layout, or anything needing the QML engine | `ui/tests/qml/tst_*.qml`, run offscreen |
 | Standalone host, adapter, packaging, or installer behavior | `app/tests/`, run locally on Linux |
 | A rule that grep can enforce — no literal colours, no `LayoutMirroring` | `tests/test_source.sh` |
 
-Add the new file to the `Makefile` in the same commit; a test nothing runs is
-not a test. Assert the fault, not the fix: run the new test against the old
-code once and watch it fail, and say so in the pull request.
+Verify that the runner discovers the new test, or register it in the Makefile, CMake or CI in the same commit. Assert the fault, not the spelling of the fix: for a bug regression, run it against the old behavior and report the observed failure in the pull request. Coverage counts and source-text matches do not establish behavioral correctness.
 
 ## If you touched the interface
 
@@ -179,7 +178,7 @@ watch fail. Four things belong in it, and a reviewer will ask for any that is
 missing:
 
 - `make validate`, and that it was green on the commit you are sending.
-- The new test, and that you saw it fail against the unfixed code.
+- For a bug fix, the new or extended regression and its observed failure against the unfixed behavior. Otherwise, name the applicable existing checks; do not add a test merely to fill this item.
 - The relevant automated behavior checks and visual evidence, with provenance required under [If you touched the interface](#if-you-touched-the-interface).
 - That a fresh agent reviewed the diff, and what it found. "Nothing" is an
   answer; not having asked is not.

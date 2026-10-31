@@ -15,6 +15,7 @@ Read the relevant document before changing its area; these contain constraints t
 | Message HTML, images, direction and outgoing MIME | [docs/MESSAGE-RENDERING.md](docs/MESSAGE-RENDERING.md) |
 | Network requests, credentials, subprocesses and security reviews | [docs/SECURITY-BOUNDARIES.md](docs/SECURITY-BOUNDARIES.md) |
 | Backend APIs, binary pins and releases | [docs/BACKEND-RUNTIME.md](docs/BACKEND-RUNTIME.md) |
+| Adding, changing or reviewing tests | [docs/TESTING.md](docs/TESTING.md) |
 | Writing issue reports, PR descriptions, reviews or discussion comments | [CONTRIBUTING.md — Write for people](CONTRIBUTING.md#write-for-people) |
 | Before making a commit or creating, updating, reviewing or requesting review of a pull request, including review follow-ups | [CONTRIBUTING.md](CONTRIBUTING.md) — mandatory; the single source of truth for commit/PR guidelines and evidence requirements |
 
