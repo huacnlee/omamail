@@ -73,6 +73,16 @@ Rectangle {
 
   color: root.backgroundColor
 
+  // A preview is read-only, but its text must still be available to copy,
+  // including on calendars where the owner cannot open the event editor.
+  component DetailText: TextEdit {
+    readOnly: true
+    selectByMouse: true
+    textFormat: TextEdit.PlainText
+    selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+    selectedTextColor: color
+  }
+
   function httpLink(value) {
     return Html.externallyOpenableHttpUrl(value)
   }
@@ -174,7 +184,8 @@ Rectangle {
         panelFontFamily: root.panelFontFamily
       }
 
-      Text {
+      DetailText {
+        objectName: "event-title-text"
         width: parent.width
         text: String(root.event && root.event.summary || "Untitled event")
         color: root.textColor
@@ -182,17 +193,16 @@ Rectangle {
         font.pixelSize: Style.font.title
         font.bold: true
         wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
       }
 
-      Text {
+      DetailText {
+        objectName: "event-date-text"
         width: parent.width
         text: root.dateSummary()
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.body
         wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
       }
 
       Row {
@@ -207,7 +217,8 @@ Rectangle {
           color: root.eventColor
         }
 
-        Text {
+        DetailText {
+          objectName: "event-calendar-text"
           anchors.verticalCenter: parent.verticalCenter
           width: parent.width - Style.space(18)
           text: root.source
@@ -216,7 +227,6 @@ Rectangle {
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
           wrapMode: Text.Wrap
-          textFormat: Text.PlainText
         }
       }
 
@@ -247,22 +257,21 @@ Rectangle {
           color: root.dimColor
         }
 
-        Text {
+        DetailText {
+          objectName: "event-location-text"
           width: parent.width - Style.space(28)
           text: String(root.event && root.event.location || "")
           color: root.textColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
           wrapMode: Text.WrapAnywhere
-          textFormat: Text.PlainText
         }
       }
 
-      Text {
+      DetailText {
         width: parent.width
         visible: root.refreshing || root.refreshError !== ""
         text: root.refreshing ? "Refreshing event details..." : root.refreshError
-        textFormat: Text.PlainText
         wrapMode: Text.Wrap
         color: root.refreshError !== "" ? root.urgentColor : root.dimColor
         font.family: root.panelFontFamily
@@ -273,9 +282,8 @@ Rectangle {
         width: parent.width
         spacing: Style.space(6)
         visible: root.meetingLink !== ""
-        Text {
+        DetailText {
           text: "Meeting link"
-          textFormat: Text.PlainText
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
@@ -332,18 +340,17 @@ Rectangle {
         }
       }
 
-      Text {
+      DetailText {
         width: parent.width
         visible: !!root.event && root.event.eventType === "fromGmail"
         text: "Created automatically from Gmail. Google does not allow apps to change its time or event details."
-        textFormat: Text.PlainText
         wrapMode: Text.Wrap
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.body
       }
 
-      Text {
+      DetailText {
         objectName: "event-description-text"
         visible: String(root.event && root.event.description || "") !== ""
         width: parent.width
@@ -351,18 +358,15 @@ Rectangle {
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.body
-        lineHeight: 1.35
         wrapMode: Text.Wrap
-        textFormat: Text.PlainText
       }
 
       Column {
         width: parent.width
         spacing: Style.space(8)
         visible: attendeeList.count > 0
-        Text {
+        DetailText {
           text: "Guests · " + attendeeList.count
-          textFormat: Text.PlainText
           color: root.textColor
           font.family: root.panelFontFamily
           font.bold: true
@@ -394,20 +398,18 @@ Rectangle {
               Column {
                 width: parent.width - Style.space(30)
                 spacing: Style.space(3)
-                Text {
+                DetailText {
                   width: parent.width
                   text: modelData.name + (modelData.self ? " (you)" : "")
-                  textFormat: Text.PlainText
                   wrapMode: Text.Wrap
                   color: root.textColor
                   font.family: root.panelFontFamily
                   font.pixelSize: Style.font.bodySmall
                 }
-                Text {
+                DetailText {
                   width: parent.width
                   text: modelData.label + (modelData.optional ? " · Optional" : "")
                     + (modelData.email && modelData.email !== modelData.name ? " · " + modelData.email : "")
-                  textFormat: Text.PlainText
                   wrapMode: Text.Wrap
                   color: root.dimColor
                   font.family: root.panelFontFamily
@@ -419,12 +421,11 @@ Rectangle {
         }
       }
 
-      Text {
+      DetailText {
         width: parent.width
         visible: root.conferenceStatus === "pending" || root.conferenceStatus === "failure"
         text: root.conferenceStatus === "pending" ? "Google Meet is being created. Refresh to check its status."
           : "The event was saved, but Google Meet could not be created."
-        textFormat: Text.PlainText
         wrapMode: Text.Wrap
         color: root.dimColor
         font.family: root.panelFontFamily

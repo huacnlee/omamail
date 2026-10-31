@@ -257,9 +257,9 @@ a contents-write token as described above.
 
 ## Standalone security gates
 
-A standalone release needs a separate security verdict for macOS arm64, Linux x86_64, and Windows x64. The verdict is **PASS** only when the release commit has completed its native job and every boundary below was exercised on that runtime. A shared test on another operating system, successful compilation, or source inspection alone leaves that platform **NOT VERIFIED**. A failing boundary is **BLOCK** and prevents publication.
+A standalone release requires successful automated native CI for macOS arm64, Linux x86_64, and Windows x64. Those jobs provide evidence for a scoped security assessment; a green job does not itself establish a security verdict or prove that every boundary below was exercised. Assess the actual coverage, including fixture limitations, before reporting **PASS**, **BLOCK** or **NOT VERIFIED** for an affected boundary. A demonstrated failure blocks publication. Contributor and reviewer checks follow [CONTRIBUTING.md](../CONTRIBUTING.md#before-you-write-anything), which requires neither contributor hands-on testing nor local macOS/Windows runs.
 
-| Boundary | Evidence required on each native runtime |
+| Boundary | Evidence to assess in native CI results |
 | --- | --- |
 | Credentials | Native Keychain, Secret Service, or Credential Manager success, missing-item, denial, validation, and bounded-prompt cases; secrets absent from argv, settings, and diagnostics. |
 | Untrusted mail and URLs | Plain-text metadata, HTML/resource sanitization, public-address DNS pinning, HTTPS/TLS, redirect, proxy, deadline, and response-size cases using controlled targets. |
@@ -285,7 +285,7 @@ ctest --test-dir build/app --output-on-failure
 QT_QPA_PLATFORM=offscreen qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
 ```
 
-These commands establish evidence only for the operating system that ran them. Package and installer acceptance must use the archive produced on its native release runner; macOS and Linux use `app/scripts/package-release.sh`, while Windows uses `app/scripts/package-release.ps1`.
+Run the applicable local checks on Linux, following [CONTRIBUTING.md](../CONTRIBUTING.md#before-you-write-anything). These commands establish evidence only for the operating system that ran them. Automated package and installer acceptance uses the archive produced on its native release runner; macOS and Linux use `app/scripts/package-release.sh`, while Windows uses `app/scripts/package-release.ps1`.
 
 `make install-plugin` removes the old private backend and its local-build marker,
 then links and reloads only the plugin. It does not compile or download a backend.
