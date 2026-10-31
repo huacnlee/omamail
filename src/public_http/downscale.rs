@@ -170,12 +170,14 @@ fn target(width: u32, height: u32) -> Option<(u32, u32)> {
     Some((scaled(width), scaled(height)))
 }
 
-/// The component count of a progressive JPEG, from its start-of-frame header.
+/// Progressive component count, zero for sequential frames, or unknown.
 fn progressive_components(data: &[u8]) -> Option<u64> {
     let mut at = 2;
     while at + 4 <= data.len() {
         if data[at] != 0xff {
-            return None;
+            // Match the decoder's permissive handling of inter-header padding.
+            at += 1;
+            continue;
         }
         let marker = data[at + 1];
         match marker {
@@ -184,6 +186,7 @@ fn progressive_components(data: &[u8]) -> Option<u64> {
             // A scan before any frame header: not a JPEG this reads.
             0xda => return None,
             0xc2 | 0xc6 | 0xca | 0xce => return data.get(at + 9).map(|n| u64::from(*n)),
+            0xc0 | 0xc1 => return Some(0),
             0xc0..=0xcf if marker != 0xc4 && marker != 0xc8 && marker != 0xcc => return None,
             _ => at += 2 + usize::from(u16::from_be_bytes([data[at + 2], data[at + 3]])),
         }
@@ -226,8 +229,11 @@ fn shrink(format: ImageFormat, data: &[u8]) -> Result<Option<Vec<u8>>, ImageErro
     let total = decoder.total_bytes();
     let decoding = if format == ImageFormat::Png && data.get(28) == Some(&1) {
         total
+    } else if format == ImageFormat::Jpeg {
+        // Unknown classification must not omit the coefficient allowance.
+        pixels * progressive_components(data).unwrap_or(4) * COEFFICIENT_BYTES
     } else {
-        progressive_components(data).map_or(0, |n| pixels * n * COEFFICIENT_BYTES)
+        0
     };
     let resizing = u64::from(width) * u64::from(high) * RESIZE_BYTES_PER_PIXEL;
     let needed = total

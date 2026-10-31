@@ -718,6 +718,54 @@ fn an_accepted_progressive_jpeg_never_exceeds_the_allocation_budget() {
 }
 
 #[test]
+fn padded_progressive_jpeg_is_refused_before_decoding() {
+    use image::ImageDecoder;
+
+    let mut bytes = progressive_jpeg(&gradient(64, 64, false).to_rgb8());
+    // The locked decoder accepts padding between headers. Verify that this is
+    // still a decodable JPEG before enlarging only its declared dimensions.
+    pad_jpeg_header(&mut bytes);
+    assert_eq!(image::load_from_memory(&bytes).unwrap().width(), 64);
+    let at = bytes
+        .windows(2)
+        .position(|pair| pair == [0xff, 0xc2])
+        .unwrap();
+    bytes[at + 5..at + 9].copy_from_slice(&[0x20, 0x00, 0x20, 0x00]);
+    let decoder =
+        image::ImageReader::with_format(std::io::Cursor::new(&bytes), image::ImageFormat::Jpeg)
+            .into_decoder()
+            .unwrap();
+    assert_eq!(decoder.dimensions(), (8192, 8192));
+    drop(decoder);
+
+    let (outcome, peak) = counting::peak_of(|| downscale::prepare("image/jpeg", &bytes));
+    assert!(matches!(outcome, Err("public_image_refused")));
+    assert!(peak < 4 * 1024 * 1024, "refusal allocated {peak} bytes");
+}
+
+#[test]
+fn padded_jpeg_headers_still_allow_bounded_images() {
+    let picture = gradient(2500, 64, false);
+    for mut bytes in [
+        encoded(&picture, image::ImageFormat::Jpeg),
+        progressive_jpeg(&picture.to_rgb8()),
+    ] {
+        pad_jpeg_header(&mut bytes);
+        let (mime, resized) = shown(&served("image/jpeg", bytes).unwrap());
+        assert_eq!(mime, "image/jpeg");
+        assert_eq!((resized.width(), resized.height()), (1600, 41));
+    }
+}
+
+fn pad_jpeg_header(bytes: &mut Vec<u8>) {
+    let at = bytes
+        .windows(2)
+        .position(|pair| pair[0] == 0xff && matches!(pair[1], 0xc0 | 0xc2))
+        .unwrap();
+    bytes.splice(at..at, [0, 0x7e, 0]);
+}
+
+#[test]
 fn images_whose_peak_passes_the_budget_are_refused_before_decoding() {
     // Cases found over 512 MiB with a guard that priced the resize and the
     // coefficients by pixel count alone: a tall 16-bit PNG, whose resize
