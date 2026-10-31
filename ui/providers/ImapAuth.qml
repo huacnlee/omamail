@@ -273,31 +273,56 @@ Item {
   function completeSignIn(ok, error, generation) {
     if (generation !== undefined && generation !== sessionGeneration) return
     if (!loginBusy && !replacementBusy) return
-    loginBusy = false
-    replacementBusy = false
     if (!ok) {
+      loginBusy = false
+      replacementBusy = false
       pendingPassword = ""
       lastError = safeError(error) || "The server rejected that username or password"
       return
     }
-    restoreOwed = false
-    password = pendingPassword
-    pendingPassword = ""
-    passwordChecked = true
-    lastError = ""
     // A password the server just accepted needs no keyring lookup: stop any
     // retry scheduled while the store was unreachable, so a late one cannot
     // report the mailbox as unavailable over a working sign-in.
     stopSecretRetry()
-    storePassword()
-    loginSucceeded()
+    // The accepted password is applied once the keyring has answered, not
+    // before: the client's reads name only the account and the backend finds
+    // the password there. A new mailbox that went ready first sent its first
+    // list ahead of the write and opened on auth_signed_out; a replacement
+    // keeps the old password in service until then.
+    var attempt = sessionGeneration
+    storePassword(pendingPassword, function(stored) {
+      if (attempt !== root.sessionGeneration) return
+      root.loginBusy = false
+      root.replacementBusy = false
+      if (stored === false) {
+        // Every read would find no password, so this is no sign-in either —
+        // and no saved session to reconnect to.
+        root.pendingPassword = ""
+        root.restoreOwed = false
+        root.passwordChecked = true
+        root.lastError = "The password could not be saved in the system keyring. "
+          + "Unlock it, then try again"
+        return
+      }
+      root.restoreOwed = false
+      root.password = root.pendingPassword
+      root.pendingPassword = ""
+      root.passwordChecked = true
+      root.lastError = ""
+      if (stored) root.credentialsSaved()
+      root.loginSucceeded()
+    })
   }
 
-  function storePassword() {
+  // `done` is told true or false once the keyring answers, or null at once
+  // when nothing was written.
+  function storePassword(value, done) {
     if (!platform || typeof platform.credentialPut !== "function" || accountId === ""
-        || password === "" || credentialWriteBusy) return
+        || value === "" || credentialWriteBusy) {
+      done(null)
+      return
+    }
     var boundAccount = accountId
-    var value = password
     credentialWriteBusy = true
     credentialWriteAccount = boundAccount
     platform.credentialPut("imap-password", boundAccount, "", value, function(ok, error) {
@@ -311,9 +336,7 @@ Item {
         return
       }
       if (boundAccount !== root.accountId) return
-      if (!ok) root.lastError = "Signed in, but the password could not be saved. "
-        + "You may need to enter it again after a restart"
-      else root.credentialsSaved()
+      done(ok)
     })
   }
 

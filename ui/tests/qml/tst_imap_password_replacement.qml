@@ -174,6 +174,9 @@ Item {
       savedAuth.completeSignIn(true, "")
       compare(password.text, "new-app-password", "so the next Save changes can store it")
       verify(savedAuth.lastError.indexOf("could not be saved") >= 0)
+      // The keyring still holds the old one, so that is the one in service.
+      compare(savedAuth.password, "old-password")
+      compare(findChild(page, "imap-error").text, savedAuth.lastError)
     }
 
     // The auth half: a mailbox already holding a password keeps it until the
