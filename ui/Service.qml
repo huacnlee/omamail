@@ -102,6 +102,7 @@ Item {
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
   readonly property bool backendCanSuggestGoogleContacts: backend.ready && backend.apiVersion >= 10
+  readonly property bool backendCanReadAddressBook: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
@@ -447,6 +448,18 @@ Item {
   readonly property var recipientContacts: contactBook.contacts
   readonly property bool contactsLoading: contactBook.loading
   function refreshRecipientContacts() { contactBook.refresh() }
+  readonly property var addressBook: contactBook.people
+  readonly property bool addressBookLoading: contactBook.peopleLoading || contactBook.loading
+  function refreshAddressBook(force) { contactBook.refreshPeople(force) }
+  // A contact's photo, through the backend like any remote picture: the window
+  // itself never asks a host for one. `done` receives a data: URI or "".
+  function contactPhoto(url, done) {
+    if (!url || !backend || !backend.ready) { done(""); return }
+    backend.call("public.image", { url: url }, function(result, error) {
+      var data = result && !error ? String(result.data || "") : ""
+      done(data.indexOf("data:image/") === 0 ? data : "")
+    })
+  }
 
   function registerMailtoHandler() {
     if (!hasMailto || pluginDir === "" || mailtoInstaller.running) return

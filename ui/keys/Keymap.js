@@ -13,7 +13,7 @@
 // follows it — a context that is not text entry parks the focus rather than
 // leaving it wherever the last click put it. Keeping those two as separate
 // things is what let a dismissed compose field go on eating j and k.
-var CONTEXTS = ["list", "reader", "search", "compose", "eventCompose", "eventDescription", "eventGuests", "page", "calendar", "assistant", "assistantCommands"]
+var CONTEXTS = ["list", "reader", "search", "compose", "eventCompose", "eventDescription", "eventGuests", "page", "calendar", "contacts", "assistant", "assistantCommands"]
 
 // Shorthands, so a row says where it lives rather than restating the set.
 var MAIL = ["list", "reader"]
@@ -144,6 +144,20 @@ var BINDINGS = [
     group: "Calendar", label: "Undo the last event change", hint: { calendar: "undo" } },
   { id: "calendarMonth", keys: ["m"], contexts: ["calendar"],
     group: "Calendar", label: "Show month view" },
+  // The address book: the same cursor keys as the list, and the two things a
+  // person is looked up for, writing to them and finding what they sent.
+  { id: "contactNext", keys: ["j", "Down"], contexts: ["contacts"],
+    group: "Contacts", label: "Select the next contact",
+    hintKey: "j / k", hint: { contacts: "move" } },
+  { id: "contactPrevious", keys: ["k", "Up"], contexts: ["contacts"],
+    group: "Contacts", label: "Select the previous contact" },
+  { id: "contactWrite", keys: ["c"], contexts: ["contacts"],
+    group: "Contacts", label: "Write to the selected contact", hint: { contacts: "write" } },
+  { id: "contactMails", keys: ["Return", "o"], contexts: ["contacts"],
+    group: "Contacts", label: "Show mail from the selected contact",
+    hintKey: "o", hint: { contacts: "their mail" } },
+  { id: "contactSearch", keys: ["/"], contexts: ["contacts"],
+    group: "Contacts", label: "Search contacts" },
   // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
   // a hand on the numpad expects the same thing of them.
   { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],
@@ -211,14 +225,16 @@ var BINDINGS = [
   { id: "assistantChooseCommand", keys: ["Return", "Enter"], contexts: ["assistantCommands"],
     group: "AI", label: "Complete or run the selected AI command" },
 
-  { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar"],
+  { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Switch between mail and calendar" },
-  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar"],
+  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Go to mail" },
-  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar"],
+  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Go to calendar" },
-  { id: "toggleSidebar", keys: ["["], contexts: ["list", "reader", "calendar"],
+  { id: "toggleSidebar", keys: ["["], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Show or hide the sidebar" },
+  { id: "contactsView", keys: ["Ctrl+Shift+P"], contexts: ["list", "reader", "calendar", "contacts"],
+    group: "Going", label: "Go to contacts" },
   { id: "toggleCalendarPane", keys: ["]"], contexts: ["list", "reader"],
     group: "Going", label: "Show or hide the calendar pane" },
 
@@ -258,6 +274,7 @@ function contextFor(state) {
   if (value.composing) return "compose"
   if (value.searchFocused) return "search"
   if (value.calendarVisible) return "calendar"
+  if (value.contactsVisible) return "contacts"
   if (value.currentView === "reader") return "reader"
   return "list"
 }

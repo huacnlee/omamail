@@ -75,9 +75,10 @@ async fn listing(
     key: &str,
     out: &mut Vec<Value>,
     bytes: &mut usize,
+    each: fn(&Value, &mut Vec<Value>),
 ) -> Result<bool, &'static str> {
     let origin = Url::parse(url).map_err(|_| "contacts_network_failed")?;
-    pages(key, out, bytes, |page_token| {
+    pages(key, out, bytes, each, |page_token| {
         let mut url = origin.clone();
         url.query_pairs_mut().extend_pairs(query);
         if !page_token.is_empty() {
@@ -116,6 +117,7 @@ async fn pages<F, Fut>(
     key: &str,
     out: &mut Vec<Value>,
     bytes: &mut usize,
+    each: fn(&Value, &mut Vec<Value>),
     mut fetch: F,
 ) -> Result<bool, &'static str>
 where
@@ -134,7 +136,7 @@ where
         let payload: Value =
             serde_json::from_str(&text).map_err(|_| "contacts_invalid_response")?;
         for person in payload[key].as_array().into_iter().flatten() {
-            rows(person, out);
+            each(person, out);
         }
         match payload["nextPageToken"].as_str() {
             Some(next) if !next.is_empty() && next != page_token && out.len() < MAX_CONTACTS => {
@@ -165,6 +167,7 @@ async fn fetch_all(token: &str) -> Result<Value, &'static str> {
         "connections",
         &mut out,
         &mut bytes,
+        rows,
     )
     .await?;
     let other = listing(
@@ -174,14 +177,175 @@ async fn fetch_all(token: &str) -> Result<Value, &'static str> {
         "otherContacts",
         &mut out,
         &mut bytes,
+        rows,
     )
     .await?;
     Ok(json!({"granted": saved || other, "contacts": out}))
 }
 
+fn text(value: &Value, max: usize) -> String {
+    value
+        .as_str()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(max)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
+/// `{value, type}` entries of one People API field, bounded.
+fn entries(list: &Value, max: usize) -> Vec<Value> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let value = text(&entry["value"], 320);
+            (!value.is_empty())
+                .then(|| json!({"value": value, "type": text(&entry["formattedType"], 40)}))
+        })
+        .take(max)
+        .collect()
+}
+
+/// One person as the address book shows them. Only a photo Google serves from
+/// its own content host is kept, so the window never asks another host for it.
+fn person(person: &Value, saved: bool) -> Option<Value> {
+    let emails = entries(&person["emailAddresses"], 20);
+    let phones = entries(&person["phoneNumbers"], 20);
+    let name = person["names"]
+        .as_array()
+        .and_then(|names| names.first())
+        .map(|name| text(&name["displayName"], 200))
+        .unwrap_or_default();
+    if emails.is_empty() && phones.is_empty() {
+        return None;
+    }
+    let organization = person["organizations"].as_array().and_then(|o| o.first());
+    let photo = person["photos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|photo| photo["default"] != true)
+        .map(|photo| text(&photo["url"], 2048))
+        .filter(|url| {
+            Url::parse(url).is_ok_and(|url| {
+                url.scheme() == "https"
+                    && url
+                        .host_str()
+                        .is_some_and(|host| host.ends_with(".googleusercontent.com"))
+            })
+        })
+        .unwrap_or_default();
+    Some(json!({
+        "id": text(&person["resourceName"], 200),
+        "name": name,
+        "emails": emails,
+        "phones": phones,
+        "organization": organization.map(|o| text(&o["name"], 200)).unwrap_or_default(),
+        "title": organization.map(|o| text(&o["title"], 200)).unwrap_or_default(),
+        "photo": photo,
+        "saved": saved,
+    }))
+}
+
+fn saved_person(value: &Value, out: &mut Vec<Value>) {
+    if out.len() < MAX_CONTACTS
+        && let Some(row) = person(value, true)
+    {
+        out.push(row)
+    }
+}
+
+fn other_person(value: &Value, out: &mut Vec<Value>) {
+    if out.len() < MAX_CONTACTS
+        && let Some(row) = person(value, false)
+    {
+        out.push(row)
+    }
+}
+
+/// The whole address book: saved contacts with their phones, organisation and
+/// photo, then the people the account has written to ("Other contacts").
+pub async fn people(token: &str) -> Result<Value, &'static str> {
+    tokio::time::timeout(DEADLINE, people_all(token))
+        .await
+        .map_err(|_| "contacts_timeout")?
+}
+
+async fn people_all(token: &str) -> Result<Value, &'static str> {
+    let mut out = Vec::new();
+    let mut bytes = 0;
+    let saved = listing(
+        token,
+        "https://people.googleapis.com/v1/people/me/connections",
+        &[
+            (
+                "personFields",
+                "names,emailAddresses,phoneNumbers,organizations,photos",
+            ),
+            ("pageSize", "1000"),
+        ],
+        "connections",
+        &mut out,
+        &mut bytes,
+        saved_person,
+    )
+    .await?;
+    let other = listing(
+        token,
+        "https://people.googleapis.com/v1/otherContacts",
+        &[
+            ("readMask", "names,emailAddresses,phoneNumbers"),
+            ("pageSize", "1000"),
+        ],
+        "otherContacts",
+        &mut out,
+        &mut bytes,
+        other_person,
+    )
+    .await?;
+    Ok(json!({"granted": saved || other, "people": out}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_person_keeps_phones_organisation_and_a_google_photo_only() {
+        let row = person(
+            &json!({"resourceName":"people/c1","names":[{"displayName":"Ada"}],
+                "emailAddresses":[{"value":"ada@example.com","formattedType":"Work"}],
+                "phoneNumbers":[{"value":"+32 470 00 00 00","formattedType":"Mobile"},{"value":""}],
+                "organizations":[{"name":"Analytical","title":"Engineer"}],
+                "photos":[{"url":"https://lh3.googleusercontent.com/a/x"}]}),
+            true,
+        )
+        .unwrap();
+        assert_eq!(row["id"], "people/c1");
+        assert_eq!(
+            row["emails"],
+            json!([{"value":"ada@example.com","type":"Work"}])
+        );
+        assert_eq!(
+            row["phones"],
+            json!([{"value":"+32 470 00 00 00","type":"Mobile"}])
+        );
+        assert_eq!(row["organization"], "Analytical");
+        assert_eq!(row["title"], "Engineer");
+        assert_eq!(row["photo"], "https://lh3.googleusercontent.com/a/x");
+        let elsewhere = person(
+            &json!({"emailAddresses":[{"value":"b@example.com"}],
+                "photos":[{"url":"https://tracker.example/p.png"}]}),
+            false,
+        )
+        .unwrap();
+        assert_eq!(elsewhere["photo"], "");
+        assert_eq!(elsewhere["saved"], false);
+        assert!(person(&json!({"names":[{"displayName":"Nobody"}]}), true).is_none());
+    }
 
     #[test]
     fn rows_take_the_display_name_and_every_address() {
@@ -215,7 +379,7 @@ mod tests {
     async fn pages_follow_tokens_and_stop_on_a_repeat() {
         let (mut out, mut bytes, mut asked) = (Vec::new(), 0, Vec::new());
         let answers = [page(2, "b"), page(1, "b"), page(5, "c")];
-        let granted = pages("connections", &mut out, &mut bytes, |token| {
+        let granted = pages("connections", &mut out, &mut bytes, rows, |token| {
             let answer = answers[asked.len()].clone();
             asked.push(token);
             async move { Ok(Some(answer)) }
@@ -233,14 +397,17 @@ mod tests {
     #[tokio::test]
     async fn a_missing_scope_is_an_empty_listing_and_errors_stay_errors() {
         let mut out = Vec::new();
-        let none = pages("connections", &mut out, &mut 0, |_| async { Ok(None) }).await;
+        let none = pages("connections", &mut out, &mut 0, rows, |_| async {
+            Ok(None)
+        })
+        .await;
         assert_eq!((none, out.len()), (Ok(false), 0));
         assert_eq!(granted(403), Ok(false));
         assert_eq!(granted(200), Ok(true));
         assert_eq!(granted(401), Err("contacts_auth_refused"));
         assert_eq!(granted(500), Err("contacts_request_failed"));
         assert_eq!(granted(429), Err("contacts_request_failed"));
-        let bad = pages("connections", &mut out, &mut 0, |_| async {
+        let bad = pages("connections", &mut out, &mut 0, rows, |_| async {
             Ok(Some("not json".to_owned()))
         })
         .await;
@@ -250,7 +417,7 @@ mod tests {
     #[tokio::test]
     async fn pages_are_bounded_in_contacts_bytes_and_calls() {
         let (mut out, mut calls) = (Vec::new(), 0);
-        let full = pages("connections", &mut out, &mut 0, |_| {
+        let full = pages("connections", &mut out, &mut 0, rows, |_| {
             calls += 1;
             let next = format!("p{calls}");
             async move { Ok(Some(page(1000, &next))) }
@@ -260,7 +427,7 @@ mod tests {
         assert_eq!((out.len(), calls), (MAX_CONTACTS, MAX_CONTACTS / 1000));
 
         let (mut out, mut bytes, mut calls) = (Vec::new(), 0, 0);
-        let endless = pages("connections", &mut out, &mut bytes, |_| {
+        let endless = pages("connections", &mut out, &mut bytes, rows, |_| {
             calls += 1;
             let next = format!("p{calls}");
             async move { Ok(Some(page(0, &next))) }
@@ -269,9 +436,13 @@ mod tests {
         assert_eq!((endless, calls), (Ok(true), MAX_PAGES));
 
         let mut bytes = TOTAL_LIMIT - 10;
-        let big = pages("connections", &mut Vec::new(), &mut bytes, |_| async {
-            Ok(Some(page(1, "")))
-        })
+        let big = pages(
+            "connections",
+            &mut Vec::new(),
+            &mut bytes,
+            rows,
+            |_| async { Ok(Some(page(1, ""))) },
+        )
         .await;
         assert_eq!(big, Err("contacts_response_too_large"));
     }

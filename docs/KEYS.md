@@ -47,6 +47,7 @@ readonly property string keyContext:
 | `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `contacts` | The address book | Moving through contacts, writing to one, their mail |
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
@@ -143,6 +144,11 @@ used to exist, and they had.
 | `calendarAgenda` | `a` | calendar | Show agenda view |
 | `calendarUndo` | `u` | calendar | Undo the last event change |
 | `calendarMonth` | `m` | calendar | Show month view |
+| `contactNext` | `j`, `Down` | contacts | Select the next contact |
+| `contactPrevious` | `k`, `Up` | contacts | Select the previous contact |
+| `contactWrite` | `c` | contacts | Write to the selected contact |
+| `contactMails` | `Return`, `o` | contacts | Show mail from the selected contact |
+| `contactSearch` | `/` | contacts | Search contacts |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |
@@ -158,10 +164,11 @@ used to exist, and they had.
 | `assistantCommandNext` | `Down` | assistantCommands | Next command |
 | `assistantCommandPrevious` | `Up` | assistantCommands | Previous command |
 | `assistantChooseCommand` | `Return`, `Enter` | assistantCommands | Complete or run the selected AI command |
-| `calendar` | `Alt+C` | mail+calendar | Switch between mail and calendar |
-| `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
-| `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
-| `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
+| `calendar` | `Alt+C` | mail+calendar+contacts | Switch between mail and calendar |
+| `mailView` | `Ctrl+Shift+M` | mail+calendar+contacts | Go to mail |
+| `calendarView` | `Ctrl+Shift+C` | mail+calendar+contacts | Go to calendar |
+| `toggleSidebar` | `[` | mail+calendar+contacts | Show or hide the sidebar |
+| `contactsView` | `Ctrl+Shift+P` | mail+calendar+contacts | Go to contacts |
 | `toggleCalendarPane` | `]` | mail | Show or hide the calendar pane |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |

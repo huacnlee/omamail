@@ -308,8 +308,13 @@ Item {
   readonly property string page: navPage.kind
   readonly property string overlay: navOverlay ? navOverlay.kind : ""
   readonly property string currentView: page === "reader" ? "reader"
-    : ((page === "calendar" || page === "calendarDetail") ? "calendar" : "list")
+    : ((page === "calendar" || page === "calendarDetail") ? "calendar"
+      : (page === "contacts" ? "contacts" : "list"))
   readonly property bool calendarVisible: currentView === "calendar"
+  readonly property bool contactsVisible: currentView === "contacts"
+  // Either of the other two things the window is for: the mail chrome (search,
+  // list, reader, compose button) stands down for both.
+  readonly property bool otherRootVisible: calendarVisible || contactsVisible
   // With no calendar connected anywhere the view cannot hold an event, so the
   // window stops offering it; Settings still adds one.
   readonly property bool calendarAvailable: !(service && service.noCalendars === true)
@@ -460,7 +465,7 @@ Item {
   // The month and the day's events at the right of the mail; never on a
   // narrow window, where the reader has no room to give.
   readonly property bool calendarPaneShown: !!service && service.calendarPaneOpen
-    && !compact && !showPage && !composing && !calendarVisible && calendarAvailable
+    && !compact && !showPage && !composing && !otherRootVisible && calendarAvailable
   function toggleCalendarPane() {
     if (service) service.setCalendarPaneOpen(!service.calendarPaneOpen)
   }
@@ -625,6 +630,32 @@ Item {
     navUntouched = false
     nav = Nav.replaceRoot(nav, "calendar")
     return true
+  }
+
+  function showContacts() {
+    navUntouched = false
+    nav = Nav.replaceRoot(nav, "contacts")
+    return true
+  }
+
+  // From the address book: a draft to that person, or their mail listed.
+  function writeToContact(recipient) {
+    backToList()
+    openDraft({ to: recipient })
+  }
+
+  function mailsOfContact(address) {
+    if (!service) return
+    var provider = Provider.get(service.providerId)
+    if (!service.unified && provider && provider.addressSearch === true) {
+      searchAddress("from", address)
+      return
+    }
+    // No address operator here (IMAP, Microsoft, HEY, or every mailbox at
+    // once): the address as plain text, which is what the bar then shows.
+    backToList()
+    searchBar.setQuery(address)
+    service.search(address)
   }
 
   // Moving the cursor has to bring the row with it. The list is a Column in a
@@ -1087,6 +1118,18 @@ Item {
     }
     if (id === "toggleSidebar") return toggleSidebar()
     if (id === "toggleCalendarPane") return toggleCalendarPane()
+    if (id === "contactsView") return showContacts()
+    // Down in the search field arrives here too, the field having no use for
+    // it: the keyboard leaves the field for the list, on the first match.
+    if (id === "contactNext") {
+      if (!contactsView.searchFocused) contactsView.move(1)
+      focusScope.parkKeyboard()
+      return
+    }
+    if (id === "contactPrevious") { contactsView.move(-1); focusScope.parkKeyboard(); return }
+    if (id === "contactWrite") return contactsView.writeToSelected()
+    if (id === "contactMails") return contactsView.mailsOfSelected()
+    if (id === "contactSearch") return contactsView.focusSearch()
     if (id === "zoomIn") return zoomBy(0.1)
     if (id === "zoomOut") return zoomBy(-0.1)
     if (id === "zoomReset") { if (service) service.setBodyZoom(1.0); return }
@@ -1119,6 +1162,11 @@ Item {
     // beats.
     if (searchBar.fieldFocused) {
       if (searchBar.queryText !== "") searchBar.clear()
+      focusScope.parkKeyboard()
+      return
+    }
+    if (contactsVisible && contactsView.searchFocused) {
+      contactsView.leaveSearch()
       focusScope.parkKeyboard()
       return
     }
@@ -1467,6 +1515,7 @@ Item {
         eventDescriptionFocused: eventComposer.descriptionFocused,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
+        contactsVisible: root.contactsVisible,
         currentView: root.currentView,
         sendPending: !!root.service && root.service.sendPending
       }))
@@ -1601,7 +1650,7 @@ Item {
             width: Math.min(Style.space(340), parent.width)
             // Below this it is a slot too small to type in; the shortcut still
             // works and reopens it as the window grows.
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.otherRootVisible
               && parent.width >= Style.space(120)
           textColor: root.foreground
           accentColor: root.accent
@@ -1644,7 +1693,7 @@ Item {
           IconButton {
             objectName: "refresh-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.otherRootVisible
             iconName: "refresh"
             tooltipText: root.calendarVisible
               ? (root.service && root.service.calendarController.loading
@@ -1670,7 +1719,7 @@ Item {
             id: headerComposeButton
             objectName: "compose-button"
             anchors.verticalCenter: parent.verticalCenter
-            visible: !root.showPage && !root.composing && !root.calendarVisible
+            visible: !root.showPage && !root.composing && !root.otherRootVisible
             text: "Compose"
             tooltipText: "Compose · c"
             foreground: root.dim
@@ -1690,7 +1739,7 @@ Item {
             opacity: enabled ? 1 : 0.4
             anchors.verticalCenter: parent.verticalCenter
             visible: !!root.service && root.service.hasAgent !== false
-              && !root.showPage && !root.calendarVisible && root.overlay !== "eventComposer"
+              && !root.showPage && !root.otherRootVisible && root.overlay !== "eventComposer"
             width: headerComposeButton.implicitHeight
             height: headerComposeButton.implicitHeight
             Accessible.name: "AI"
@@ -1764,6 +1813,7 @@ Item {
           visible: !root.compact && !root.showPage && !root.composing
           collapsed: root.sidebarCollapsed
           calendarSelected: root.calendarVisible
+          contactsSelected: root.contactsVisible
           calendarAvailable: root.calendarAvailable
           menuLabelPath: labelMenu.opened && !!root.service
             && labelMenu.accountId === root.service.activeAccountId ? labelMenu.labelPath : ""
@@ -1778,6 +1828,7 @@ Item {
           onCalendarRequested: {
             if (root.showCalendar()) calendarView.refresh()
           }
+          onContactsRequested: root.showContacts()
           // Not a search: the provider decides what selecting a label means,
           // and on IMAP it is a folder rather than a term to look for.
           onLabelSelected: function(labelId, name) {
@@ -1868,7 +1919,7 @@ Item {
                   root.listWidth > 0 ? root.listWidth
                     : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
           visible: width > 0 && !root.showPage && !root.composing
-            && !root.calendarVisible
+            && !root.otherRootVisible
 
           // The scroller fills the column so its bar sits on the column edge;
           // the breathing room is padding on the content, not a margin on the
@@ -1991,7 +2042,7 @@ Item {
           anchors.right: calendarPane.visible ? calendarPane.left : parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          visible: !root.showPage && !root.composing && !root.calendarVisible
+          visible: !root.showPage && !root.composing && !root.otherRootVisible
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
@@ -2164,6 +2215,34 @@ Item {
             }
             onEditRequested: function(sourceId, event) { eventComposer.beginEdit(sourceId, event) }
             onDeleteRequested: function(sourceId, event) { root.requestEventDelete(sourceId, event) }
+          }
+        }
+
+        Rectangle {
+          objectName: "contacts-container"
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
+            : (sidebar.visible ? sidebar.right : parent.left)
+          visible: root.contactsVisible && !root.showPage && !root.composing
+          color: root.background
+          z: 10
+
+          ContactsView {
+            id: contactsView
+            anchors.fill: parent
+            visible: parent.visible
+            service: root.service
+            textColor: root.foreground
+            backgroundColor: root.background
+            accentColor: root.accent
+            dimColor: root.dim
+            borderColor: root.calendarBorder
+            fontFamily: root.fontFamily
+            onWriteRequested: function(recipient) { root.writeToContact(recipient) }
+            onMailsRequested: function(address) { root.mailsOfContact(address) }
+            onCopyRequested: function(text) { root.copyText(text) }
           }
         }
 
@@ -2623,7 +2702,7 @@ Item {
           anchors.right: parent.right
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
-          visible: !root.compact && !root.showPage && !root.composing && !root.calendarVisible
+          visible: !root.compact && !root.showPage && !root.composing && !root.otherRootVisible
             && root.calendarAvailable
           iconName: "calendar"
           tooltipText: root.calendarPaneShown ? "Hide the calendar pane" : "Show the calendar pane"

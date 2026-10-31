@@ -259,6 +259,19 @@ pub async fn suggest_google(token: &str) -> Result<Value, &'static str> {
     Ok(json!({"granted":fetched["granted"],"contacts":sorted(book)}))
 }
 
+/// A Gmail account's whole address book, one row per person, by name.
+pub async fn people_google(token: &str) -> Result<Value, &'static str> {
+    let mut fetched = google::people(token).await?;
+    if let Some(people) = fetched["people"].as_array_mut() {
+        people.sort_by_key(|p| {
+            let name = p["name"].as_str().unwrap_or("");
+            let fallback = p["emails"][0]["value"].as_str().unwrap_or("");
+            (if name.is_empty() { fallback } else { name }).to_lowercase()
+        });
+    }
+    Ok(fetched)
+}
+
 fn sorted(book: Book) -> Value {
     let mut values: Vec<_> = book.into_values().collect();
     values.sort_by_key(|v| {

@@ -262,7 +262,7 @@ impl Session {
                 .await
                 .map_err(|_| "worker_failed")?;
         }
-        if method == "contacts.google" {
+        if matches!(method, "contacts.google" | "contacts.people") {
             let account = params["accountId"]
                 .as_str()
                 .filter(|id| {
@@ -276,6 +276,9 @@ impl Session {
                 return Err("invalid_params");
             }
             let token = self.gmail.access_token(account).await?;
+            if method == "contacts.people" {
+                return crate::contacts::people_google(&token).await;
+            }
             return crate::contacts::suggest_google(&token).await;
         }
         if matches!(method, "public.image" | "public.unsubscribe") {
