@@ -9,6 +9,8 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -23,6 +25,25 @@ int reportResourceCheck(const ResourcePaths &paths)
     QTextStream stream(stderr);
     for (const QString &error : result.errors) stream << error << Qt::endl;
     return 1;
+}
+
+// One Omamail per session. Closing the window only hides it, so the mail and
+// calendar notifications keep coming; on a desktop with no Dock or tray to
+// click, launching Omamail again is the way back. A second launch asks the
+// running one to show its window and leaves.
+QString instanceName()
+{
+    return QStringLiteral("omamail-app-") + qEnvironmentVariable("USER", QStringLiteral("user"));
+}
+
+bool showRunningInstance()
+{
+    QLocalSocket socket;
+    socket.connectToServer(instanceName());
+    if (!socket.waitForConnected(500)) return false;
+    socket.write("show\n");
+    socket.waitForBytesWritten(500);
+    return true;
 }
 }
 
@@ -76,6 +97,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     if (const int status = reportResourceCheck(paths); status != 0) return status;
+    if (showRunningInstance()) return 0;
     initializeNotificationActivation();
 
     // Native platform styles can draw a light system scrollbar over a dark
@@ -105,5 +127,16 @@ int main(int argc, char *argv[])
             if (host) watchNativeCloseChord(window, [host] { host->requestClose(); });
         }
     }
+    // A socket left behind by a crash would refuse the name; nobody answered
+    // it above, so it is stale and safe to remove.
+    QLocalServer instanceServer;
+    QLocalServer::removeServer(instanceName());
+    instanceServer.listen(instanceName());
+    QObject::connect(&instanceServer, &QLocalServer::newConnection, &instanceServer, [&instanceServer, host] {
+        while (QLocalSocket *peer = instanceServer.nextPendingConnection()) {
+            QObject::connect(peer, &QLocalSocket::disconnected, peer, &QObject::deleteLater);
+            if (host) emit host->reopenRequested();
+        }
+    });
     return application.exec();
 }

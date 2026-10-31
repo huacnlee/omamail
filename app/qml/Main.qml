@@ -258,6 +258,11 @@ ApplicationWindow {
     }
     function onReopenRequested() {
       if (!mailApp.opened) shellAdapter.summon(manifestAdapter.value.id, "{}")
+      // The compositor's close (Super+W on Hyprland) hides the window without
+      // telling the app, so it can still count itself open. Show it either way.
+      if (!root.visible) root.show()
+      root.raise()
+      root.requestActivate()
     }
     // The host saw the platform close chord before Qt did — on macOS it takes
     // Cmd+W off the event stream ahead of the input method, which otherwise
