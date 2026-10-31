@@ -67,19 +67,17 @@ def blocks(source):
 
 def main():
     failures = []
-    files = [
-        p
-        for d in ("", "account", "cache", "message", "providers", "components")
-        for p in sorted((ROOT / d).glob("*.qml"))
-    ]
+    files = [p for p in sorted(ROOT.rglob("*.qml"))
+             if "tests" not in p.relative_to(ROOT).parts]
     for path in files:
         source = path.read_text(encoding="utf-8")
         for name, body in blocks(source):
+            body = MASKED.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), body)
             binding = re.search(r"^\s*text\s*:(.*?)(?=^\s*[\w.]+\s*:|\Z)",
                                 body, re.S | re.M)
             if not binding or not UNTRUSTED.search(binding.group(1)):
                 continue
-            if "textFormat" not in body:
+            if not re.search(r"^\s*textFormat\s*:\s*Text\.PlainText\s*(?=;|\n|$)", body, re.M):
                 excerpt = " ".join(binding.group(1).split())[:60]
                 failures.append("%s: %s { text: %s } needs textFormat: Text.PlainText"
                                 % (path.relative_to(ROOT), name, excerpt))

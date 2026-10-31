@@ -385,7 +385,7 @@
       "search": " hello ",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"hello\""
+    "expected": "search:TEXT \"hello\""
   },
   {
     "params": {
@@ -395,7 +395,7 @@
       "search": " hello ",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"hello\""
+    "expected": "search:TEXT \"hello\""
   },
   {
     "params": {
@@ -405,7 +405,7 @@
       "search": " hello ",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"hello\""
+    "expected": "search:TEXT \"hello\""
   },
   {
     "params": {
@@ -415,7 +415,7 @@
       "search": "from:a@example.org subject:\"hello world\" plain",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
+    "expected": "search:FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
   },
   {
     "params": {
@@ -425,7 +425,7 @@
       "search": "from:a@example.org subject:\"hello world\" plain",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
+    "expected": "search:FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
   },
   {
     "params": {
@@ -435,7 +435,7 @@
       "search": "from:a@example.org subject:\"hello world\" plain",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
+    "expected": "search:FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
   },
   {
     "params": {
@@ -445,7 +445,7 @@
       "search": "to: \"quoted mail\" *word*",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TO \"quoted mail\" TEXT \"*word*\""
+    "expected": "search:TO \"quoted mail\" TEXT \"*word*\""
   },
   {
     "params": {
@@ -455,7 +455,7 @@
       "search": "to: \"quoted mail\" *word*",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TO \"quoted mail\" TEXT \"*word*\""
+    "expected": "search:TO \"quoted mail\" TEXT \"*word*\""
   },
   {
     "params": {
@@ -465,7 +465,7 @@
       "search": "to: \"quoted mail\" *word*",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TO \"quoted mail\" TEXT \"*word*\""
+    "expected": "search:TO \"quoted mail\" TEXT \"*word*\""
   },
   {
     "params": {
@@ -475,7 +475,7 @@
       "search": "from:***",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"from:***\""
+    "expected": "search:TEXT \"from:***\""
   },
   {
     "params": {
@@ -485,7 +485,7 @@
       "search": "from:***",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"from:***\""
+    "expected": "search:TEXT \"from:***\""
   },
   {
     "params": {
@@ -495,7 +495,7 @@
       "search": "from:***",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"from:***\""
+    "expected": "search:TEXT \"from:***\""
   },
   {
     "params": {
@@ -505,7 +505,7 @@
       "search": "folder:INBOX",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"folder:INBOX\""
+    "expected": "search:TEXT \"folder:INBOX\""
   },
   {
     "params": {
@@ -515,7 +515,7 @@
       "search": "folder:INBOX",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"folder:INBOX\""
+    "expected": "search:TEXT \"folder:INBOX\""
   },
   {
     "params": {
@@ -525,7 +525,7 @@
       "search": "folder:INBOX",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"folder:INBOX\""
+    "expected": "search:TEXT \"folder:INBOX\""
   },
   {
     "params": {
@@ -1429,7 +1429,7 @@
       "search": " hello ",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"hello\""
+    "expected": "search:TEXT \"hello\""
   },
   {
     "params": {
@@ -1439,7 +1439,7 @@
       "search": " hello ",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"hello\""
+    "expected": "search:TEXT \"hello\""
   },
   {
     "params": {
@@ -1449,7 +1449,7 @@
       "search": " hello ",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"hello\""
+    "expected": "search:TEXT \"hello\""
   },
   {
     "params": {
@@ -1459,7 +1459,7 @@
       "search": "from:a@example.org subject:\"hello world\" plain",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
+    "expected": "search:FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
   },
   {
     "params": {
@@ -1469,7 +1469,7 @@
       "search": "from:a@example.org subject:\"hello world\" plain",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
+    "expected": "search:FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
   },
   {
     "params": {
@@ -1479,7 +1479,7 @@
       "search": "from:a@example.org subject:\"hello world\" plain",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
+    "expected": "search:FROM \"a@example.org\" SUBJECT \"hello world\" TEXT \"plain\""
   },
   {
     "params": {
@@ -1489,7 +1489,7 @@
       "search": "to: \"quoted mail\" *word*",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TO \"quoted mail\" TEXT \"*word*\""
+    "expected": "search:TO \"quoted mail\" TEXT \"*word*\""
   },
   {
     "params": {
@@ -1499,7 +1499,7 @@
       "search": "to: \"quoted mail\" *word*",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TO \"quoted mail\" TEXT \"*word*\""
+    "expected": "search:TO \"quoted mail\" TEXT \"*word*\""
   },
   {
     "params": {
@@ -1509,7 +1509,7 @@
       "search": "to: \"quoted mail\" *word*",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TO \"quoted mail\" TEXT \"*word*\""
+    "expected": "search:TO \"quoted mail\" TEXT \"*word*\""
   },
   {
     "params": {
@@ -1519,7 +1519,7 @@
       "search": "from:***",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"from:***\""
+    "expected": "search:TEXT \"from:***\""
   },
   {
     "params": {
@@ -1529,7 +1529,7 @@
       "search": "from:***",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"from:***\""
+    "expected": "search:TEXT \"from:***\""
   },
   {
     "params": {
@@ -1539,7 +1539,7 @@
       "search": "from:***",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"from:***\""
+    "expected": "search:TEXT \"from:***\""
   },
   {
     "params": {
@@ -1549,7 +1549,7 @@
       "search": "folder:INBOX",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"folder:INBOX\""
+    "expected": "search:TEXT \"folder:INBOX\""
   },
   {
     "params": {
@@ -1559,7 +1559,7 @@
       "search": "folder:INBOX",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"folder:INBOX\""
+    "expected": "search:TEXT \"folder:INBOX\""
   },
   {
     "params": {
@@ -1569,7 +1569,7 @@
       "search": "folder:INBOX",
       "defaultQuery": "in:inbox"
     },
-    "expected": "folder:INBOX TEXT \"folder:INBOX\""
+    "expected": "search:TEXT \"folder:INBOX\""
   },
   {
     "params": {
@@ -1692,7 +1692,7 @@
       "field": "from",
       "value": "a@example.org"
     },
-    "expected": "folder:INBOX FROM \"a@example.org\""
+    "expected": "search:FROM \"a@example.org\""
   },
   {
     "params": {
@@ -1701,7 +1701,7 @@
       "field": "to",
       "value": "a@example.org"
     },
-    "expected": "folder:INBOX TO \"a@example.org\""
+    "expected": "search:TO \"a@example.org\""
   },
   {
     "params": {
@@ -1710,7 +1710,7 @@
       "field": "from",
       "value": "a b"
     },
-    "expected": "folder:INBOX FROM \"a b\""
+    "expected": "search:FROM \"a b\""
   },
   {
     "params": {
@@ -1719,7 +1719,7 @@
       "field": "to",
       "value": "a b"
     },
-    "expected": "folder:INBOX TO \"a b\""
+    "expected": "search:TO \"a b\""
   },
   {
     "params": {
@@ -1728,7 +1728,7 @@
       "field": "from",
       "value": "a\"b"
     },
-    "expected": "folder:INBOX FROM \"a\\\"b\""
+    "expected": "search:FROM \"a\\\"b\""
   },
   {
     "params": {
@@ -1737,7 +1737,7 @@
       "field": "to",
       "value": "a\"b"
     },
-    "expected": "folder:INBOX TO \"a\\\"b\""
+    "expected": "search:TO \"a\\\"b\""
   },
   {
     "params": {

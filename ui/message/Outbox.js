@@ -10,13 +10,3 @@ function normalizeDelay(value) {
   if (!isFinite(seconds)) return DEFAULT_DELAY_SECONDS
   return Math.max(0, Math.min(MAX_DELAY_SECONDS, Math.floor(seconds)))
 }
-
-function schedule(payload, now, delaySeconds) {
-  var delay = normalizeDelay(delaySeconds)
-  if (delay === 0) return null
-  return ({ payload: payload, dueAt: Number(now) + delay * 1000 })
-}
-
-function remainingSeconds(dueAt, now) {
-  return Math.max(0, Math.ceil((Number(dueAt) - Number(now)) / 1000))
-}

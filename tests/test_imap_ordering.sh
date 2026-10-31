@@ -253,17 +253,4 @@ stop_server
 [ "$(commands)" = 'CAPABILITY|LOGIN|ID NIL|SELECT "{one,two}"|UID FETCH 1:* (UID)|NOOP|LOGOUT|' ] \
   || fail "an encoded folder must remain literal across all sections, saw: $(commands)"
 
-# Rust owns capability negotiation and sends ID once before selecting a folder.
-# The native controlled-server test proves both ID/non-ID peers and pool reuse.
-python3 - <<'SRC' || exit 1
-from pathlib import Path
-text = Path("src/providers/imap/mod.rs").read_text()
-acquire = text[text.index("async fn acquire("):text.index("async fn release(")]
-assert 'command(&mut wire, "CAPABILITY")' in acquire
-assert 'if advertises(&capabilities, "ID")' in acquire
-assert acquire.index('if advertises(&capabilities, "ID")') < acquire.index('"ID (')
-assert 'p["identify"]' not in text
-assert 'native_id_gate_is_checked_once_before_select' in Path("src/providers/imap/tests.rs").read_text()
-SRC
-
 echo "imap ordering ok"

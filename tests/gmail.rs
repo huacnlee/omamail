@@ -1,4 +1,4 @@
-#[cfg(unix)]
+#[cfg(all(unix, feature = "integration-test-credentials"))]
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -9,12 +9,16 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "integration-test-credentials"))]
 fn config_root(home: &Path, xdg: &Path) -> PathBuf {
     let _ = xdg;
     home.join("Library/Application Support")
 }
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(all(
+    unix,
+    not(target_os = "macos"),
+    feature = "integration-test-credentials"
+))]
 fn config_root(home: &Path, xdg: &Path) -> PathBuf {
     let _ = home;
     xdg.to_owned()
@@ -29,7 +33,7 @@ fn gmail_config_directory_uses_the_shared_platform_contract() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "integration-test-credentials"))]
 #[test]
 fn mail_gmail_actions_default_to_preview_and_keep_credential_failures_explicit() {
     let temp = Command::new("mktemp").arg("-d").output().unwrap();
@@ -45,13 +49,7 @@ fn mail_gmail_actions_default_to_preview_and_keep_credential_failures_explicit()
         fs::Permissions::from_mode(0o600),
     )
     .unwrap();
-    // No client file is installed: execution must fail without reaching keyring.
-    fs::write(
-        dir.join("secret-tool"),
-        b"#!/bin/sh\nprintf touched > \"$HOME/keyring-touched\"\nexit 9\n",
-    )
-    .unwrap();
-    fs::set_permissions(dir.join("secret-tool"), fs::Permissions::from_mode(0o700)).unwrap();
+    // Observe NativeStore itself, not the retired secret-tool subprocess path.
     for operation in [
         "read", "unread", "star", "unstar", "archive", "trash", "spam",
     ] {
@@ -67,6 +65,14 @@ fn mail_gmail_actions_default_to_preview_and_keep_credential_failures_explicit()
                 .env("XDG_CACHE_HOME", dir.join("cache"))
                 .env("XDG_STATE_HOME", dir.join("state"))
                 .env("PATH", &dir)
+                .env(
+                    "OMAMAIL_INTEGRATION_CREDENTIAL_FILE",
+                    dir.join("missing-token"),
+                )
+                .env(
+                    "OMAMAIL_INTEGRATION_CREDENTIAL_TRACE",
+                    dir.join("keyring-touched"),
+                )
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -153,7 +159,7 @@ fn malformed_gmail_requests_are_refused_before_credentials_or_network() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "integration-test-credentials"))]
 #[test]
 fn gmail_registry_and_private_credentials_gate_keyring_access() {
     let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
@@ -177,23 +183,28 @@ fn gmail_registry_and_private_credentials_gate_keyring_access() {
     let credentials = config.join("credentials.json");
     fs::write(&credentials, br#"{"installed":{"client_id":"123-test.apps.googleusercontent.com","client_secret":"synthetic-client-secret"}}"#).unwrap();
     fs::set_permissions(&credentials, fs::Permissions::from_mode(0o644)).unwrap();
-    let keyring = dir.join("secret-tool");
-    fs::write(
-        &keyring,
-        b"#!/bin/sh\nprintf touched > \"$HOME/keyring-touched\"\nexit 9\n",
-    )
-    .unwrap();
-    fs::set_permissions(&keyring, fs::Permissions::from_mode(0o700)).unwrap();
-    for (account, error) in [
-        ("unknown@example.org", "gmail_account_unknown"),
-        ("imap:b@example.org", "gmail_account_unknown"),
-        ("A@example.org", "gmail_client_permissions"),
+    for (account, error, private_client) in [
+        ("unknown@example.org", "gmail_account_unknown", false),
+        ("imap:b@example.org", "gmail_account_unknown", false),
+        ("A@example.org", "gmail_client_permissions", false),
+        ("a@example.org", "gmail_keyring_failed", true),
     ] {
+        if private_client {
+            fs::set_permissions(&credentials, fs::Permissions::from_mode(0o600)).unwrap();
+        }
         let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
             .args(["call", "gmail.read", "--json"])
             .env("HOME", &dir)
             .env("XDG_CONFIG_HOME", dir.join(".config"))
             .env("PATH", &dir)
+            .env(
+                "OMAMAIL_INTEGRATION_CREDENTIAL_FILE",
+                dir.join("missing-token"),
+            )
+            .env(
+                "OMAMAIL_INTEGRATION_CREDENTIAL_TRACE",
+                dir.join("keyring-touched"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -211,7 +222,11 @@ fn gmail_registry_and_private_credentials_gate_keyring_access() {
         assert_eq!(answer["error"]["code"], error);
         assert!(output.stderr.is_empty());
         assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-"));
-        assert!(!dir.join("keyring-touched").exists());
+        assert_eq!(
+            dir.join("keyring-touched").exists(),
+            private_client,
+            "only a known account and a private client file may reach NativeStore"
+        );
     }
     fs::remove_dir_all(dir).unwrap();
 }
