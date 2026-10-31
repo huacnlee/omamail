@@ -12,6 +12,7 @@ Item {
     id: fixture
     property var service: null
     property int hourHeight: 60
+    function zoomHours(direction) { hourHeight = Calendar.zoomedHourHeight(hourHeight, direction) }
     property bool eventWriting: false
     property bool loading: false
     property string sourceKind: "google"
@@ -59,27 +60,29 @@ Item {
       waitForRendering(view)
       wait(50)
     }
-    function test_hour_height_setting_sets_the_timeline_minimum() {
+    function test_zoom_changes_the_hour_height_and_stays_at_the_same_hour() {
       var timeline = findChild(view, "calendar-time-scroll")
-      verify(timeline !== null)
       compare(timeline.hourHeight, Style.space(60))
-      fixture.hourHeight = 40
-      compare(timeline.hourHeight, Style.space(40))
-      compare(timeline.contentHeight, Style.space(40) * 24)
-      fixture.hourHeight = 20
-      compare(timeline.hourHeight, Math.max(Style.space(20), timeline.height / 24))
-      verify(timeline.contentHeight <= timeline.height + 0.5)
+      timeline.contentY = 8 * timeline.hourHeight
+      view.zoomHours(-1)
+      compare(timeline.hourHeight, Style.space(55))
+      fuzzyCompare(timeline.contentY / timeline.hourHeight, 8, 0.01)
+      view.zoomHours(1)
+      view.zoomHours(1)
+      compare(timeline.hourHeight, Style.space(65))
+      fuzzyCompare(timeline.contentY / timeline.hourHeight, 8, 0.01)
+      view.zoomHours(0)
+      compare(timeline.hourHeight, Style.space(60))
     }
-    function test_changing_hour_height_keeps_the_first_event_in_view() {
+    function test_hours_stretch_past_the_zoom_to_fill_the_window() {
       var timeline = findChild(view, "calendar-time-scroll")
-      timeline.contentY = timeline.contentHeight - timeline.height
-      fixture.hourHeight = 40
-      tryCompare(timeline, "contentY", Math.min(view.hourRange.first * Style.space(40),
-        timeline.contentHeight - timeline.height))
+      fixture.hourHeight = 25
+      compare(timeline.hourHeight, Math.max(Style.space(25), timeline.height / 24))
+      verify(timeline.contentHeight <= timeline.height + 0.5)
     }
     function test_short_hours_still_move_a_short_event() {
       var original = fixture.events
-      fixture.hourHeight = 20
+      fixture.hourHeight = 25
       fixture.events = [{sourceId:"personal",googleId:"meeting",uid:"uid",summary:"Planning",
         start:{ms:new Date(2026,9,1,10).getTime()},end:{ms:new Date(2026,9,1,10,30).getTime()}}]
       waitForRendering(view)

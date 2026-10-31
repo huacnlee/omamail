@@ -36,7 +36,6 @@ Item {
   QtObject {
     id: calendarController
 
-    property int hourHeight: 60
     property var sourceList: ({ version: 1, sources: [] })
     property var availableSources: sourceList
     property bool savingSource: false
@@ -125,18 +124,6 @@ Item {
       compare(mailService.unifiedCalendarView, false)
       compare(mailService.settingChanges, 2)
       compare(toggle.checked, false)
-    }
-
-    function test_hour_height_field_shows_and_persists_the_setting() {
-      var field = findChild(settings, "calendar-hour-height")
-      verify(field !== null)
-      calendarController.hourHeight = 40
-      compare(field.value, 40)
-
-      field.modified(30)
-      compare(mailService.settings.calendarHourHeight, 30)
-      calendarController.hourHeight = 60
-      mailService.settings = ({})
     }
 
     function test_invitation_destination_is_opt_in_persisted_and_backend_gated() {

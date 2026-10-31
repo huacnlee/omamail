@@ -13,6 +13,7 @@ Item {
     property var nextResult: ({ body: "{}", status: 200 })
     property var nextError: null
     property var settings: ({})
+    function persistSetting(name, value) { var next = ({}); next[name] = value; settings = next }
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: false
     property var discoveryCallback: null
@@ -72,14 +73,17 @@ Item {
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
-    function test_hour_height_comes_from_the_persisted_setting() {
+    function test_hour_height_comes_from_the_saved_value_and_zooming_saves_it() {
       var saved = mailService.settings
       mailService.settings = ({})
       compare(controller.hourHeight, 60)
-      mailService.settings = ({ calendarHourHeight: 35 })
-      compare(controller.hourHeight, 35)
+      controller.zoomHours(-1)
+      compare(mailService.settings.calendarHourHeight, 55)
+      compare(controller.hourHeight, 55)
       mailService.settings = ({ calendarHourHeight: 5000 })
       compare(controller.hourHeight, 120)
+      controller.zoomHours(0)
+      compare(controller.hourHeight, 60)
       mailService.settings = saved
     }
 

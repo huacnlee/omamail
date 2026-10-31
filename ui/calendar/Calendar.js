@@ -1230,17 +1230,25 @@ function dayMinutes(timeMs, day) {
 }
 
 // The smallest height one hour may take in the day and week views, in unscaled
-// pixels. The timeline still stretches past it to fill a tall window. Anything
-// unusable falls back to the default rather than to an edge of the range.
+// pixels, which the zoom keys change. The timeline still stretches past it to
+// fill a tall window. Anything unusable falls back to the default rather than
+// to an edge of the range.
 var HOUR_HEIGHT_DEFAULT = 60
-var HOUR_HEIGHT_MIN = 20
+var HOUR_HEIGHT_MIN = 25
 var HOUR_HEIGHT_MAX = 120
+var HOUR_HEIGHT_STEP = 5
 
 function normalizeHourHeight(value) {
   var usable = typeof value === "number" || (typeof value === "string" && value.trim() !== "")
   var height = usable ? Math.floor(Number(value)) : NaN
   if (!isFinite(height) || height <= 0) return HOUR_HEIGHT_DEFAULT
   return Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, height))
+}
+
+// One press of a zoom key: +1 or -1 steps from the current height, 0 resets.
+function zoomedHourHeight(current, direction) {
+  if (!direction) return HOUR_HEIGHT_DEFAULT
+  return normalizeHourHeight(normalizeHourHeight(current) + direction * HOUR_HEIGHT_STEP)
 }
 
 function eventTop(event, day, firstHour, hourHeight) {

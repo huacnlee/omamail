@@ -76,9 +76,17 @@ Item {
     timeline.contentY = Math.max(0, Math.min(hourRange.first * timeline.hourHeight,
       timeline.contentHeight - timeline.height))
   }
+  // Zooming keeps the hour at the top of the view where it is, or the same
+  // pixel offset would land on a different time.
+  function zoomHours(direction) {
+    if (!controller) return
+    var topHour = timeline.contentY / timeline.hourHeight
+    controller.zoomHours(direction)
+    timeline.contentY = Math.max(0, Math.min(topHour * timeline.hourHeight,
+      timeline.contentHeight - timeline.height))
+  }
   Component.onCompleted: Qt.callLater(root.resetTimeScroll)
   onDaysChanged: Qt.callLater(root.resetTimeScroll)
-  onMinimumHourHeightChanged: Qt.callLater(root.resetTimeScroll)
   readonly property int hourCount: Math.max(1, lastHour - firstHour)
   readonly property var allDayLayout: Calendar.spanLayout(
     (controller ? controller.events : []).filter(Calendar.displayInAllDayLane), days)

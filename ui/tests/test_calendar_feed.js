@@ -714,14 +714,22 @@ assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
-// The day and week views' minimum hour height comes from an editable setting.
+// The day and week views' minimum hour height comes from a saved value.
 assert.strictEqual(feed.normalizeHourHeight(40), 40)
 assert.strictEqual(feed.normalizeHourHeight("35"), 35)
 assert.strictEqual(feed.normalizeHourHeight(26.9), 26)
-assert.strictEqual(feed.normalizeHourHeight(5), 20)
+assert.strictEqual(feed.normalizeHourHeight(5), 25)
 assert.strictEqual(feed.normalizeHourHeight(500), 120)
 for (const unusable of [undefined, null, "", " ", "tall", true, [40], 0, -10, NaN, Infinity])
   assert.strictEqual(feed.normalizeHourHeight(unusable), 60, String(unusable))
+
+// One press of a zoom key, stopping at each end of the range.
+assert.strictEqual(feed.zoomedHourHeight(60, -1), 55)
+assert.strictEqual(feed.zoomedHourHeight(60, 1), 65)
+assert.strictEqual(feed.zoomedHourHeight(25, -1), 25)
+assert.strictEqual(feed.zoomedHourHeight(120, 1), 120)
+assert.strictEqual(feed.zoomedHourHeight(40, 0), 60)
+assert.strictEqual(feed.zoomedHourHeight(undefined, -1), 55)
 
 console.log("test_calendar_feed.js ok")
 

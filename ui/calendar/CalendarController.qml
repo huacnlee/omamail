@@ -81,6 +81,9 @@ Item {
   readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
   readonly property int hourHeight: Calendar.normalizeHourHeight(
     service && service.settings ? service.settings.calendarHourHeight : undefined)
+  function zoomHours(direction) {
+    if (service) service.persistSetting("calendarHourHeight", Calendar.zoomedHourHeight(hourHeight, direction))
+  }
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView

@@ -46,7 +46,6 @@
       "oauthPort": 9481,
       "undoSendSeconds": 10,
       "unifiedCalendarView": false,
-      "calendarHourHeight": 60,
       "calendarRemindersEnabled": true,
       "calendarSnoozeMinutes": 5,
       "openOnClick": "Window",
@@ -171,16 +170,6 @@
         "label": "Unified calendar view",
         "defaultValue": false,
         "description": "Show calendars from every connected account instead of following the current mailbox."
-      },
-      {
-        "key": "calendarHourHeight",
-        "type": "integer",
-        "label": "Calendar hour height",
-        "min": 20,
-        "max": 120,
-        "step": 5,
-        "defaultValue": 60,
-        "description": "Smallest height of one hour in the day and week views. Lower values fit more of the day on screen."
       },
       {
         "key": "calendarRemindersEnabled",
