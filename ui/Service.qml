@@ -101,6 +101,8 @@ Item {
   readonly property bool backendNeedsUpdate: backend.needsUpdate
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
+  readonly property bool backendCanSuggestGoogleContacts: backend.ready && backend.apiVersion >= 10
+  readonly property bool backendCanReadAddressBook: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
@@ -441,18 +443,21 @@ Item {
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
-  // Thunderbird and Betterbird keep both explicit and learned addresses in
-  // their local profile. The helper reads those databases without modifying
-  // them. Nothing is copied into Omamail's settings or cache.
-  property var recipientContacts: []
-  property bool contactsLoading: false
-
-  function refreshRecipientContacts() {
-    if (contactsLoading || !backend || !backend.ready) return
-    contactsLoading = true
-    backend.call("contacts.suggest", {}, function(result, error) {
-      root.contactsLoading = false
-      if (!error && Array.isArray(result)) root.recipientContacts = result
+  // Local address books and Google Contacts; see account/ContactBook.qml.
+  ContactBook { id: contactBook; service: root }
+  readonly property var recipientContacts: contactBook.contacts
+  readonly property bool contactsLoading: contactBook.loading
+  function refreshRecipientContacts() { contactBook.refresh() }
+  readonly property var addressBook: contactBook.people
+  readonly property bool addressBookLoading: contactBook.peopleLoading || contactBook.loading
+  function refreshAddressBook(force) { contactBook.refreshPeople(force) }
+  // A contact's photo, through the backend like any remote picture: the window
+  // itself never asks a host for one. `done` receives a data: URI or "".
+  function contactPhoto(url, done) {
+    if (!url || !backend || !backend.ready) { done(""); return }
+    backend.call("public.image", { url: url }, function(result, error) {
+      var data = result && !error ? String(result.data || "") : ""
+      done(data.indexOf("data:image/") === 0 ? data : "")
     })
   }
 
@@ -1231,6 +1236,8 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  // The month and the day's events at the right of the mail, as Outlook has.
+  property bool calendarPaneOpen: false
   // How wide the rail and the list were dragged to, in pixels; 0 is "never
   // dragged", which each pane reads as its own default.
   property real sidebarWidth: 0
@@ -1265,6 +1272,7 @@ Item {
   function applyWindowPrefs(raw) {
     var prefs = Model.windowPrefs(raw)
     sidebarCollapsed = prefs.sidebarCollapsed
+    calendarPaneOpen = prefs.calendarPaneOpen
     sidebarWidth = prefs.sidebarWidth
     listWidth = prefs.listWidth
     collapsedFolders = prefs.collapsedFolders
@@ -1304,6 +1312,7 @@ Item {
     windowPrefsSettling.stop()
     windowWritePayload = JSON.stringify({
       sidebarCollapsed: sidebarCollapsed,
+      calendarPaneOpen: calendarPaneOpen,
       sidebarWidth: sidebarWidth,
       listWidth: listWidth,
       collapsedFolders: collapsedFolders,
@@ -1341,6 +1350,13 @@ Item {
   // The rail's labels in the order it draws them, folded rows left out — the
   // list the Ctrl digits number.
   readonly property var visibleLabels: Model.visibleLabels(labels, collapsedFolders)
+
+  function setCalendarPaneOpen(value) {
+    var next = value === true
+    if (next === calendarPaneOpen) return
+    calendarPaneOpen = next
+    saveWindowPrefs()
+  }
 
   function setSidebarCollapsed(value) {
     var next = value === true
@@ -1671,6 +1687,9 @@ Item {
   }
 
   readonly property alias calendarController: sharedCalendar
+  // Its own controller, so the pane's month and the calendar view's range
+  // never refetch over each other.
+  readonly property alias calendarPaneController: paneCalendar
   readonly property bool noCalendars: sharedCalendar.noCalendars
   readonly property var barEvents: Preview.upcomingEvents(
     barCalendar.events, Date.now(), 2)
@@ -2605,9 +2624,21 @@ Item {
     accountId: root.calendarAccountId
     onSourceListChanged: {
       barCalendar.sourceList = sourceList
+      paneCalendar.sourceList = sourceList
       Qt.callLater(root.refreshCalendarPreview)
     }
-    onSourcesLoadedChanged: barCalendar.sourcesLoaded = sourcesLoaded
+    onSourcesLoadedChanged: {
+      barCalendar.sourcesLoaded = sourcesLoaded
+      paneCalendar.sourcesLoaded = sourcesLoaded
+    }
+  }
+
+  CalendarController {
+    id: paneCalendar
+    service: root
+    pluginDir: root.pluginDir
+    cacheName: "calendar-pane"
+    accountId: root.calendarAccountId
   }
 
   CalendarController {
@@ -2889,7 +2920,7 @@ Item {
         else root.restoreAccountRegistry()
         root.refreshRecipientContacts()
       }
-      else root.contactsLoading = false
+      else contactBook.loading = false
     }
   }
 

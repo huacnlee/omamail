@@ -22,6 +22,9 @@ Item {
   property bool collapsed: false
   property bool calendarSelected: false
   property bool calendarAvailable: true
+  property bool contactsSelected: false
+  // A mailbox row is the place shown only while the window shows mail.
+  readonly property bool otherViewSelected: calendarSelected || contactsSelected
   property string menuLabelPath: ""
 
   signal mailboxSelected(string key)
@@ -31,6 +34,7 @@ Item {
   // names), its path, and where the menu goes.
   signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
   signal calendarRequested()
+  signal contactsRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
   // opens the row it sits on cannot disagree.
@@ -89,7 +93,7 @@ Item {
           // is waiting; the labels below still count, because those are lists
           // the user built and their sizes mean something.
           count: 0
-          selected: !root.calendarSelected && !!root.service
+          selected: !root.otherViewSelected && !!root.service
             && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === "" && root.service.rawQuery === ""
           slotNumber: Model.slotNumberOf(root.slots, "mailbox", modelData.key)
@@ -143,7 +147,7 @@ Item {
           slotNumber: modelData.selectable ? Model.slotNumberOf(root.slots, "label", modelData.id) : 0
           count: modelData.unread
           selected: root.menuLabelPath === modelData.path
-            || (modelData.selectable && !root.calendarSelected && !!root.service
+            || (modelData.selectable && !root.otherViewSelected && !!root.service
               && root.service.rawQuery !== ""
               && root.service.rawLabelId === modelData.id)
           onActivated: {
@@ -156,7 +160,8 @@ Item {
     }
   }
 
-  // Calendar stays fixed at the foot of the rail while mailbox labels scroll.
+  // Calendar and Contacts stay fixed at the foot of the rail while mailbox
+  // labels scroll.
   Column {
     id: footer
     anchors.left: parent.left
@@ -170,6 +175,14 @@ Item {
       visible: root.calendarAvailable
       selected: root.calendarSelected
       onActivated: root.calendarRequested()
+    }
+
+    Entry {
+      x: Style.space(6)
+      label: "Contacts"
+      icon: "people"
+      selected: root.contactsSelected
+      onActivated: root.contactsRequested()
     }
 
     Item {

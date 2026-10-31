@@ -7,7 +7,7 @@ var FACTS = {
     "capabilities": {
       "archive": true,
       "batch": true,
-      "conversations": false,
+      "conversations": true,
       "labels": true,
       "manageLabels": true,
       "move": true,

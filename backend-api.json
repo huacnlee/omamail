@@ -89,6 +89,8 @@
     "cache.calendarRead",
     "cache.calendarPut",
     "contacts.suggest",
+    "contacts.google",
+    "contacts.people",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -1355,6 +1357,28 @@
       }
     },
     {
+      "name": "Google Contacts refuses an account that is not a Gmail address",
+      "method": "contacts.google",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "The address book refuses an account that is not a Gmail address",
+      "method": "contacts.people",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
       "name": "Microsoft 365 provider rules",
       "method": "providers.snapshot",
       "params": {},
@@ -1561,10 +1585,15 @@
     }
   ],
   "unreleased": {
-    "methods": [],
+    "methods": [
+      "contacts.google",
+      "contacts.people"
+    ],
     "cases": [
       "Calendar validation errors preserve safe context",
-      "Calendar authentication errors preserve safe context"
+      "Calendar authentication errors preserve safe context",
+      "Google Contacts refuses an account that is not a Gmail address",
+      "The address book refuses an account that is not a Gmail address"
     ]
   }
 }

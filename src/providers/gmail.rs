@@ -18,6 +18,8 @@ mod resources;
 #[cfg(test)]
 #[path = "gmail_tests.rs"]
 mod tests;
+#[path = "gmail_threads.rs"]
+mod threads;
 #[path = "gmail_writes.rs"]
 mod writes;
 struct Token {
@@ -60,7 +62,30 @@ struct AccountSession {
     valid: AtomicBool,
     token: tokio::sync::Mutex<Option<Arc<Token>>>,
     quota: tokio::sync::Mutex<Quota>,
+    /// The rows of the last conversation listings, by representative id: the
+    /// metadata the listing already read and the members it found, so the
+    /// row's `gmail.read` is answered without asking Gmail again and carries
+    /// its conversation the way a JMAP read does.
+    blocks: Mutex<HashMap<String, Remembered>>,
+    /// When this account last changed a message from here. A row remembered
+    /// before that may carry labels the write changed, so it is read again.
+    written: Mutex<Option<Instant>>,
 }
+
+struct Remembered {
+    at: Instant,
+    thread: String,
+    query: String,
+    block: Value,
+    payload: Value,
+}
+
+/// How many listed rows one account remembers, and for how long. A row is
+/// read right after its listing; one older than this is read from Gmail.
+const MAX_BLOCKS: usize = 2000;
+const BLOCK_TTL: Duration = Duration::from_secs(600);
+/// The headers a summary row is built from, for messages and threads alike.
+const SUMMARY_HEADERS: [&str; 5] = ["From", "To", "Subject", "Date", "List-Unsubscribe"];
 
 impl AccountSession {
     fn new() -> Self {
@@ -71,6 +96,8 @@ impl AccountSession {
                 units: QUOTA_BURST,
                 refilled: Instant::now(),
             }),
+            blocks: Mutex::new(HashMap::new()),
+            written: Mutex::new(None),
         }
     }
 
@@ -400,11 +427,15 @@ impl Session {
         if !queue::queued(method) {
             return self.call(method, params).await;
         }
+        self.note_write(params);
         let (_, outcome) = self.enqueue_write(method, params).await?;
         outcome.await.map_err(|_| "gmail_queue_dropped")?
     }
 
     pub async fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+        if queue::queued(method) || writes::supports(method) {
+            self.note_write(params);
+        }
         if queue::queued(method) {
             let (ticket, _outcome) = self.enqueue_write(method, params).await?;
             return Ok(json!({"queued":true,"ticket":ticket.to_string()}));
@@ -416,7 +447,7 @@ impl Session {
             "gmail.invalidate" => &["accountId"],
             "gmail.labels" | "gmail.profile" | "gmail.sendAs" => &["accountId"],
             "gmail.labelCounts" => &["accountId", "id"],
-            "gmail.list" => &["accountId", "query", "pageSize", "pageToken"],
+            "gmail.list" => &["accountId", "query", "pageSize", "pageToken", "threads"],
             "gmail.read" => &["accountId", "id", "full"],
             "gmail.attachment" => &["accountId", "messageId", "attachmentId"],
             _ => return Err("unknown_method"),
@@ -465,7 +496,16 @@ impl Session {
                     "pageToken".into(),
                     field(params, "pageToken", false)?.into(),
                 ));
-                vec!["messages"]
+                let by_thread = match params.get("threads") {
+                    None => false,
+                    Some(Value::Bool(v)) => *v,
+                    _ => return Err("invalid_params"),
+                };
+                if by_thread && threads::applies(field(params, "query", false)?) {
+                    vec!["threads"]
+                } else {
+                    vec!["messages"]
+                }
             }
             "gmail.read" => {
                 let full = match params.get("full") {
@@ -478,7 +518,7 @@ impl Session {
                     if full { "full" } else { "metadata" }.into(),
                 ));
                 if !full {
-                    for header in ["From", "To", "Subject", "Date", "List-Unsubscribe"] {
+                    for header in SUMMARY_HEADERS {
                         query.push(("metadataHeaders".into(), header.into()));
                     }
                 }
@@ -502,7 +542,21 @@ impl Session {
         }) {
             return Err("gmail_account_unknown");
         }
-        self.account(&account)?.pace(quota_cost(method)).await?;
+        if method == "gmail.read"
+            && params.get("full") == Some(&Value::Bool(false))
+            && let Some(answer) = self
+                .remembered_read(&account, field(params, "id", true)?)
+                .await
+        {
+            return Ok(answer);
+        }
+        // Gmail bills a thread listing at twice a message listing.
+        let cost = if path == ["threads"] {
+            10
+        } else {
+            quota_cost(method)
+        };
+        self.account(&account)?.pace(cost).await?;
         let answer = self
             .get_with(
                 &account,
@@ -516,6 +570,11 @@ impl Session {
             .await?;
         if method != "gmail.list" {
             return Ok(resources::normalize(method, answer));
+        }
+        if path == ["threads"] {
+            return self
+                .conversation_page(&account, field(params, "query", false)?.trim(), answer)
+                .await;
         }
         let messages = match answer.get("messages") {
             None => Vec::new(),
@@ -535,5 +594,173 @@ impl Session {
         Ok(
             json!({"ids":ids,"threadIds":threads,"nextPageToken":answer["nextPageToken"].as_str().unwrap_or(""),"estimate":answer["resultSizeEstimate"].as_u64().unwrap_or(0)}),
         )
+    }
+
+    /// One page of conversations: each listed thread read with its summary
+    /// headers, in parallel, then answered in the shape of a message page whose
+    /// ids are the representatives, so every caller of `gmail.list` reads it
+    /// unchanged. The representatives' metadata is kept for their reads, which
+    /// therefore cost nothing more. A thread that can no longer be read (purged
+    /// between the two calls, say) is left out rather than failing the page.
+    async fn conversation_page(
+        &self,
+        account: &str,
+        query: &str,
+        answer: Value,
+    ) -> Result<Value, &'static str> {
+        let listed: Vec<String> = match answer.get("threads") {
+            None => Vec::new(),
+            Some(Value::Array(values)) => values
+                .iter()
+                .map(|t| {
+                    t["id"]
+                        .as_str()
+                        .filter(|id| gmail_http::validate_path_part(id).is_ok())
+                        .map(str::to_owned)
+                        .ok_or("gmail_invalid_response")
+                })
+                .collect::<Result<_, _>>()?,
+            _ => return Err("gmail_invalid_response"),
+        };
+        let reads = listed.iter().map(|id| self.thread_metadata(account, id));
+        let mut read = Vec::new();
+        let mut failure = None;
+        for result in futures_util::future::join_all(reads).await {
+            match result {
+                Ok(thread) => read.push(thread),
+                Err(error) => failure = failure.or(Some(error)),
+            }
+        }
+        if read.is_empty()
+            && let Some(error) = failure
+        {
+            return Err(error);
+        }
+        let mut ids = Vec::new();
+        let mut thread_ids = Vec::new();
+        let mut rows = Vec::new();
+        for thread in &read {
+            let Some((representative, block)) = threads::block(thread, query) else {
+                continue;
+            };
+            let Some((payload, _)) = threads::member(thread, query, &representative) else {
+                continue;
+            };
+            ids.push(representative.clone());
+            thread_ids.push(block["id"].clone());
+            rows.push((representative, block, payload));
+        }
+        let now = Instant::now();
+        let thread_of = |block: &Value| block["id"].as_str().unwrap_or("").to_owned();
+        self.remember(
+            account,
+            rows.into_iter()
+                .map(|(id, block, payload)| {
+                    let thread = thread_of(&block);
+                    (
+                        id,
+                        Remembered {
+                            at: now,
+                            thread,
+                            query: query.to_owned(),
+                            block,
+                            payload,
+                        },
+                    )
+                })
+                .collect(),
+        )?;
+        Ok(json!({
+            "ids": ids,
+            "threadIds": thread_ids,
+            "nextPageToken": answer["nextPageToken"].as_str().unwrap_or(""),
+            "estimate": answer["resultSizeEstimate"].as_u64().unwrap_or(0),
+        }))
+    }
+
+    async fn thread_metadata(&self, account: &str, id: &str) -> Result<Value, &'static str> {
+        self.account(account)?.pace(10).await?;
+        let mut query: Vec<(String, String)> = vec![("format".into(), "metadata".into())];
+        for header in SUMMARY_HEADERS {
+            query.push(("metadataHeaders".into(), header.into()));
+        }
+        self.get_with(
+            account,
+            || refresh_grant(account.to_owned()),
+            |token| {
+                let query = &query;
+                async move { gmail_http::get(&["threads", id], query, &token).await }
+            },
+        )
+        .await
+    }
+
+    /// Keeps listed rows, dropping expired ones first and then the oldest, so
+    /// a listing never takes away the rows another listing is still reading.
+    fn remember(&self, account: &str, rows: Vec<(String, Remembered)>) -> Result<(), &'static str> {
+        let session = self.account(account)?;
+        let mut known = session.blocks.lock().map_err(|_| "session_failed")?;
+        known.retain(|_, row| row.at.elapsed() < BLOCK_TTL);
+        let room = MAX_BLOCKS.saturating_sub(rows.len().min(MAX_BLOCKS));
+        if known.len() > room {
+            let mut ages: Vec<(Instant, String)> =
+                known.iter().map(|(id, row)| (row.at, id.clone())).collect();
+            ages.sort();
+            for (_, id) in ages.into_iter().take(known.len() - room) {
+                known.remove(&id);
+            }
+        }
+        known.extend(rows.into_iter().take(MAX_BLOCKS));
+        Ok(())
+    }
+
+    fn note_write(&self, params: &Value) {
+        let Ok(account) = field(params, "accountId", true) else {
+            return;
+        };
+        if let Ok(session) = self.account(&account.to_lowercase())
+            && let Ok(mut written) = session.written.lock()
+        {
+            *written = Some(Instant::now());
+        }
+    }
+
+    /// A listed row's metadata read: kept from the listing while nothing was
+    /// written since, otherwise the thread is read again so the labels and the
+    /// conversation are current. `None` for a message no listing remembers.
+    async fn remembered_read(&self, account: &str, id: &str) -> Option<Value> {
+        let session = self.account(account).ok()?;
+        let (fresh, thread, query, answer) = {
+            let known = session.blocks.lock().ok()?;
+            let row = known.get(id)?;
+            let written = *session.written.lock().ok()?;
+            let fresh = row.at.elapsed() < BLOCK_TTL && written.is_none_or(|at| at < row.at);
+            let mut answer = row.payload.clone();
+            answer["thread"] = row.block.clone();
+            (fresh, row.thread.clone(), row.query.clone(), answer)
+        };
+        if fresh {
+            return Some(answer);
+        }
+        let reread = self.thread_metadata(account, &thread).await.ok();
+        let current = reread.as_ref().and_then(|t| threads::member(t, &query, id));
+        let mut known = session.blocks.lock().ok()?;
+        let Some((payload, block)) = current else {
+            known.remove(id);
+            return None;
+        };
+        let mut answer = payload.clone();
+        answer["thread"] = block.clone();
+        known.insert(
+            id.to_owned(),
+            Remembered {
+                at: Instant::now(),
+                thread,
+                query,
+                block,
+                payload,
+            },
+        );
+        Some(answer)
     }
 }

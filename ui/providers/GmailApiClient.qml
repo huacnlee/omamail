@@ -154,10 +154,14 @@ Item {
 
   // ---------------------------------------------------------------- reads
 
+  // One row per conversation, as Gmail's web client lists them: the backend
+  // reads `threads` and answers with each conversation's representative, whose
+  // later read carries the member ids (the drafts listing stays per message).
   function listMessages(query, maxResults, pageToken, callback, progress) {
     return backendRequest("gmail.list", {
       query: String(query || ""), pageToken: String(pageToken || ""),
-      pageSize: Math.max(1, Math.min(100, Math.floor(Number(maxResults) || 25)))
+      pageSize: Math.max(1, Math.min(100, Math.floor(Number(maxResults) || 25))),
+      threads: true
     }, callback)
 
   }
@@ -183,23 +187,10 @@ Item {
 
   }
 
-  // The counted members of a conversation, for the reader's conversation rail.
-  //
-  // Always empty, and Gmail is never asked: it declares `threads` — a
-  // server-side thread id exists — but not `conversations`, so its listing is
-  // one row per message and no row here carries member ids for a rail to draw.
-  //
-  // Deferred rather than answered on the spot even though the answer is in
-  // hand: every caller in this interface is written against a callback that
-  // arrives later, and running one partway through the function that started it
-  // is a re-entry no other read produces.
+  // The counted members of a conversation, for the reader's conversation rail:
+  // each one's metadata, read like any list row.
   function getSummaries(ids, callback) {
-    var handle = newHandle()
-    Qt.callLater(function() {
-      if (!root || handle.aborted || typeof callback !== "function") return
-      callback([], "")
-    })
-    return handle
+    return getMessages(ids, false, callback)
   }
 
   // Fetches every id at once and calls back once, with the results in the

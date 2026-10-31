@@ -426,3 +426,9 @@ deepEqual(keymap.helpColumns(-3), [keymap.helpGroups()])
 deepEqual(keymap.helpColumns(99).length, all.length, "never more columns than groups")
 
 console.log("test_keymap.js ok")
+
+// Anything the keyboard does, the mouse can do: each row says how.
+keymap.BINDINGS.forEach(function (binding) {
+  assert.ok(typeof binding.pointer === "string" && binding.pointer.trim() !== "",
+    binding.id + " has no pointer way: add one, and name it in `pointer`")
+})

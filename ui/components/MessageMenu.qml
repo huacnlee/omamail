@@ -25,12 +25,16 @@ Item {
   // what it asks for reaches that message alone, where a row's menu reaches
   // every counted member of the conversation the row stands for.
   property bool memberOnly: false
+  // The ticked rows, for the two selection rows: every key has a pointer way
+  // too, and ticking a first row otherwise needed Ctrl held.
+  property var checkedIds: []
+  property bool allChecked: false
   property real anchorX: 0
   property real anchorY: 0
   property int cursorIndex: -1
   readonly property var menuRows: [continueRow, replyRow, replyAllRow, forwardRow, archiveRow,
     unarchiveRow, untrashRow, moveRow,
-    trashRow, spamRow, readRow, starRow, browserRow, aiRow]
+    trashRow, spamRow, readRow, starRow, checkRow, checkAllRow, browserRow, aiRow]
   // The rows a choice here will act on, as App's handler sends it: every
   // ticked row when the menu was opened on one of them (the list says which,
   // `MessageList.reachedIds`), else the one message. Restore, Move to Inbox
@@ -273,6 +277,27 @@ Item {
         visible: !root.service || root.service.canStar
         text: root.starAction === "unstar" ? "Unstar" : "Star"
         onActivated: root.run(root.starAction)
+      }
+
+      MenuSeparatorLine {
+        visible: !root.memberOnly
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
+
+      MenuRow {
+        id: checkRow
+        objectName: "message-menu-check"
+        visible: !root.memberOnly
+        text: root.checkedIds.indexOf(root.messageId) >= 0 ? "Deselect" : "Select"
+        onActivated: root.run("toggleCheck")
+      }
+      MenuRow {
+        id: checkAllRow
+        objectName: "message-menu-check-all"
+        visible: !root.memberOnly
+        text: root.allChecked ? "Select none" : "Select all"
+        onActivated: root.run("checkAll")
       }
 
       MenuSeparatorLine {

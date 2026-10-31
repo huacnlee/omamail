@@ -26,6 +26,8 @@ Item {
   SignalSpy { id: copySpy; target: menu; signalName: "copyRequested" }
   SignalSpy { id: pasteSpy; target: menu; signalName: "pasteRequested" }
   SignalSpy { id: openSpy; target: menu; signalName: "openLinkRequested" }
+  SignalSpy { id: zoomSpy; target: menu; signalName: "zoomRequested" }
+  SignalSpy { id: zoomResetSpy; target: menu; signalName: "zoomResetRequested" }
 
   TestCase {
     name: "TextMenu"
@@ -150,6 +152,27 @@ Item {
       show(true)
       // Nothing selected: Cut and Copy are out, Paste is the first row.
       compare(menu.cursorIndex, menu.menuRows.indexOf(menu.pasteRow))
+    }
+  
+    // ------------------------------------------------------------- zoom
+
+    // A message body's zoom, for a hand on the mouse alone; nowhere else.
+    function test_a_message_body_offers_its_zoom() {
+      show(false)
+      compare(menu.zoomInRow.visible, false)
+      menu.zoomable = true
+      zoomSpy.clear(); zoomResetSpy.clear()
+      show(false)
+      compare(menu.zoomInRow.visible, true)
+      menu.zoomInRow.activated()
+      compare(zoomSpy.signalArguments[0][0], 0.1)
+      show(false)
+      menu.zoomOutRow.activated()
+      compare(zoomSpy.signalArguments[1][0], -0.1)
+      show(false)
+      menu.zoomResetRow.activated()
+      compare(zoomResetSpy.count, 1)
+      menu.zoomable = false
     }
   }
 }

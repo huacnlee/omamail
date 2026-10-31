@@ -297,6 +297,14 @@ Item {
     } else moveMonth(offset)
   }
 
+  // The day picked in the mail's calendar pane, in the day view.
+  function showDay(date) {
+    viewMode = "day"
+    visibleMonth = new Date(date.getFullYear(), date.getMonth(), 1)
+    visibleWeek = date
+    refresh()
+  }
+
   function setView(mode) {
     viewMode = ["day", "week", "month", "agenda"].indexOf(mode) >= 0 ? mode : "month"
     refresh()
@@ -439,6 +447,23 @@ Item {
           fontFamily: root.panelFontFamily
           fontSize: root.toolbarFontSize
           onClicked: root.goToday()
+        }
+
+        // `u` by pointer: there only while the last change can still be taken
+        // back, so the toolbar never offers an undo that would do nothing.
+        IconTextButton {
+          objectName: "calendar-undo"
+          text: "Undo"
+          visible: !!root.controller && !!root.controller.undoChange
+            && !root.controller.eventWriting
+          implicitHeight: root.toolbarControlHeight
+          tooltipText: "Undo the last event change · u"
+          foreground: root.textColor
+          accent: root.accentColor
+          ghost: true
+          fontFamily: root.panelFontFamily
+          fontSize: root.toolbarFontSize
+          onClicked: root.controller.undoLastChange()
         }
 
       }

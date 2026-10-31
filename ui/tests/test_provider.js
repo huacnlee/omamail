@@ -123,14 +123,14 @@ assert.strictEqual(provider.can("hey", "star"), false, "HEY has no flag")
 assert.strictEqual(provider.can("hey", "archive"), false, "HEY has no archive")
 
 // Having a thread id and listing conversations are two questions. HEY's rows
-// already are conversations, so the panel groups nothing; Gmail has the ids and
-// still lists messages, because collapsing its list would cost a `threads.get`
-// per thread; IMAP has neither.
+// already are conversations, so the panel groups nothing; Gmail lists
+// conversations through `threads.list`, as its web client does; IMAP has
+// thread ids for neither, and Outlook has the folder but no conversation list.
 assert.strictEqual(provider.can("hey", "conversations"), true, "a HEY row is a topic")
-assert.strictEqual(provider.can("gmail", "conversations"), false,
-  "Gmail has thread ids and still lists messages")
+assert.strictEqual(provider.can("gmail", "conversations"), true,
+  "Gmail lists conversations, as its web client does")
 assert.strictEqual(provider.can("imap", "conversations"), false)
-assert.strictEqual(provider.can("gmail", "threads"), true,
+assert.strictEqual(provider.can("imap", "threads"), false,
   "and the two answers are independent of each other")
 
 // ---------------------------------------------------------- refusals
