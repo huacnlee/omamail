@@ -44,16 +44,17 @@ const paints=[]
 const later=[]
 const imageContext={remoteImagesAllowed:true,remoteImagesLoading:false,readerSourceKey:'cache',
   selectedRemoteImageSources:['https://example.org/one','https://example.org/two'],
-  remoteImageData:{},remoteImageAttempted:{},imageFetchQueue:[],imageFetchSerial:0,imageBatchDirty:false,
+  remoteImageData:{},remoteImageAttempted:{},imageFetchQueue:[],imageFetchSerial:0,imageBatchDirty:false,imagePaintMinWait:100,imagePaintWait:800,
   imagePaintTimer:{running:false,start(){this.running=true},stop(){this.running=false}},
   Html:require('../ui/tests/load').load('message/Html.js'),Qt:{callLater:fn=>later.push(fn)},
   backend:{ready:true,call(method,params,callback){images.push({method,params,callback})}},
   renderSource:key=>paints.push(key)}
 imageContext.root=imageContext
 vm.createContext(imageContext)
-for(const name of ['prepareRemoteImages','fetchNextImage','flushRemoteImages'])vm.runInContext(method(name),imageContext)
+for(const name of ['prepareRemoteImages','fetchNextImage','flushRemoteImages','stopImagePaint'])vm.runInContext(method(name),imageContext)
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII='
 imageContext.prepareRemoteImages()
+assert.strictEqual(imageContext.imagePaintWait,100,'a new batch of images starts with the short wait')
 images[0].callback({data:png},null)
 assert.strictEqual(paints.length,0,'first image must not rebuild whole document before batch ends')
 imageContext.readerSourceKey='live'
