@@ -28,8 +28,15 @@ const MAX_PIXELS: u64 = 4_000_000;
 /// Declared size above which an image is refused: it cannot be decoded within
 /// `MAX_ALLOC`, and Qt's own allocation limit would refuse it too.
 const MAX_SOURCE_PIXELS: u64 = 100_000_000;
-/// Decoded pixels plus the working copy the resize needs (about half again).
+/// Peak heap one decode and resize may use.
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
+/// What the decode and resize hold beyond the decoded pixels: a fixed part and
+/// a part per pixel, whatever the sample type. Measured with `image` 0.25.10 on
+/// JPEG and PNG, 8 and 16 bit, 12 to 80 MP, as about 60 MiB plus 1.8 bytes a
+/// pixel (the pixel share is a fit; small images carry the fixed part), rounded
+/// up. `an_accepted_image_never_exceeds_the_allocation_budget` re-checks it.
+const WORKING_FIXED: u64 = 64 * 1024 * 1024;
+const WORKING_BYTES_PER_PIXEL: u64 = 3;
 const JPEG_QUALITY: u8 = 90;
 const CACHE_BYTES: usize = 32 * 1024 * 1024;
 const CACHE_ENTRIES: usize = 512;
@@ -169,14 +176,15 @@ fn shrink(format: ImageFormat, data: &[u8]) -> Result<Option<Vec<u8>>, ImageErro
     let mut decoder = reader.into_decoder()?;
     let (width, height) = decoder.dimensions();
     let pixels = u64::from(width) * u64::from(height);
-    // The decoded buffer plus the resize's working copy must fit the budget,
-    // whatever the sample size (a 16-bit RGBA PNG is eight bytes a pixel).
-    if pixels > MAX_SOURCE_PIXELS
-        || decoder
-            .total_bytes()
-            .saturating_add(decoder.total_bytes() / 2)
-            > MAX_ALLOC
-    {
+    // Refuse before decoding anything if the peak would pass the budget. An
+    // interlaced PNG is assembled in a second full-size buffer.
+    let total = decoder.total_bytes();
+    let interlaced = format == ImageFormat::Png && data.get(28) == Some(&1);
+    let needed = total
+        .saturating_mul(if interlaced { 2 } else { 1 })
+        .saturating_add(WORKING_FIXED)
+        .saturating_add(pixels.saturating_mul(WORKING_BYTES_PER_PIXEL));
+    if pixels > MAX_SOURCE_PIXELS || needed > MAX_ALLOC {
         return Err(limit_error());
     }
     let orientation = decoder.orientation()?;

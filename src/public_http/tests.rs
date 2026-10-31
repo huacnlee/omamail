@@ -477,15 +477,6 @@ fn an_image_too_large_to_decode_within_the_limit_is_refused() {
 }
 
 #[test]
-fn an_image_whose_decoded_size_exceeds_the_budget_is_refused_before_decoding() {
-    // 81 MP is under the pixel limit, but 16-bit RGBA is 8 bytes a pixel.
-    assert_eq!(
-        served("image/png", png_header(9000, 9000, 16, 6)),
-        Err("public_image_refused")
-    );
-}
-
-#[test]
 fn an_image_that_will_not_decode_passes_through_and_is_not_decoded_again() {
     let truncated = png_header(3000, 2000, 8, 2);
     let expected = format!("data:image/png;base64,{}", STANDARD.encode(&truncated));
@@ -515,4 +506,122 @@ fn the_prepared_cache_evicts_the_least_recently_used_first() {
         "the oldest unused is evicted"
     );
     assert!(cache.get(&[33; 32]).is_some());
+}
+
+// Counts heap use on the one thread that switched it on, so concurrent tests
+// do not disturb a measurement.
+mod counting {
+    use std::{
+        alloc::{GlobalAlloc, Layout, System},
+        cell::Cell,
+    };
+
+    thread_local! {
+        static ON: Cell<bool> = const { Cell::new(false) };
+        static LIVE: Cell<usize> = const { Cell::new(0) };
+        static PEAK: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub struct Counting;
+
+    fn grow(by: usize) {
+        if ON.with(Cell::get) {
+            let live = LIVE.with(|c| c.get() + by);
+            LIVE.with(|c| c.set(live));
+            PEAK.with(|c| c.set(c.get().max(live)));
+        }
+    }
+
+    fn shrink(by: usize) {
+        if ON.with(Cell::get) {
+            LIVE.with(|c| c.set(c.get().saturating_sub(by)));
+        }
+    }
+
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            grow(layout.size());
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            grow(layout.size());
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            shrink(layout.size());
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new: usize) -> *mut u8 {
+            if new > layout.size() {
+                grow(new - layout.size());
+            } else {
+                shrink(layout.size() - new);
+            }
+            unsafe { System.realloc(ptr, layout, new) }
+        }
+    }
+
+    /// The most heap `work` held at once, in bytes.
+    pub fn peak_of<T>(work: impl FnOnce() -> T) -> (T, usize) {
+        LIVE.with(|c| c.set(0));
+        PEAK.with(|c| c.set(0));
+        ON.with(|c| c.set(true));
+        let out = work();
+        ON.with(|c| c.set(false));
+        (out, PEAK.with(Cell::get))
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: counting::Counting = counting::Counting;
+
+#[test]
+fn an_over_budget_image_is_refused_before_anything_is_allocated() {
+    // 81 MP of 16-bit RGBA, and 80 MP of 8-bit RGB (under the pixel limit, over
+    // the budget once the resize's working memory is counted): a few dozen
+    // bytes of file each.
+    for bomb in [
+        png_header(9000, 9000, 16, 6),
+        png_header(10_000, 8000, 8, 2),
+    ] {
+        let (outcome, peak) = counting::peak_of(|| downscale::prepare("image/png", &bomb));
+        assert!(matches!(outcome, Err("public_image_refused")));
+        assert!(peak < 4 * 1024 * 1024, "refusal allocated {peak} bytes");
+    }
+}
+
+#[test]
+fn an_accepted_image_never_exceeds_the_allocation_budget() {
+    // Real work with the locked `image` version: the peak of the whole decode,
+    // resize and encode has to stay inside what the guard promised, for each
+    // sample type the guard prices from the header.
+    for (picture, format) in [
+        (gradient(3000, 2400, false), image::ImageFormat::Jpeg),
+        (gradient(3000, 2400, false), image::ImageFormat::Png),
+        (gradient(3000, 2400, true), image::ImageFormat::Png),
+        (
+            image::DynamicImage::ImageRgba16(image::ImageBuffer::from_fn(2800, 2600, |x, y| {
+                image::Rgba([(x * 20) as u16, (y * 20) as u16, 9, 50_000])
+            })),
+            image::ImageFormat::Png,
+        ),
+    ] {
+        let mime = if format == image::ImageFormat::Jpeg {
+            "image/jpeg"
+        } else {
+            "image/png"
+        };
+        let bytes = encoded(&picture, format);
+        let pixels = u64::from(picture.width()) * u64::from(picture.height());
+        let promised = picture.as_bytes().len() as u64 + 64 * 1024 * 1024 + pixels * 3;
+        assert!(promised <= 512 * 1024 * 1024);
+        let (outcome, peak) = counting::peak_of(|| downscale::prepare(mime, &bytes));
+        assert!(matches!(outcome, Ok(downscale::Prepared::Smaller(_))));
+        assert!(
+            (peak as u64) <= promised,
+            "{mime} {}x{}: peak {peak} bytes, guard priced {promised}",
+            picture.width(),
+            picture.height()
+        );
+    }
 }
