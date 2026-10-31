@@ -103,7 +103,8 @@ Item {
   readonly property var monthNames: ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"]
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-  readonly property string todayIso: Calendar.isoDate(new Date())
+  // Date alone has no binding dependency: use the shared clock to cross midnight.
+  readonly property string todayIso: Calendar.isoDate(new Date(controller ? controller.nowMs : Date.now()))
   readonly property var viewOptions: ["Day", "Week", "Month", "Agenda"].map(function(label) {
     var binding = Keymap.bindingsFor("calendar").filter(function(row) { return row.id === "calendar" + label })[0]
     return { mode: label.toLowerCase(), label: label + " (" + Keymap.displayFor(binding) + ")" }
@@ -117,7 +118,7 @@ Item {
   Binding {
     target: root.controller
     property: "clockRunning"
-    value: root.visible && root.viewMode !== "month"
+    value: root.visible
     when: root.controller !== null
   }
 

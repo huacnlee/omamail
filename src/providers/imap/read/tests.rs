@@ -90,7 +90,7 @@ async fn sparse_search_orders_by_date_before_paging_even_when_progressive() {
             write(&mut w, b"* 1 FETCH (UID 7)\r\n* 2 FETCH (UID 1000)\r\n* 3 FETCH (UID 50000)\r\nO1 OK snapshot\r\n").await.unwrap();
             assert_eq!(
                 line(&mut w).await.unwrap(),
-                b"O1 UID FETCH 7,1000,50000 (UID INTERNALDATE)\r\n"
+                b"O1 UID FETCH 7:50000 (UID INTERNALDATE)\r\n"
             );
             write(&mut w,b"* 1 FETCH (UID 7 INTERNALDATE \"23-Sep-2026 12:00:00 +0000\")\r\n* 2 FETCH (UID 1000 INTERNALDATE \"22-Sep-2026 12:00:00 +0000\")\r\n* 3 FETCH (UID 50000 INTERNALDATE \"21-Sep-2026 12:00:00 +0000\")\r\nO1 OK snapshot\r\n").await.unwrap();
             assert_eq!(
@@ -126,6 +126,68 @@ fn unsolicited_flags_preserve_snapshot_dates() {
 }
 
 #[tokio::test]
+async fn date_scan_fits_a_server_capping_each_argument_at_4096_bytes() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let peer = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut w: Wire = BufReader::new(Box::new(stream));
+        greeting(&mut w).await;
+        // A sparse four-digit inbox: as a comma list its UIDs need ~9 KB.
+        let inbox: Vec<u32> = (4..=2300).filter(|uid| uid % 7 != 0).collect();
+        while let Ok(raw) = line(&mut w).await {
+            let request = String::from_utf8(raw).unwrap();
+            let request = request.trim_end();
+            // Stalwart refuses any single argument longer than 4096 bytes.
+            if request.split(' ').any(|arg| arg.len() > 4096) {
+                write(
+                    &mut w,
+                    b"O1 BAD [PARSE] Argument exceeds maximum length of 4096 bytes.\r\n",
+                )
+                .await
+                .unwrap();
+                continue;
+            }
+            let mut response = String::new();
+            if request == "O1 SELECT \"INBOX\"" {
+                response.push_str("O1 OK selected\r\n");
+            } else if let Some(fetch) = request.strip_prefix("O1 UID FETCH ") {
+                let (set, fields) = fetch.split_once(' ').unwrap();
+                let wanted = |uid: u32| {
+                    set.split(',').any(|part| match part.split_once(':') {
+                        Some((first, "*")) => uid >= first.parse().unwrap(),
+                        Some((first, last)) => {
+                            (first.parse().unwrap()..=last.parse().unwrap()).contains(&uid)
+                        }
+                        None => uid == part.parse::<u32>().unwrap(),
+                    })
+                };
+                let dated = fields.contains("INTERNALDATE");
+                for uid in inbox.iter().copied().filter(|uid| wanted(*uid)) {
+                    response.push_str(&if dated {
+                        format!("* {uid} FETCH (UID {uid} INTERNALDATE \"21-Sep-2026 12:00:00 +0000\")\r\n")
+                    } else {
+                        format!("* {uid} FETCH (UID {uid})\r\n")
+                    });
+                }
+                response.push_str("O1 OK fetched\r\n");
+            } else {
+                panic!("unexpected command: {request}");
+            }
+            write(&mut w, response.as_bytes()).await.unwrap();
+        }
+    });
+    let mut p = params(port);
+    p["query"] = json!("folder:INBOX");
+    let page = super::super::call("imap.list", &p).await.unwrap();
+    assert_eq!(
+        page["page"]["ids"],
+        json!(["2300:INBOX", "2299:INBOX", "2298:INBOX"])
+    );
+    peer.abort();
+}
+
+#[tokio::test]
 async fn multi_window_dates_settle_before_paging_and_ignore_unsolicited_flags() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -145,7 +207,8 @@ async fn multi_window_dates_settle_before_paging_and_ignore_unsolicited_flags() 
                 let ids: Vec<u32> = if set == "1:*" {
                     (1..=4100).collect()
                 } else {
-                    set.split(',').map(|s| s.parse().unwrap()).collect()
+                    let (first, last) = set.split_once(':').unwrap_or((set, set));
+                    (first.parse().unwrap()..=last.parse().unwrap()).collect()
                 };
                 let dated = fields.contains("INTERNALDATE");
                 if dated {
@@ -301,7 +364,8 @@ async fn a_slow_server_that_answers_every_command_still_pages() {
                 let ids: Vec<u32> = if set == "1:*" {
                     (1..=9000).collect()
                 } else {
-                    set.split(',').map(|id| id.parse().unwrap()).collect()
+                    let (first, last) = set.split_once(':').unwrap_or((set, set));
+                    (first.parse().unwrap()..=last.parse().unwrap()).collect()
                 };
                 for uid in &ids {
                     response.push_str(&if dated {

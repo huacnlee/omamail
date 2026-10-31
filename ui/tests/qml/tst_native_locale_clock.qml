@@ -108,6 +108,15 @@ Item {
   TestCase {
     name: "NativeLocaleClock"
     when: windowShown
+    function test_mail_row_renders_the_system_locale_clock() {
+      row.summary = {id:"one", subject:"Synthetic native summary", from:{display:"Sender"},
+        snippet:"", time:"14:57", unread:false, starred:false}
+      waitForRendering(row)
+      var locale = Qt.locale()
+      var expected = new Date(2026,9,22,14,57).toLocaleTimeString(locale, locale.timeFormat(Locale.ShortFormat))
+      compare(findChild(row, "message-time").text, expected)
+      compare(row.summary.time, "14:57", "display formatting must not rewrite the cached summary")
+    }
     function test_narrow_reader_keeps_the_complete_clock_visible() {
       reader.width = 360
       mailService.selectedMessage = {id:"message-9",subject:"Synthetic",from:{display:"Sender",email:"sender@example.com"},

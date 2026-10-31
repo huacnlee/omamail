@@ -59,6 +59,13 @@ impl Service {
     fn read_alias(&self, _name: &str) -> OwnedObjectPath {
         path("/org/freedesktop/secrets/collection/default")
     }
+    #[zbus(property)]
+    fn collections(&self) -> Vec<OwnedObjectPath> {
+        vec![
+            path("/org/freedesktop/secrets/collection/default"),
+            path("/org/freedesktop/secrets/collection/unrelated"),
+        ]
+    }
     fn search_items(
         &self,
         _attributes: HashMap<String, String>,
@@ -66,7 +73,7 @@ impl Service {
         self.searches.fetch_add(1, Ordering::SeqCst);
         if self
             .failures
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                 left.checked_sub(1)
             })
             .is_ok()
@@ -154,6 +161,7 @@ struct Fixture {
     unlocks: Arc<AtomicUsize>,
     creates: Arc<AtomicUsize>,
     collection_locked: Arc<AtomicBool>,
+    unrelated_collection_locked: Arc<AtomicBool>,
     _daemon: Daemon,
 }
 impl Fixture {
@@ -174,6 +182,13 @@ impl Fixture {
     fn with_locked_collection() -> Self {
         let fixture = Self::build(false, true, false, false, 0);
         fixture.collection_locked.store(true, Ordering::SeqCst);
+        fixture
+    }
+    fn with_unrelated_locked_collection() -> Self {
+        let fixture = Self::build(false, false, false, false, 0);
+        fixture
+            .unrelated_collection_locked
+            .store(true, Ordering::SeqCst);
         fixture
     }
     fn build(
@@ -207,6 +222,7 @@ impl Fixture {
         let unlocks = Arc::new(AtomicUsize::new(0));
         let locked = Arc::new(AtomicBool::new(locked));
         let collection_locked = Arc::new(AtomicBool::new(false));
+        let unrelated_collection_locked = Arc::new(AtomicBool::new(false));
         let failures = Arc::new(AtomicUsize::new(failures));
         let creates = Arc::new(AtomicUsize::new(0));
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -245,6 +261,14 @@ impl Fixture {
                 )
                 .unwrap()
                 .serve_at(
+                    "/org/freedesktop/secrets/collection/unrelated",
+                    Collection {
+                        creates: creates.clone(),
+                        locked: unrelated_collection_locked.clone(),
+                    },
+                )
+                .unwrap()
+                .serve_at(
                     "/org/freedesktop/secrets/prompt/stuck",
                     Prompt(prompts.clone()),
                 )
@@ -263,6 +287,7 @@ impl Fixture {
             unlocks,
             creates,
             collection_locked,
+            unrelated_collection_locked,
             _daemon: daemon,
         }
     }
@@ -526,7 +551,7 @@ fn credentials_native_linux_silently_unlocks_a_locked_item() {
         let service = SecretService::connect_with_existing(EncryptionType::Dh, connection)
             .await
             .unwrap();
-        find(&service, &attrs).await.map(|item| item.is_some())
+        find(&service, &attrs, Operation::Get).await.map(|item| item.is_some())
     });
 
     assert!(matches!(found, Ok(true)));
@@ -566,6 +591,52 @@ fn credentials_native_linux_a_locked_collection_is_unlocked_before_a_write() {
         1,
         "the write never reached CreateItem"
     );
+}
+
+/// A read on a locked collection answers unavailable immediately rather than
+/// mistaking the locked entries for a missing secret or prompting on an
+/// unattended startup.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_a_locked_collection_returns_unavailable_for_get() {
+    let fixture = Fixture::with_locked_collection();
+    let shared = Shared::new().unwrap();
+
+    assert!(matches!(
+        run_on(
+            &shared,
+            &key(),
+            Operation::Get,
+            || fixture.client(),
+            DEADLINE
+        ),
+        Err(Error::Unavailable)
+    ));
+    assert_eq!(
+        fixture.searches.load(Ordering::SeqCst),
+        1,
+        "search did not run before checking collection lock"
+    );
+}
+
+/// An unlocked item in the target collection must be read even if an unrelated
+/// collection on the Secret Service daemon is locked.
+#[test]
+#[ignore = "requires native dbus-daemon; mandatory in the Linux credential gate"]
+fn credentials_native_linux_unlocked_target_reads_with_unrelated_locked_collection() {
+    let fixture = Fixture::with_unrelated_locked_collection();
+    let attrs: HashMap<_, _> = key().attributes().unwrap().into_iter().collect();
+
+    let found = fixture.runtime.block_on(async {
+        let connection = fixture.client().await.unwrap();
+        let service = SecretService::connect_with_existing(EncryptionType::Dh, connection)
+            .await
+            .unwrap();
+        find(&service, &attrs, Operation::Get).await.map(|item| item.is_some())
+    });
+
+    assert!(matches!(found, Ok(true)));
+    assert_eq!(fixture.searches.load(Ordering::SeqCst), 1);
 }
 
 /// One operation costs the caller one deadline. Opening the session and running

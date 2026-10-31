@@ -635,19 +635,20 @@ function recurrenceIntervalUnit(frequency, interval) {
   return Number(interval) === 1 ? unit : unit + "s"
 }
 
+function editorDateTime(dateText, timeText) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return null
+  var clock = Clock.parse(timeText)
+  if (!clock) return null
+  timeText = two(clock.hour) + ":" + two(clock.minute)
+  var value = new Date(dateText + "T" + timeText + ":00")
+  if (!isFinite(value.getTime()) || isoDate(value) !== dateText
+      || two(value.getHours()) + ":" + two(value.getMinutes()) !== timeText) return null
+  return value
+}
+
 function editorDateRange(firstDate, firstTime, lastDate, lastTime, allDay) {
-  function parse(dateText, timeText) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return null
-    var clock = Clock.parse(timeText)
-    if (!clock) return null
-    timeText = two(clock.hour) + ":" + two(clock.minute)
-    var value = new Date(dateText + "T" + timeText + ":00")
-    if (!isFinite(value.getTime()) || isoDate(value) !== dateText
-        || two(value.getHours()) + ":" + two(value.getMinutes()) !== timeText) return null
-    return value
-  }
-  var start = parse(String(firstDate), allDay ? "00:00" : String(firstTime))
-  var end = parse(String(lastDate), allDay ? "00:00" : String(lastTime))
+  var start = editorDateTime(String(firstDate), allDay ? "00:00" : String(firstTime))
+  var end = editorDateTime(String(lastDate), allDay ? "00:00" : String(lastTime))
   if (!start || !end) return {ok:false,error:allDay ? "Enter valid dates (YYYY-MM-DD)" : "Enter valid dates (YYYY-MM-DD) and local times (or HH:mm)"}
   if (allDay) end.setDate(end.getDate() + 1)
   if (end.getTime() <= start.getTime()) return {ok:false,error:allDay

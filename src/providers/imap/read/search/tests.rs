@@ -2,6 +2,21 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 mod paging;
 
+/// The UID ranges an IMAP set names, read as a server reads it.
+fn ranges(set: &str) -> Vec<std::ops::RangeInclusive<u32>> {
+    set.split(',')
+        .map(|part| {
+            let (first, last) = part.split_once(':').unwrap_or((part, part));
+            first.parse().unwrap()..=last.parse().unwrap()
+        })
+        .collect()
+}
+
+/// The UIDs an IMAP set names.
+fn uids(set: &str) -> Vec<u32> {
+    ranges(set).into_iter().flatten().collect()
+}
+
 #[derive(Default)]
 struct Counts {
     searches: AtomicUsize,
@@ -75,8 +90,8 @@ async fn peer(socket: TcpStream, counts: Arc<Counts>) {
             }
             counts.fetches.fetch_add(1, Ordering::SeqCst);
             assert!(rest.ends_with(" (UID INTERNALDATE)\r\n"));
-            for uid in rest.split_once(' ').unwrap().0.split(',') {
-                let day = if uid == "1" { 28 } else { 20 };
+            for uid in uids(rest.split_once(' ').unwrap().0) {
+                let day = if uid == 1 { 28 } else { 20 };
                 data.push_str(&format!(
                     "* 1 FETCH (UID {uid} INTERNALDATE \"{day}-Sep-2026 12:00:00 +0000\")\r\n"
                 ));
@@ -170,6 +185,117 @@ async fn large_account_scan_is_parallel_bounded_and_pages_reuse_snapshot() {
     assert_eq!(call(&p).await, Err("imap_search_expired"));
     assert_eq!(counts.selects.load(Ordering::SeqCst), before + 1);
     server.abort();
+}
+
+/// One folder of 5000 messages where only odd UIDs match, served like Stalwart:
+/// any argument over 4096 bytes is refused before the command runs.
+async fn sparse_peer(socket: TcpStream, fetches: Arc<AtomicUsize>) {
+    let mut wire: Wire = BufReader::new(Box::new(socket));
+    write(&mut wire, b"* OK synthetic server\r\n")
+        .await
+        .unwrap();
+    while let Ok(bytes) = line(&mut wire).await {
+        let cmd = String::from_utf8(bytes).unwrap();
+        let mut data = String::new();
+        if cmd.trim_end().split(' ').any(|arg| arg.len() > 4096) {
+            data.push_str("O1 BAD [PARSE] Argument exceeds maximum length of 4096 bytes.\r\n");
+            if write(&mut wire, data.as_bytes()).await.is_err() {
+                break;
+            }
+            continue;
+        }
+        if cmd.starts_with("O1 LOGIN ") {
+        } else if cmd == "O1 CAPABILITY\r\n" {
+            data.push_str("* CAPABILITY IMAP4rev1\r\n");
+        } else if cmd == "O1 LIST \"\" \"*\"\r\n" {
+            data.push_str("* LIST () \"/\" f000\r\n");
+        } else if cmd == "O1 SELECT \"f000\"\r\n" {
+            data.push_str("* OK [UIDVALIDITY 1] stable\r\n* OK [UIDNEXT 5001] next\r\n");
+        } else if cmd == "O1 UID FETCH 1:5000 (UID)\r\n" {
+            for uid in 1..=5000 {
+                data.push_str(&format!("* {uid} FETCH (UID {uid})\r\n"));
+            }
+        } else if let Some(rest) = cmd.strip_prefix("O1 UID SEARCH UID ") {
+            let (first, last) = rest.split_once(' ').unwrap().0.split_once(':').unwrap();
+            let (first, last) = (first.parse::<u32>().unwrap(), last.parse::<u32>().unwrap());
+            data.push_str("* SEARCH");
+            for uid in (first..=last).filter(|uid| uid % 2 == 1) {
+                data.push_str(&format!(" {uid}"));
+            }
+            data.push_str("\r\n");
+        } else if let Some(rest) = cmd.strip_prefix("O1 UID FETCH ") {
+            let (set, fields) = rest.split_once(' ').unwrap();
+            if fields.starts_with("(UID INTERNALDATE") {
+                fetches.fetch_add(1, Ordering::SeqCst);
+            }
+            for uid in uids(set) {
+                data.push_str(&format!(
+                    "* {uid} FETCH (UID {uid} INTERNALDATE \"20-Sep-2026 12:00:00 +0000\")\r\n"
+                ));
+            }
+        } else {
+            panic!("unexpected command: {cmd}");
+        }
+        data.push_str("O1 OK done\r\n");
+        if write(&mut wire, data.as_bytes()).await.is_err() {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn sparse_match_fetches_fit_a_server_capping_each_argument_at_4096_bytes() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let fetches = Arc::new(AtomicUsize::new(0));
+    let counter = fetches.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(sparse_peer(socket, counter.clone()));
+        }
+    });
+    let mut p = json!({"settings":{"imapHost":"127.0.0.1","imapPort":port,
+        "username":"synthetic","insecure":true,"testPlaintext":true},
+        "credential":"synthetic:sparse","query":"search:ALL","limit":2,"requestToken":"sparse"});
+    let mut method = "imap.list";
+    let result = loop {
+        let result = super::super::super::call(method, &p).await.unwrap();
+        if result["continuation"].is_null() {
+            break result;
+        }
+        p["continuation"] = result["continuation"].clone();
+        method = "imap.listContinue";
+    };
+    assert_eq!(result["page"]["estimate"], 2500);
+    assert_eq!(result["page"]["ids"], json!(["4999:f000", "4997:f000"]));
+    // Still one FETCH per 4096-UID window: the first window's 2048 single UIDs
+    // make 9.7 KB, so they go as the window's range and the even UIDs are dropped.
+    assert_eq!(fetches.load(Ordering::SeqCst), 2);
+    server.abort();
+}
+
+#[test]
+fn a_fetch_names_the_matches_until_they_are_longer_than_one_argument() {
+    let inventory: Vec<u32> = (1..=20_000).collect();
+    assert_eq!(fetch_set(&[7], &inventory), "7");
+    assert_eq!(fetch_set(&[3, 4, 5, 7, 9, 10], &inventory), "3:5,7,9:10");
+    // Even UIDs never fold into ranges. 817 four-digit and two five-digit ones
+    // make exactly 4096 bytes, which Stalwart accepts; 816 and three make 4097.
+    let fits: Vec<u32> = (1000..)
+        .step_by(2)
+        .take(817)
+        .chain([10000, 10002])
+        .collect();
+    let over: Vec<u32> = (1000..)
+        .step_by(2)
+        .take(816)
+        .chain([10000, 10002, 10004])
+        .collect();
+    let named = fetch_set(&fits, &inventory);
+    assert_eq!(named.len(), 4096);
+    assert_eq!(uids(&named), fits);
+    assert_eq!(fetch_set(&over, &inventory), "1:20000");
 }
 
 fn metadata(uid: u32, day: u8, body: &str) -> Vec<u8> {
@@ -276,8 +402,7 @@ async fn generic_peer(socket: TcpStream, selected: Arc<std::sync::Mutex<Vec<Stri
                 write(&mut wire, data.as_bytes()).await.unwrap();
                 continue;
             }
-            for uid in set.split(',') {
-                let uid = uid.parse::<u32>().unwrap();
+            for uid in uids(set) {
                 let (_, _, day, raw) = GENERIC
                     .iter()
                     .find(|m| m.0 == folder && m.1 == uid)
