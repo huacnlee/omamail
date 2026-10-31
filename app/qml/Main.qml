@@ -97,6 +97,16 @@ ApplicationWindow {
     onTriggered: root.saveWindowSize()
   }
 
+  function bringForward(payload) {
+    // A plain relaunch leaves an open window as it is; a draft opens either way.
+    if (!mailApp.opened || payload !== "{}") shellAdapter.summon(manifestAdapter.value.id, payload)
+    // The compositor's close (Super+W on Hyprland) hides the window without
+    // telling the app, so it can still count itself open. Show it either way.
+    if (!root.visible) root.show()
+    root.raise()
+    root.requestActivate()
+  }
+
   function openInitialWindow() {
     if (initialOpenIssued) return
     initialOpenIssued = true
@@ -260,12 +270,12 @@ ApplicationWindow {
       if (root.nativeHost) mailService.applySettings(root.nativeHost.settings)
     }
     function onReopenRequested() {
-      if (!mailApp.opened) shellAdapter.summon(manifestAdapter.value.id, "{}")
-      // The compositor's close (Super+W on Hyprland) hides the window without
-      // telling the app, so it can still count itself open. Show it either way.
-      if (!root.visible) root.show()
-      root.raise()
-      root.requestActivate()
+      root.bringForward("{}")
+    }
+    // Omamail launched again, maybe with a mailto: link (see main.cpp).
+    function onOpenRequested(payload) {
+      if (root.nativeHost) root.nativeHost.takePendingOpen()
+      root.bringForward(payload)
     }
     // The host saw the platform close chord before Qt did — on macOS it takes
     // Cmd+W off the event stream ahead of the input method, which otherwise

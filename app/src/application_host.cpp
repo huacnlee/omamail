@@ -101,6 +101,19 @@ bool ApplicationHost::openExternal(const QString &urlOrPath)
     return QDesktopServices::openUrl(url);
 }
 
+void ApplicationHost::requestOpen(const QString &payload)
+{
+    m_pendingOpen = payload.isEmpty() ? QStringLiteral("{}") : payload;
+    emit openRequested(m_pendingOpen);
+}
+
+QString ApplicationHost::takePendingOpen()
+{
+    const QString payload = m_pendingOpen;
+    m_pendingOpen.clear();
+    return payload;
+}
+
 bool ApplicationHost::setClipboard(const QString &text)
 {
     if (!QGuiApplication::instance() || !QGuiApplication::clipboard()) return false;
