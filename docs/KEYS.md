@@ -46,7 +46,7 @@ readonly property string keyContext:
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
-| `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `calendar` | The calendar | Calendar navigation, hour zoom in the day and week views, and the modified keys |
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.

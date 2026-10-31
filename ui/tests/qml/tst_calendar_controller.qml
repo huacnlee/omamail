@@ -13,7 +13,8 @@ Item {
     property var nextResult: ({ body: "{}", status: 200 })
     property var nextError: null
     property var settings: ({})
-    function persistSetting(name, value) { var next = ({}); next[name] = value; settings = next }
+    property int saves: 0
+    function persistSetting(name, value) { var next = ({}); next[name] = value; settings = next; saves++ }
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: false
     property var discoveryCallback: null
@@ -73,17 +74,21 @@ Item {
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
-    function test_hour_height_comes_from_the_saved_value_and_zooming_saves_it() {
+    function test_a_run_of_zoom_presses_shows_at_once_and_saves_once() {
       var saved = mailService.settings
       mailService.settings = ({})
+      mailService.saves = 0
       compare(controller.hourHeight, 60)
-      controller.zoomHours(-1)
-      compare(mailService.settings.calendarHourHeight, 55)
-      compare(controller.hourHeight, 55)
+      controller.zoomHours(-1, 0)
+      controller.zoomHours(-1, 0)
+      controller.zoomHours(-1, 0)
+      compare(controller.hourHeight, 45)
+      compare(mailService.saves, 0)
+      tryCompare(mailService, "saves", 1)
+      compare(mailService.settings.calendarHourHeight, 45)
+      compare(controller.hourHeight, 45)
       mailService.settings = ({ calendarHourHeight: 5000 })
-      compare(controller.hourHeight, 120)
-      controller.zoomHours(0)
-      compare(controller.hourHeight, 60)
+      compare(controller.hourHeight, 120, "a hand-edited value stays in range")
       mailService.settings = saved
     }
 

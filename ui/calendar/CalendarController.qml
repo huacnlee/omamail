@@ -79,11 +79,25 @@ Item {
   // Every account's calendars, not just this mailbox's: the entry hides only
   // when no account has one and nothing was added in Settings.
   readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
-  readonly property int hourHeight: Calendar.normalizeHourHeight(
-    service && service.settings ? service.settings.calendarHourHeight : undefined)
-  function zoomHours(direction) {
-    if (service) service.persistSetting("calendarHourHeight", Calendar.zoomedHourHeight(hourHeight, direction))
+  // The view follows a zoom at once. The save waits for the keys to rest, because
+  // each one rewrites the shell's whole config and a held key repeats.
+  property int unsavedHourHeight: 0
+  readonly property int hourHeight: unsavedHourHeight > 0 ? unsavedHourHeight
+    : Calendar.normalizeHourHeight(service && service.settings ? service.settings.calendarHourHeight : undefined)
+  function zoomHours(direction, filled) {
+    if (!service) return
+    var next = Calendar.zoomedHourHeight(hourHeight, direction, filled)
+    if (next === hourHeight) return
+    unsavedHourHeight = next
+    hourHeightSave.restart()
   }
+  function saveHourHeight() {
+    if (unsavedHourHeight <= 0 || !service) return
+    service.persistSetting("calendarHourHeight", unsavedHourHeight)
+    unsavedHourHeight = 0
+  }
+  Timer { id: hourHeightSave; interval: 300; onTriggered: root.saveHourHeight() }
+  Component.onDestruction: saveHourHeight()
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView

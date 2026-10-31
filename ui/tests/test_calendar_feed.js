@@ -730,6 +730,11 @@ assert.strictEqual(feed.zoomedHourHeight(25, -1), 25)
 assert.strictEqual(feed.zoomedHourHeight(120, 1), 120)
 assert.strictEqual(feed.zoomedHourHeight(40, 0), 60)
 assert.strictEqual(feed.zoomedHourHeight(undefined, -1), 55)
+// A window tall enough to stretch hours to 37.5: no invisible presses.
+assert.strictEqual(feed.zoomedHourHeight(40, -1, 37.5), 38, "stops where the window takes over")
+assert.strictEqual(feed.zoomedHourHeight(38, -1, 37.5), 38)
+assert.strictEqual(feed.zoomedHourHeight(25, -1, 37.5), 25, "nothing to shrink, nothing saved")
+assert.strictEqual(feed.zoomedHourHeight(25, 1, 37.5), 43, "growing starts from what is on screen")
 
 console.log("test_calendar_feed.js ok")
 

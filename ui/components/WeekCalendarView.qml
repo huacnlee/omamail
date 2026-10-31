@@ -70,8 +70,9 @@ Item {
   readonly property int minimumHourHeight: Calendar.normalizeHourHeight(controller ? controller.hourHeight : undefined)
   // A short hour shrinks what is fixed for a tall one, or a resize edge would
   // leave nothing to drag by and a card's margin nothing to show its title in.
-  readonly property int resizeEdge: Style.space(Math.min(9, minimumHourHeight * 0.15))
-  readonly property int cardMargin: Style.space(Math.min(5, minimumHourHeight / 12))
+  readonly property real hourScale: Math.min(1, timeline.hourHeight / Style.space(60))
+  readonly property int resizeEdge: Style.space(9 * hourScale)
+  readonly property int cardMargin: Style.space(5 * hourScale)
   function resetTimeScroll() {
     timeline.contentY = Math.max(0, Math.min(hourRange.first * timeline.hourHeight,
       timeline.contentHeight - timeline.height))
@@ -79,9 +80,9 @@ Item {
   // Zooming keeps the hour at the top of the view where it is, or the same
   // pixel offset would land on a different time.
   function zoomHours(direction) {
-    if (!controller) return
+    if (!controller || pendingGesture || dragPreview) return
     var topHour = timeline.contentY / timeline.hourHeight
-    controller.zoomHours(direction)
+    controller.zoomHours(direction, timeline.height / hourCount / Style.space(60) * 60)
     timeline.contentY = Math.max(0, Math.min(topHour * timeline.hourHeight,
       timeline.contentHeight - timeline.height))
   }
@@ -328,7 +329,7 @@ Item {
             anchors.leftMargin: Style.space(4)
             anchors.top: parent.top
             anchors.topMargin: index === 0 ? Style.space(2) : -implicitHeight / 2
-            visible: index > 0 || timeline.hourHeight >= implicitHeight * 1.5 + Style.space(2)
+            visible: index > 0 || root.hourScale >= 1 || timeline.hourHeight >= implicitHeight * 1.5 + Style.space(2)
             text: Calendar.timeLabel(new Date(2000, 0, 1, root.firstHour + index).getTime(), root.timeFormat)
             color: root.dimColor
             font.family: root.panelFontFamily

@@ -31,7 +31,7 @@ Item {
   property bool monthPointerDown: false
   property Item hoveredMonthDay: null
   function zoomHours(direction) {
-    if (viewMode === "day" || viewMode === "week") weekView.zoomHours(direction)
+    if ((viewMode === "day" || viewMode === "week") && !detailOpen) weekView.zoomHours(direction)
   }
 
   function updateMonthHover() {

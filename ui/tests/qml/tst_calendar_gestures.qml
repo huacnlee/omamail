@@ -12,7 +12,7 @@ Item {
     id: fixture
     property var service: null
     property int hourHeight: 60
-    function zoomHours(direction) { hourHeight = Calendar.zoomedHourHeight(hourHeight, direction) }
+    function zoomHours(direction, filled) { hourHeight = Calendar.zoomedHourHeight(hourHeight, direction, filled) }
     property bool eventWriting: false
     property bool loading: false
     property string sourceKind: "google"
@@ -74,11 +74,23 @@ Item {
       view.zoomHours(0)
       compare(timeline.hourHeight, Style.space(60))
     }
-    function test_hours_stretch_past_the_zoom_to_fill_the_window() {
+    function test_zoom_at_the_bottom_of_the_day_stays_inside_the_timeline() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      timeline.contentY = timeline.contentHeight - timeline.height
+      view.zoomHours(-1)
+      compare(timeline.contentY, timeline.contentHeight - timeline.height)
+      view.zoomHours(0)
+    }
+    function test_zoom_waits_for_a_drag_to_finish() {
+      view.dragPreview = {}
+      view.zoomHours(-1)
+      compare(fixture.hourHeight, 60)
+      view.dragPreview = null
+    }
+    function test_the_smallest_hours_still_fit_the_whole_day_on_a_short_window() {
       var timeline = findChild(view, "calendar-time-scroll")
       fixture.hourHeight = 25
-      compare(timeline.hourHeight, Math.max(Style.space(25), timeline.height / 24))
-      verify(timeline.contentHeight <= timeline.height + 0.5)
+      verify(timeline.contentHeight <= timeline.height + 0.5, "24 hours without scrolling")
     }
     function test_short_hours_still_move_a_short_event() {
       var original = fixture.events

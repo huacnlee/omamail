@@ -1245,10 +1245,15 @@ function normalizeHourHeight(value) {
   return Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, height))
 }
 
-// One press of a zoom key: +1 or -1 steps from the current height, 0 resets.
-function zoomedHourHeight(current, direction) {
+// One press of a zoom key: +1 or -1 steps, 0 resets. `filled` is the height the
+// timeline already stretches to in this window, so a press starts from what is
+// on screen and a press that could not show there changes nothing.
+function zoomedHourHeight(current, direction, filled) {
   if (!direction) return HOUR_HEIGHT_DEFAULT
-  return normalizeHourHeight(normalizeHourHeight(current) + direction * HOUR_HEIGHT_STEP)
+  var fill = Math.ceil(Number(filled) || 0)
+  var from = Math.max(normalizeHourHeight(current), fill)
+  if (direction < 0 && from <= fill) return normalizeHourHeight(current)
+  return Math.max(normalizeHourHeight(from + direction * HOUR_HEIGHT_STEP), Math.min(fill, HOUR_HEIGHT_MAX))
 }
 
 function eventTop(event, day, firstHour, hourHeight) {
