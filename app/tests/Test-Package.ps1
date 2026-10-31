@@ -13,10 +13,11 @@ function Assert-True([bool]$Condition, [string]$Message) {
 function Expect-Failure([scriptblock]$Action, [string]$Pattern) {
     try {
         & $Action
-        throw "expected failure matching: $Pattern"
     } catch {
         if ($_.Exception.Message -notmatch $Pattern) { throw }
+        return
     }
+    throw "expected failure matching: $Pattern"
 }
 
 function Write-X64Pe([string]$Path) {
