@@ -235,7 +235,7 @@ Item {
         imageFetchQueue = []
         remoteImagesLoading = false
         imageBatchDirty = false
-        imagePaintTimer.stop()
+        stopImagePaint()
         remoteImageAttempted = ({})
         selectedDocument = null
         selectedReaderDocument = null
@@ -251,6 +251,11 @@ Item {
   property int imageFetchSerial: 0
   property var remoteImageAttempted: ({})
   property bool imageBatchDirty: false
+  // Repaint wait: starts short so the first pictures appear quickly, doubles
+  // after each repaint up to the cap, and starts over for each message.
+  readonly property int imagePaintMinWait: 100
+  readonly property int imagePaintMaxWait: 3000
+  property int imagePaintWait: imagePaintMinWait
   // Prepared remote bytes stay separate from the source body. Qt receives only
   // completed data URIs, never an address whose pending load would draw its
   // built-in broken placeholder or whose redirect could escape the URL gate.
@@ -1296,7 +1301,7 @@ Item {
     remoteImageData = ({})
     remoteImageAttempted = ({})
     imageBatchDirty = false
-    imagePaintTimer.stop()
+    stopImagePaint()
     selectedRemoteImageSources = []
     imageFetchQueue = []
     imageFetchSerial++
@@ -1613,9 +1618,15 @@ Item {
     if (pending.length === 0) return
     imageFetchQueue = pending
     imageBatchDirty = false
+    imagePaintWait = imagePaintMinWait
     remoteImagesLoading = true
     imageFetchSerial++
     fetchNextImage(imageFetchSerial)
+  }
+
+  function stopImagePaint() {
+    imagePaintTimer.stop()
+    imagePaintWait = imagePaintMinWait
   }
 
   function flushRemoteImages() {
@@ -1628,7 +1639,7 @@ Item {
     if (serial !== imageFetchSerial) return
     if (imageFetchQueue.length === 0) {
       remoteImagesLoading = false
-      imagePaintTimer.stop()
+      stopImagePaint()
       flushRemoteImages()
       return
     }
@@ -1707,7 +1718,7 @@ Item {
     remoteImageData = ({})
     remoteImageAttempted = ({})
     imageBatchDirty = false
-    imagePaintTimer.stop()
+    stopImagePaint()
     selectedRemoteImageSources = []
     imageFetchQueue = []
     imageFetchSerial++
@@ -2977,15 +2988,18 @@ Item {
   // component completes.
   onAuthChanged: if (auth) auth.restoreSession()
 
-  // Coalesce image completions into one repaint per interval. Each repaint
-  // rebuilds the whole document with every image fetched so far, and Qt decodes
-  // them on the GUI thread, so a repaint per completion stalls the shell while
-  // a message with many large images loads.
+  // Coalesce image completions into one repaint per interval, backing off from
+  // 100 ms to 3 s. Each repaint rebuilds the whole document with every image
+  // fetched so far, and Qt decodes them on the GUI thread, so a repaint per
+  // completion stalls the shell while a message with many large images loads.
   Timer {
     id: imagePaintTimer
-    interval: 3000
+    interval: root.imagePaintWait
     repeat: false
-    onTriggered: root.flushRemoteImages()
+    onTriggered: {
+      root.flushRemoteImages()
+      root.imagePaintWait = Math.min(root.imagePaintWait * 2, root.imagePaintMaxWait)
+    }
   }
 
   // Only ages the "synced" label; nothing else depends on it.
