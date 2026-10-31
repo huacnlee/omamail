@@ -82,13 +82,20 @@ jobs:
           toolchain: "1.98.1"
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: rustup target add "${{ matrix.target }}"
-      - name: Test and build native static Linux backend
+      - name: Test native static Linux backend
         env:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
           RUSTFLAGS: -C linker=musl-gcc
-        run: |
-          cargo test --locked --features integration-test-credentials
-          cargo build --release --locked
+        run: cargo test --locked --features integration-test-credentials
+      - name: Build native static Linux backend with the shipped Google client
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+          RUSTFLAGS: -C linker=musl-gcc
+          # The shipped Google desktop client is compiled in here and nowhere
+          # else: tests, CI and development builds never see these secrets.
+          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: cargo build --release --locked
       - name: Verify native version and static linkage, then package
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -103,7 +110,7 @@ jobs:
           if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
           if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
           python3 scripts/package-backend.py check-api
-          python3 tests/test_backend_api.py --binary "$binary" --expected-version "$VERSION"
+          python3 tests/test_backend_api.py --binary "$binary" --expected-version "$VERSION" --shipped-google-client
           python3 scripts/package-backend.py package "$binary" "$ARCH" artifact
           python3 scripts/package-backend.py verify artifact --arch "$ARCH"
           python3 scripts/package-backend.py provenance --output artifact/backend-build.json
@@ -137,21 +144,28 @@ jobs:
         run: python3 -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
       - name: Exercise the native Keychain credential contract
         run: cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
-      - name: Test and build the standalone backend and Qt host
+      - name: Test the standalone backend
+        run: cargo test --locked --no-default-features --features standalone,integration-test-credentials
+      - name: Build the standalone backend with the shipped Google client
+        env:
+          # The shipped Google desktop client is compiled in here and nowhere
+          # else: tests, CI and development builds never see these secrets.
+          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: cargo build --release --locked --no-default-features --features standalone
+      - name: Build and test the Qt host
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_CONTROLS_STYLE: Omamail
           QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           set -euo pipefail
-          cargo test --locked --no-default-features --features standalone,integration-test-credentials
-          cargo build --release --locked --no-default-features --features standalone
           cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
           qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
       - name: Package, unpack, and test the macOS archive and installer
         env:
           QT_QPA_PLATFORM: cocoa
@@ -173,7 +187,7 @@ jobs:
           test -s "$ready"
           python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); assert value["version"] == sys.argv[2] and type(value["apiVersion"]) is int' "$ready" "${{ needs.prepare.outputs.version }}"
           test "$("$backend" --version)" = "omamail ${{ needs.prepare.outputs.version }}"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          python3 tests/test_backend_api.py --binary "$backend" --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: app-macos-aarch64
@@ -217,21 +231,28 @@ jobs:
             printf "%s" "synthetic-native-release-password" | gnome-keyring-daemon --unlock --components=secrets --control-directory="$fixture/control"
             cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
           '
-      - name: Test and build the standalone backend and Qt host
+      - name: Test the standalone backend
+        run: cargo test --locked --no-default-features --features standalone,integration-test-credentials
+      - name: Build the standalone backend with the shipped Google client
+        env:
+          # The shipped Google desktop client is compiled in here and nowhere
+          # else: tests, CI and development builds never see these secrets.
+          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: cargo build --release --locked --no-default-features --features standalone
+      - name: Build and test the Qt host
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_CONTROLS_STYLE: Omamail
           QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           set -euo pipefail
-          cargo test --locked --no-default-features --features standalone,integration-test-credentials
-          cargo build --release --locked --no-default-features --features standalone
           cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
           cmake --build build/app
           ctest --test-dir build/app --output-on-failure
           python3 app/tests/test_qml_inventory.py
           qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
       - name: Package, unpack, and test the Linux archive and installer
         env:
           QT_QPA_PLATFORM: offscreen
@@ -253,7 +274,7 @@ jobs:
           test -s "$ready"
           python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); assert value["version"] == sys.argv[2] and type(value["apiVersion"]) is int' "$ready" "${{ needs.prepare.outputs.version }}"
           test "$("$backend" --version)" = "omamail ${{ needs.prepare.outputs.version }}"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          python3 tests/test_backend_api.py --binary "$backend" --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: app-linux-x86_64
@@ -287,7 +308,24 @@ jobs:
         run: |
           cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw "native credential contract failed" }
-      - name: Test and build the standalone backend and Qt host
+      - name: Test the standalone backend
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo test --locked --no-default-features --features standalone,integration-test-credentials
+          if ($LASTEXITCODE -ne 0) { throw "standalone Rust tests failed" }
+      - name: Build the standalone backend with the shipped Google client
+        shell: pwsh
+        env:
+          # The shipped Google desktop client is compiled in here and nowhere
+          # else: tests, CI and development builds never see these secrets.
+          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build --release --locked --no-default-features --features standalone
+          if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
+      - name: Build and test the Qt host
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
@@ -295,10 +333,6 @@ jobs:
           QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
         run: |
           $ErrorActionPreference = "Stop"
-          cargo test --locked --no-default-features --features standalone,integration-test-credentials
-          if ($LASTEXITCODE -ne 0) { throw "standalone Rust tests failed" }
-          cargo build --release --locked --no-default-features --features standalone
-          if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
           cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
           if ($LASTEXITCODE -ne 0) { throw "Qt configuration failed" }
           cmake --build build/app --config Release
@@ -309,7 +343,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
           qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
-          python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
           if ($LASTEXITCODE -ne 0) { throw "backend API contract failed" }
       - name: Package, unpack, and test the Windows archive and installer
         shell: pwsh
@@ -337,7 +371,7 @@ jobs:
           if ([string]$readyValue.version -ne "${{ needs.prepare.outputs.version }}" -or -not $apiIsInteger) { throw "live smoke returned invalid readiness metadata" }
           $reported = & $backend --version
           if ($LASTEXITCODE -ne 0 -or $reported -ne "omamail ${{ needs.prepare.outputs.version }}") { throw "backend version mismatch" }
-          python tests/test_backend_api.py --binary $backend --expected-version "${{ needs.prepare.outputs.version }}" --standalone
+          python tests/test_backend_api.py --binary $backend --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
           if ($LASTEXITCODE -ne 0) { throw "packaged backend API contract failed" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

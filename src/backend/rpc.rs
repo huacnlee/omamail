@@ -126,33 +126,43 @@ async fn one(
     let deadline = deadline + body_allowance(&request);
     // An expired queued request must not start a side effect: timeout_at polls
     // its future before checking the clock.
-    let result = if tokio::time::Instant::now() >= deadline {
-        Err("request_timed_out")
-    } else if request.method.starts_with("gmail.")
-        || (request.method == "request.upload"
-            && request.params["method"]
-                .as_str()
-                .is_some_and(|method| method.starts_with("gmail.")))
-    {
-        tokio::time::timeout_at(deadline, session.dispatch(&request.method, &request.params))
+    let (result, details) = crate::calendar::diagnostics::capture(async {
+        if tokio::time::Instant::now() >= deadline {
+            Err("request_timed_out")
+        } else if request.method.starts_with("gmail.")
+            || (request.method == "request.upload"
+                && request.params["method"]
+                    .as_str()
+                    .is_some_and(|method| method.starts_with("gmail.")))
+        {
+            tokio::time::timeout_at(
+                deadline,
+                Box::pin(session.dispatch(&request.method, &request.params)),
+            )
             .await
             .unwrap_or(Err("request_timed_out"))
-    } else {
-        // Legacy process operations have their own deadlines. Dropping a
-        // spawn_blocking join cannot cancel a running send; await it so quit
-        // remains a completion barrier and never reports a false cancellation.
-        session.dispatch(&request.method, &request.params).await
-    };
+        } else {
+            // Legacy process operations have their own deadlines. Dropping a
+            // spawn_blocking join cannot cancel a running send; await it so quit
+            // remains a completion barrier and never reports a false cancellation.
+            // Keep the multi-provider future off the RPC scope's stack.
+            Box::pin(session.dispatch(&request.method, &request.params)).await
+        }
+    })
+    .await;
     let quit = request.method == "system.quit" && result.is_ok();
     let Id::Present(id) = request.id else {
         return (None, quit);
     };
-    let response = match result {
+    let mut response = match result {
         Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
         Err("unknown_method") => error(id, -32601, "Method not found"),
         Err("invalid_params") => error(id, -32602, "Invalid params"),
         Err(code) => error(id, -32000, code),
     };
+    if let Some(details) = details {
+        response["error"]["data"] = details;
+    }
     (Some(response), quit)
 }
 

@@ -64,6 +64,34 @@ class Diagnostics(unittest.TestCase):
             self.assertIn(code, data)
         self.assertNotIn('unknown_error', data)
 
+    def test_calendar_details_survive_regeneration_without_private_server_fields(self):
+        safe = {'provider': 'google', 'operation': 'import', 'stage': 'request',
+                'httpStatus': 400, 'reason': 'badRequest', 'field': 'start.timeZone'}
+        event = {'method': 'calendar.saveInvitation', 'error': {
+            'code': -32000, 'message': 'calendar_request_failed',
+            'data': dict(safe, message='SECRET', url='SECRET', token='SECRET', requestId='SECRET')}}
+        self.call('record', [event])
+        self.call('record', [])
+        self.call('open')
+        entries = json.loads((self.folder / 'errors.json').read_text())
+        self.assertEqual(entries[0]['data'], safe)
+        report = (self.folder / 'report.txt').read_text()
+        self.assertIn('badRequest', report)
+        self.assertNotIn('SECRET', report)
+        self.assertNotIn('SECRET', (self.root / 'state/launched').read_text())
+
+    def test_calendar_details_reject_arbitrary_values_and_invalid_statuses(self):
+        for value in ['badRequest\r', 'badRequest\n', 'badRequest\r\n', 'badRequest\0',
+                      'badRequest_PRIVATE', 'SECRET "\\日本語', None, {}, [], True]:
+            event = {'method': 'calendar.saveInvitation', 'error': {
+                'message': 'calendar_request_failed',
+                'data': {key: value for key in ['provider', 'operation', 'stage', 'reason', 'field', 'httpStatus']}}}
+            self.call('record', [event])
+        self.call('open')
+        entries = json.loads((self.folder / 'errors.json').read_text())
+        self.assertTrue(all('data' not in entry for entry in entries))
+        self.assertNotIn('SECRET', (self.folder / 'report.txt').read_text())
+
     def test_static_backend_error_vocabulary_does_not_drift(self):
         spec = importlib.util.spec_from_file_location('diagnostics', SCRIPT)
         module = importlib.util.module_from_spec(spec)

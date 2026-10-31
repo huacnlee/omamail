@@ -479,8 +479,9 @@ TestCase {
     compare(composition.service.settings.maxMessages, 17)
     compare(composition.service.notifyNewMail, false)
     compare(composition.service.backendRuntime.bundled, true)
-    compare(composition.service.backendRuntime.requiredApiVersion, 7,
-      "the bundled handshake must require this checkout's API")
+    compare(composition.service.backendRuntime.requiredApiVersion, 9,
+      "the bundled handshake must accept the released API and its unreleased step")
+    compare(composition.service.backendRuntime.latestApiVersion, 10)
     compare(composition.service.backendRuntime.canInstall, false)
     compare(composition.service.backendRuntime.executable, host.backendPath)
     tryCompare(composition.app, "backendUnavailable", true)

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../../components" as Omamail
+import "../../keys/Keymap.js" as Keymap
 
 Item {
   width: 900
@@ -59,6 +60,7 @@ Item {
     function updateEvent(_sourceId, _event, _fields) {
       if (creatingEvent || eventWriting) return false
       updateCalls++
+      createdFields = _fields
       eventWriting = true
       return true
     }
@@ -74,17 +76,25 @@ Item {
     urgentColor: Qt.rgba(1, 0.2, 0.2, 1)
     dimColor: Qt.rgba(0.67, 0.67, 0.67, 1)
     panelFontFamily: "monospace"
+    onKeyPressed: function(event) { router.routeKeyEvent(event) }
   }
+
+  TextEdit { id: clipboardSource; visible: false; textFormat: TextEdit.PlainText }
 
   TestCase {
     Omamail.KeyRouter {
-      context: composer.opened ? (composer.guestSuggestionsOpen ? "eventGuests" : "eventCompose") : ""
+      id: router
+      context: Keymap.contextFor({eventComposing:composer.opened,
+        guestSuggestions:composer.guestSuggestionsOpen,eventDescriptionFocused:composer.descriptionFocused})
       onTriggered: function(id) {
         if (id === "saveEvent") composer.submit("all")
         if (id === "guestNext") composer.moveGuestSuggestion(1)
         if (id === "guestPrevious") composer.moveGuestSuggestion(-1)
         if (id === "guestChoose") composer.chooseGuestSuggestion()
-        if (id === "back") composer.dismissGuestSuggestions()
+        if (id === "back") {
+          if (composer.guestSuggestionsOpen) composer.dismissGuestSuggestions()
+          else composer.close()
+        }
       }
     }
     name: "CalendarEventComposer"
@@ -182,6 +192,74 @@ Item {
       compare(composer.opened,false)
     }
 
+    function test_description_paste_newlines_save_and_reopen() {
+      composer.begin()
+      wait(0)
+      var notes = findChild(composer, "event-description-field")
+      var description = "Agenda\n\n- Review the proposal\n- Bring café notes\n<b>Literal text</b>"
+      clipboardSource.text = description
+      clipboardSource.selectAll()
+      clipboardSource.copy()
+      notes.forceActiveFocus()
+      keyClick(Qt.Key_V, Qt.ControlModifier)
+      compare(composer.notesText(), description)
+      keyClick(Qt.Key_Return)
+      keyClick(Qt.Key_Enter)
+      keyClick(Qt.Key_Return, Qt.ShiftModifier)
+      compare(composer.notesText(), description + "\n\n\n")
+      compare(eventController.createCalls, 0, "line breaks must not submit the event")
+      verify(notes.height > findChild(composer, "event-title-field").height * 2)
+      keyClick(Qt.Key_Return, Qt.ControlModifier)
+      compare(eventController.createCalls, 1)
+      compare(eventController.createdFields.description, description + "\n\n\n")
+      eventController.creatingEvent = false
+      eventController.eventCreated(true, "")
+      composer.beginEdit("google:me@example.com", {summary:"Saved paragraphs",
+        description:eventController.createdFields.description,
+        start:{ms:Date.now()},end:{ms:Date.now()+3600000}})
+      wait(0)
+      compare(composer.notesText(), description + "\n\n\n")
+      notes.forceActiveFocus()
+      notes.cursorPosition = notes.length
+      keyClick(Qt.Key_X)
+      keyClick(Qt.Key_Enter, Qt.ControlModifier)
+      compare(eventController.updateCalls, 1)
+      compare(eventController.createdFields.description, description + "\n\n\nx")
+    }
+
+    function test_long_description_grows_and_keeps_caret_and_save_reachable() {
+      composer.begin()
+      wait(0)
+      var notes = findChild(composer, "event-description-field")
+      var scroll = findChild(composer, "event-composer-scroll")
+      var save = findChild(composer, "event-save-button")
+      var initialHeight = notes.height
+      clipboardSource.text = Array(45).join("A long paragraph that wraps while editing the event details. ")
+        + "\n\n" + Array(40).join("Another line\n")
+      clipboardSource.selectAll()
+      clipboardSource.copy()
+      notes.forceActiveFocus()
+      keyClick(Qt.Key_V, Qt.ControlModifier)
+      tryVerify(function() { return notes.height > initialHeight * 4 })
+      function caretVisible() {
+        var y = notes.mapToItem(scroll, 0, notes.cursorRectangle.y).y
+        return y >= 0 && y + notes.cursorRectangle.height <= scroll.height
+      }
+      tryVerify(caretVisible)
+      keyClick(Qt.Key_Home, Qt.ControlModifier)
+      tryVerify(caretVisible)
+      keyClick(Qt.Key_End, Qt.ControlModifier)
+      tryVerify(caretVisible)
+      verify(save.mapToItem(composer, 0, save.height).y <= composer.height)
+      compare(eventController.createCalls, 0)
+      keyClick(Qt.Key_Tab)
+      verify(!notes.activeFocus, "Tab navigates out of the description")
+      notes.forceActiveFocus()
+      keyClick(Qt.Key_Escape)
+      compare(composer.opened, false)
+      compare(eventController.createCalls, 0)
+    }
+
     function test_save_failure_stays_visible_without_scrolling() {
       composer.begin()
       findChild(composer, "event-title-field").text = "Error visibility"
@@ -238,6 +316,58 @@ Item {
       compare(save.enabled,false)
       findChild(composer,"event-end-date-field").text = "2026-09-09"
       compare(save.enabled,true)
+    }
+
+    function typeField(name, text) {
+      var field = findChild(composer, name)
+      field.forceActiveFocus()
+      field.selectAll()
+      for (var i = 0; i < text.length; i++) keyClick(text[i])
+    }
+
+    function test_start_edit_keeps_duration_through_incomplete_input_and_save() {
+      composer.beginEdit("google:me@example.com", {summary:"Half hour",
+        start:{ms:new Date(2026,9,28,15,0).getTime()},end:{ms:new Date(2026,9,28,15,30).getTime()}})
+      wait(0)
+      typeField("event-start-time-field", "1")
+      compare(findChild(composer,"event-end-time-field").text, "15:30")
+      verify(!composer.dateRange.ok)
+      for (var i = 0; i < "6:00".length; i++) keyClick("6:00"[i])
+      compare(findChild(composer,"event-end-time-field").text, "16:30")
+      keyClick(Qt.Key_Return)
+      compare(eventController.updateCalls, 1)
+      compare(eventController.createdFields.startMs, new Date(2026,9,28,16,0).getTime())
+      compare(eventController.createdFields.endMs, new Date(2026,9,28,16,30).getTime())
+    }
+
+    function test_start_edit_rolls_end_date_and_uses_manually_changed_duration() {
+      composer.beginAt(new Date(2026,9,28,15,0).getTime())
+      wait(0)
+      typeField("event-end-time-field", "15:45")
+      compare(findChild(composer,"event-start-time-field").text, "15:00")
+      typeField("event-start-time-field", "23:45")
+      compare(findChild(composer,"event-end-time-field").text, "00:30")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-29")
+      typeField("event-start-date-field", "2026-10-30")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-31")
+      compare(composer.dateRange.endMs - composer.dateRange.startMs, 45 * 60000)
+      typeField("event-start-time-field", "10:00")
+      compare(findChild(composer,"event-end-time-field").text, "10:45")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-30")
+    }
+
+    function test_start_edit_does_not_shift_all_day_or_invalid_ranges() {
+      composer.beginWith({startMs:new Date(2026,9,28).getTime(),endMs:new Date(2026,9,30).getTime(),allDay:true})
+      wait(0)
+      typeField("event-start-date-field", "2026-10-27")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-29")
+      composer.close()
+      composer.beginAt(new Date(2026,9,28,15,0).getTime())
+      wait(0)
+      typeField("event-end-time-field", "14:00")
+      typeField("event-start-time-field", "13:00")
+      compare(findChild(composer,"event-end-time-field").text, "14:00")
+      verify(composer.dateRange.ok)
     }
 
     // A suggestion from a message opens the form filled in, on the

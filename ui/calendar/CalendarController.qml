@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import "Calendar.js" as Calendar
 import "Sources.js" as Sources
+import "Invitations.js" as Invitations
 import "../providers/MicrosoftOAuth.js" as Microsoft
 import "../backend/Plain.js" as Plain
 
@@ -81,7 +82,8 @@ Item {
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView
-    ? availableSources : Sources.forAccount(availableSources, accountId)
+    ? availableSources : Sources.forAccount(availableSources, accountId,
+      (Invitations.destination(service ? service.settings : null, accountId) || {}).id)
   // One name for every mailbox, because the unified view is one view.
   //
   // A controller with no account is already showing every source — the bar
@@ -120,6 +122,11 @@ Item {
     return root.sourceIncluded(source)
   }).map(function(source) { return String(source.id || "") }).join("\n")
   onEnabledSourceKeyChanged: reloadVisibleRange()
+  Connections {
+    target: root.service
+    ignoreUnknownSignals: true
+    function onInvitationCalendarSaved() { root.reloadVisibleRange() }
+  }
 
   // No `eventCache.loaded` guard, and it is not missing. `refresh` refuses on
   // an unloaded cache and `eventCache.onRestored` runs one as soon as it is
