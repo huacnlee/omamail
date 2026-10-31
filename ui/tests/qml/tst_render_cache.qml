@@ -206,6 +206,30 @@ Item {
       compare(ofMethod("reader.render").length, 2, "the last image paints without waiting for the interval")
     }
 
+    function test_spaced_completions_share_one_intermediate_repaint() {
+      account.selectedId = "message-one"
+      account.readerSourceKey = "native-key"
+      account.remoteImagesAllowed = true
+      account.selectedRemoteImageSources = ["https://example.org/one", "https://example.org/two",
+        "https://example.org/three", "https://example.org/four"]
+      var png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="
+      function ofMethod(method) {
+        return backend.requests.filter(function(call) { return call.method === method })
+      }
+      account.prepareRemoteImages()
+      ofMethod("public.image")[0].callback({data: png}, null)
+      wait(200)
+      ofMethod("public.image")[1].callback({data: png}, null)
+      compare(ofMethod("public.image").length, 3, "the third fetch is still pending")
+      compare(ofMethod("reader.render").length, 0, "the second completion does not repaint on its own")
+      tryVerify(function() { return ofMethod("reader.render").length === 1 }, 5000,
+        "both completed images share one repaint")
+      var shown = ofMethod("reader.render")[0].params.options.remoteImageData
+      compare(Object.keys(shown).sort(), ["https://example.org/one", "https://example.org/two"],
+        "the intermediate render carries exactly the images completed so far")
+      compare(account.remoteImagesLoading, true, "the third and fourth fetches are still outstanding")
+    }
+
     function test_image_policy_change_only_rerenders_the_opaque_native_source() {
       account.selectedId = "message-one"
       account.renderSource("native-key")
