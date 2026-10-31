@@ -1972,7 +1972,7 @@ Item {
           anchors.bottom: parent.bottom
           width: Style.space(250)
           visible: root.calendarPaneShown
-          controller: root.service ? root.service.calendarPaneController : null
+          controller: (root.service && root.service.calendarPaneController) || null
           textColor: root.foreground
           backgroundColor: root.background
           accentColor: root.accent

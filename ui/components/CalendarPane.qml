@@ -6,6 +6,7 @@ import "../calendar/Calendar.js" as Calendar
 // The month and the picked day's events, in a pane at the right of the mail,
 // as Outlook keeps its calendar beside the inbox. A day is picked with a click;
 // a double click, or a click on an event, opens that day in the calendar view.
+// Under the month come the picked day's events and those of the two weeks after.
 // It reads through its own controller, over the weeks the month shows.
 Rectangle {
   id: root
@@ -23,13 +24,39 @@ Rectangle {
 
   color: backgroundColor
 
-  readonly property string todayIso: Calendar.isoDate(new Date())
+  // Set rather than bound: a binding on `new Date()` is worked out once and
+  // would keep yesterday as today in a window left open overnight.
+  property string todayIso: Calendar.isoDate(new Date())
   property string selectedIso: todayIso
+  function checkToday() {
+    var now = Calendar.isoDate(new Date())
+    if (now === todayIso) return
+    // The picked day moves on with today when it was today.
+    if (selectedIso === todayIso) selectedIso = now
+    var month = new Date(visibleMonth)
+    var wasThisMonth = Calendar.isoDate(new Date(month.getFullYear(), month.getMonth(), 1)).slice(0, 7)
+      === todayIso.slice(0, 7)
+    todayIso = now
+    if (wasThisMonth) visibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  }
   property date visibleMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   readonly property var days: Calendar.monthGridDays(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
   readonly property var events: controller ? controller.events : []
-  readonly property var selectedDay: dayOf(selectedIso)
-  readonly property var selectedEvents: Calendar.eventsOnDay(events, selectedDay)
+  // The picked day, then the days after it that have something on, as
+  // Outlook lists what is coming under its month.
+  readonly property int agendaSpan: 14
+  readonly property var agendaDays: {
+    var list = []
+    var parts = String(selectedIso).split("-").map(Number)
+    for (var i = 0; i < agendaSpan; i++) {
+      var date = new Date(parts[0], parts[1] - 1, parts[2] + i)
+      var day = dayOf(Calendar.isoDate(date))
+      var dayEvents = Calendar.eventsOnDay(events, day)
+      if (i === 0 || dayEvents.length > 0)
+        list.push({ day: day, events: dayEvents, first: i === 0 })
+    }
+    return list
+  }
   readonly property var weekdayNames: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
   readonly property var monthNames: ["January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"]
@@ -45,7 +72,10 @@ Rectangle {
 
   function refresh() {
     if (!visible || !controller || !controller.sourcesLoaded || days.length === 0) return
-    controller.refresh(days[0].startMs, days[days.length - 1].endMs)
+    // Far enough for the days listed after the picked one, which may run
+    // past the last week the month shows.
+    var agendaEnd = dayOf(selectedIso).startMs + agendaSpan * 86400000 + 86400000
+    controller.refresh(days[0].startMs, Math.max(days[days.length - 1].endMs, agendaEnd))
   }
 
   function moveMonth(offset) {
@@ -62,10 +92,14 @@ Rectangle {
     return Calendar.eventsOnDay(events, day).length > 0
   }
 
-  function dayTitle() {
-    var date = selectedDay.date
+  function dayTitle(day) {
+    var date = day.date
     var title = dayNames[date.getDay()] + " " + date.getDate() + " " + monthNames[date.getMonth()]
-    return selectedIso === todayIso ? "Today · " + title : title
+    if (day.isoDate === todayIso) return "Today · " + title
+    var tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    if (day.isoDate === Calendar.isoDate(tomorrow)) return "Tomorrow · " + title
+    return title
   }
 
   function eventTime(event) {
@@ -75,10 +109,11 @@ Rectangle {
   }
 
   onVisibleMonthChanged: Qt.callLater(refresh)
-  onVisibleChanged: if (visible) Qt.callLater(refresh)
+  onSelectedIsoChanged: Qt.callLater(refresh)
+  onVisibleChanged: if (visible) { checkToday(); Qt.callLater(refresh) }
   onControllerChanged: Qt.callLater(refresh)
   Connections {
-    target: root.controller
+    target: root.controller || null
     ignoreUnknownSignals: true
     function onSourcesLoadedChanged() { Qt.callLater(root.refresh) }
   }
@@ -87,11 +122,11 @@ Rectangle {
     interval: 5 * 60 * 1000
     repeat: true
     running: root.visible
-    onTriggered: root.refresh()
+    onTriggered: { root.checkToday(); root.refresh() }
   }
 
   CalendarPalette {
-    id: palette
+    id: calendarColors
     palettePath: root.controller && root.controller.service
       ? String(root.controller.service.calendarPalettePath || "") : ""
     textColor: root.textColor
@@ -252,17 +287,6 @@ Rectangle {
       height: 1
       color: root.borderColor
     }
-
-    Text {
-      objectName: "calendar-pane-day"
-      width: parent.width
-      text: root.dayTitle()
-      elide: Text.ElideRight
-      color: root.textColor
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.bodySmall
-      font.bold: true
-    }
   }
 
   Flickable {
@@ -281,79 +305,101 @@ Rectangle {
     Column {
       id: agendaColumn
       width: agenda.width
-      spacing: Style.space(6)
-
-      Text {
-        visible: root.selectedEvents.length === 0
-        width: parent.width
-        text: root.controller && root.controller.loading ? "Loading…" : "Nothing planned"
-        color: root.dimColor
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
+      spacing: Style.space(12)
 
       Repeater {
-        model: root.selectedEvents
-        Rectangle {
-          id: eventRow
+        model: root.agendaDays
+        Column {
+          id: dayBlock
           required property var modelData
-          readonly property color eventColor: palette.colorFor(
-            root.controller ? root.controller.colorKeyFor(modelData.sourceId) : "")
+          required property int index
           width: agendaColumn.width
-          height: eventText.height + Style.space(10)
-          radius: Math.min(4, Style.cornerRadius)
-          color: eventMouse.containsMouse ? Qt.alpha(eventColor, 0.22) : Qt.alpha(eventColor, 0.12)
+          spacing: Style.space(6)
 
-          Rectangle {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: Style.space(3)
-            color: eventRow.eventColor
+          Text {
+            objectName: dayBlock.index === 0 ? "calendar-pane-day" : ""
+            width: parent.width
+            text: root.dayTitle(dayBlock.modelData.day)
+            elide: Text.ElideRight
+            color: dayBlock.modelData.first ? root.textColor : root.dimColor
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
           }
 
-          Column {
-            id: eventText
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: Style.space(10)
-            anchors.rightMargin: Style.space(6)
-
-            Text {
-              width: parent.width
-              text: root.eventTime(eventRow.modelData)
-              color: root.dimColor
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-            Text {
-              width: parent.width
-              text: String(eventRow.modelData.summary || "")
-              textFormat: Text.PlainText
-              elide: Text.ElideRight
-              color: root.textColor
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-            Text {
-              width: parent.width
-              visible: text !== ""
-              text: String(eventRow.modelData.location || "")
-              textFormat: Text.PlainText
-              elide: Text.ElideRight
-              color: root.dimColor
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
+          Text {
+            visible: dayBlock.modelData.events.length === 0
+            width: parent.width
+            text: root.controller && root.controller.loading ? "Loading…" : "Nothing planned"
+            color: root.dimColor
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
           }
 
-          MouseArea {
-            id: eventMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.openDay(root.selectedDay.date)
+          Repeater {
+            model: dayBlock.modelData.events
+            Rectangle {
+              id: eventRow
+              required property var modelData
+              readonly property color eventColor: calendarColors.colorFor(
+                root.controller ? root.controller.colorKeyFor(modelData.sourceId) : "")
+              width: dayBlock.width
+              height: eventText.height + Style.space(10)
+              radius: Math.min(4, Style.cornerRadius)
+              color: eventMouse.containsMouse ? Qt.alpha(eventColor, 0.22) : Qt.alpha(eventColor, 0.12)
+
+              Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: Style.space(3)
+                color: eventRow.eventColor
+              }
+
+              Column {
+                id: eventText
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(10)
+                anchors.rightMargin: Style.space(6)
+
+                Text {
+                  width: parent.width
+                  text: root.eventTime(eventRow.modelData)
+                  color: root.dimColor
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                Text {
+                  width: parent.width
+                  text: String(eventRow.modelData.summary || "")
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  color: root.textColor
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Text {
+                  width: parent.width
+                  visible: text !== ""
+                  text: String(eventRow.modelData.location || "")
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  color: root.dimColor
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+              }
+
+              MouseArea {
+                id: eventMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.openDay(dayBlock.modelData.day.date)
+              }
+            }
           }
         }
       }
