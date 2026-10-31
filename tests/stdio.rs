@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -15,13 +15,26 @@ impl Sandbox {
         std::fs::create_dir(&path).unwrap();
         Self(path)
     }
-    fn command(&self) -> Command {
+    fn spawn(&self) -> Child {
+        // Darwin creates pipes and sets FD_CLOEXEC in separate syscalls. A
+        // concurrent spawn can inherit another test's still-unmarked pipe,
+        // keeping its output readable after that test closes the reader.
+        // Serialize only creation; the backend processes still run in parallel.
+        #[cfg(target_os = "macos")]
+        static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        #[cfg(target_os = "macos")]
+        let _spawn = SPAWN.lock().unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_omamail"));
         command
             .env("HOME", &self.0)
             .env("XDG_CONFIG_HOME", self.0.join("config"))
-            .env("XDG_CACHE_HOME", self.0.join("cache"));
-        command
+            .env("XDG_CACHE_HOME", self.0.join("cache"))
+            .arg("serve")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
     }
 }
 impl Drop for Sandbox {
@@ -33,14 +46,7 @@ impl Drop for Sandbox {
 #[test]
 fn fragmented_input_and_bytes_before_eof_are_preserved() {
     let sandbox = Sandbox::new();
-    let mut child = sandbox
-        .command()
-        .arg("serve")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = sandbox.spawn();
     let mut input = child.stdin.take().unwrap();
     input.write_all(b"{\"jsonrpc\":\"2.0\",").unwrap();
     std::thread::sleep(Duration::from_millis(20));
@@ -57,22 +63,28 @@ fn fragmented_input_and_bytes_before_eof_are_preserved() {
 
 #[test]
 fn broken_output_stops_backend_while_input_remains_open() {
+    broken_output_stops_backend(1);
+}
+
+#[test]
+fn broken_output_stops_backend_with_queued_requests() {
+    // Exceed both bounded channels while keeping stdin open. The writer must
+    // release its response receiver so dispatch and input backpressure unwind.
+    broken_output_stops_backend(64);
+}
+
+fn broken_output_stops_backend(requests: usize) {
     let sandbox = Sandbox::new();
-    let mut child = sandbox
-        .command()
-        .arg("serve")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = sandbox.spawn();
     let mut input = child.stdin.take().unwrap();
     drop(child.stdout.take().unwrap());
-    writeln!(
-        input,
-        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"system.info\"}}"
-    )
-    .unwrap();
+    input
+        .write_all(
+            b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"system.info\"}\n"
+                .repeat(requests)
+                .as_slice(),
+        )
+        .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -92,14 +104,7 @@ fn broken_output_stops_backend_while_input_remains_open() {
 #[test]
 fn backend_replies_before_eof_and_drains_requests_before_quit() {
     let sandbox = Sandbox::new();
-    let mut child = sandbox
-        .command()
-        .arg("serve")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = sandbox.spawn();
     let mut input = child.stdin.take().unwrap();
     let output = child.stdout.take().unwrap();
     let (sender, receiver) = mpsc::channel();
