@@ -40,6 +40,34 @@ fn newest_copy_owns_scope_and_older_copy_can_supply_search_fields() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0]["dateMs"], 20);
 }
+
+#[test]
+fn cached_search_matches_all_words_across_fields_and_keeps_newest_flags() {
+    let store = json!({"queries":{
+        "in:inbox|25":{"at":1,"summaries":[
+            {"id":"older","dateMs":10,"subject":"Quarterly invoice","from":{"display":"Jane Doe"},"to":[{"email":"buyer@example.org"}],"unread":true},
+            {"id":"newer","dateMs":20,"subject":"Invoice approved","snippet":"Jane signed it"}
+        ]},
+        "is:unread|25":{"at":2,"summaries":[
+            {"id":"older","dateMs":10,"subject":"Quarterly invoice","from":{"display":"Jane Doe"},"unread":false}
+        ]}
+    }});
+    let found = search(&store, "jane invoice", "gmail");
+    assert_eq!(
+        found
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["newer", "older"]
+    );
+    assert_eq!(found[1]["unread"], false);
+    for query in ["buyer@example.org", "\"quarterly invoice\""] {
+        let found = search(&store, query, "gmail");
+        assert_eq!(found.len(), 1, "{query}");
+        assert_eq!(found[0]["id"], "older");
+    }
+    assert!(search(&store, "", "gmail").is_empty());
+}
 #[test]
 fn page_caps_close_pagination_and_prunes_old_queries() {
     let rows: Vec<_> = (0..101)
