@@ -10,6 +10,14 @@ Claude Code, or whatever you use at this checkout, describe what went wrong,
 and let it read the code — the working agreements it needs are in
 [AGENTS.md](AGENTS.md), which both of those read on their own.
 
+## Write for people
+
+Write issue reports, pull request titles and descriptions, reviews and discussion comments for human readers, including when an agent writes them. Keep them clear, concise and easy to understand without knowing the implementation. Lead with the problem or conclusion, explain why it matters, and make any requested action or decision clear.
+
+Use everyday words and short sentences. Avoid unnecessary jargon and abbreviations; explain technical terms when they are needed. For example, say "show the remaining pictures as soon as all downloads finish" rather than "flush on queue drain".
+
+Include the reasoning, important tradeoffs and evidence needed to understand the change or make a decision. Link to code, tests or logs for implementation details instead of walking through every function and file. Readers can explore those details themselves or with their agents; they should not have to do that to understand the main point. Keep required reproduction steps, verification results and security findings in the report.
+
 ## You found a bug
 
 1. Reproduce it, and write down the smallest way to.
