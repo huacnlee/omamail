@@ -551,6 +551,8 @@ fn the_prepared_cache_evicts_the_least_recently_used_first() {
     assert!(cache.get(&[33; 32]).is_some());
 }
 
+const BUDGET: u64 = 512 * 1024 * 1024;
+
 // Counts heap use on the one thread that switched it on, so concurrent tests
 // do not disturb a measurement.
 mod counting {
@@ -620,12 +622,12 @@ static ALLOCATOR: counting::Counting = counting::Counting;
 
 #[test]
 fn an_over_budget_image_is_refused_before_anything_is_allocated() {
-    // 81 MP of 16-bit RGBA, and 80 MP of 8-bit RGB (under the pixel limit, over
+    // 81 MP of 16-bit RGBA, and 96 MP of 8-bit RGB (under the pixel limit, over
     // the budget once the resize's working memory is counted): a few dozen
     // bytes of file each.
     for bomb in [
         png_header(9000, 9000, 16, 6),
-        png_header(10_000, 8000, 8, 2),
+        png_header(12_000, 8000, 8, 2),
     ] {
         let (outcome, peak) = counting::peak_of(|| downscale::prepare("image/png", &bomb));
         assert!(matches!(outcome, Err("public_image_refused")));
@@ -636,8 +638,8 @@ fn an_over_budget_image_is_refused_before_anything_is_allocated() {
 #[test]
 fn an_accepted_image_never_exceeds_the_allocation_budget() {
     // Real work with the locked `image` version: the peak of the whole decode,
-    // resize and encode has to stay inside what the guard promised, for each
-    // sample type the guard prices from the header.
+    // resize and encode has to stay inside the budget for every image the guard
+    // accepts, for each sample type and shape it prices from the header.
     for (picture, format) in [
         (gradient(3000, 2400, false), image::ImageFormat::Jpeg),
         (gradient(3000, 2400, false), image::ImageFormat::Png),
@@ -648,6 +650,13 @@ fn an_accepted_image_never_exceeds_the_allocation_budget() {
             })),
             image::ImageFormat::Png,
         ),
+        // Tall: the resize intermediate is as wide as the source.
+        (
+            image::DynamicImage::ImageRgba16(image::ImageBuffer::from_fn(1600, 18_000, |x, y| {
+                image::Rgba([(x * 40) as u16, (y * 3) as u16, 9, 50_000])
+            })),
+            image::ImageFormat::Png,
+        ),
     ] {
         let mime = if format == image::ImageFormat::Jpeg {
             "image/jpeg"
@@ -655,14 +664,11 @@ fn an_accepted_image_never_exceeds_the_allocation_budget() {
             "image/png"
         };
         let bytes = encoded(&picture, format);
-        let pixels = u64::from(picture.width()) * u64::from(picture.height());
-        let promised = picture.as_bytes().len() as u64 + 64 * 1024 * 1024 + pixels * 3;
-        assert!(promised <= 512 * 1024 * 1024);
         let (outcome, peak) = counting::peak_of(|| downscale::prepare(mime, &bytes));
         assert!(matches!(outcome, Ok(downscale::Prepared::Smaller(_))));
         assert!(
-            (peak as u64) <= promised,
-            "{mime} {}x{}: peak {peak} bytes, guard priced {promised}",
+            (peak as u64) <= BUDGET,
+            "{mime} {}x{}: peak {peak} bytes, budget {BUDGET}",
             picture.width(),
             picture.height()
         );
@@ -671,18 +677,67 @@ fn an_accepted_image_never_exceeds_the_allocation_budget() {
 
 #[test]
 fn an_accepted_interlaced_png_never_exceeds_the_allocation_budget() {
-    // The largest 8-bit RGB size the guard accepts when it prices the
-    // interlaced assembly buffer: 7200 x 7200 is 51.8 MP, 509 MiB of the 512.
-    let (width, height) = (7200, 7200);
-    let bytes = interlaced_png(width, height);
-    let pixels = u64::from(width) * u64::from(height);
-    let promised = 2 * pixels * 3 + 64 * 1024 * 1024 + pixels * 3;
-    assert!(promised <= 512 * 1024 * 1024);
-    assert!(promised > 500 * 1024 * 1024, "not near the boundary");
+    // The decoder assembles an interlaced file in a second full-size buffer.
+    let bytes = interlaced_png(7200, 7200);
     let (outcome, peak) = counting::peak_of(|| downscale::prepare("image/png", &bytes));
     assert!(matches!(outcome, Ok(downscale::Prepared::Smaller(_))));
     assert!(
-        (peak as u64) <= promised,
-        "interlaced {width}x{height}: peak {peak} bytes, guard priced {promised}"
+        (peak as u64) <= BUDGET,
+        "interlaced 7200x7200: peak {peak} bytes, budget {BUDGET}"
     );
+}
+
+// A progressive JPEG keeps a coefficient for every component of every pixel.
+fn progressive_jpeg(picture: &image::RgbImage) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut encoder = jpeg_encoder::Encoder::new(&mut out, 90);
+    encoder.set_progressive(true);
+    encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_4_4);
+    encoder
+        .encode(
+            picture.as_raw(),
+            picture.width() as u16,
+            picture.height() as u16,
+            jpeg_encoder::ColorType::Rgb,
+        )
+        .unwrap();
+    out
+}
+
+#[test]
+fn an_accepted_progressive_jpeg_never_exceeds_the_allocation_budget() {
+    let picture = gradient(4000, 3000, false).to_rgb8();
+    let bytes = progressive_jpeg(&picture);
+    assert!(bytes.windows(2).any(|pair| pair == [0xff, 0xc2]));
+    let (outcome, peak) = counting::peak_of(|| downscale::prepare("image/jpeg", &bytes));
+    assert!(matches!(outcome, Ok(downscale::Prepared::Smaller(_))));
+    assert!(
+        (peak as u64) <= BUDGET,
+        "progressive 4000x3000: peak {peak} bytes, budget {BUDGET}"
+    );
+}
+
+#[test]
+fn images_whose_peak_passes_the_budget_are_refused_before_decoding() {
+    // Cases found over 512 MiB with a guard that priced the resize and the
+    // coefficients by pixel count alone: a tall 16-bit PNG, whose resize
+    // intermediate is as wide as the source, and a large progressive JPEG.
+    // Only the header is real; refusal must not decode anything.
+    let mut progressive = progressive_jpeg(&gradient(64, 64, false).to_rgb8());
+    let at = progressive
+        .windows(2)
+        .position(|pair| pair == [0xff, 0xc2])
+        .unwrap();
+    progressive[at + 5..at + 9].copy_from_slice(&[0x20, 0x00, 0x20, 0x00]);
+    for (mime, bomb) in [
+        ("image/png", png_header(1600, 26_500, 16, 6)),
+        ("image/jpeg", progressive),
+    ] {
+        let (outcome, peak) = counting::peak_of(|| downscale::prepare(mime, &bomb));
+        assert!(matches!(outcome, Err("public_image_refused")), "{mime}");
+        assert!(
+            peak < 4 * 1024 * 1024,
+            "{mime}: refusal allocated {peak} bytes"
+        );
+    }
 }

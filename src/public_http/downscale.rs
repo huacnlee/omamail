@@ -30,13 +30,21 @@ const MAX_PIXELS: u64 = 4_000_000;
 const MAX_SOURCE_PIXELS: u64 = 100_000_000;
 /// Peak heap one decode and resize may use.
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
-/// What the decode and resize hold beyond the decoded pixels: a fixed part and
-/// a part per pixel, whatever the sample type. Measured with `image` 0.25.10 on
-/// JPEG and PNG, 8 and 16 bit, 12 to 80 MP, as about 60 MiB plus 1.8 bytes a
-/// pixel (the pixel share is a fit; small images carry the fixed part), rounded
-/// up. `an_accepted_image_never_exceeds_the_allocation_budget` re-checks it.
+/// Heap held beyond the decoded pixels, measured with `image` 0.25.10 on JPEG
+/// and PNG, 8 and 16 bit, 24 to 67 MP, square, tall and wide. The decode and the
+/// resize run one after the other, so the larger of the two counts:
+/// - the resize keeps its intermediate (the source width by the target height)
+///   as four `f32` channels whatever the image holds, 16 bytes a pixel;
+/// - an interlaced PNG is assembled in a second full-size buffer, and a
+///   progressive JPEG keeps a 16-bit coefficient per component and pixel.
+///
+/// `WORKING_FIXED` covers the rest (the output, the encoder, allocator slack);
+/// the largest overshoot measured past the other terms was 32 MiB.
+/// `an_accepted_image_never_exceeds_the_allocation_budget` and its siblings
+/// re-check the price.
 const WORKING_FIXED: u64 = 64 * 1024 * 1024;
-const WORKING_BYTES_PER_PIXEL: u64 = 3;
+const RESIZE_BYTES_PER_PIXEL: u64 = 16;
+const COEFFICIENT_BYTES: u64 = 2;
 const JPEG_QUALITY: u8 = 90;
 const CACHE_BYTES: usize = 32 * 1024 * 1024;
 const CACHE_ENTRIES: usize = 512;
@@ -162,6 +170,27 @@ fn target(width: u32, height: u32) -> Option<(u32, u32)> {
     Some((scaled(width), scaled(height)))
 }
 
+/// The component count of a progressive JPEG, from its start-of-frame header.
+fn progressive_components(data: &[u8]) -> Option<u64> {
+    let mut at = 2;
+    while at + 4 <= data.len() {
+        if data[at] != 0xff {
+            return None;
+        }
+        let marker = data[at + 1];
+        match marker {
+            0xff => at += 1,
+            0x01 | 0xd0..=0xd9 => at += 2,
+            // A scan before any frame header: not a JPEG this reads.
+            0xda => return None,
+            0xc2 | 0xc6 | 0xca | 0xce => return data.get(at + 9).map(|n| u64::from(*n)),
+            0xc0..=0xcf if marker != 0xc4 && marker != 0xc8 && marker != 0xcc => return None,
+            _ => at += 2 + usize::from(u16::from_be_bytes([data[at + 2], data[at + 3]])),
+        }
+    }
+    None
+}
+
 fn limit_error() -> ImageError {
     ImageError::Limits(image::error::LimitError::from_kind(
         image::error::LimitErrorKind::InsufficientMemory,
@@ -176,15 +205,7 @@ fn shrink(format: ImageFormat, data: &[u8]) -> Result<Option<Vec<u8>>, ImageErro
     let mut decoder = reader.into_decoder()?;
     let (width, height) = decoder.dimensions();
     let pixels = u64::from(width) * u64::from(height);
-    // Refuse before decoding anything if the peak would pass the budget. An
-    // interlaced PNG is assembled in a second full-size buffer.
-    let total = decoder.total_bytes();
-    let interlaced = format == ImageFormat::Png && data.get(28) == Some(&1);
-    let needed = total
-        .saturating_mul(if interlaced { 2 } else { 1 })
-        .saturating_add(WORKING_FIXED)
-        .saturating_add(pixels.saturating_mul(WORKING_BYTES_PER_PIXEL));
-    if pixels > MAX_SOURCE_PIXELS || needed > MAX_ALLOC {
+    if pixels > MAX_SOURCE_PIXELS {
         return Err(limit_error());
     }
     let orientation = decoder.orientation()?;
@@ -198,10 +219,24 @@ fn shrink(format: ImageFormat, data: &[u8]) -> Result<Option<Vec<u8>>, ImageErro
     let Some((wide, high)) = target(shown.0, shown.1) else {
         return Ok(None);
     };
-    let mut picture = DynamicImage::from_decoder(decoder)?;
     // Resize first and rotate the small copy, so the rotation never holds a
     // second full-size buffer.
     let (wide, high) = if turned { (high, wide) } else { (wide, high) };
+    // Refuse before decoding anything if the peak would pass the budget.
+    let total = decoder.total_bytes();
+    let decoding = if format == ImageFormat::Png && data.get(28) == Some(&1) {
+        total
+    } else {
+        progressive_components(data).map_or(0, |n| pixels * n * COEFFICIENT_BYTES)
+    };
+    let resizing = u64::from(width) * u64::from(high) * RESIZE_BYTES_PER_PIXEL;
+    let needed = total
+        .saturating_add(decoding.max(resizing))
+        .saturating_add(WORKING_FIXED);
+    if needed > MAX_ALLOC {
+        return Err(limit_error());
+    }
+    let mut picture = DynamicImage::from_decoder(decoder)?;
     picture = picture.resize_exact(wide, high, FilterType::CatmullRom);
     picture.apply_orientation(orientation);
     let mut out = Vec::new();
