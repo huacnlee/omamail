@@ -2,15 +2,18 @@
 
 Open Settings and choose Add mailbox, then select your provider.
 
-**Gmail** signs in with Google directly. Released builds include an OAuth
-client, so signing in needs no setup. A development build ships none: create
-your own client once and the setup page walks through it. Your own client
-always takes precedence over the included one, for your own quota and consent
-screen. In exchange Gmail gets labels, conversations, Gmail's own search
-syntax, and a "report spam" that Google actually learns from.
+**Gmail** signs in with Google directly. Released builds include an OAuth client for setup-free sign-in; a personal client takes precedence over the included one. On Linux, the Omarchy plugin can create your own personal OAuth client automatically: enter your Google address, select your browser, and choose **Connect Gmail...**. The helper checks for the selected Google account in that browser. If needed it opens Google sign-in and waits for you to finish, then continues automatically. An existing Gmail login is reused without requiring a separate Cloud Console login. The helper creates a project, enables Gmail and Calendar, configures Google's owner-only PERSONAL mode, and saves the Desktop client. Google’s permission page opens automatically after setup for mailbox permissions. Each owner needs their own personal client; it cannot be reused for another Google account. The existing Gmail provider supplies labels, conversations, Gmail's search syntax, and spam reporting.
 
-Calendar rides the same sign-in but is a separate API. With your own client,
-enable **Google Calendar API** in the Cloud project too, alongside Gmail API, from
+Automatic setup requires Google Cloud CLI and uv on PATH. **Install setup tools...** opens a terminal to install missing packages; complete any package or password prompts there and setup checks the tools again automatically. The installer remains active while the terminal is working and keeps a failed installation visible for diagnosis. On Omarchy, you can also install them yourself with `omarchy pkg aur add google-cloud-cli` and `omarchy pkg add uv`. The first run prepares an isolated Python environment through uv. Google may require ordinary account sign-in or acceptance of its Cloud terms; organization policy and project quotas still apply. Console endpoints are undocumented and may change. Choose **Use an existing client instead...** for the manual workflow, including on other platforms.
+
+Google session cookies are queried from the selected browser's existing cookie database only when you start setup, using a read-only SQLite connection with normal locking. SQL selects Google domains before values are returned to the helper or decrypted. No database snapshot, backup copy, lock bypass, or browser session-file fallback is used. The helper holds selected cookie values in memory for Google requests and does not write them to its checkpoints or logs. SQLite may create or update its shared-memory index and lock metadata (`-shm`) during a normal WAL read; this bookkeeping is not a cookie-value copy, and the cookie database and WAL content are not modified. The pinned browser-cookie3 dependency supplies Chromium key derivation and decryption only; its database and session loaders are never invoked. Locked databases, unsupported schemas or encryption, and decryption errors stop setup without a copying fallback. Unlock the desktop keyring or close the selected browser and retry, or use manual setup.
+
+Edge, Chrome, Chromium, and Brave use the selected profile's persisted cookies. Firefox reads only `cookies.sqlite` for the selected profile and excludes container and private-session identities; it never reads `sessionstore.js` or recovery files. Firefox sign-in must be saved in the ordinary profile database, so a login held only in session recovery data is unavailable to automatic setup. Other browser profiles or installations can be selected by entering their cookie database path; an ambiguous Firefox default requires an explicit selection. The synthetic cookie tests cover these readers and their failure/cancellation boundaries; they do not establish compatibility with every browser version or keyring configuration.
+
+Retries reuse an owner-only checkpoint under `$XDG_CONFIG_HOME/omamail/google-setup-<account-hash>.json` (default `~/.config/omamail`). A process lock prevents overlapping automatic setups. Existing named client entries are preserved and a different client for the same account is never overwritten. If client creation succeeds remotely but the process stops before saving its secret, automatic setup refuses to create a duplicate; recover the client through manual setup. Cancelling stops local work; it does not delete the Cloud project. No billing account is linked. Long-term token lifetime in PERSONAL mode has not yet been measured.
+
+For manual setup, Calendar rides the same sign-in but is a separate API: enable **Google
+Calendar API** in the Cloud project too, alongside Gmail API, from
 [the API library](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com)
 or `gcloud services enable calendar-json.googleapis.com`. Skipping this step
 does not surface as a missing-permission message — the calendar panel just

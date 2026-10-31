@@ -215,6 +215,7 @@ Item {
 
   TestCase {
     name: "AppNavigation"
+    SignalSpy { id: nativeVisibility; signalName: "visibleChanged" }
     when: windowShown
 
     function named(item, objectName) {
@@ -273,6 +274,7 @@ Item {
       mailService.noCalendars = false
       mailService.selectedBody = ({ text: "Original body", source: "plain" })
       fakeAuth.credentialsPresent = false
+      fakeAuth.credentialsWriteBusy = false
       fakeShell.hidden = []
       app.opened = true
       app.cursorId = ""
@@ -953,6 +955,45 @@ Item {
       app.back()
       compare(kinds(), "calendar,settings")
       compare(view.contentY, calendars, "a return keeps the scroll")
+    }
+
+    function test_native_close_keeps_setup_visible_until_client_write_finishes() {
+      app.chooseProvider("gmail")
+      fakeAuth.credentialsWriteBusy = true
+      var win = having(app, function(it) { return it.title === "Omamail" })
+      verify(win)
+      tryCompare(win, "visible", true)
+      win.visible = false
+      tryCompare(win, "visible", true)
+      compare(fakeShell.hidden.length, 0)
+      compare(app.page, "setup")
+      fakeAuth.credentialsWriteBusy = false
+      win.visible = false
+      compare(fakeShell.hidden.length, 1)
+      // This fake shell records hide without changing app.opened. Restore the
+      // window so the next test starts with a rendered, focusable surface.
+      win.visible = true
+    }
+
+    function test_native_closed_signal_obeys_the_setup_guard_and_notifies_the_host() {
+      app.chooseProvider("gmail")
+      var win = having(app, function(it) { return it.title === "Omamail" })
+      verify(win)
+      fakeAuth.credentialsWriteBusy = true
+      nativeVisibility.target = win
+      nativeVisibility.clear()
+      win.closed()
+      compare(fakeShell.hidden.length, 0, "a write keeps ownership of the window")
+      // Quickshell can report native closure while its requested visibility is
+      // still true. Recovery must reset that request, not assign true again.
+      tryCompare(nativeVisibility, "count", 2)
+      verify(win.visible)
+      compare(fakeShell.hidden.length, 0, "deferred recovery cannot retire the owner")
+      verify(fakeAuth.credentialsWriteBusy)
+      nativeVisibility.target = null
+      fakeAuth.credentialsWriteBusy = false
+      win.closed()
+      compare(fakeShell.hidden.length, 1, "native close must notify the host even without visibleChanged")
     }
 
     function test_editing_an_account_from_settings_returns_to_settings() {

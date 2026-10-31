@@ -460,4 +460,27 @@ deepEqual(credentials.accountIds(damaged), ["three@work.com"])
     "nothing configured stays nothing")
 }
 
+// PERSONAL clients stay bound to their owner, including after a file round trip.
+{
+  var personalClient = { clientId: "333-personal.apps.googleusercontent.com",
+    clientSecret: "synthetic-secret", projectId: "synthetic-project",
+    personal: true, ownerEmail: "owner@example.com" }
+  var personalStore = credentials.withAccount(credentials.emptyStore(), "owner@example.com", personalClient)
+  var personalText = credentials.serialize(personalStore)
+  assert.strictEqual(credentials.effective(personalText, "owner@example.com").personal, true)
+  assert.strictEqual(credentials.effective(personalText, "owner@example.com").ownerEmail, "owner@example.com")
+  assert.strictEqual(credentials.effective(personalText, "other@example.com").clientId, "")
+  assert.strictEqual(credentials.effective(personalText, "").clientId, "")
+  assert.strictEqual(credentials.effective(personalText, "owner@example.com", shipped).clientId, personalClient.clientId)
+  assert.strictEqual(credentials.usingBuiltin(personalText, "owner@example.com", shipped), false)
+  assert.strictEqual(credentials.effective(personalText, "other@example.com", shipped).clientId, shipped.clientId)
+  assert.strictEqual(credentials.usingBuiltin(personalText, "other@example.com", shipped), true)
+  var wrongOwner = credentials.withAccount(credentials.emptyStore(), "other@example.com", personalClient)
+  assert.strictEqual(credentials.forAccount(wrongOwner, "other@example.com").clientId, "")
+  var mixed = credentials.withAccount(personalStore, "shared@example.com",
+    {clientId: "444-shared.apps.googleusercontent.com", clientSecret: "synthetic-shared"})
+  assert.strictEqual(credentials.effective(credentials.serialize(mixed), "new@example.com").clientId,
+    "444-shared.apps.googleusercontent.com")
+}
+
 console.log("test_credentials.js ok")

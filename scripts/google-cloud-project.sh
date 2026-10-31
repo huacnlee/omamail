@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Optional shortcut for the Google Cloud half of the setup.
 #
-# gcloud can do exactly two of the four steps: create the project and enable
+# This manual helper uses the public CLI to create the project and enable
 # the Gmail API. The OAuth consent screen for external users and the Desktop
 # app client have no CLI and no public API — `gcloud iam oauth-clients` builds
 # Workforce Identity Federation apps, which is a different object, and
 # `gcloud alpha iap oauth-brands` only produces org-internal brands that a
 # personal Gmail account cannot use.
 #
-# So this script does the automatable half and then opens the console on the
+# The experimental google-personal-setup.py helper can also create an owner-only
+# consent screen and Desktop client through undocumented Console HTTP APIs.
+# This script uses the public CLI and then opens the console on the
 # right pages *with the project already selected*, which is where most of the
 # fumbling happens.
 set -euo pipefail
@@ -70,7 +72,8 @@ clients_url="https://console.cloud.google.com/auth/clients/create?project=$proje
 
 cat <<EOF
 
-Done with the part gcloud can do. Two steps are left, and both are console-only:
+Done with the public CLI steps. Complete the following manual steps in the console,
+or use automatic personal setup in Omamail instead:
 
   1. Configure the consent screen, add your Gmail address as a test user, then
      press "Publish app". Publishing matters: a project left in Testing is

@@ -39,6 +39,7 @@ Item {
     ? platform.configPath("credentials.json") : Credentials.path(home)
 
   property var credentials: Credentials.effective("")
+  property string rawCredentials: ""
   property bool credentialsChecked: false
   property bool usingBuiltinClient: false
   // The OAuth client a release backend was built with, from `auth.builtinClient`.
@@ -180,7 +181,15 @@ Item {
     if (credentialsWriteBusy) return false
     lastError = ""
     credentialsWriteBusy = true
-    credentialsWritePayload = Credentials.serialize(result.credentials)
+    var next = result.credentials
+    // Editing the existing client must not lose its owner-only restriction.
+    if (next.clientId === credentials.clientId && credentials.personal === true) {
+      next.personal = true
+      next.ownerEmail = credentials.ownerEmail
+      next.projectId = credentials.projectId
+    }
+    credentialsWritePayload = Credentials.serialize(Credentials.withAccount(
+      Credentials.loadStore(rawCredentials), accountId, next))
     if (!platform || typeof platform.writeConfig !== "function") {
       credentialsWriteBusy = false
       credentialsWritePayload = ""
@@ -225,7 +234,8 @@ Item {
   // with is the fallback. Development builds ship none, so there this resolves
   // to the file or to nothing at all.
   function applyCredentials(raw) {
-    credentialsText = String(raw || "")
+    rawCredentials = String(raw || "")
+    credentialsText = rawCredentials
     var loaded = Credentials.effective(raw, accountId, builtinClient)
     usingBuiltinClient = Credentials.usingBuiltin(raw, accountId, builtinClient)
     var changed = String(loaded.clientId) !== String(credentials.clientId)
@@ -243,6 +253,8 @@ Item {
       else sessionChecked = true
     }
   }
+
+  function reloadCredentials() { credentialsFile.reload() }
 
   // -------------------------------------------------------- credential store
 
@@ -409,6 +421,10 @@ Item {
 
   function beginLogin() {
     if (loginBusy || refreshBusy) return
+    if (credentials.personal && String(accountId).toLowerCase() !== credentials.ownerEmail) {
+      lastError = "This personal client can only sign in its Google account owner"
+      return
+    }
     if (!credentialsPresent) {
       lastError = "Connect a Google Cloud OAuth client first"
       return
@@ -429,7 +445,8 @@ Item {
     if (!backend || !backend.ready) { failLogin("Mail backend unavailable"); return }
     var serial = ++tokenRequestSerial
     backend.call("auth.begin", { clientId: clientId, clientSecret: credentials.clientSecret,
-      port: OAuth.normalizedPort(oauthPort), scopes: scopes, loginHint: loginHint }, function(result, error) {
+      port: OAuth.normalizedPort(oauthPort), scopes: scopes,
+      loginHint: credentials.personal ? credentials.ownerEmail : loginHint }, function(result, error) {
       if (serial !== root.tokenRequestSerial || !root.loginBusy) {
         if (result && result.id) root.backend.call("auth.cancel", { id: result.id }, function() {})
         return
@@ -466,6 +483,12 @@ Item {
       root.nativeFlow = ""
       authTimeout.stop()
       root.signedInProfile = result.profile || null
+      if (root.credentials.personal && (!root.signedInProfile
+          || String(root.signedInProfile.emailAddress || "").toLowerCase() !== root.credentials.ownerEmail)) {
+        root.signedInProfile = null
+        root.failLogin("Sign in with the Google account that owns this personal client")
+        return
+      }
       root.acceptSignIn(OAuth.parseTokenResponse(result.status, result.body, ""))
     })
   }
