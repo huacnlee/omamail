@@ -1,4 +1,5 @@
 import QtQuick
+import "../message/Message.js" as Mail
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
@@ -239,7 +240,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.baseline: sender.baseline
         textFormat: Text.PlainText
-        text: root.summary.time
+        text: Mail.displayTimeLabel(root.summary.time, root.summary.date)
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption

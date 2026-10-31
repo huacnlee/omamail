@@ -1,4 +1,5 @@
 .pragma library
+.import "../message/Clock.js" as Clock
 
 .import "../message/Calendar.js" as Ics
 
@@ -635,7 +636,10 @@ function recurrenceIntervalUnit(frequency, interval) {
 }
 
 function editorDateTime(dateText, timeText) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return null
+  var clock = Clock.parse(timeText)
+  if (!clock) return null
+  timeText = two(clock.hour) + ":" + two(clock.minute)
   var value = new Date(dateText + "T" + timeText + ":00")
   if (!isFinite(value.getTime()) || isoDate(value) !== dateText
       || two(value.getHours()) + ":" + two(value.getMinutes()) !== timeText) return null
@@ -645,7 +649,7 @@ function editorDateTime(dateText, timeText) {
 function editorDateRange(firstDate, firstTime, lastDate, lastTime, allDay) {
   var start = editorDateTime(String(firstDate), allDay ? "00:00" : String(firstTime))
   var end = editorDateTime(String(lastDate), allDay ? "00:00" : String(lastTime))
-  if (!start || !end) return {ok:false,error:allDay ? "Enter valid dates (YYYY-MM-DD)" : "Enter valid dates (YYYY-MM-DD) and times (HH:mm)"}
+  if (!start || !end) return {ok:false,error:allDay ? "Enter valid dates (YYYY-MM-DD)" : "Enter valid dates (YYYY-MM-DD) and local times (or HH:mm)"}
   if (allDay) end.setDate(end.getDate() + 1)
   if (end.getTime() <= start.getTime()) return {ok:false,error:allDay
     ? "Last day must be on or after the first day" : "End date and time must be after the start"}

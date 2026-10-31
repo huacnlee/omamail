@@ -1,4 +1,5 @@
 .pragma library
+.import "../message/Clock.js" as Clock
 
 .import "../backend/Plain.js" as Plain
 
@@ -364,12 +365,11 @@ function suggestionWhen(suggestion, nowMs) {
   var start = new Date(Number(s.startMs) || 0)
   if (!isFinite(start.getTime()) || start.getTime() <= 0) return ""
   var now = new Date(Number(nowMs) || Date.now())
-  function two(n) { return n < 10 ? "0" + n : String(n) }
   function day(d) {
     var text = DAY_NAMES[d.getDay()] + " " + d.getDate() + " " + MONTH_NAMES[d.getMonth()]
     return d.getFullYear() !== now.getFullYear() ? text + " " + d.getFullYear() : text
   }
-  function clock(d) { return two(d.getHours()) + ":" + two(d.getMinutes()) }
+  function clock(d) { return Clock.time(d) }
   var end = new Date(Number(s.endMs) || 0)
   if (s.allDay === true) {
     var lastDay = isFinite(end.getTime()) && end.getTime() > start.getTime() ? new Date(end.getTime() - 1) : start
