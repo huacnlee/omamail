@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 
+mod downscale;
+
 const DEADLINE: Duration = Duration::from_secs(20);
 const MAX_IMAGE: usize = 5 * 1024 * 1024;
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
@@ -249,10 +251,19 @@ fn image_data(response: Response) -> Result<String, &'static str> {
     if claimed != mime {
         return Err("public_image_refused");
     }
-    Ok(format!("data:{mime};base64,{}", STANDARD.encode(data)))
+    Ok(match downscale::prepare(mime, &data)? {
+        downscale::Prepared::Original => format!("data:{mime};base64,{}", STANDARD.encode(data)),
+        downscale::Prepared::Smaller(smaller) => {
+            format!("data:{mime};base64,{}", STANDARD.encode(smaller.as_slice()))
+        }
+    })
 }
 pub async fn image(url: &str) -> Result<String, &'static str> {
-    image_data(fetch(url, MAX_IMAGE).await?)
+    let response = fetch(url, MAX_IMAGE).await?;
+    let _one_decode_at_a_time = downscale::slot().await;
+    tokio::task::spawn_blocking(move || image_data(response))
+        .await
+        .map_err(|_| "worker_failed")?
 }
 
 #[cfg(test)]
