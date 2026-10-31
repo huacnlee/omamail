@@ -714,6 +714,15 @@ assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
+// The day and week views' minimum hour height comes from an editable setting.
+assert.strictEqual(feed.normalizeHourHeight(40), 40)
+assert.strictEqual(feed.normalizeHourHeight("35"), 35)
+assert.strictEqual(feed.normalizeHourHeight(26.9), 26)
+assert.strictEqual(feed.normalizeHourHeight(5), 20)
+assert.strictEqual(feed.normalizeHourHeight(500), 120)
+for (const unusable of [undefined, null, "", " ", "tall", true, [40], 0, -10, NaN, Infinity])
+  assert.strictEqual(feed.normalizeHourHeight(unusable), 60, String(unusable))
+
 console.log("test_calendar_feed.js ok")
 
 // -------------------------------------------------------------- Microsoft

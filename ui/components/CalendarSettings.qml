@@ -768,6 +768,24 @@ Column {
     }
   }
 
+  SettingRow {
+    title: "Hour height"
+    detail: "Lower values fit more of the day on screen in the day and week views."
+    NumberField {
+      objectName: "calendar-hour-height"
+      label: "Pixels"
+      from: 20
+      to: 120
+      stepSize: 5
+      value: root.controller ? root.controller.hourHeight : 60
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      fontSize: Style.font.bodySmall
+      onModified: function(next) { root.service.persistSetting("calendarHourHeight", next) }
+    }
+  }
+
   Button {
     objectName: "calendar-open-after-setup"
     visible: root.setupComplete

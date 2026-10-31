@@ -25,7 +25,8 @@ const QSet<QString> &allowedSettings()
         QStringLiteral("heavyMessageRendering"), QStringLiteral("contentDirection"),
         QStringLiteral("defaultQuery"), QStringLiteral("notifyNewMail"),
         QStringLiteral("oauthPort"), QStringLiteral("undoSendSeconds"),
-        QStringLiteral("unifiedCalendarView"), QStringLiteral("openOnClick"),
+        QStringLiteral("unifiedCalendarView"), QStringLiteral("calendarHourHeight"),
+        QStringLiteral("openOnClick"),
         QStringLiteral("showBarIcon"), QStringLiteral("suggestEvents"),
         QStringLiteral("unifiedMailboxes")};
     return keys;

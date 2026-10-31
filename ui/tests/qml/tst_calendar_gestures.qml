@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import qs.Commons
 import "../../components" as Views
 import "../../calendar/Calendar.js" as Calendar
 
@@ -10,6 +11,7 @@ Item {
   QtObject {
     id: fixture
     property var service: null
+    property int hourHeight: 60
     property bool eventWriting: false
     property bool loading: false
     property string sourceKind: "google"
@@ -52,9 +54,48 @@ Item {
       moved.clear(); created.clear(); fixture.eventWriting = false; fixture.loading = false; view.pendingGesture = null
       fixture.sourceKind = "google"
       fixture.apiReady = true
+      fixture.hourHeight = 60
       view.resetTimeScroll()
       waitForRendering(view)
       wait(50)
+    }
+    function test_hour_height_setting_sets_the_timeline_minimum() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      verify(timeline !== null)
+      compare(timeline.hourHeight, Style.space(60))
+      fixture.hourHeight = 40
+      compare(timeline.hourHeight, Style.space(40))
+      compare(timeline.contentHeight, Style.space(40) * 24)
+      fixture.hourHeight = 20
+      compare(timeline.hourHeight, Math.max(Style.space(20), timeline.height / 24))
+      verify(timeline.contentHeight <= timeline.height + 0.5)
+    }
+    function test_changing_hour_height_keeps_the_first_event_in_view() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      timeline.contentY = timeline.contentHeight - timeline.height
+      fixture.hourHeight = 40
+      tryCompare(timeline, "contentY", Math.min(view.hourRange.first * Style.space(40),
+        timeline.contentHeight - timeline.height))
+    }
+    function test_short_hours_still_move_a_short_event() {
+      var original = fixture.events
+      fixture.hourHeight = 20
+      fixture.events = [{sourceId:"personal",googleId:"meeting",uid:"uid",summary:"Planning",
+        start:{ms:new Date(2026,9,1,10).getTime()},end:{ms:new Date(2026,9,1,10,30).getTime()}}]
+      waitForRendering(view)
+      var drag = findChild(view, "calendar-event-drag-meeting")
+      verify(drag.height <= Style.space(18), "a card the fixed edges would swallow")
+      var hour = findChild(view, "calendar-time-scroll").hourHeight
+      mousePress(drag, drag.width / 2, drag.height / 2)
+      mouseMove(drag, drag.width / 2, drag.height / 2 + hour, 20)
+      mouseRelease(drag, drag.width / 2, drag.height / 2 + hour)
+      compare(moved.count, 1)
+      var startMoved = moved.signalArguments[0][1] - new Date(2026,9,1,10).getTime()
+      var endMoved = moved.signalArguments[0][2] - new Date(2026,9,1,10,30).getTime()
+      verify(startMoved > 0, "the start moved")
+      compare(endMoved, startMoved)
+      view.pendingGesture = null
+      fixture.events = original
     }
     function test_legacy_provider_cannot_dispatch_resize() {
       for (var i = 0; i < 3; i++) {

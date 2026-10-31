@@ -1229,6 +1229,20 @@ function dayMinutes(timeMs, day) {
     + local.getSeconds() / 60 + local.getMilliseconds() / 60000
 }
 
+// The smallest height one hour may take in the day and week views, in unscaled
+// pixels. The timeline still stretches past it to fill a tall window. Anything
+// unusable falls back to the default rather than to an edge of the range.
+var HOUR_HEIGHT_DEFAULT = 60
+var HOUR_HEIGHT_MIN = 20
+var HOUR_HEIGHT_MAX = 120
+
+function normalizeHourHeight(value) {
+  var usable = typeof value === "number" || (typeof value === "string" && value.trim() !== "")
+  var height = usable ? Math.floor(Number(value)) : NaN
+  if (!isFinite(height) || height <= 0) return HOUR_HEIGHT_DEFAULT
+  return Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, height))
+}
+
 function eventTop(event, day, firstHour, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))

@@ -79,6 +79,8 @@ Item {
   // Every account's calendars, not just this mailbox's: the entry hides only
   // when no account has one and nothing was added in Settings.
   readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
+  readonly property int hourHeight: Calendar.normalizeHourHeight(
+    service && service.settings ? service.settings.calendarHourHeight : undefined)
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView

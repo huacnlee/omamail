@@ -12,6 +12,7 @@ Item {
     property var requests: []
     property var nextResult: ({ body: "{}", status: 200 })
     property var nextError: null
+    property var settings: ({})
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: false
     property var discoveryCallback: null
@@ -70,6 +71,17 @@ Item {
     SignalSpy { id: discoverySpy; target: controller; signalName: "discoveryFinished" }
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
+
+    function test_hour_height_comes_from_the_persisted_setting() {
+      var saved = mailService.settings
+      mailService.settings = ({})
+      compare(controller.hourHeight, 60)
+      mailService.settings = ({ calendarHourHeight: 35 })
+      compare(controller.hourHeight, 35)
+      mailService.settings = ({ calendarHourHeight: 5000 })
+      compare(controller.hourHeight, 120)
+      mailService.settings = saved
+    }
 
     function test_settings_can_target_another_accounts_calendar() {
       controller.accountId = "one@gmail.com"

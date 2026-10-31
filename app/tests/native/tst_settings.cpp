@@ -22,6 +22,7 @@ private slots:
     void atomicSettingsRoundTrip();
     void invalidJsonIsPreserved();
     void rejectsCredentialAndUnknownFields();
+    void acceptsCalendarHourHeight();
     void fileStoreReadsWritesAndWatches();
     void fileStoreWriteOutlastsABriefShareLock();
     void watchReportsExternalCreation();
@@ -91,6 +92,15 @@ void SettingsTest::rejectsCredentialAndUnknownFields()
     QVERIFY(!QFile::exists(path));
     QVERIFY(!store.replace({{QStringLiteral("futureUnreviewedField"), true}}, &error));
     QVERIFY(!QFile::exists(path));
+}
+
+void SettingsTest::acceptsCalendarHourHeight()
+{
+    QTemporaryDir directory;
+    SettingsStore store(directory.filePath(QStringLiteral("settings.json")));
+    QString error;
+    QVERIFY2(store.replace({{QStringLiteral("calendarHourHeight"), 40}}, &error), qPrintable(error));
+    QCOMPARE(store.load(&error).value(QStringLiteral("calendarHourHeight")).toInt(), 40);
 }
 
 void SettingsTest::fileStoreReadsWritesAndWatches()

@@ -67,12 +67,18 @@ Item {
     controller ? controller.events : [], days, 7, 19)
   readonly property int firstHour: 0
   readonly property int lastHour: 24
+  readonly property int minimumHourHeight: Calendar.normalizeHourHeight(controller ? controller.hourHeight : undefined)
+  // A short hour shrinks what is fixed for a tall one, or a resize edge would
+  // leave nothing to drag by and a card's margin nothing to show its title in.
+  readonly property int resizeEdge: Style.space(Math.min(9, minimumHourHeight * 0.15))
+  readonly property int cardMargin: Style.space(Math.min(5, minimumHourHeight / 12))
   function resetTimeScroll() {
     timeline.contentY = Math.max(0, Math.min(hourRange.first * timeline.hourHeight,
       timeline.contentHeight - timeline.height))
   }
   Component.onCompleted: Qt.callLater(root.resetTimeScroll)
   onDaysChanged: Qt.callLater(root.resetTimeScroll)
+  onMinimumHourHeightChanged: Qt.callLater(root.resetTimeScroll)
   readonly property int hourCount: Math.max(1, lastHour - firstHour)
   readonly property var allDayLayout: Calendar.spanLayout(
     (controller ? controller.events : []).filter(Calendar.displayInAllDayLane), days)
@@ -290,7 +296,7 @@ Item {
     anchors.right: parent.right
     anchors.top: allDayLane.bottom
     anchors.bottom: parent.bottom
-    readonly property real hourHeight: Math.max(Style.space(60), height / root.hourCount)
+    readonly property real hourHeight: Math.max(Style.space(root.minimumHourHeight), height / root.hourCount)
     contentWidth: width
     contentHeight: Math.max(height, hourHeight * root.hourCount)
     clip: true
@@ -314,6 +320,7 @@ Item {
             anchors.leftMargin: Style.space(4)
             anchors.top: parent.top
             anchors.topMargin: index === 0 ? Style.space(2) : -implicitHeight / 2
+            visible: index > 0 || timeline.hourHeight >= implicitHeight * 1.5 + Style.space(2)
             text: Calendar.timeLabel(new Date(2000, 0, 1, root.firstHour + index).getTime(), root.timeFormat)
             color: root.dimColor
             font.family: root.panelFontFamily
@@ -457,6 +464,8 @@ Item {
                 Column {
                   anchors.fill: parent
                   anchors.margins: Style.space(5)
+                  anchors.topMargin: root.cardMargin
+                  anchors.bottomMargin: root.cardMargin
                   spacing: Style.space(1)
                   Text {
                     width: parent.width
@@ -496,7 +505,7 @@ Item {
                   hoverEnabled: true
                   enabled: !root.pendingGesture && !(root.controller && root.controller.eventWriting)
                   cursorShape: !eventBlock.canReschedule ? Qt.PointingHandCursor
-                    : mouseY < Style.space(9) || mouseY > height - Style.space(9)
+                    : mouseY < root.resizeEdge || mouseY > height - root.resizeEdge
                     ? Qt.SizeVerCursor : Qt.OpenHandCursor
                   preventStealing: true
                   property point initial: Qt.point(0, 0)
@@ -505,7 +514,7 @@ Item {
                   property var proposed: null
                   onPressed: function(mouse) {
                     initial = mapToItem(timeline, mouse.x, mouse.y)
-                    edge = mouse.y < Style.space(9) ? "start" : mouse.y > height - Style.space(9) ? "end" : ""
+                    edge = mouse.y < root.resizeEdge ? "start" : mouse.y > height - root.resizeEdge ? "end" : ""
                     moved = false
                     proposed = null
                   }
