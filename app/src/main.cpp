@@ -9,6 +9,10 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -24,17 +28,47 @@ int reportResourceCheck(const ResourcePaths &paths)
     for (const QString &error : result.errors) stream << error << Qt::endl;
     return 1;
 }
+
+// One Omamail per session. Closing the window only hides it, so the mail and
+// calendar notifications keep coming; on a desktop with no Dock or tray to
+// click, launching Omamail again is the way back. A second launch asks the
+// running one to show its window and leaves.
+QString instanceName()
+{
+    return QStringLiteral("omamail-app-") + qEnvironmentVariable("USER", QStringLiteral("user"));
+}
+
+// The payload the window opens with: a mailto: link becomes a draft, as the
+// shell plugin's mailto.sh does. Anything else opens the window as it is.
+QString openPayload(const QString &mailto)
+{
+    if (!mailto.startsWith(QStringLiteral("mailto:"), Qt::CaseInsensitive)) return QStringLiteral("{}");
+    return QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("mailto"), mailto}})
+                                 .toJson(QJsonDocument::Compact));
+}
+
+bool showRunningInstance(const QString &payload)
+{
+    QLocalSocket socket;
+    socket.connectToServer(instanceName());
+    if (!socket.waitForConnected(500)) return false;
+    socket.write(payload.toUtf8() + "\n");
+    socket.waitForBytesWritten(500);
+    return true;
+}
 }
 
 int main(int argc, char *argv[])
 {
     bool checkOnly = false;
     QString readyFile;
+    QString mailto;
     for (int i = 1; i < argc; ++i) {
         const QString argument = QString::fromLocal8Bit(argv[i]);
         if (argument == QStringLiteral("--check-resources")) checkOnly = true;
         else if (argument == QStringLiteral("--smoke-test") && i + 1 < argc)
             readyFile = QString::fromLocal8Bit(argv[++i]);
+        else if (argument.startsWith(QStringLiteral("mailto:"), Qt::CaseInsensitive)) mailto = argument;
     }
 
     QCoreApplication::setOrganizationName(QStringLiteral("Omamail"));
@@ -76,6 +110,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     if (const int status = reportResourceCheck(paths); status != 0) return status;
+    if (showRunningInstance(openPayload(mailto))) return 0;
     initializeNotificationActivation();
 
     // Native platform styles can draw a light system scrollbar over a dark
@@ -99,11 +134,28 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty()) return 1;
     auto *host = engine.singletonInstance<ApplicationHost *>(
         QStringLiteral("Omamail.Native"), QStringLiteral("NativeHost"));
+    if (host && !mailto.isEmpty()) host->requestOpen(openPayload(mailto));
     for (QObject *object : engine.rootObjects()) {
         if (auto *window = qobject_cast<QWindow *>(object)) {
             prepareNativeWindow(window);
             if (host) watchNativeCloseChord(window, [host] { host->requestClose(); });
         }
     }
+    // A socket left behind by a crash would refuse the name; nobody answered
+    // it above, so it is stale and safe to remove.
+    QLocalServer instanceServer;
+    QLocalServer::removeServer(instanceName());
+    instanceServer.listen(instanceName());
+    QObject::connect(&instanceServer, &QLocalServer::newConnection, &instanceServer, [&instanceServer, host] {
+        while (QLocalSocket *peer = instanceServer.nextPendingConnection()) {
+            QObject::connect(peer, &QLocalSocket::disconnected, peer, &QObject::deleteLater);
+            QObject::connect(peer, &QLocalSocket::readyRead, peer, [peer, host] {
+                while (peer->canReadLine()) {
+                    const QString payload = QString::fromUtf8(peer->readLine()).trimmed();
+                    if (host) host->requestOpen(payload);
+                }
+            });
+        }
+    });
     return application.exec();
 }
