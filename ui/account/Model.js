@@ -776,6 +776,7 @@ function windowPrefs(raw) {
       bodyZoom: 1,
       bodyMode: "reader",
       alwaysShowImages: false,
+      calendarPaneOpen: false,
       windowOpen: false
     }
   }
@@ -790,6 +791,7 @@ function windowPrefs(raw) {
     bodyZoom: clampZoom(parsed.bodyZoom),
     bodyMode: bodyMode,
     alwaysShowImages: parsed.alwaysShowImages === true,
+    calendarPaneOpen: parsed.calendarPaneOpen === true,
     windowOpen: parsed.windowOpen === true
   }
 }

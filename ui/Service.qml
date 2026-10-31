@@ -1223,6 +1223,8 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
+  // The month and the day's events at the right of the mail, as Outlook has.
+  property bool calendarPaneOpen: false
   // How wide the rail and the list were dragged to, in pixels; 0 is "never
   // dragged", which each pane reads as its own default.
   property real sidebarWidth: 0
@@ -1257,6 +1259,7 @@ Item {
   function applyWindowPrefs(raw) {
     var prefs = Model.windowPrefs(raw)
     sidebarCollapsed = prefs.sidebarCollapsed
+    calendarPaneOpen = prefs.calendarPaneOpen
     sidebarWidth = prefs.sidebarWidth
     listWidth = prefs.listWidth
     collapsedFolders = prefs.collapsedFolders
@@ -1296,6 +1299,7 @@ Item {
     windowPrefsSettling.stop()
     windowWritePayload = JSON.stringify({
       sidebarCollapsed: sidebarCollapsed,
+      calendarPaneOpen: calendarPaneOpen,
       sidebarWidth: sidebarWidth,
       listWidth: listWidth,
       collapsedFolders: collapsedFolders,
@@ -1333,6 +1337,13 @@ Item {
   // The rail's labels in the order it draws them, folded rows left out — the
   // list the Ctrl digits number.
   readonly property var visibleLabels: Model.visibleLabels(labels, collapsedFolders)
+
+  function setCalendarPaneOpen(value) {
+    var next = value === true
+    if (next === calendarPaneOpen) return
+    calendarPaneOpen = next
+    saveWindowPrefs()
+  }
 
   function setSidebarCollapsed(value) {
     var next = value === true
@@ -1663,6 +1674,9 @@ Item {
   }
 
   readonly property alias calendarController: sharedCalendar
+  // Its own controller, so the pane's month and the calendar view's range
+  // never refetch over each other.
+  readonly property alias calendarPaneController: paneCalendar
   readonly property bool noCalendars: sharedCalendar.noCalendars
   readonly property var barEvents: Preview.upcomingEvents(
     barCalendar.events, Date.now(), 2)
@@ -2597,9 +2611,21 @@ Item {
     accountId: root.calendarAccountId
     onSourceListChanged: {
       barCalendar.sourceList = sourceList
+      paneCalendar.sourceList = sourceList
       Qt.callLater(root.refreshCalendarPreview)
     }
-    onSourcesLoadedChanged: barCalendar.sourcesLoaded = sourcesLoaded
+    onSourcesLoadedChanged: {
+      barCalendar.sourcesLoaded = sourcesLoaded
+      paneCalendar.sourcesLoaded = sourcesLoaded
+    }
+  }
+
+  CalendarController {
+    id: paneCalendar
+    service: root
+    pluginDir: root.pluginDir
+    cacheName: "calendar-pane"
+    accountId: root.calendarAccountId
   }
 
   CalendarController {

@@ -856,7 +856,7 @@ assert.strictEqual(model.clampZoom("1.5"), 1.5, "including one written as text")
 
 deepEqual(model.windowPrefs(""), {
   sidebarCollapsed: false, sidebarWidth: 0, listWidth: 0, collapsedFolders: [], bodyZoom: 1, bodyMode: "reader",
-  alwaysShowImages: false, windowOpen: false
+  alwaysShowImages: false, windowOpen: false, calendarPaneOpen: false
 })
 assert.strictEqual(model.windowPrefs('{"plainTextForced":true}').bodyMode, "plain",
   "the old two-mode preference migrates to the three-mode setting")
@@ -871,6 +871,8 @@ assert.strictEqual(model.paneWidth(99999), 4000)
 assert.strictEqual(model.paneWidth(0), 0)
 deepEqual(model.windowPrefs('{"collapsedFolders":["Archive","",3,"Archive"]}').collapsedFolders, ["Archive", "3"])
 assert.strictEqual(model.windowPrefs('{"windowOpen":"yes"}').windowOpen, false)
+assert.strictEqual(model.windowPrefs('{"calendarPaneOpen":true}').calendarPaneOpen, true)
+assert.strictEqual(model.windowPrefs('{"calendarPaneOpen":1}').calendarPaneOpen, false)
 
 // ------------------------------------------------- what a detail read carries
 //

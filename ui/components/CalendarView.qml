@@ -297,6 +297,14 @@ Item {
     } else moveMonth(offset)
   }
 
+  // The day picked in the mail's calendar pane, in the day view.
+  function showDay(date) {
+    viewMode = "day"
+    visibleMonth = new Date(date.getFullYear(), date.getMonth(), 1)
+    visibleWeek = date
+    refresh()
+  }
+
   function setView(mode) {
     viewMode = ["day", "week", "month", "agenda"].indexOf(mode) >= 0 ? mode : "month"
     refresh()

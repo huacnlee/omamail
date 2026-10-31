@@ -459,6 +459,16 @@ fn calendar_cache_preserves_resources_and_refuses_arbitrary_paths() {
         .unwrap(),
         json!({"version":3,"ranges":{}})
     );
+    // The calendar pane beside the mail keeps its own range.
+    assert_eq!(
+        call_at(
+            &temp.0,
+            "cache.calendarRead",
+            &json!({"name":"calendar-pane"})
+        )
+        .unwrap(),
+        json!({"version":3,"ranges":{}})
+    );
 }
 
 #[test]

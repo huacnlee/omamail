@@ -162,6 +162,7 @@ used to exist, and they had.
 | `mailView` | `Ctrl+Shift+M` | mail+calendar | Go to mail |
 | `calendarView` | `Ctrl+Shift+C` | mail+calendar | Go to calendar |
 | `toggleSidebar` | `[` | mail+calendar | Show or hide the sidebar |
+| `toggleCalendarPane` | `]` | mail | Show or hide the calendar pane |
 | `zoomIn` | `Ctrl++`, `Ctrl+=` | reader | Zoom the message body in |
 | `zoomOut` | `Ctrl+-` | reader | Zoom the message body out |
 | `zoomReset` | `Ctrl+0` | reader | Reset the zoom |

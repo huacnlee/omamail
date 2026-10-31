@@ -219,6 +219,8 @@ var BINDINGS = [
     group: "Going", label: "Go to calendar" },
   { id: "toggleSidebar", keys: ["["], contexts: ["list", "reader", "calendar"],
     group: "Going", label: "Show or hide the sidebar" },
+  { id: "toggleCalendarPane", keys: ["]"], contexts: ["list", "reader"],
+    group: "Going", label: "Show or hide the calendar pane" },
 
   // Only where there is a message body to size. These carried no context at
   // all, which left them live on a settings form.
