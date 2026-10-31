@@ -468,6 +468,49 @@ fn png_header(width: u32, height: u32, depth: u8, color: u8) -> Vec<u8> {
     out
 }
 
+// An 8-bit RGB PNG stored with Adam7 interlacing, which the `image` encoder
+// cannot write. The decoder assembles such a file in a second full-size
+// buffer, which is what the guard prices at twice the decoded size.
+fn interlaced_png(width: u32, height: u32) -> Vec<u8> {
+    use std::io::Write;
+    const PASSES: [(u32, u32, u32, u32); 7] = [
+        (0, 0, 8, 8),
+        (4, 0, 8, 8),
+        (0, 4, 4, 8),
+        (2, 0, 4, 4),
+        (0, 2, 2, 4),
+        (1, 0, 2, 2),
+        (0, 1, 1, 2),
+    ];
+    let mut raw = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut line = Vec::new();
+    for (x0, y0, dx, dy) in PASSES {
+        if x0 >= width || y0 >= height {
+            continue;
+        }
+        for y in (y0..height).step_by(dy as usize) {
+            line.clear();
+            line.push(0);
+            for x in (x0..width).step_by(dx as usize) {
+                line.extend([
+                    (x * 255 / width) as u8,
+                    (y * 255 / height) as u8,
+                    ((x ^ y) & 0xff) as u8,
+                ]);
+            }
+            raw.write_all(&line).unwrap();
+        }
+    }
+    let mut ihdr = width.to_be_bytes().to_vec();
+    ihdr.extend(height.to_be_bytes());
+    ihdr.extend([8, 2, 0, 0, 1]);
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    out.extend(png_chunk(b"IHDR", &ihdr));
+    out.extend(png_chunk(b"IDAT", &raw.finish().unwrap()));
+    out.extend(png_chunk(b"IEND", &[]));
+    out
+}
+
 #[test]
 fn an_image_too_large_to_decode_within_the_limit_is_refused() {
     assert_eq!(
@@ -624,4 +667,22 @@ fn an_accepted_image_never_exceeds_the_allocation_budget() {
             picture.height()
         );
     }
+}
+
+#[test]
+fn an_accepted_interlaced_png_never_exceeds_the_allocation_budget() {
+    // The largest 8-bit RGB size the guard accepts when it prices the
+    // interlaced assembly buffer: 7200 x 7200 is 51.8 MP, 509 MiB of the 512.
+    let (width, height) = (7200, 7200);
+    let bytes = interlaced_png(width, height);
+    let pixels = u64::from(width) * u64::from(height);
+    let promised = 2 * pixels * 3 + 64 * 1024 * 1024 + pixels * 3;
+    assert!(promised <= 512 * 1024 * 1024);
+    assert!(promised > 500 * 1024 * 1024, "not near the boundary");
+    let (outcome, peak) = counting::peak_of(|| downscale::prepare("image/png", &bytes));
+    assert!(matches!(outcome, Ok(downscale::Prepared::Smaller(_))));
+    assert!(
+        (peak as u64) <= promised,
+        "interlaced {width}x{height}: peak {peak} bytes, guard priced {promised}"
+    );
 }
