@@ -117,6 +117,14 @@ Item {
       compare(keyringReads(imap.accountId).length, 0)
       verify(imap.auth.lastError.indexOf("could not be saved") >= 0, imap.auth.lastError)
       compare(imap.setupState, "signed_out", "not a saved session waiting to reconnect")
+
+      // Unlocked, the same password is accepted again and this time kept.
+      held = null
+      verify(mailService.signInWithPassword("app-password"), "the form can be sent again")
+      tryVerify(function() { return held !== null }, 2000)
+      BackendFixture.respond(mailService, held, {stored: true})
+      tryVerify(function() { return imap.ready }, 2000)
+      compare(imap.auth.lastError, "")
     }
   }
 }
