@@ -165,10 +165,11 @@ function Invoke-TestInstall($Bundle, [hashtable]$Overrides = @{}) {
 function Expect-InstallFailure($Bundle, [string]$Pattern, [hashtable]$Overrides = @{}) {
     try {
         Invoke-TestInstall $Bundle $Overrides
-        throw "expected install failure matching: $Pattern"
     } catch {
         if ($_.Exception.Message -notmatch $Pattern) { throw }
+        return
     }
+    throw "expected install failure matching: $Pattern"
 }
 
 function Reset-OldInstallation {

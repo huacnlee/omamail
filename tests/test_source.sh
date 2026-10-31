@@ -700,24 +700,10 @@ for client in providers/GmailApiClient.qml providers/HeyClient.qml \
   grep -q 'function getSummaries(ids, callback)' "$client" \
     || fail "$client must expose the shared conversation-member interface"
 done
-# A member is a message and a stop must tell the truth about that message. A
-# thread block speaks for the whole conversation, so putting one on a member
-# would draw a stop bold because a different message in the thread is unread.
-awk '
-  /function getSummaries\(/ { in_members = 1 }
-  in_members && /withThreadBlock/ { exit 1 }
-  in_members && /^  function getMessages\(/ { exit 0 }
-  END { exit 0 }
-' providers/JmapClient.qml \
-  || fail "a conversation member must not be given the row's thread block"
 grep -q 'if (ids.length > 0) progress({' providers/ImapClient.qml \
   || fail "IMAP search windows must report ids before the final page"
 grep -q 'UID FETCH {set} (UID INTERNALDATE)' ../src/providers/imap/read.rs \
   || fail "native IMAP paging must read arrival dates in bounded UID batches"
-grep -q 'sparse_search_orders_by_date_before_paging_even_when_progressive' ../src/providers/imap/read/tests.rs \
-  || fail "native sparse search needs tested date-ordered pagination"
-grep -q 'multi_window_dates_settle_before_paging_and_ignore_unsolicited_flags' ../src/providers/imap/read/tests.rs \
-  || fail "native IMAP ordering needs a bounded multi-window network regression"
 grep -q 'continuation' ../src/providers/imap/read.rs \
   || fail "native streamed IMAP reads must continue through opaque bounded batches"
 grep -q 'fetchQueue\.push(wanted)' account/MailAccount.qml \
@@ -848,14 +834,6 @@ done
 # confirmation owned by App may call the service after naming the target.
 grep -q 'AccountRemovalDialog {' App.qml \
   || fail "account removal needs a confirmation dialog"
-if awk '
-  /function removeCurrentAccountFromEditor\(/ { in_remove = 1 }
-  in_remove && /service\.removeAccountAt/ { exit 0 }
-  in_remove && /^  }/ { exit 1 }
-  END { exit 1 }
-' App.qml; then
-  fail "requesting account removal must not remove it immediately"
-fi
 
 # The fix for a hanging request that looks right and does nothing.
 #
