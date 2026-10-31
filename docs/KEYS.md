@@ -108,6 +108,11 @@ Generated from `ui/keys/Keymap.js`. `ui/tests/test_keymap.js` asserts this table
 matches it, so the two cannot drift — three hand-written copies of this list
 used to exist, and they had.
 
+Every key also has a way that needs the pointer alone, named in the binding's
+`pointer` field in `ui/keys/Keymap.js`: a click, a button, the row menu (right
+click) or the message body's menu. The keymap test fails on a binding without
+one, so a new key arrives with its mouse road.
+
 <!-- BEGIN BINDINGS -->
 | id | keys | contexts | action |
 |---|---|---|---|

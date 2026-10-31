@@ -29,7 +29,11 @@ Item {
   property int cursorIndex: -1
   readonly property bool opened: menu.opened
   readonly property bool hasSelection: !!target && String(target.selectedText || "") !== ""
-  readonly property var menuRows: [cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow]
+  readonly property var menuRows: [cutRow, copyRow, pasteRow, selectAllRow, openLinkRow, copyLinkRow,
+    zoomInRow, zoomOutRow, zoomResetRow]
+  // A message body offers its zoom here, so Ctrl+wheel and Ctrl+plus/minus
+  // have a way that needs the pointer alone.
+  property bool zoomable: false
 
   readonly property alias cutRow: cutRow
   readonly property alias copyRow: copyRow
@@ -37,12 +41,17 @@ Item {
   readonly property alias selectAllRow: selectAllRow
   readonly property alias openLinkRow: openLinkRow
   readonly property alias copyLinkRow: copyLinkRow
+  readonly property alias zoomInRow: zoomInRow
+  readonly property alias zoomOutRow: zoomOutRow
+  readonly property alias zoomResetRow: zoomResetRow
 
   signal copyRequested(string text)
   // Paste is the owner's: a compose form tries the clipboard for an image
   // before it pastes text, and only it knows how.
   signal pasteRequested(var target)
   signal openLinkRequested(string url)
+  signal zoomRequested(real step)
+  signal zoomResetRequested()
 
   anchors.fill: parent
   z: 50
@@ -174,6 +183,30 @@ Item {
         visible: root.link !== ""
         text: "Copy URL"
         onActivated: { var url = root.link; menu.close(); root.copyRequested(url) }
+      }
+
+      MenuSeparatorLine {
+        visible: root.zoomable
+        width: menu.width - menu.leftPadding - menu.rightPadding
+        lineColor: root.textColor
+      }
+      MenuRow {
+        id: zoomInRow
+        visible: root.zoomable
+        text: "Zoom in"
+        onActivated: { menu.close(); root.zoomRequested(0.1) }
+      }
+      MenuRow {
+        id: zoomOutRow
+        visible: root.zoomable
+        text: "Zoom out"
+        onActivated: { menu.close(); root.zoomRequested(-0.1) }
+      }
+      MenuRow {
+        id: zoomResetRow
+        visible: root.zoomable
+        text: "Reset zoom"
+        onActivated: { menu.close(); root.zoomResetRequested() }
       }
     }
   }

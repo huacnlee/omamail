@@ -1150,6 +1150,9 @@ Item {
       if (root.service && typeof root.service.copyText === "function") root.service.copyText(text)
     }
     onOpenLinkRequested: function(url) { root.openLink(url) }
+    zoomable: true
+    onZoomRequested: function(step) { root.zoomRequested(step) }
+    onZoomResetRequested: root.zoomResetRequested()
   }
 
   // The subject's own menu: one row, the subject as written. Beside the

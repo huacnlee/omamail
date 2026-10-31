@@ -449,6 +449,23 @@ Item {
           onClicked: root.goToday()
         }
 
+        // `u` by pointer: there only while the last change can still be taken
+        // back, so the toolbar never offers an undo that would do nothing.
+        IconTextButton {
+          objectName: "calendar-undo"
+          text: "Undo"
+          visible: !!root.controller && !!root.controller.undoChange
+            && !root.controller.eventWriting
+          implicitHeight: root.toolbarControlHeight
+          tooltipText: "Undo the last event change · u"
+          foreground: root.textColor
+          accent: root.accentColor
+          ghost: true
+          fontFamily: root.panelFontFamily
+          fontSize: root.toolbarFontSize
+          onClicked: root.controller.undoLastChange()
+        }
+
       }
 
       RowLayout {

@@ -19,6 +19,8 @@ var CONTEXTS = ["list", "reader", "search", "compose", "eventCompose", "eventDes
 var MAIL = ["list", "reader"]
 var ANY = ["*"]
 
+// Every binding names its pointer way too, in `pointer`: the keyboard is the
+// fast road, never the only one. tests/test_keymap.js refuses a row without.
 var BINDINGS = [
   // These survive the shortcut sheet, and they are the only mailbox keys that
   // do: behind the sheet they scroll it. A reference sheet taller than the
@@ -26,28 +28,28 @@ var BINDINGS = [
   // that contradicts the rest. The account switcher is not on this list — it is
   // a popup, and a popup takes every key before the shortcut map sees it, so it
   // answers `j`/`k` itself.
-  { id: "cursorDown", keys: ["j", "Down"], contexts: MAIL,
+  { id: "cursorDown", pointer: "Click a row", keys: ["j", "Down"], contexts: MAIL,
     survivesOverlay: true,
     group: "Moving", label: "Move down",
     hintKey: "j / k", hint: { list: "move" } },
-  { id: "cursorUp", keys: ["k", "Up"], contexts: MAIL,
+  { id: "cursorUp", pointer: "Click a row", keys: ["k", "Up"], contexts: MAIL,
     survivesOverlay: true,
     group: "Moving", label: "Move up" },
-  { id: "scrollDown", keys: ["Shift+J"], contexts: ["reader"],
+  { id: "scrollDown", pointer: "Mouse wheel over the message", keys: ["Shift+J"], contexts: ["reader"],
     survivesOverlay: true,
     group: "Moving", label: "Scroll down",
     hintKey: "Shift+J / Shift+K", hint: { reader: "scroll" } },
-  { id: "scrollUp", keys: ["Shift+K"], contexts: ["reader"],
+  { id: "scrollUp", pointer: "Mouse wheel over the message", keys: ["Shift+K"], contexts: ["reader"],
     survivesOverlay: true,
     group: "Moving", label: "Scroll up" },
   // Explicit opening remains available, but cursor movement already opens the
   // reader, so the footer does not need an additional open hint.
-  { id: "open", keys: ["Return", "Enter", "o"], contexts: MAIL,
+  { id: "open", pointer: "Click a row", keys: ["Return", "Enter", "o"], contexts: MAIL,
     group: "Moving", label: "Open the selected message",
     hintKey: "o" },
-  { id: "openReader", keys: ["Right"], contexts: ["list"],
+  { id: "openReader", pointer: "Click a row", keys: ["Right"], contexts: ["list"],
     group: "Moving", label: "Open the selected message" },
-  { id: "backToList", keys: ["u", "Left"], contexts: ["reader"],
+  { id: "backToList", pointer: "The reader's back button", keys: ["u", "Left"], contexts: ["reader"],
     group: "Moving", label: "Back to the list" },
   // Along the conversation rail, which only the reader has. Two letters rather
   // than a reuse of `j` and `k`: those move the list cursor, and they go on
@@ -64,9 +66,9 @@ var BINDINGS = [
   // of two or more. Offering them on every message would be the promise the
   // hint filter exists to stop being made, one line lower down. They are on the
   // shortcut sheet, with the rest of the table.
-  { id: "nextMember", keys: ["n"], contexts: ["reader"],
+  { id: "nextMember", pointer: "Click a message on the conversation rail", keys: ["n"], contexts: ["reader"],
     group: "Moving", label: "Next message in the conversation" },
-  { id: "previousMember", keys: ["p"], contexts: ["reader"],
+  { id: "previousMember", pointer: "Click a message on the conversation rail", keys: ["p"], contexts: ["reader"],
     group: "Moving", label: "Previous message in the conversation" },
 
   // Each is the button in its slot, and where that action is already done the
@@ -74,15 +76,15 @@ var BINDINGS = [
   // one in Archive to the Inbox (`Model.keyActionFor`). Re-trashing moves
   // nothing, so `d` was a key that did nothing there. `inverse` names that
   // action and its hint, so the hint row says what the key will do.
-  { id: "archive", keys: ["e"], contexts: MAIL,
+  { id: "archive", pointer: "Archive icon on the row or in the reader, middle-click, or the row menu", keys: ["e"], contexts: MAIL,
     group: "Acting", label: "Archive (in Archive: move to Inbox)",
     hint: { list: "archive", reader: "archive" },
     inverse: { action: "unarchive", hint: "move to inbox" } },
-  { id: "trash", keys: ["d"], contexts: MAIL,
+  { id: "trash", pointer: "Trash icon on the row or in the reader, or the row menu", keys: ["d"], contexts: MAIL,
     group: "Acting", label: "Move to trash (in the trash: restore)",
     hint: { list: "trash", reader: "trash" },
     inverse: { action: "untrash", hint: "restore" } },
-  { id: "star", keys: ["s"], contexts: MAIL,
+  { id: "star", pointer: "Star icon on the row or in the reader, or the row menu", keys: ["s"], contexts: MAIL,
     group: "Acting", label: "Star or unstar" },
   // `v` because that is the key Gmail moves a message with, and issue #58 asks
   // for those shortcuts one for one. Not `m`: free here, but Gmail's `m` mutes
@@ -91,95 +93,95 @@ var BINDINGS = [
   //
   // "Move to" rather than "Move to a label" because the destination is a label
   // on Gmail and a folder on IMAP, and the sheet has no provider to ask.
-  { id: "moveToLabel", keys: ["v"], contexts: MAIL,
+  { id: "moveToLabel", pointer: "Move-to icon in the reader, or the row menu", keys: ["v"], contexts: MAIL,
     group: "Acting", label: "Move to",
     hint: { list: "move to", reader: "move to" },
     hintNeedsSelection: true, hintUnavailableId: "move" },
-  { id: "markRead", keys: ["Shift+I"], contexts: MAIL,
+  { id: "markRead", pointer: "Right-click a row: Mark as read", keys: ["Shift+I"], contexts: MAIL,
     group: "Acting", label: "Mark read" },
-  { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
+  { id: "markUnread", pointer: "Right-click a row: Mark as unread", keys: ["Shift+U"], contexts: MAIL,
     group: "Acting", label: "Mark unread" },
   // Space or Gmail's x toggles the cursor row, including while the reader
   // is open beside the list.
-  { id: "toggleCheck", keys: ["x", "Space"], contexts: MAIL,
+  { id: "toggleCheck", pointer: "Right-click a row: Select, or its check box", keys: ["x", "Space"], contexts: MAIL,
     group: "Acting", label: "Select or deselect the message",
     hintKey: "Space", hint: { list: "select" } },
-  { id: "checkAll", keys: ["Ctrl+A"], contexts: ["list"],
+  { id: "checkAll", pointer: "Right-click a row: Select all", keys: ["Ctrl+A"], contexts: ["list"],
     group: "Acting", label: "Select every message loaded, or none" },
 
   // Answering works from the list too, the way the row's own menu does: the
   // message is opened first and the draft waits for it. Binding these to the
   // reader only left the keyboard able to do less than a right-click.
-  { id: "reply", keys: ["r"], contexts: MAIL,
+  { id: "reply", pointer: "Reply icon in the reader, or the row menu", keys: ["r"], contexts: MAIL,
     group: "Writing", label: "Reply", hint: { reader: "reply" } },
-  { id: "replyAll", keys: ["a"], contexts: MAIL,
+  { id: "replyAll", pointer: "Reply-all icon in the reader, or the row menu", keys: ["a"], contexts: MAIL,
     group: "Writing", label: "Reply to all" },
-  { id: "forward", keys: ["f"], contexts: MAIL,
+  { id: "forward", pointer: "Forward icon in the reader, or the row menu", keys: ["f"], contexts: MAIL,
     group: "Writing", label: "Forward" },
-  { id: "compose", keys: ["c"], contexts: MAIL,
+  { id: "compose", pointer: "Compose button", keys: ["c"], contexts: MAIL,
     group: "Writing", label: "Compose or edit a draft", hint: { list: "compose" } },
-  { id: "createEvent", keys: ["c"], contexts: ["calendar"],
+  { id: "createEvent", pointer: "Click an empty day or time slot", keys: ["c"], contexts: ["calendar"],
     group: "Writing", label: "Create an event", hint: { calendar: "create" } },
-  { id: "calendarNext", keys: ["j", "Down"], contexts: ["calendar"],
+  { id: "calendarNext", pointer: "Click an event", keys: ["j", "Down"], contexts: ["calendar"],
     group: "Calendar", label: "Select the next event",
     hintKey: "j / k", hint: { calendar: "select" } },
-  { id: "calendarPrevious", keys: ["k", "Up"], contexts: ["calendar"],
+  { id: "calendarPrevious", pointer: "Click an event", keys: ["k", "Up"], contexts: ["calendar"],
     group: "Calendar", label: "Select the previous event" },
-  { id: "openCalendarEvent", keys: ["Return", "o"], contexts: ["calendar"],
+  { id: "openCalendarEvent", pointer: "Click an event", keys: ["Return", "o"], contexts: ["calendar"],
     group: "Calendar", label: "Open the selected event",
     hintKey: "o", hint: { calendar: "open" } },
-  { id: "calendarPreviousPeriod", keys: ["h", "Left"], contexts: ["calendar"],
+  { id: "calendarPreviousPeriod", pointer: "The ‹ button", keys: ["h", "Left"], contexts: ["calendar"],
     group: "Calendar", label: "Previous week or month" },
-  { id: "calendarNextPeriod", keys: ["l", "Right"], contexts: ["calendar"],
+  { id: "calendarNextPeriod", pointer: "The › button", keys: ["l", "Right"], contexts: ["calendar"],
     group: "Calendar", label: "Next week or month" },
-  { id: "calendarToday", keys: ["t"], contexts: ["calendar"],
+  { id: "calendarToday", pointer: "The Today button", keys: ["t"], contexts: ["calendar"],
     group: "Calendar", label: "Go to today" },
-  { id: "calendarWeek", keys: ["w"], contexts: ["calendar"],
+  { id: "calendarWeek", pointer: "The view selector", keys: ["w"], contexts: ["calendar"],
     group: "Calendar", label: "Show week view" },
-  { id: "calendarDay", keys: ["d"], contexts: ["calendar"],
+  { id: "calendarDay", pointer: "The view selector", keys: ["d"], contexts: ["calendar"],
     group: "Calendar", label: "Show day view" },
-  { id: "calendarAgenda", keys: ["a"], contexts: ["calendar"],
+  { id: "calendarAgenda", pointer: "The view selector", keys: ["a"], contexts: ["calendar"],
     group: "Calendar", label: "Show agenda view" },
-  { id: "calendarUndo", keys: ["u"], contexts: ["calendar"],
+  { id: "calendarUndo", pointer: "The Undo button in the calendar toolbar", keys: ["u"], contexts: ["calendar"],
     group: "Calendar", label: "Undo the last event change", hint: { calendar: "undo" } },
-  { id: "calendarMonth", keys: ["m"], contexts: ["calendar"],
+  { id: "calendarMonth", pointer: "The view selector", keys: ["m"], contexts: ["calendar"],
     group: "Calendar", label: "Show month view" },
   // The address book: the same cursor keys as the list, and the two things a
   // person is looked up for, writing to them and finding what they sent.
-  { id: "contactNext", keys: ["j", "Down"], contexts: ["contacts"],
+  { id: "contactNext", pointer: "Click a contact", keys: ["j", "Down"], contexts: ["contacts"],
     group: "Contacts", label: "Select the next contact",
     hintKey: "j / k", hint: { contacts: "move" } },
-  { id: "contactPrevious", keys: ["k", "Up"], contexts: ["contacts"],
+  { id: "contactPrevious", pointer: "Click a contact", keys: ["k", "Up"], contexts: ["contacts"],
     group: "Contacts", label: "Select the previous contact" },
-  { id: "contactWrite", keys: ["c"], contexts: ["contacts"],
+  { id: "contactWrite", pointer: "The Write button, a click on an address, or a double click on a contact", keys: ["c"], contexts: ["contacts"],
     group: "Contacts", label: "Write to the selected contact", hint: { contacts: "write" } },
-  { id: "contactMails", keys: ["Return", "o"], contexts: ["contacts"],
+  { id: "contactMails", pointer: "The Their mail button", keys: ["Return", "o"], contexts: ["contacts"],
     group: "Contacts", label: "Show mail from the selected contact",
     hintKey: "o", hint: { contacts: "their mail" } },
-  { id: "contactSearch", keys: ["/"], contexts: ["contacts"],
+  { id: "contactSearch", pointer: "Click the search field", keys: ["/"], contexts: ["contacts"],
     group: "Contacts", label: "Search contacts" },
   // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
   // a hand on the numpad expects the same thing of them.
-  { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],
+  { id: "send", pointer: "The Send button", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],
     group: "Writing", label: "Send", hint: { compose: "send" } },
-  { id: "saveEvent", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["eventCompose", "eventDescription"],
+  { id: "saveEvent", pointer: "The Save button", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["eventCompose", "eventDescription"],
     sequenceContexts: { "Return": ["eventCompose"], "Enter": ["eventCompose"] },
     hintKey: "Ctrl+Enter",
     group: "Writing", label: "Save and close the event", hint: { eventCompose: "save", eventDescription: "save" } },
-  { id: "guestNext", keys: ["Down"], contexts: ["eventGuests"],
+  { id: "guestNext", pointer: "Click a suggestion", keys: ["Down"], contexts: ["eventGuests"],
     group: "Writing", label: "Next guest suggestion" },
-  { id: "guestPrevious", keys: ["Up"], contexts: ["eventGuests"],
+  { id: "guestPrevious", pointer: "Click a suggestion", keys: ["Up"], contexts: ["eventGuests"],
     group: "Writing", label: "Previous guest suggestion" },
-  { id: "guestChoose", keys: ["Return", "Enter"], contexts: ["eventGuests"],
+  { id: "guestChoose", pointer: "Click a suggestion", keys: ["Return", "Enter"], contexts: ["eventGuests"],
     group: "Writing", label: "Choose guest suggestion" },
-  { id: "undoSend", keys: ["Alt+Z"], contexts: ANY,
+  { id: "undoSend", pointer: "The Undo button on the toast", keys: ["Alt+Z"], contexts: ANY,
     survivesOverlay: true,
     group: "Writing", label: "Undo send" },
 
   // Reachable from the mailbox. `/` is a bare key, so it is only offered where
   // bare keys mean anything — inside the field it is a character being typed,
   // and Qt gives the field its keys before any Shortcut sees them.
-  { id: "search", keys: ["/"], contexts: MAIL,
+  { id: "search", pointer: "Click the search field", keys: ["/"], contexts: MAIL,
     group: "Finding", label: "Search" },
 
   // The rail by number, and nothing to remember: hold Ctrl and every row says
@@ -192,7 +194,7 @@ var BINDINGS = [
   // own key list, so the `Ctrl+` prefix is not written down a second time.
   // Nine and not ten, because `Ctrl+0` is reset zoom in every browser and
   // stays that here; a tenth row on the rail would have taken it.
-  { id: "goMailbox",
+  { id: "goMailbox", pointer: "Click the mailbox in the sidebar",
     keys: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5",
       "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"],
     contexts: MAIL, group: "Going", label: "Go to that mailbox",
@@ -200,7 +202,7 @@ var BINDINGS = [
 
   // Accounts are surfaces rather than destinations inside the current one, so
   // they use Alt and the same visible order as the account switcher.
-  { id: "goAccount",
+  { id: "goAccount", pointer: "Menu: Switch account...",
     keys: ["Alt+1", "Alt+2", "Alt+3", "Alt+4", "Alt+5",
       "Alt+6", "Alt+7", "Alt+8", "Alt+9", "Alt+0"],
     contexts: ["list", "reader", "calendar"], group: "Going",
@@ -211,52 +213,52 @@ var BINDINGS = [
   // thing here — and not a chord either, because it opens a list the keyboard
   // then walks — or types into: letters narrow it, the arrows move, `Enter`
   // takes one.
-  { id: "switchAccount", keys: ["Alt+A"], contexts: MAIL,
+  { id: "switchAccount", pointer: "Menu: Switch account...", keys: ["Alt+A"], contexts: MAIL,
     group: "Going", label: "Switch account" },
   // The message agent, on the cursor row. A popup, so the same shape as the
   // account switcher: opened through the table, then answering its own keys.
-  { id: "askAgent", keys: ["Alt+G"], contexts: ["list", "reader", "compose"],
+  { id: "askAgent", pointer: "The AI button, or the row menu: Ask AI", keys: ["Alt+G"], contexts: ["list", "reader", "compose"],
     group: "Acting", label: "Ask AI about the message or draft" },
-  { id: "assistantSend", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["assistant", "assistantCommands"],
+  { id: "assistantSend", pointer: "The send button", keys: ["Return", "Enter", "Ctrl+Return", "Ctrl+Enter"], contexts: ["assistant", "assistantCommands"],
     sequenceContexts: { "Return": ["assistant"], "Enter": ["assistant"] },
     group: "AI", label: "Send the AI message" },
-  { id: "assistantCommandNext", keys: ["Down"], contexts: ["assistantCommands"], group: "AI", label: "Next command" },
-  { id: "assistantCommandPrevious", keys: ["Up"], contexts: ["assistantCommands"], group: "AI", label: "Previous command" },
-  { id: "assistantChooseCommand", keys: ["Return", "Enter"], contexts: ["assistantCommands"],
+  { id: "assistantCommandNext", pointer: "Click a command", keys: ["Down"], contexts: ["assistantCommands"], group: "AI", label: "Next command" },
+  { id: "assistantCommandPrevious", pointer: "Click a command", keys: ["Up"], contexts: ["assistantCommands"], group: "AI", label: "Previous command" },
+  { id: "assistantChooseCommand", pointer: "Click a command", keys: ["Return", "Enter"], contexts: ["assistantCommands"],
     group: "AI", label: "Complete or run the selected AI command" },
 
-  { id: "calendar", keys: ["Alt+C"], contexts: ["list", "reader", "calendar", "contacts"],
+  { id: "calendar", pointer: "Calendar in the sidebar, or any mailbox", keys: ["Alt+C"], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Switch between mail and calendar" },
-  { id: "mailView", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar", "contacts"],
+  { id: "mailView", pointer: "Click a mailbox in the sidebar", keys: ["Ctrl+Shift+M"], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Go to mail" },
-  { id: "calendarView", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar", "contacts"],
+  { id: "calendarView", pointer: "Calendar in the sidebar", keys: ["Ctrl+Shift+C"], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Go to calendar" },
-  { id: "toggleSidebar", keys: ["["], contexts: ["list", "reader", "calendar", "contacts"],
+  { id: "toggleSidebar", pointer: "The sidebar icon at the bottom left", keys: ["["], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Show or hide the sidebar" },
-  { id: "contactsView", keys: ["Ctrl+Shift+P"], contexts: ["list", "reader", "calendar", "contacts"],
+  { id: "contactsView", pointer: "Contacts in the sidebar", keys: ["Ctrl+Shift+P"], contexts: ["list", "reader", "calendar", "contacts"],
     group: "Going", label: "Go to contacts" },
-  { id: "toggleCalendarPane", keys: ["]"], contexts: ["list", "reader"],
+  { id: "toggleCalendarPane", pointer: "The calendar icon at the bottom right", keys: ["]"], contexts: ["list", "reader"],
     group: "Going", label: "Show or hide the calendar pane" },
 
   // Only where there is a message body to size. These carried no context at
   // all, which left them live on a settings form.
-  { id: "zoomIn", keys: ["Ctrl++", "Ctrl+="], contexts: ["reader"],
+  { id: "zoomIn", pointer: "Ctrl+wheel, or right-click the message: Zoom in", keys: ["Ctrl++", "Ctrl+="], contexts: ["reader"],
     group: "Reading", label: "Zoom the message body in" },
-  { id: "zoomOut", keys: ["Ctrl+-"], contexts: ["reader"],
+  { id: "zoomOut", pointer: "Ctrl+wheel, or right-click the message: Zoom out", keys: ["Ctrl+-"], contexts: ["reader"],
     group: "Reading", label: "Zoom the message body out" },
-  { id: "zoomReset", keys: ["Ctrl+0"], contexts: ["reader"],
+  { id: "zoomReset", pointer: "Right-click the message: Reset zoom", keys: ["Ctrl+0"], contexts: ["reader"],
     group: "Reading", label: "Reset the zoom" },
 
-  { id: "refresh", keys: ["F5", "Ctrl+R"], contexts: ANY,
+  { id: "refresh", pointer: "The refresh button", keys: ["F5", "Ctrl+R"], contexts: ANY,
     group: "Mailbox", label: "Check for mail" },
-  { id: "settings", keys: ["Ctrl+,"], contexts: ANY,
+  { id: "settings", pointer: "Menu: Settings...", keys: ["Ctrl+,"], contexts: ANY,
     group: "Mailbox", label: "Open settings" },
   // A question mark asks for the key reference while the keyboard belongs to
   // mail. Text-entry contexts keep it as text instead.
-  { id: "help", keys: ["?"], contexts: MAIL,
+  { id: "help", pointer: "Menu: Keyboard...", keys: ["?"], contexts: MAIL,
     survivesOverlay: true,
     group: "Mailbox", label: "Toggle all keybindings" },
-  { id: "back", keys: ["Escape"], contexts: ANY,
+  { id: "back", pointer: "The Back button, or the window's close button", keys: ["Escape"], contexts: ANY,
     survivesOverlay: true,
     group: "Mailbox", label: "Back, or close the window",
     hint: { reader: "back", page: "back", compose: "close", eventCompose: "close", eventDescription: "close", search: "leave" } }

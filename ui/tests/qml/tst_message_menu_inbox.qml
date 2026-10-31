@@ -402,5 +402,31 @@ Item {
       compare(menu.archived, false)
       compare(unarchiveRow().visible, false)
     }
+  
+    // ------------------------------------------------- selecting by pointer
+
+    // Ticking a first row used to need Ctrl held: the menu offers it, and
+    // the whole list, so the keyboard's x and Ctrl+A have a pointer way.
+    function test_the_menu_selects_a_row_and_every_row() {
+      menu.checkedIds = []
+      menu.allChecked = false
+      show(archivedMessage())
+      var select = shown("Select")
+      verify(select !== null)
+      select.activated()
+      compare(actionSpy.count, 1)
+      compare(actionSpy.signalArguments[0][0], "toggleCheck")
+      compare(actionSpy.signalArguments[0][1], "m1")
+      show(archivedMessage())
+      shown("Select all").activated()
+      compare(actionSpy.signalArguments[0][0], "checkAll")
+      menu.checkedIds = ["m1"]
+      menu.allChecked = true
+      show(archivedMessage())
+      verify(shown("Deselect") !== null)
+      verify(shown("Select none") !== null)
+      menu.checkedIds = []
+      menu.allChecked = false
+    }
   }
 }

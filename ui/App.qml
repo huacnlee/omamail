@@ -3054,7 +3054,13 @@ Item {
           root.openMessage(id)
           root.startCompose(mode)
         }
+        checkedIds: root.checkedIds
+        allChecked: !!root.service && root.checkedIds.length > 0
+          && Model.retainIds(root.checkedIds, root.service.messages).length
+            === Model.allIds(root.service.messages).length
         onActionRequested: function(action, id) {
+          if (action === "toggleCheck") return root.toggleCheck(id)
+          if (action === "checkAll") return root.checkAll()
           // On a ticked row the menu means the selection; on any other row it
           // means that row alone, whatever else is ticked.
           var outside = root.checkedIds.indexOf(id) < 0
