@@ -1,11 +1,13 @@
 import QtQuick
 import Quickshell.Io
+import "Details.js" as Details
 
 // This helper remains usable when the mail backend cannot start. Only error
 // envelopes cross stdin; Python allowlists them before writing anything.
 Item {
   id: root
   required property string pluginDir
+  property int backendApiVersion: 0
   property var queue: []
   property bool openRequested: false
   readonly property bool busy: openRequested || (worker.running && mode === "open")
@@ -22,6 +24,8 @@ Item {
       message: error && typeof error.message === "string" && error.message.length <= 128
         ? error.message : "unknown_error"
     }}
+    if (backendApiVersion >= 10 && Details.calendarMethod(event.method))
+      event.error.data = Details.clean(error && error.data)
     var encoded = JSON.stringify(event)
     var now = Date.now()
     if (encoded === previous && now - previousAt < 10000) return
