@@ -2,6 +2,7 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml ui/compose/PendingCompose.qml \
+	ui/compose/SpellcheckAdapter.qml ui/compose/SpellingState.qml \
 	ui/tests/compatibility/tst_published_agent.qml \
 	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
 	ui/tests/qml/tst_reader_subject_menu.qml ui/tests/qml/tst_drafts_refresh.qml ui/tests/qml/tst_account_hosts.qml \
@@ -138,6 +139,8 @@ test-js:
 	node tests/test_imap_backend.js
 	node tests/test_hey_backend.js
 	node tests/test_gmail_backend.js
+	node ui/tests/test_settings.js
+	node ui/tests/test_spelling.js
 	node ui/tests/test_compose_recovery.js
 	node ui/tests/test_agent.js
 	node ui/tests/test_agent_options.js
