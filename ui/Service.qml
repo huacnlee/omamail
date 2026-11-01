@@ -1271,9 +1271,7 @@ Item {
     bodyZoom = prefs.bodyZoom
     bodyMode = prefs.bodyMode
     alwaysShowImages = prefs.alwaysShowImages
-    // The standalone app started with the session (--background) stays out
-    // of sight even if the window was open when the session ended.
-    restoreWindow = prefs.windowOpen && Qt.application.arguments.indexOf("--background") < 0
+    restoreWindow = prefs.windowOpen
     restoreAttempts = 0
     windowPrefsLoaded = true
     if (restoreWindow) Qt.callLater(root.reopenWindow)

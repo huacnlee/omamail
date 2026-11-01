@@ -34,6 +34,8 @@ set(OMAMAIL_NATIVE_SOURCES
   src/process.h
   src/resource_check.cpp
   src/resource_check.h
+  src/single_instance.cpp
+  src/single_instance.h
 )
 
 if(APPLE)
@@ -148,6 +150,7 @@ if(BUILD_TESTING)
   omamail_native_test(tst_settings tst_settings.cpp)
   omamail_native_test(tst_resources tst_resources.cpp)
   omamail_native_test(tst_notifications tst_notifications.cpp)
+  omamail_native_test(tst_single_instance tst_single_instance.cpp)
 
   target_compile_definitions(tst_process PRIVATE
     PYTHON_EXECUTABLE="${Python3_EXECUTABLE}"

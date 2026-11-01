@@ -2,6 +2,7 @@
 #include "application_host.h"
 #include "notifications.h"
 #include "resource_check.h"
+#include "single_instance.h"
 #include "window.h"
 
 #include <QCoreApplication>
@@ -11,8 +12,6 @@
 #include <QIcon>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocalServer>
-#include <QLocalSocket>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -29,10 +28,7 @@ int reportResourceCheck(const ResourcePaths &paths)
     return 1;
 }
 
-// One Omamail per session. Closing the window only hides it, so the mail and
-// calendar notifications keep coming; on a desktop with no Dock or tray to
-// click, launching Omamail again is the way back. A second launch asks the
-// running one to show its window and leaves.
+// One Omamail per session; see single_instance.h.
 QString instanceName()
 {
     return QStringLiteral("omamail-app-") + qEnvironmentVariable("USER", QStringLiteral("user"));
@@ -47,15 +43,6 @@ QString openPayload(const QString &mailto)
                                  .toJson(QJsonDocument::Compact));
 }
 
-bool showRunningInstance(const QString &payload)
-{
-    QLocalSocket socket;
-    socket.connectToServer(instanceName());
-    if (!socket.waitForConnected(500)) return false;
-    socket.write(payload.toUtf8() + "\n");
-    socket.waitForBytesWritten(500);
-    return true;
-}
 }
 
 int main(int argc, char *argv[])
@@ -110,7 +97,18 @@ int main(int argc, char *argv[])
         return 1;
     }
     if (const int status = reportResourceCheck(paths); status != 0) return status;
-    if (showRunningInstance(openPayload(mailto))) return 0;
+    // Settled before QML or the backend load, so two launches at once cannot
+    // both start one.
+    SingleInstance instance(instanceName());
+    switch (instance.claimOrForward(openPayload(mailto))) {
+    case SingleInstance::Launch::Forwarded:
+        return 0;
+    case SingleInstance::Launch::Failed:
+        QTextStream(stderr) << "Another Omamail is starting and did not answer" << Qt::endl;
+        return 1;
+    case SingleInstance::Launch::Owner:
+        break;
+    }
     initializeNotificationActivation();
 
     // Native platform styles can draw a light system scrollbar over a dark
@@ -141,21 +139,10 @@ int main(int argc, char *argv[])
             if (host) watchNativeCloseChord(window, [host] { host->requestClose(); });
         }
     }
-    // A socket left behind by a crash would refuse the name; nobody answered
-    // it above, so it is stale and safe to remove.
-    QLocalServer instanceServer;
-    QLocalServer::removeServer(instanceName());
-    instanceServer.listen(instanceName());
-    QObject::connect(&instanceServer, &QLocalServer::newConnection, &instanceServer, [&instanceServer, host] {
-        while (QLocalSocket *peer = instanceServer.nextPendingConnection()) {
-            QObject::connect(peer, &QLocalSocket::disconnected, peer, &QObject::deleteLater);
-            QObject::connect(peer, &QLocalSocket::readyRead, peer, [peer, host] {
-                while (peer->canReadLine()) {
-                    const QString payload = QString::fromUtf8(peer->readLine()).trimmed();
-                    if (host) host->requestOpen(payload);
-                }
-            });
-        }
+    QObject::connect(&instance, &SingleInstance::openRequested, &instance, [host](const QString &payload) {
+        if (host) host->requestOpen(payload);
     });
+    if (!instance.listen())
+        QTextStream(stderr) << "Omamail could not listen for later launches" << Qt::endl;
     return application.exec();
 }

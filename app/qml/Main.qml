@@ -107,12 +107,14 @@ ApplicationWindow {
     root.requestActivate()
   }
 
+  readonly property bool startedInBackground: Qt.application.arguments.indexOf("--background") >= 0
+
   function openInitialWindow() {
     if (initialOpenIssued) return
     initialOpenIssued = true
     // Started with the session (--background): keep checking mail and sending
     // notifications without a window; launching Omamail again shows it.
-    if (Qt.application.arguments.indexOf("--background") >= 0) return
+    if (startedInBackground) return
     shellAdapter.summon(manifestAdapter.value.id, "{}")
   }
 
@@ -287,6 +289,11 @@ ApplicationWindow {
   Connections {
     target: mailService
     function onAccountsLoadedChanged() { root.routePendingActivation() }
+    // Started with the session (--background), the window stays out of sight
+    // even if it was open when the session ended.
+    function onRestoreWindowChanged() {
+      if (mailService.restoreWindow && root.startedInBackground) mailService.restoreWindow = false
+    }
   }
 
   Connections {
