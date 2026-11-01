@@ -39,6 +39,11 @@ Item {
       if (!root.controller.loading && !root.controller.eventWriting) root.pendingGesture = null
       if (!root.controller.loading && !root.controller.pendingRangeStart) root.followsFirstEvent = false
     }
+    // Calendars arrive with their account's sign-in, after the first load ended.
+    function onEnabledSourceKeyChanged() {
+      if (!root.movedByHand) root.followsFirstEvent = true
+    }
+    function onCalendarScopeChanged() { root.resetTimeScroll() }
   }
 
   readonly property real timeRailWidth: Math.max(Style.space(52),
@@ -83,17 +88,23 @@ Item {
   // one until they have loaded, or until it is scrolled or an event is dragged.
   // After that, an event changing does not move what is on screen.
   property bool followsFirstEvent: true
+  property bool movedByHand: false
+  function stopFollowing() {
+    movedByHand = true
+    followsFirstEvent = false
+  }
   function showOpeningHour() {
     timeline.topHour = openingHour
     timeline.relayout()
   }
   function resetTimeScroll() {
+    movedByHand = false
     followsFirstEvent = true
     showOpeningHour()
   }
   onOpeningHourChanged: if (followsFirstEvent) showOpeningHour()
-  onDragPreviewChanged: if (dragPreview) followsFirstEvent = false
-  onPendingGestureChanged: if (pendingGesture) followsFirstEvent = false
+  onDragPreviewChanged: if (dragPreview) stopFollowing()
+  onPendingGestureChanged: if (pendingGesture) stopFollowing()
   function zoomHours(direction) {
     if (!controller || pendingGesture || dragPreview) return
     var unscaled = Calendar.HOUR_HEIGHT_USUAL / Style.space(Calendar.HOUR_HEIGHT_USUAL)
@@ -327,10 +338,14 @@ Item {
     // once the layout has settled.
     property real topHour: 0
     property real placedY: 0
+    property real placedHeight: 0
+    property real placedContentHeight: 0
     property bool relayingOut: false
     function placeTopHour() {
       contentY = Math.max(0, Math.min(topHour * hourHeight, hourHeight * root.hourCount - height))
       placedY = contentY
+      placedHeight = height
+      placedContentHeight = contentHeight
     }
     function relayout() {
       relayingOut = true
@@ -346,9 +361,11 @@ Item {
     onContentYChanged: {
       // Flickable also rounds contentY to a whole pixel, which is not a scroll.
       if (relayingOut || Math.abs(contentY - placedY) < 1) return
+      // A change of layout can move it before any of the handlers above have run.
+      if (height !== placedHeight || contentHeight !== placedContentHeight) return
       placedY = contentY
       topHour = contentY / hourHeight
-      root.followsFirstEvent = false
+      root.stopFollowing()
     }
     contentWidth: width
     contentHeight: Math.max(height, hourHeight * root.hourCount)

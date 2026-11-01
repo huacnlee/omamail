@@ -74,6 +74,12 @@ Item {
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
+    function test_the_week_view_can_watch_what_it_follows() {
+      compare(typeof controller.pendingRangeStart, "number")
+      compare(typeof controller.enabledSourceKey, "string")
+      compare(typeof controller.calendarScope, "string")
+    }
+
     function test_a_run_of_zoom_presses_shows_at_once_and_saves_once() {
       var saved = mailService.settings
       mailService.settings = ({})

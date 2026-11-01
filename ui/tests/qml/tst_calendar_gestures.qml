@@ -16,6 +16,8 @@ Item {
     property bool eventWriting: false
     property bool loading: false
     property double pendingRangeStart: 0
+    property string enabledSourceKey: ""
+    property string calendarScope: ""
     property string sourceKind: "google"
     property bool apiReady: true
     function findSource(id) { return {id:id,kind:sourceKind} }
@@ -117,6 +119,22 @@ Item {
       resizeTo(height + 100)
       fuzzyCompare(topHour(), 5, 0.01)
     }
+    function test_a_window_taller_than_the_day_returns_to_the_same_hour() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var height = view.height
+      fixture.hourHeight = 30
+      wait(0)
+      timeline.contentY = 2 * timeline.hourHeight
+      resizeTo(height + 200)
+      compare(timeline.contentY, 0, "the whole day fits")
+      resizeTo(height)
+      fuzzyCompare(topHour(), 2, 0.01)
+      var original = fixture.events
+      fixture.events = plannedAt(1)
+      wait(50)
+      fuzzyCompare(topHour(), 2, 0.01, "still a scroll by hand")
+      fixture.events = original
+    }
     function test_zooming_out_and_back_returns_to_the_same_hour() {
       var timeline = findChild(view, "calendar-time-scroll")
       timeline.contentY = 12 * timeline.hourHeight
@@ -172,6 +190,36 @@ Item {
       fixture.events = original
       view.resetTimeScroll()
       fuzzyCompare(topHour(), 10, 0.01)
+    }
+    function test_a_calendar_arriving_after_the_first_load_is_followed_unless_scrolled() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var original = fixture.events
+      fixture.loading = true
+      fixture.loading = false
+      fixture.enabledSourceKey = "work"
+      fixture.events = plannedAt(5)
+      fuzzyCompare(topHour(), 5, 0.01)
+      wait(0)
+      timeline.contentY = 9 * timeline.hourHeight
+      fixture.enabledSourceKey = "work\nhome"
+      fixture.events = plannedAt(4)
+      wait(50)
+      fuzzyCompare(topHour(), 9, 0.01, "a scroll is kept")
+      fixture.enabledSourceKey = ""
+      fixture.events = original
+      view.resetTimeScroll()
+    }
+    function test_switching_mailbox_opens_at_its_first_event() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var original = fixture.events
+      wait(0)
+      timeline.contentY = 2 * timeline.hourHeight
+      fixture.calendarScope = "other"
+      fixture.events = plannedAt(5)
+      fuzzyCompare(topHour(), 5, 0.01)
+      fixture.calendarScope = ""
+      fixture.events = original
+      view.resetTimeScroll()
     }
     function test_dragging_the_first_event_does_not_scroll_the_view() {
       var original = fixture.events
