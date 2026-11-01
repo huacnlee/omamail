@@ -39,11 +39,16 @@ Item {
       if (!root.controller.loading && !root.controller.eventWriting) root.pendingGesture = null
       if (!root.controller.loading && !root.controller.pendingRangeStart) root.followsFirstEvent = false
     }
-    // Calendars arrive with their account's sign-in, after the first load ended.
+    // Calendars arrive with their account's sign-in, after the first load ended,
+    // and the controller may already have applied their cached events.
     function onEnabledSourceKeyChanged() {
-      if (!root.movedByHand) root.followsFirstEvent = true
+      if (root.movedByHand) return
+      root.followsFirstEvent = true
+      root.showOpeningHour()
     }
-    function onCalendarScopeChanged() { root.resetTimeScroll() }
+    function onCalendarScopeChanged() {
+      if (!root.pendingGesture && !root.dragPreview) root.resetTimeScroll()
+    }
   }
 
   readonly property real timeRailWidth: Math.max(Style.space(52),

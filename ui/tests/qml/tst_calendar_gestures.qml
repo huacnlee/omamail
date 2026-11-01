@@ -196,9 +196,10 @@ Item {
       var original = fixture.events
       fixture.loading = true
       fixture.loading = false
-      fixture.enabledSourceKey = "work"
       fixture.events = plannedAt(5)
-      fuzzyCompare(topHour(), 5, 0.01)
+      fuzzyCompare(topHour(), 10, 0.01, "the first load has ended")
+      fixture.enabledSourceKey = "work"
+      fuzzyCompare(topHour(), 5, 0.01, "its cached events came first")
       wait(0)
       timeline.contentY = 9 * timeline.hourHeight
       fixture.enabledSourceKey = "work\nhome"
@@ -208,6 +209,21 @@ Item {
       fixture.enabledSourceKey = ""
       fixture.events = original
       view.resetTimeScroll()
+    }
+    function test_switching_mailbox_waits_for_a_drag_to_finish() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var drag = findChild(view, "calendar-event-drag-meeting")
+      wait(0)
+      timeline.contentY = 8 * timeline.hourHeight
+      var top = timeline.contentY
+      mousePress(drag, drag.width / 2, drag.height / 2)
+      mouseMove(drag, drag.width / 2, drag.height / 2 + 40, 20)
+      verify(view.dragPreview !== null)
+      fixture.calendarScope = "other"
+      compare(timeline.contentY, top)
+      mouseRelease(drag, drag.width / 2, drag.height / 2 + 40)
+      fixture.calendarScope = ""
+      view.pendingGesture = null
     }
     function test_switching_mailbox_opens_at_its_first_event() {
       var timeline = findChild(view, "calendar-time-scroll")
