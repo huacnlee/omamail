@@ -42,12 +42,12 @@ void ProcessTest::exactArgumentsAndStdin()
     NativeProcess process;
     process.setCommand(command(QStringLiteral("probe"),
         {QStringLiteral("space here"), QStringLiteral("$(not-a-shell)"),
-         QString::fromUtf8("東京")}));
+         QString::fromUtf8("東京"), QStringLiteral("quote\"and\\slash\\")}));
     process.setStdinEnabled(true);
     QSignalSpy lines(&process, &NativeProcess::stdoutLine);
     QSignalSpy exited(&process, &NativeProcess::exited);
     connect(&process, &NativeProcess::started, &process, [&process] {
-        process.write(QString::fromUtf8("raw €\nwithout-added-newline"));
+        process.write(QString::fromUtf8("raw €\n") + QChar(0) + QStringLiteral("without-added-newline"));
         process.closeWriteChannel();
     });
 
@@ -58,9 +58,9 @@ void ProcessTest::exactArgumentsAndStdin()
     const auto result = QJsonDocument::fromJson(lines.at(0).at(0).toString().toUtf8()).object();
     QCOMPARE(result.value(QStringLiteral("argv")).toArray().toVariantList(),
              QVariantList({QStringLiteral("space here"), QStringLiteral("$(not-a-shell)"),
-                           QString::fromUtf8("東京")}));
+                           QString::fromUtf8("東京"), QStringLiteral("quote\"and\\slash\\")}));
     QCOMPARE(result.value(QStringLiteral("stdin")).toString(),
-             QStringLiteral("72617720e282ac0a776974686f75742d61646465642d6e65776c696e65"));
+             QStringLiteral("72617720e282ac0a00776974686f75742d61646465642d6e65776c696e65"));
 }
 
 void ProcessTest::incrementalUtf8Lines()
@@ -74,7 +74,7 @@ void ProcessTest::incrementalUtf8Lines()
     QVERIFY(exited.wait(5000));
     QCOMPARE(lines.size(), 2);
     QCOMPARE(lines.at(0).at(0).toString(), QString::fromUtf8("first €"));
-    QCOMPARE(lines.at(1).at(0).toString(), QString::fromUtf8("second U0001f642"));
+    QCOMPARE(lines.at(1).at(0).toString(), QString::fromUtf8("second 🙂"));
 }
 
 void ProcessTest::stderrIsBounded()

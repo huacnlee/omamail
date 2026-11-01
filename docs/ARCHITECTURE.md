@@ -95,7 +95,7 @@ An action describes intent, not an input device. `archive` is the same operation
 
 The context is the guard. Do not add a second collection of `enabled` tests in the key handler for conditions already expressed by the context. Capability is different: it comes from the active provider and decides whether an operation exists at all. A provider capability should remove an unavailable action from the view rather than offer an action that fails after activation.
 
-Qt Quick Controls popups intercept keys before window shortcuts. That is a platform fact, not an exception to the architecture. Popup-local navigation therefore lives on the popup content item, and the popup owns its own Escape dismissal. An application action may open a popup, but `goBack()` does not duplicate the popup's close policy. The tests in `ui/tests/qml/tst_popup_keys.qml` preserve this boundary.
+Qt Quick Controls popups intercept keys before window shortcuts. That is a platform fact, not an exception to the architecture. Popup-local navigation therefore lives on the popup content item, and the popup owns its own Escape dismissal. An application action may open a popup, but `goBack()` does not duplicate the popup's close policy. The production-popup tests in `ui/tests/qml/tst_account_switcher.qml` preserve this boundary.
 
 ## Domain modules
 

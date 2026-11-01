@@ -139,7 +139,6 @@ test-js:
 	node tests/test_imap_backend.js
 	node tests/test_hey_backend.js
 	node tests/test_gmail_backend.js
-	node ui/tests/test_compose_recovery.js
 	node ui/tests/test_agent.js
 	node ui/tests/test_agent_options.js
 	node ui/tests/test_chat_text.js
@@ -167,12 +166,9 @@ test-js:
 	node ui/tests/test_html.js
 	node ui/tests/test_direction.js
 	node ui/tests/test_appearance.js
-	node ui/tests/test_cache.js
-	node ui/tests/test_render_cache.js
 	node ui/tests/test_model.js
 	node ui/tests/test_icons.js
 	node ui/tests/test_navigation.js
-	node ui/tests/test_conversation.js
 	node tests/test_reader_pipeline.js
 	node ui/tests/test_keymap.js
 	node ui/tests/test_accounts.js

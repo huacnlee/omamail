@@ -131,9 +131,22 @@ mod tests {
         assert!(cache.get("one", "1", "source", &json!({})).is_none());
         assert!(cache.get("one", "0", "source", &json!({})).is_some());
         cache
+            .put("one", "0", "replacement", &json!({}), json!({"html":"new"}))
+            .unwrap();
+        assert!(cache.get("one", "0", "source", &json!({})).is_none());
+        assert_eq!(
+            cache.get("one", "0", "replacement", &json!({})).unwrap()["html"],
+            "new"
+        );
+        assert!(
+            cache.get("one", "2", "source", &json!({})).is_some(),
+            "replacement must not evict another entry"
+        );
+        cache
             .put("two", "0", "source", &json!({}), json!({}))
             .unwrap();
         cache.invalidate("one", None);
+        assert!(cache.get("one", "0", "replacement", &json!({})).is_none());
         assert!(cache.get("two", "0", "source", &json!({})).is_some());
         assert!(cache.bytes <= MAX_BYTES);
     }

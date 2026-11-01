@@ -527,8 +527,10 @@ TestCase {
     compare(composition.height, 680)
     composition.width = 980
     composition.height = 710
-    composition.scheduleWindowSizeSave()
-    composition.saveWindowSize()
+    tryVerify(function() {
+      var saved = JSON.parse(host.files[path])
+      return saved.width === 980 && saved.height === 710
+    })
     var saved = JSON.parse(host.files[path])
     compare(saved.width, 980)
     compare(saved.height, 710)

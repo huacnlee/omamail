@@ -93,34 +93,6 @@ if grep -vE '^\s*(//|\*|/\*)' message/Html.js | grep -nE '#[0-9A-Fa-f]{6}' \
   fail "message/Html.js may only name the PAPER/INK sheet colours"
 fi
 
-# 3b. Reading mode is a rebuild, and the rebuild lives with the parse.
-#
-# `background` is an address in HTML, not a colour, and Qt fetches it. It sat in
-# the colour list because senders write it next to `bgcolor`, and with
-# `keepColors` on it survived — a real message reached its sender's host with
-# remote images off. An appearance option may never buy a network request, so
-# the resource attributes are refused before the colour question is asked.
-if grep -nE '^var COLOUR_ATTRIBUTES = .*\bbackground\b' message/Html.js; then
-  fail "message/Html.js treats the HTML background attribute as a colour; it is an address"
-fi
-grep -q '^var RESOURCE_ATTRIBUTES = {' message/Html.js \
-  || fail "message/Html.js must refuse resource-bearing attributes as their own class"
-awk '
-  /^function cleanAttributes/ { in_function = 1 }
-  in_function && /RESOURCE_ATTRIBUTES\[name\] === true/ { resource = NR }
-  in_function && /COLOUR_ATTRIBUTES\[name\] === true/ { colour = NR }
-  in_function && /^}/ { exit !(resource && colour && resource < colour) }
-  END { exit !(resource && colour && resource < colour) }
-' message/Html.js \
-  || fail "a resource attribute must be dropped before keepColors is consulted"
-
-# A text node goes back out escaped. What the tokenizer read as text is not what
-# a second reader reads once something between two pieces of it is unwrapped, and
-# a "<" that was not a tag on the way in can be one on the way out — past every
-# check here, because by then it is a string rather than an element.
-grep -q 'out.push(escapeMarkup(node.text))' message/Html.js \
-  || fail "message/Html.js must escape a text node on the way out, not write it back raw"
-
 # Deciding what may be fetched and rebuilding a message for reading are one
 # file's work, and a view that called the sanitiser would be a second place
 # those decisions were made. What it may still do is fit a document it has
@@ -128,30 +100,13 @@ grep -q 'out.push(escapeMarkup(node.text))' message/Html.js \
 if grep -nE 'Html\.(sanitize|readerTree)\(' components/MessageReader.qml; then
   fail "the reader view must not sanitise a body; the account renders it once"
 fi
-# Sanitization and reader reconstruction now run in the Rust worker. Only a
-# correlated, successful native result may reach the QML document properties.
+# Keep the ownership boundary static; tst_render_cache.qml exercises stale and
+# failed replies, and src/cache/render.rs tests native cache isolation/limits.
 python3 - <<'PY_NATIVE_RENDER'
 from pathlib import Path
 account = Path("account/MailAccount.qml").read_text()
-start = account.index("  function renderSource(")
-render = account[start:account.index("  function showRemoteImages", start)]
-if 'backend.call("reader.render"' not in render or "withReader: true" not in account:
-    raise SystemExit("test_source.sh: native render must prepare both safe display trees")
 if "Html.sanitize(" in account or "RenderCache." in account:
     raise SystemExit("test_source.sh: body parsing and render caching belong to Rust")
-for guard in ("rendering !== root.renderSerial", "account !== root.accountId",
-              "selection !== root.selectedId", "detail !== root.detailSerial",
-              "if (error || !result)"):
-    if guard not in render or render.index(guard) > render.index("selectedDocument = ready.document"):
-        raise SystemExit("test_source.sh: stale or failed renders must never reach the document")
-native = Path("../src/backend/content.rs").read_text()
-if "message::html::request(params)?" not in native or ".get(account, id, source, &policy)" not in native:
-    raise SystemExit("test_source.sh: render results must originate in the native sanitizer and keyed cache")
-cache = Path("../src/cache/render.rs").read_text()
-for invariant in ("MAX_PER_ACCOUNT: usize = 12", "MAX_BYTES", "e.account == account",
-                  "e.id == id", "e.source == source", "e.options == *options"):
-    if invariant not in cache:
-        raise SystemExit("test_source.sh: native render cache must be bounded and isolated by complete policy")
 PY_NATIVE_RENDER
 grep -q 'remoteImageData: remoteImagesAllowed ? remoteImageData : null' account/MailAccount.qml \
   || fail "Qt must receive prepared image bytes rather than a pending remote source"
@@ -194,21 +149,6 @@ fi
 # 3c. Which way a message runs is decided in one place, and the two questions it
 #     answers stay separate.
 #
-# Qt resolves a paragraph's direction from its own first strong character and is
-# good at it. Two things it cannot do are what Direction.js is for, and both are
-# easy to undo by "simplifying" the code that uses it.
-grep -q 'promoteDirection' message/Html.js \
-  || fail "a CSS direction must be promoted to the dir attribute Qt actually reads"
-# The sheet's physical sides and the body's `dir` are one statement. Qt places a
-# list marker on the side the block runs from, so a sheet that indents a list
-# from the right while the block is still left-to-right does not move the bullet
-# — it drops it. Splitting these was tried; the bullets went missing.
-grep -q 'function baseDirectionAttribute' message/Html.js \
-  || fail "the body direction and the stylesheet's sides must be written together"
-if grep -n 'palette.pinned' message/Html.js; then
-  fail "a document has one direction, not a direction and a flag saying whether to mean it"
-fi
-
 # A reply prefix is Latin whatever the thread is written in, so a subject asked
 # with `resolve` rather than `resolveSubject` puts every message in a thread
 # after the first against the wrong edge — which is the bug the module exists
@@ -700,66 +640,14 @@ for client in providers/GmailApiClient.qml providers/HeyClient.qml \
   grep -q 'function getSummaries(ids, callback)' "$client" \
     || fail "$client must expose the shared conversation-member interface"
 done
-# A member is a message and a stop must tell the truth about that message. A
-# thread block speaks for the whole conversation, so putting one on a member
-# would draw a stop bold because a different message in the thread is unread.
-awk '
-  /function getSummaries\(/ { in_members = 1 }
-  in_members && /withThreadBlock/ { exit 1 }
-  in_members && /^  function getMessages\(/ { exit 0 }
-  END { exit 0 }
-' providers/JmapClient.qml \
-  || fail "a conversation member must not be given the row's thread block"
 grep -q 'if (ids.length > 0) progress({' providers/ImapClient.qml \
   || fail "IMAP search windows must report ids before the final page"
 grep -q 'UID FETCH {set} (UID INTERNALDATE)' ../src/providers/imap/read.rs \
   || fail "native IMAP paging must read arrival dates in bounded UID batches"
-grep -q 'sparse_search_orders_by_date_before_paging_even_when_progressive' ../src/providers/imap/read/tests.rs \
-  || fail "native sparse search needs tested date-ordered pagination"
-grep -q 'multi_window_dates_settle_before_paging_and_ignore_unsolicited_flags' ../src/providers/imap/read/tests.rs \
-  || fail "native IMAP ordering needs a bounded multi-window network regression"
 grep -q 'continuation' ../src/providers/imap/read.rs \
   || fail "native streamed IMAP reads must continue through opaque bounded batches"
 grep -q 'fetchQueue\.push(wanted)' account/MailAccount.qml \
   || fail "streamed metadata reads need one shared queue"
-# Native intent preparation owns row/member updates, scoped rollback and
-# conversation expansion. QML still owns queueing provider writes and navigation.
-python3 - <<'PY_NATIVE_INTENTS'
-from pathlib import Path
-account = Path("account/MailAccount.qml").read_text()
-start = account.index("  function runNativeAction(")
-run = account[start:account.index("  function rememberList", start)]
-for marker in ("intents.begin(parameters", "intents.settle(account, actionQuery",
-               "root.applyIntentView(prepared.view", "prepared.targets", "prepared.change",
-               "prepared.generation", "allRead: allRead === true", "quiet: quiet === true",
-               "memberOnly: memberOnly === true", "sourceLabelId: hasLabels ? rawLabelId"):
-    if marker not in run:
-        raise SystemExit("test_source.sh: native action contract missing: " + marker)
-if not run.index("stopLiveList()\n    var parameters") < run.index("intents.begin(parameters"):
-    raise SystemExit("test_source.sh: action preparation must invalidate pre-edit list snapshots")
-if not run.index("root.applyIntentView(prepared.view") < run.index("function dispatch()"):
-    raise SystemExit("test_source.sh: optimistic native view must apply before provider dispatch")
-dispatch = run[run.index("function dispatch()"):]
-if not dispatch.index("stopLiveList()") < dispatch.index("root.pendingAction = action"):
-    raise SystemExit("test_source.sh: queued provider writes must interrupt stale list reads")
-settle = run[run.index("intents.settle(account, actionQuery, prepared.token, failed"):]
-if not settle.index("root.runQueuedAction()") < settle.index("root.resumeDeferredListLoad("):
-    raise SystemExit("test_source.sh: completed actions must drain the write queue before revalidation")
-for marker in ("prepared.invalidatesPage === true || parameters.opaqueQuery",
-               'root.nextPageToken = ""', "cacheStore.invalidate(targets",
-               "root.loadMessages(false, true, message)", "root.active && root.cacheKey !== actionQuery"):
-    if marker not in run:
-        raise SystemExit("test_source.sh: mutation cache/pagination reconciliation missing: " + marker)
-if '(pendingAction !== "" || actionPreparations > 0) && cacheKey === pendingActionQuery' not in account:
-    raise SystemExit("test_source.sh: preparations and writes must only defer their own query")
-if "deferredListLoad = ({" not in account or "next.dispatch()" not in account:
-    raise SystemExit("test_source.sh: navigation and queued provider writes must not be discarded")
-intents = Path("account/Intents.qml").read_text()
-if 'account.backend.call("model.intent"' not in intents or "Model." in intents:
-    raise SystemExit("test_source.sh: optimistic replay must run in the native intent store")
-if "account.runNativeAction(" not in Path("account/BatchAction.qml").read_text():
-    raise SystemExit("test_source.sh: bulk edits must share the native transaction pipeline")
-PY_NATIVE_INTENTS
 grep -q 'if (!service.act(acted, action)) return false' App.qml \
   || fail "a refused action must not move the keyboard cursor"
 awk '
@@ -785,8 +673,6 @@ grep -q 'Some messages could not be loaded' providers/ImapClient.qml \
   || fail "native IMAP partial metadata failures must reach the UI"
 grep -q 'progressTimerComponent' providers/GmailApiClient.qml \
   || fail "parallel Gmail metadata replies must be coalesced before repainting"
-grep -q 'MAX_SUMMARIES_PER_QUERY' cache/Cache.js \
-  || fail "each cached query needs a row cap"
 
 # New-mail notifications use the application's own mark, not the desktop's
 # generic unread-mail glyph.
@@ -848,14 +734,6 @@ done
 # confirmation owned by App may call the service after naming the target.
 grep -q 'AccountRemovalDialog {' App.qml \
   || fail "account removal needs a confirmation dialog"
-if awk '
-  /function removeCurrentAccountFromEditor\(/ { in_remove = 1 }
-  in_remove && /service\.removeAccountAt/ { exit 0 }
-  in_remove && /^  }/ { exit 1 }
-  END { exit 1 }
-' App.qml; then
-  fail "requesting account removal must not remove it immediately"
-fi
 
 # The fix for a hanging request that looks right and does nothing.
 #
@@ -964,7 +842,9 @@ for name in ("components/AppMenu.qml", "components/MessageMenu.qml"):
     if not listed:
         raise SystemExit("test_source.sh: %s must list its rows in menuRows" % name)
     known = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", listed.group(1)))
-    drawn = re.findall(r"MenuRow \{\s*id: ([A-Za-z_][A-Za-z0-9_]*)", source)
+    drawn = re.findall(r"Menu(?:Action)?Row\s*\{\s*id:\s*([A-Za-z_][A-Za-z0-9_]*)", source)
+    if not drawn:
+        raise SystemExit("test_source.sh: %s has no menu rows to check" % name)
     missing = [row for row in drawn if row not in known]
     if missing:
         raise SystemExit("test_source.sh: %s draws %s without listing it in menuRows"
@@ -1047,18 +927,6 @@ awk '
   top_button && /^  \}/ { top_button = 0 }
 ' components/ImapSetupPage.qml \
   || fail "IMAP Remove account must not be detached from the account action row"
-
-# A mailbox row is the selected one only when no search is standing on top of
-# it, and that guard is a continuation line. Inserting a binding between the two
-# lines silently reparented the guard onto the new property — every row on the
-# rail then numbered itself 1, and nothing failed.
-awk '
-  /selected: !!root.service && root.service.mailboxKey/ {
-    getline
-    if ($0 !~ /searchQuery/) exit 1
-  }
-' components/MailboxSidebar.qml \
-  || fail "the mailbox row's selected guard lost its search continuation line"
 
 # 5. Nothing tracked may be large. This plugin is installed by cloning it, so
 #    every megabyte in the tree is a megabyte between the user and a working

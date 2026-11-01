@@ -143,6 +143,20 @@ fn outgoing_preserves_twenty_mebibyte_attachment_support() {
     let data = STANDARD.encode(vec![0xab; 20 * 1024 * 1024]);
     let output=compose::build(&json!({"to":"test@example.org","body":"hello","attachments":[{"filename":"large.bin","data":data}]})).unwrap();
     assert!(output["raw"].as_str().unwrap().len() < 48 * 1024 * 1024);
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(output["raw"].as_str().unwrap())
+        .unwrap();
+    let parsed = mailparse::parse_mail(&bytes).unwrap();
+    assert_eq!(parsed.subparts.len(), 2);
+    let attachment = &parsed.subparts[1];
+    assert_eq!(
+        attachment.get_content_disposition().params["filename"],
+        "large.bin"
+    );
+    assert_eq!(
+        attachment.get_body_raw().unwrap(),
+        vec![0xab; 20 * 1024 * 1024]
+    );
 }
 #[test]
 fn outgoing_address_words_never_hide_address_structure() {
