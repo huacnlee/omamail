@@ -12,7 +12,7 @@ Item {
     id: fixture
     property var service: null
     property int hourHeight: 60
-    function zoomHours(direction, filled) { hourHeight = Calendar.zoomedHourHeight(hourHeight, direction, filled) }
+    function zoomHours(direction, shown, filled) { hourHeight = Calendar.zoomedHourHeight(hourHeight, shown, direction, filled) }
     property bool eventWriting: false
     property bool loading: false
     property string sourceKind: "google"
@@ -71,15 +71,81 @@ Item {
       view.zoomHours(1)
       compare(timeline.hourHeight, Style.space(65))
       fuzzyCompare(timeline.contentY / timeline.hourHeight, 8, 0.01)
+    }
+    function test_hours_are_automatic_until_zoomed_and_after_a_reset() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      fixture.hourHeight = 0
+      fuzzyCompare(timeline.hourHeight, timeline.height / 16, 0.01)
+      timeline.contentY = 8 * timeline.hourHeight
+      var shown = Math.round(timeline.hourHeight)
+      view.zoomHours(1)
+      compare(fixture.hourHeight, shown + 5)
+      fuzzyCompare(timeline.contentY / timeline.hourHeight, 8, 0.01)
       view.zoomHours(0)
-      compare(timeline.hourHeight, Style.space(60))
+      compare(fixture.hourHeight, 0)
+      fuzzyCompare(timeline.hourHeight, timeline.height / 16, 0.01)
+      fuzzyCompare(timeline.contentY / timeline.hourHeight, 8, 0.01)
+    }
+    function test_automatic_hours_stay_at_the_same_hour_when_the_window_resizes() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var tall = view.height
+      fixture.hourHeight = 0
+      timeline.contentY = 8 * timeline.hourHeight
+      view.anchors.fill = undefined
+      view.width = 1000
+      view.height = tall / 2
+      verify(timeline.hourHeight < tall / 16)
+      fuzzyCompare(timeline.contentY / timeline.hourHeight, 8, 0.01)
+      view.anchors.fill = view.parent
+    }
+    function test_more_all_day_rows_do_not_change_the_automatic_height() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var original = fixture.events
+      fixture.hourHeight = 0
+      var hour = timeline.hourHeight
+      var day = view.days[0]
+      fixture.events = original.concat([0, 1, 2].map(function(index) {
+        return {sourceId:"personal",uid:"all"+index,summary:"Away",start:{ms:day.startMs,allDay:true},end:{ms:day.endMs}}
+      }))
+      compare(view.allDayCount, 3)
+      compare(timeline.hourHeight, hour)
+      fixture.events = original
+    }
+    function test_the_view_opens_at_the_first_event_and_follows_late_events_until_scrolled() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var original = fixture.events
+      function opensAt(hour) { fuzzyCompare(timeline.contentY / timeline.hourHeight, hour, 0.01) }
+      opensAt(10)
+      fixture.events = []
+      tryVerify(function() { return Math.abs(timeline.contentY / timeline.hourHeight - 7) < 0.01 }, 1000, "no events: the usual hour")
+      fixture.events = original
+      tryVerify(function() { return Math.abs(timeline.contentY / timeline.hourHeight - 10) < 0.01 }, 1000, "events arrive: their first hour")
+      timeline.contentY = 2 * timeline.hourHeight
+      fixture.events = []
+      wait(50)
+      opensAt(2)
+      fixture.events = original
+      view.resetTimeScroll()
+      opensAt(10)
+    }
+    function test_dragging_the_first_event_does_not_scroll_the_view() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var original = fixture.events
+      var top = timeline.contentY
+      view.dragPreview = {}
+      fixture.events = [{sourceId:"personal",googleId:"meeting",uid:"uid",summary:"Planning",
+        start:{ms:new Date(2026,9,1,9).getTime()},end:{ms:new Date(2026,9,1,10).getTime()}}]
+      wait(50)
+      compare(timeline.contentY, top)
+      view.dragPreview = null
+      fixture.events = original
+      view.resetTimeScroll()
     }
     function test_zoom_at_the_bottom_of_the_day_stays_inside_the_timeline() {
       var timeline = findChild(view, "calendar-time-scroll")
       timeline.contentY = timeline.contentHeight - timeline.height
       view.zoomHours(-1)
       compare(timeline.contentY, timeline.contentHeight - timeline.height)
-      view.zoomHours(0)
     }
     function test_zoom_waits_for_a_drag_to_finish() {
       view.dragPreview = {}
@@ -198,7 +264,9 @@ Item {
     function test_empty_time_drag_creates_a_range() {
       var slots = findChild(view, "calendar-time-slots-2026-10-01")
       verify(slots !== null)
-      var offset = findChild(view, "calendar-time-scroll").contentY
+      // The view opens at the meeting, so start below it.
+      var scroll = findChild(view, "calendar-time-scroll")
+      var offset = scroll.contentY + scroll.hourHeight
       mousePress(slots, slots.width / 2, offset + 20)
       mouseMove(slots, slots.width / 2, offset + 70, 20)
       verify(view.dragPreview !== null)

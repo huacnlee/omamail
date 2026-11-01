@@ -81,20 +81,20 @@ Item {
   readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
   // The view follows a zoom at once. The save waits for the keys to rest, because
   // each one rewrites the shell's whole config and a held key repeats.
-  property int unsavedHourHeight: 0
-  readonly property int hourHeight: unsavedHourHeight > 0 ? unsavedHourHeight
+  property int unsavedHourHeight: -1
+  readonly property int hourHeight: unsavedHourHeight >= 0 ? unsavedHourHeight
     : Calendar.normalizeHourHeight(service && service.settings ? service.settings.calendarHourHeight : undefined)
-  function zoomHours(direction, filled) {
+  function zoomHours(direction, shown, filled) {
     if (!service) return
-    var next = Calendar.zoomedHourHeight(hourHeight, direction, filled)
+    var next = Calendar.zoomedHourHeight(hourHeight, shown, direction, filled)
     if (next === hourHeight) return
     unsavedHourHeight = next
     hourHeightSave.restart()
   }
   function saveHourHeight() {
-    if (unsavedHourHeight <= 0 || !service) return
+    if (unsavedHourHeight < 0 || !service) return
     service.persistSetting("calendarHourHeight", unsavedHourHeight)
-    unsavedHourHeight = 0
+    unsavedHourHeight = -1
   }
   Timer { id: hourHeightSave; interval: 300; onTriggered: root.saveHourHeight() }
   Component.onDestruction: saveHourHeight()

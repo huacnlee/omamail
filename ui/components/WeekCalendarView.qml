@@ -63,28 +63,37 @@ Item {
     text: Calendar.timeLabel(new Date(2000, 0, 1, 12, 59).getTime(), root.timeFormat)
   }
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-  readonly property var hourRange: Calendar.weekHourRange(
-    controller ? controller.events : [], days, 7, 19)
+  readonly property int openingHour: Calendar.weekOpeningHour(
+    controller ? controller.events : [], days, 7)
   readonly property int firstHour: 0
   readonly property int lastHour: 24
-  readonly property int minimumHourHeight: Calendar.normalizeHourHeight(controller ? controller.hourHeight : undefined)
+  readonly property int savedHourHeight: Calendar.normalizeHourHeight(controller ? controller.hourHeight : undefined)
+  // Measured as if the all-day lane held one row, so that the hours keep their
+  // height from one week to the next.
+  readonly property real automaticHourHeight: Calendar.automaticHourHeight(
+    timeline.height + allDayHeight - Style.space(32), Style.space(Calendar.HOUR_HEIGHT_USUAL),
+    Math.max(Style.space(Calendar.HOUR_HEIGHT_MIN), Style.font.caption * 2.5))
   // A short hour shrinks what is fixed for a tall one, or a resize edge would
   // leave nothing to drag by and a card's margin nothing to show its title in.
   readonly property real hourScale: Math.min(1, timeline.hourHeight / Style.space(60))
   readonly property int resizeEdge: Style.space(9 * hourScale)
   readonly property int cardMargin: Style.space(5 * hourScale)
+  property real openedAtHour: -1
   function resetTimeScroll() {
-    timeline.contentY = Math.max(0, Math.min(hourRange.first * timeline.hourHeight,
+    timeline.contentY = Math.max(0, Math.min(openingHour * timeline.hourHeight,
       timeline.contentHeight - timeline.height))
+    openedAtHour = timeline.contentY / timeline.hourHeight
   }
-  // Zooming keeps the hour at the top of the view where it is, or the same
-  // pixel offset would land on a different time.
+  // A week's events can arrive after the week does. The view follows them until
+  // it has been scrolled, and leaves alone the event being dragged.
+  onOpeningHourChanged: {
+    if (pendingGesture || dragPreview) return
+    if (Math.abs(timeline.contentY / timeline.hourHeight - openedAtHour) < 0.01) Qt.callLater(root.resetTimeScroll)
+  }
   function zoomHours(direction) {
     if (!controller || pendingGesture || dragPreview) return
-    var topHour = timeline.contentY / timeline.hourHeight
-    controller.zoomHours(direction, timeline.height / hourCount / Style.space(60) * 60)
-    timeline.contentY = Math.max(0, Math.min(topHour * timeline.hourHeight,
-      timeline.contentHeight - timeline.height))
+    var unscaled = Calendar.HOUR_HEIGHT_USUAL / Style.space(Calendar.HOUR_HEIGHT_USUAL)
+    controller.zoomHours(direction, timeline.hourHeight * unscaled, timeline.height / hourCount * unscaled)
   }
   Component.onCompleted: Qt.callLater(root.resetTimeScroll)
   onDaysChanged: Qt.callLater(root.resetTimeScroll)
@@ -305,7 +314,16 @@ Item {
     anchors.right: parent.right
     anchors.top: allDayLane.bottom
     anchors.bottom: parent.bottom
-    readonly property real hourHeight: Math.max(Style.space(root.minimumHourHeight), height / root.hourCount)
+    readonly property real hourHeight: Math.max(height / root.hourCount,
+      root.savedHourHeight > 0 ? Style.space(root.savedHourHeight) : root.automaticHourHeight)
+    // Whatever changes the height, the hour at the top of the view stays there,
+    // where the same pixel offset would land on a different time.
+    property real placedHourHeight: 0
+    onHourHeightChanged: {
+      if (placedHourHeight > 0)
+        contentY = Math.max(0, Math.min(contentY / placedHourHeight * hourHeight, hourHeight * root.hourCount - height))
+      placedHourHeight = hourHeight
+    }
     contentWidth: width
     contentHeight: Math.max(height, hourHeight * root.hourCount)
     clip: true

@@ -149,7 +149,7 @@ var BINDINGS = [
   { id: "calendarZoomOut", keys: ["Ctrl+-"], contexts: ["calendar"],
     group: "Calendar", label: "Make hours shorter in the day and week views" },
   { id: "calendarZoomReset", keys: ["Ctrl+0"], contexts: ["calendar"],
-    group: "Calendar", label: "Reset the hour height" },
+    group: "Calendar", label: "Return to the automatic hour height" },
   // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
   // a hand on the numpad expects the same thing of them.
   { id: "send", keys: ["Ctrl+Return", "Ctrl+Enter"], contexts: ["compose"],

@@ -145,7 +145,7 @@ used to exist, and they had.
 | `calendarMonth` | `m` | calendar | Show month view |
 | `calendarZoomIn` | `Ctrl++`, `Ctrl+=` | calendar | Make hours taller in the day and week views |
 | `calendarZoomOut` | `Ctrl+-` | calendar | Make hours shorter in the day and week views |
-| `calendarZoomReset` | `Ctrl+0` | calendar | Reset the hour height |
+| `calendarZoomReset` | `Ctrl+0` | calendar | Return to the automatic hour height |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |
