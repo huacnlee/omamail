@@ -30,6 +30,10 @@ pub struct Store {
     path: PathBuf,
     #[cfg(test)]
     pub(super) reads: std::cell::Cell<usize>,
+    /// Stands for coarse timestamps: every root change lands in the tick of
+    /// the previous one, so the root's stamps never move.
+    #[cfg(test)]
+    pub(super) same_tick: std::cell::Cell<bool>,
 }
 pub fn check_id(id: &str) -> Result<()> {
     if id.len() == 32
@@ -192,22 +196,38 @@ impl Store {
             path: base.join("omamail/assistant"),
             #[cfg(test)]
             reads: std::cell::Cell::new(0),
+            #[cfg(test)]
+            same_tick: std::cell::Cell::new(false),
         })
     }
     pub fn path(&self) -> &Path {
         &self.path
     }
     /// Creating/removing a turn invalidates the in-process conversation index.
-    pub(super) fn revision(&self) -> Result<[u64; 6]> {
+    /// The root's stamps alone can miss one: they record the root's last
+    /// change, and with coarse timestamps (Linux before 6.13, or a filesystem
+    /// with one-second stamps) a turn created or removed in the same tick as
+    /// the change the index already reflects leaves them as they were. Its
+    /// entries cannot miss it.
+    pub(super) fn revision(&self) -> Result<([u64; 6], Vec<String>)> {
         let m = self.root.metadata().map_err(|_| ioerror())?;
-        Ok([
-            m.dev(),
-            m.ino(),
-            m.mtime() as u64,
-            m.mtime_nsec() as u64,
-            m.ctime() as u64,
-            m.ctime_nsec() as u64,
-        ])
+        let mut entries = names(&self.root, None)?;
+        entries.sort_unstable();
+        #[cfg(test)]
+        if self.same_tick.get() {
+            return Ok(([m.dev(), m.ino(), 0, 0, 0, 0], entries));
+        }
+        Ok((
+            [
+                m.dev(),
+                m.ino(),
+                m.mtime() as u64,
+                m.mtime_nsec() as u64,
+                m.ctime() as u64,
+                m.ctime_nsec() as u64,
+            ],
+            entries,
+        ))
     }
     pub fn contains(&self, id: &str) -> Result<bool> {
         check_id(id)?;
