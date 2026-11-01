@@ -1,4 +1,5 @@
 .pragma library
+.import "Clock.js" as Clock
 
 .import "Message.js" as Mail
 
@@ -1017,8 +1018,8 @@ function fromAttachment(part, data) {
 
 function clockOf(ms, utc) {
   var at = new Date(ms)
-  return twoDigits(utc ? at.getUTCHours() : at.getHours()) + ":"
-    + twoDigits(utc ? at.getUTCMinutes() : at.getMinutes())
+  return Clock.wallTime(utc ? at.getUTCHours() : at.getHours(),
+    utc ? at.getUTCMinutes() : at.getMinutes())
 }
 
 function dayOf(ms, utc) {

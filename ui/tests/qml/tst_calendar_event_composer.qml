@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import "../../components" as Omamail
+import "../../calendar/Calendar.js" as Calendar
 import "../../keys/Keymap.js" as Keymap
 
 Item {
@@ -325,15 +326,47 @@ Item {
       for (var i = 0; i < text.length; i++) keyClick(text[i])
     }
 
+    function expectedTime(hour, minute) {
+      var locale = Qt.locale()
+      return new Date(2026, 9, 28, hour, minute).toLocaleTimeString(locale, locale.timeFormat(Locale.ShortFormat))
+    }
+
+    function test_localized_start_edit_preserves_duration_and_saved_instants_data() {
+      return [
+        {tag:"same-day", hour:16, minute:0, endDay:28, endHour:16, endMinute:30},
+        {tag:"midnight-rollover", hour:23, minute:45, endDay:29, endHour:0, endMinute:15}
+      ]
+    }
+
+    function test_localized_start_edit_preserves_duration_and_saved_instants(data) {
+      composer.beginEdit("google:me@example.com", {summary:"Localized half hour",
+        start:{ms:new Date(2026,9,28,15,0).getTime()},end:{ms:new Date(2026,9,28,15,30).getTime()}})
+      wait(0)
+      var field = findChild(composer, "event-start-time-field")
+      field.forceActiveFocus()
+      field.selectAll()
+      clipboardSource.text = expectedTime(data.hour, data.minute)
+      clipboardSource.selectAll()
+      clipboardSource.copy()
+      keyClick(Qt.Key_V, Qt.ControlModifier)
+      verify(composer.dateRange.ok, composer.dateRange.error)
+      compare(findChild(composer,"event-end-time-field").text, expectedTime(data.endHour, data.endMinute))
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-" + data.endDay)
+      keyClick(Qt.Key_Return)
+      compare(eventController.updateCalls, 1)
+      compare(eventController.createdFields.startMs, new Date(2026,9,28,data.hour,data.minute).getTime())
+      compare(eventController.createdFields.endMs, new Date(2026,9,data.endDay,data.endHour,data.endMinute).getTime())
+    }
+
     function test_start_edit_keeps_duration_through_incomplete_input_and_save() {
       composer.beginEdit("google:me@example.com", {summary:"Half hour",
         start:{ms:new Date(2026,9,28,15,0).getTime()},end:{ms:new Date(2026,9,28,15,30).getTime()}})
       wait(0)
       typeField("event-start-time-field", "1")
-      compare(findChild(composer,"event-end-time-field").text, "15:30")
+      compare(findChild(composer,"event-end-time-field").text, expectedTime(15, 30))
       verify(!composer.dateRange.ok)
       for (var i = 0; i < "6:00".length; i++) keyClick("6:00"[i])
-      compare(findChild(composer,"event-end-time-field").text, "16:30")
+      compare(findChild(composer,"event-end-time-field").text, expectedTime(16, 30))
       keyClick(Qt.Key_Return)
       compare(eventController.updateCalls, 1)
       compare(eventController.createdFields.startMs, new Date(2026,9,28,16,0).getTime())
@@ -344,15 +377,15 @@ Item {
       composer.beginAt(new Date(2026,9,28,15,0).getTime())
       wait(0)
       typeField("event-end-time-field", "15:45")
-      compare(findChild(composer,"event-start-time-field").text, "15:00")
+      compare(findChild(composer,"event-start-time-field").text, expectedTime(15, 0))
       typeField("event-start-time-field", "23:45")
-      compare(findChild(composer,"event-end-time-field").text, "00:30")
+      compare(findChild(composer,"event-end-time-field").text, expectedTime(0, 30))
       compare(findChild(composer,"event-end-date-field").text, "2026-10-29")
       typeField("event-start-date-field", "2026-10-30")
       compare(findChild(composer,"event-end-date-field").text, "2026-10-31")
       compare(composer.dateRange.endMs - composer.dateRange.startMs, 45 * 60000)
       typeField("event-start-time-field", "10:00")
-      compare(findChild(composer,"event-end-time-field").text, "10:45")
+      compare(findChild(composer,"event-end-time-field").text, expectedTime(10, 45))
       compare(findChild(composer,"event-end-date-field").text, "2026-10-30")
     }
 
@@ -435,7 +468,8 @@ Item {
         location: "Luigi's", description: "Table for four" })
       compare(composer.opened, true)
       compare(composer.titleText(), "Dinner with Bob")
-      compare(composer.whenText(), "2026-09-12 19:00 21:00")
+      compare(composer.whenText(), "2026-09-12 " + Calendar.timeLabel(new Date(2026, 8, 12, 19).getTime(), Qt.locale().timeFormat(Locale.ShortFormat))
+        + " " + Calendar.timeLabel(new Date(2026, 8, 12, 21).getTime(), Qt.locale().timeFormat(Locale.ShortFormat)))
       compare(composer.locationText(), "Luigi's")
       compare(composer.notesText(), "Table for four")
       compare(eventController.createCalls, 0, "nothing is written until the owner says so")
@@ -445,6 +479,16 @@ Item {
 
     // A form the owner is in the middle of is not replaced by a suggestion;
     // an empty one is. The suggestion's own mailbox chooses the calendar.
+    function test_localized_prefill_is_valid_and_fits_time_fields() {
+      composer.beginAt(new Date(2026, 9, 22, 23, 5).getTime())
+      verify(composer.dateRange.ok, composer.dateRange.error)
+      var fields = [findChild(composer, "event-start-time-field"), findChild(composer, "event-end-time-field")]
+      for (var i = 0; i < fields.length; i++) {
+        var field = fields[i]
+        verify(field.contentWidth <= field.width - field.leftPadding - field.rightPadding,
+          "localized time must fit inside its field: " + field.text)
+      }
+    }
     function test_a_suggestion_does_not_clobber_a_form_in_use() {
       composer.beginAt(new Date(2026, 7, 25, 9, 0).getTime())
       compare(composer.pristine, true)

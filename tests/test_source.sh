@@ -62,7 +62,7 @@ for file in "${JS_FILES[@]}"; do
 done
 
 # Calendar display clocks use the locale's short format. The composer's
-# HH:mm entry convention and its validation error are deliberately separate.
+# localized entry parser also accepts HH:mm; its validation error names that form.
 python3 - <<'PY_CALENDAR_TIME'
 import re
 from pathlib import Path
@@ -73,7 +73,7 @@ for path in files:
         if re.match(r"\s*//", line):
             continue
         for match in re.finditer(r'"([^"\n]*(?:hh|HH):mm[^"\n]*)"', line):
-            if path == Path("calendar/Calendar.js") and match.group(1) == "Enter valid dates (YYYY-MM-DD) and times (HH:mm)":
+            if path == Path("calendar/Calendar.js") and match.group(1) == "Enter valid dates (YYYY-MM-DD) and local times (or HH:mm)":
                 continue
             raise SystemExit("test_source.sh: %s:%d hard-codes a calendar clock; use the locale short time format" % (path, number))
 PY_CALENDAR_TIME
@@ -521,8 +521,8 @@ grep -q 'root.gmail.refreshCalendarPreview()' BarWidget.qml \
   || fail "opening the bar preview must refresh its upcoming events"
 grep -q 'width: parent ? parent.width : 0' BarWidget.qml \
   || fail "bar preview rows must stay inside the panel's padded content area"
-grep -q '"MMM d · ddd HH:mm"' bar/BarPreview.qml \
-  || fail "upcoming events must show a calendar date as well as a weekday"
+# The real bar-preview locale test asserts the rendered date, weekday, clock
+# and source together; do not pin its implementation to a 24-hour pattern.
 if awk '
   /function activateEvent\(event\)/ { in_function = 1 }
   in_function && /Qt\.openUrlExternally/ { found = 1 }
