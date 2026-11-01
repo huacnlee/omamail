@@ -9,6 +9,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod google;
+
 const MAX_FILE: u64 = 16 * 1024 * 1024;
 const MAX_CONTACTS: usize = 10000;
 type Book = BTreeMap<String, Value>;
@@ -245,6 +247,19 @@ fn discover(home: &Path, config: &Path, cached: &Path) -> Value {
     if let Some(text) = read(&config.join("omamail/contacts.vcf")) {
         vcard(&mut book, &text)
     }
+    sorted(book)
+}
+
+/// A Gmail account's Google Contacts, through the same address checks and
+/// ordering as the local book: `{granted, contacts}`.
+pub async fn suggest_google(token: &str) -> Result<Value, &'static str> {
+    let fetched = google::fetch(token).await?;
+    let mut book = Book::new();
+    json_book(&mut book, &fetched["contacts"]);
+    Ok(json!({"granted":fetched["granted"],"contacts":sorted(book)}))
+}
+
+fn sorted(book: Book) -> Value {
     let mut values: Vec<_> = book.into_values().collect();
     values.sort_by_key(|v| {
         v["name"]
