@@ -207,6 +207,25 @@ fn implied(new: &str, old: &str) -> bool {
         _ => false,
     }
 }
+// Table parts are scoped to their own table: see TABLE_SCOPED in Html.js.
+fn table_scoped(name: &str) -> bool {
+    matches!(
+        name,
+        "tr" | "td" | "th" | "thead" | "tbody" | "tfoot" | "caption"
+    )
+}
+/// The stack index of the open cell in the innermost table.
+fn open_cell(stack: &[Node]) -> Option<usize> {
+    for (i, v) in stack.iter().enumerate().skip(1).rev() {
+        if matches!(v.name.as_str(), "td" | "th") {
+            return Some(i);
+        }
+        if v.name == "table" {
+            return None;
+        }
+    }
+    None
+}
 fn finish(stack: &mut Vec<Node>) {
     let n = stack.pop().unwrap();
     stack.last_mut().unwrap().children.push(n)
@@ -268,12 +287,24 @@ pub fn parse(s: &str) -> Result<Node, &'static str> {
             break;
         }
         if closing {
-            if let Some(i) = stack.iter().rposition(|v| v.name == n.name) {
+            let scoped = table_scoped(&n.name);
+            if let Some(i) = stack
+                .iter()
+                .rposition(|v| v.name == n.name || (scoped && v.name == "table"))
+                .filter(|&i| stack[i].name == n.name)
+            {
                 while stack.len() > i && stack.len() > 1 {
                     finish(&mut stack)
                 }
             }
             continue;
+        }
+        if matches!(n.name.as_str(), "tr" | "td" | "th")
+            && let Some(cell) = open_cell(&stack)
+        {
+            while stack.len() > cell + 1 {
+                finish(&mut stack)
+            }
         }
         while stack.len() > 1 && implied(&n.name, &stack.last().unwrap().name) {
             finish(&mut stack)
