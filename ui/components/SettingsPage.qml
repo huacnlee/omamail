@@ -895,7 +895,7 @@ Column {
       Text {
         objectName: "spellingNeedsSetup"
         width: parent.width
-        visible: !!root.service && root.service.spellingEnabled !== false
+        visible: !!root.service && root.service.spellingEnabled === true
           && !root.service.spellingAvailable && root.service.spellingStatus !== "loading"
         text: root.service && root.service.standalone === true
           ? "Spell-checking is not available in this build."
@@ -932,7 +932,7 @@ Column {
       anchors.right: parent.right
       anchors.rightMargin: Style.space(10)
       anchors.verticalCenter: parent.verticalCenter
-      checked: !root.service || root.service.spellingEnabled !== false
+      checked: !!root.service && root.service.spellingEnabled === true
       foreground: root.textColor
       accent: root.accentColor
       onToggled: if (root.service) root.service.setSpellingEnabled(!root.service.spellingEnabled)

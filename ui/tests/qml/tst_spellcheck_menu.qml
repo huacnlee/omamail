@@ -24,6 +24,8 @@ Item {
     ]
     property string accountEmail: "me@example.com"
     property string activeAccountId: "me@example.com"
+    // Spelling is opt-in; these cases exercise it turned on.
+    property bool spellingEnabled: true
     function preferredSendAs(_r) { return null }
     function switchTo(_id) { return true }
     function refreshRecipientContacts() {}

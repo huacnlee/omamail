@@ -117,13 +117,13 @@ test("Overlong chunks are skipped with bounded scans and skipped words still yie
   assert.ok(bounded.index <= r.MAX_SLICE_CHARACTERS)
 })
 
-test("Settings default to enabled system language and only explicit false disables checking", () => {
+test("Settings default to disabled system language and only explicit true enables checking", () => {
   const rules = spelling()
-  for (const settings of [null, {}, { spellingEnabled: "no" }, { spellingEnabled: 0 }]) {
-    deepEqual(rules.decodeSettings(settings), { enabled: true, language: "" })
+  for (const settings of [null, {}, { spellingEnabled: "yes" }, { spellingEnabled: 1 }, { spellingEnabled: "true" }]) {
+    deepEqual(rules.decodeSettings(settings), { enabled: false, language: "" })
   }
   deepEqual(rules.decodeSettings({ spellingEnabled: false, spellingLanguage: "en_GB" }), { enabled: false, language: "en_GB" })
-  deepEqual(rules.decodeSettings({ spellingLanguage: "" }), { enabled: true, language: "" })
+  deepEqual(rules.decodeSettings({ spellingEnabled: true, spellingLanguage: "" }), { enabled: true, language: "" })
 })
 
 test("Language uses the system locale unless a short dictionary code overrides it", () => {
@@ -136,7 +136,7 @@ test("Language uses the system locale unless a short dictionary code overrides i
     "en_US\r\n", "en_US\0", "../x", "en/US", "en\\US", "en..US", "éé", "a".repeat(500)]) {
     assert.equal(rules.validLanguage(hostile), false, JSON.stringify(hostile))
     assert.equal(rules.resolveLanguage(hostile, "de_DE"), "de_DE")
-    deepEqual(rules.decodeSettings({ spellingLanguage: hostile }), { enabled: true, language: "" })
+    deepEqual(rules.decodeSettings({ spellingEnabled: true, spellingLanguage: hostile }), { enabled: true, language: "" })
   }
   assert.equal(rules.resolveLanguage("", "zz_ZZ"), "zz_ZZ", "no silent English fallback")
   for (const locale of ["C", "POSIX", ""]) {

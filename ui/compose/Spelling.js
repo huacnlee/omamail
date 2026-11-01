@@ -169,7 +169,7 @@ function resolveLanguage(setting, systemLocaleName) {
 function decodeSettings(settings) {
   var values = settings || ({})
   return {
-    enabled: values.spellingEnabled !== false,
+    enabled: values.spellingEnabled === true,
     language: validLanguage(values.spellingLanguage) ? values.spellingLanguage : ""
   }
 }

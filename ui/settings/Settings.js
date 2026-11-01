@@ -18,7 +18,7 @@ var DEFAULTS = ({
   calendarSnoozeMinutes: 5,
   showBarIcon: true,
   unifiedMailboxes: false,
-  spellingEnabled: true,
+  spellingEnabled: false,
   spellingLanguage: "",
   suggestEvents: false,
   aiAgent: "System default",

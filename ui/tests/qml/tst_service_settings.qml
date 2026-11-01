@@ -175,18 +175,26 @@ Item {
 
     // ------------------------------------------------------------ spelling
 
-    function test_spelling_defaults_on_and_persists_changes() {
+    function test_spelling_defaults_off_and_persists_changes() {
       mailService.applySettings({})
-      compare(mailService.spellingEnabled, true)
+      compare(mailService.spellingEnabled, false)
+      compare(mailService.spellingStatus, "disabled")
+      compare(findChild(page, "spellingSwitch").checked, false)
+      compare(findChild(page, "spellingState").text, "Off")
       compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
+
+      mailService.setSpellingEnabled(true)
+      compare(mailService.spellingEnabled, true)
+      compare(shellStore.updatedEntry.spellingEnabled, true)
+      compare(findChild(page, "spellingSwitch").checked, true)
 
       mailService.setSpellingEnabled(false)
       compare(mailService.spellingEnabled, false)
       compare(shellStore.updatedEntry.spellingEnabled, false)
 
-      // A stored value of another shape is not a decision to turn it off.
-      mailService.applySettings({ spellingEnabled: "no" })
-      compare(mailService.spellingEnabled, true)
+      // A stored value of another shape is not a decision to turn it on.
+      mailService.applySettings({ spellingEnabled: "yes" })
+      compare(mailService.spellingEnabled, false)
 
       mailService.persistSetting("spellingLanguage", "en_GB")
       compare(mailService.spellingLanguage, "en_GB")
@@ -226,7 +234,7 @@ Item {
     }
     function test_unset_system_language_guidance() {
       if (Spelling.validLanguage(Qt.locale().name)) { skip("requires C/POSIX system locale"); return }
-      mailService.applySettings({ spellingLanguage: "" })
+      mailService.applySettings({ spellingEnabled: true, spellingLanguage: "" })
       compare(mailService.spellingLanguage, "")
       compare(findChild(page, "spellingLanguagePolicy").text,
         "No system language is set; choose one with the spellingLanguage setting.")
@@ -253,7 +261,7 @@ Item {
     // The probe loads Sonnet through the same adapter the composer uses; it
     // settles into one concrete status on any machine rather than hanging.
     function test_spelling_availability_settles_to_a_known_status() {
-      mailService.applySettings({})
+      mailService.applySettings({ spellingEnabled: true })
       tryVerify(function() {
         var status = mailService.spellingStatus
         return status === "ready" || status === "no-dictionary" || status === "no-module"
@@ -264,6 +272,7 @@ Item {
     // fallback: a missing language reads no-dictionary and setting it back
     // recovers.
     function test_spelling_availability_follows_the_requested_language() {
+      mailService.applySettings({ spellingEnabled: true })
       tryVerify(function() {
         var status = mailService.spellingStatus
         return status === "ready" || status === "no-dictionary" || status === "no-module"
