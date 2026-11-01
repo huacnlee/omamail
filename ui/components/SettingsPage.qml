@@ -878,7 +878,8 @@ Column {
         id: spellingLanguagePolicy
         text: root.spellingLanguage === ""
           ? "No system language is set; choose one with the spellingLanguage setting."
-          : "Checking spelling in " + root.spellingLanguage
+          : (root.service && root.service.spellingEnabled === true
+            ? "Checking spelling in " : "When on, checks spelling in ") + root.spellingLanguage
           + (root.service && Spelling.decodeSettings(root.service.settings).language !== ""
             ? " (set in settings)." : " (system language).")
         color: root.dimColor

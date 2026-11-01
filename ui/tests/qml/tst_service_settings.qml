@@ -182,11 +182,18 @@ Item {
       compare(findChild(page, "spellingSwitch").checked, false)
       compare(findChild(page, "spellingState").text, "Off")
       compare(mailService.spellingLanguage, Spelling.resolveLanguage("", Qt.locale().name))
+      var policy = findChild(page, "spellingLanguagePolicy")
+      if (mailService.spellingLanguage !== "") {
+        compare(policy.text.indexOf("Checking spelling"), -1, "an off switch does not claim to be checking")
+        compare(policy.text, "When on, checks spelling in " + mailService.spellingLanguage + " (system language).")
+      }
 
       mailService.setSpellingEnabled(true)
       compare(mailService.spellingEnabled, true)
       compare(shellStore.updatedEntry.spellingEnabled, true)
       compare(findChild(page, "spellingSwitch").checked, true)
+      if (mailService.spellingLanguage !== "")
+        compare(policy.text, "Checking spelling in " + mailService.spellingLanguage + " (system language).")
 
       mailService.setSpellingEnabled(false)
       compare(mailService.spellingEnabled, false)
