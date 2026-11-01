@@ -26,6 +26,8 @@ fn list_handles_literals_noselect_special_use_and_modified_utf7() {
     let value = folders_value(&boxes);
     assert_eq!(value["labels"].as_array().unwrap().len(), 2);
     assert_eq!(value["labels"][1]["name"], "日本語");
+    assert_eq!(value["labels"][1]["id"], "&ZeVnLIqe-");
+    assert_eq!(value["labels"][1]["rawName"], "&ZeVnLIqe-");
 }
 #[test]
 fn date_pages_are_descending_unique_with_uid_tiebreaker() {

@@ -253,7 +253,7 @@ name, by the name they were given or their address; `Down` and `Up`, or `Ctrl`
 with `j`, `k`, `n` or `p`, walk what is left; `Enter` opens the row the cursor
 is on. A bare `j` or `k` is a letter there now, as it has to be for "jack" to
 find a mailbox.
-`ui/tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
+`ui/tests/qml/tst_account_switcher.qml` exercises this on the production popup, and
 `Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
 message list clamps.
 
@@ -315,7 +315,7 @@ pointer that has not moved, and the list scrolls to follow the keyboard. With
 hover writing `cursorId`, pressing `j` moved the cursor, the scroll brought a
 different row under the still pointer, and the cursor snapped back to it — so
 `j` and `k` stuck on whichever rows the mouse was resting near.
-`ui/tests/qml/tst_hover_under_scroll.qml` pins the Qt behaviour that makes this so.
+`ui/tests/qml/tst_preview_on_cursor.qml` drives the production list with hover events while keyboard navigation scrolls it, and checks that hover cannot take the cursor back.
 
 A mouse with a back button takes the same step `Escape` takes — `goBack()`, so the two do not become separate implementations of going back — with one exception. It never closes the window. `Escape` on a root with nothing left to clear ends the window, which is right for a key somebody pressed on purpose and wrong for a button sitting under the hand with no affordance saying the next press shuts the mailbox, so the mouse stops there instead. `ui/components/MouseBack.qml` reports the press and `ui/App.qml` decides what it means, the same way `KeyRouter` does for keys.
 
