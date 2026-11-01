@@ -1259,12 +1259,12 @@ function normalizeHourHeight(value) {
 function zoomedHourHeight(saved, shown, direction, filled) {
   if (!direction) return HOUR_HEIGHT_AUTOMATIC
   var fill = Number(filled) || 0
-  var from = Math.max(Math.round(Number(shown) || HOUR_HEIGHT_USUAL), Math.ceil(fill))
-  if (direction < 0 && from <= Math.ceil(fill)) return normalizeHourHeight(saved)
-  var next = Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, from + direction * HOUR_HEIGHT_STEP))
+  var from = Math.max(Number(shown) || HOUR_HEIGHT_USUAL, fill)
+  var limit = direction < 0 ? Math.max(HOUR_HEIGHT_MIN, fill) : HOUR_HEIGHT_MAX
+  if (direction < 0 ? from <= limit : from >= limit) return normalizeHourHeight(saved)
+  var next = Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, Math.round(from) + direction * HOUR_HEIGHT_STEP))
   // Rounded down, so that the window takes over and the whole day fits exactly.
-  if (next < fill) next = Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, Math.floor(fill)))
-  return next === from ? normalizeHourHeight(saved) : next
+  return next < fill ? Math.max(HOUR_HEIGHT_MIN, Math.floor(fill)) : next
 }
 
 function eventTop(event, day, firstHour, hourHeight) {

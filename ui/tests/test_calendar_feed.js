@@ -742,9 +742,13 @@ assert.strictEqual(feed.zoomedHourHeight(40, 40, 0), 0, "reset returns to automa
 // A window tall enough to stretch hours to 37.5: no invisible presses.
 assert.strictEqual(feed.zoomedHourHeight(40, 40, -1, 37.5), 37, "stops where the window takes over")
 assert.strictEqual(feed.zoomedHourHeight(37, 37.5, -1, 37.5), 37)
-assert.strictEqual(feed.zoomedHourHeight(38, 38, -1, 37.5), 38)
+assert.strictEqual(feed.zoomedHourHeight(38, 38, -1, 37.5), 37, "half a pixel above the fit still scrolls")
+assert.strictEqual(feed.zoomedHourHeight(25, 25, -1, 24.17), 24, "a step landing just above the fit is not the end")
 assert.strictEqual(feed.zoomedHourHeight(25, 37.5, -1, 37.5), 25, "nothing to shrink, nothing saved")
 assert.strictEqual(feed.zoomedHourHeight(25, 37.5, 1, 37.5), 43, "growing starts from what is on screen")
+// A window stretching hours past the largest height: growing would not show.
+assert.strictEqual(feed.zoomedHourHeight(0, 122.5, 1, 122.5), 0)
+assert.strictEqual(feed.zoomedHourHeight(0, 122.5, -1, 122.5), 0)
 
 console.log("test_calendar_feed.js ok")
 

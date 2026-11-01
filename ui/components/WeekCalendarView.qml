@@ -47,7 +47,8 @@ Item {
       root.showOpeningHour()
     }
     function onCalendarScopeChanged() {
-      if (!root.pendingGesture && !root.dragPreview) root.resetTimeScroll()
+      if (root.pendingGesture || root.dragPreview) root.opensAfterGesture = true
+      else root.resetTimeScroll()
     }
   }
 
@@ -84,6 +85,10 @@ Item {
   readonly property real automaticHourHeight: Calendar.automaticHourHeight(
     timeline.height + allDayHeight - Style.space(32), Style.space(Calendar.HOUR_HEIGHT_USUAL),
     Math.max(Style.space(Calendar.HOUR_HEIGHT_READABLE), Style.font.caption * 2.5))
+  // Not rounded like a spacing, so that a saved height never overshoots the fit.
+  readonly property real hourUnit: Style.space(Calendar.HOUR_HEIGHT_USUAL) / Calendar.HOUR_HEIGHT_USUAL
+  // Hours too short to hold a label each take turns.
+  readonly property int hourLabelStep: timeline.hourHeight < Style.font.caption ? 2 : 1
   // A short hour shrinks what is fixed for a tall one, or a resize edge would
   // leave nothing to drag by and a card's margin nothing to show its title in.
   readonly property real hourScale: Math.min(1, timeline.hourHeight / Style.space(60))
@@ -108,12 +113,19 @@ Item {
     showOpeningHour()
   }
   onOpeningHourChanged: if (followsFirstEvent) showOpeningHour()
-  onDragPreviewChanged: if (dragPreview) stopFollowing()
-  onPendingGestureChanged: if (pendingGesture) stopFollowing()
+  // A mailbox switched during a drag or its save opens once that has finished.
+  property bool opensAfterGesture: false
+  function finishGesture() {
+    if (!opensAfterGesture || pendingGesture || dragPreview) return
+    opensAfterGesture = false
+    resetTimeScroll()
+    if (controller && !controller.loading && !controller.pendingRangeStart) followsFirstEvent = false
+  }
+  onDragPreviewChanged: if (dragPreview) stopFollowing(); else Qt.callLater(finishGesture)
+  onPendingGestureChanged: if (pendingGesture) stopFollowing(); else Qt.callLater(finishGesture)
   function zoomHours(direction) {
     if (!controller || pendingGesture || dragPreview) return
-    var unscaled = Calendar.HOUR_HEIGHT_USUAL / Style.space(Calendar.HOUR_HEIGHT_USUAL)
-    controller.zoomHours(direction, timeline.hourHeight * unscaled, timeline.height / hourCount * unscaled)
+    controller.zoomHours(direction, timeline.hourHeight / hourUnit, timeline.height / hourCount / hourUnit)
   }
   Component.onCompleted: Qt.callLater(root.resetTimeScroll)
   onDaysChanged: Qt.callLater(root.resetTimeScroll)
@@ -335,7 +347,7 @@ Item {
     anchors.top: allDayLane.bottom
     anchors.bottom: parent.bottom
     readonly property real hourHeight: Math.max(height / root.hourCount,
-      root.savedHourHeight > 0 ? Style.space(root.savedHourHeight) : root.automaticHourHeight)
+      root.savedHourHeight > 0 ? root.savedHourHeight * root.hourUnit : root.automaticHourHeight)
     // The hour the view keeps at its top when a window or a zoom changes the layout,
     // where the same pixel offset would land on a different time, and returns to
     // when there is room again. Flickable limits contentY by the old contentHeight
@@ -395,7 +407,8 @@ Item {
             anchors.leftMargin: Style.space(4)
             anchors.top: parent.top
             anchors.topMargin: index === 0 ? Style.space(2) : -implicitHeight / 2
-            visible: index > 0 || root.hourScale >= 1 || timeline.hourHeight >= implicitHeight * 1.5 + Style.space(2)
+            visible: index % root.hourLabelStep === 0
+              && (index > 0 || root.hourScale >= 1 || timeline.hourHeight >= implicitHeight * 1.5 + Style.space(2))
             text: Calendar.timeLabel(new Date(2000, 0, 1, root.firstHour + index).getTime(), root.timeFormat)
             color: root.dimColor
             font.family: root.panelFontFamily

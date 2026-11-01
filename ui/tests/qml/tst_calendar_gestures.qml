@@ -143,6 +143,37 @@ Item {
       compare(timeline.contentHeight, timeline.height, "24 hours without scrolling")
       compare(fixture.hourHeight, Math.floor(timeline.height / 24 / Style.space(60) * 60))
     }
+    function test_zooming_out_reaches_the_whole_day_from_a_step_just_above_it() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var height = view.height
+      resizeTo(height - (timeline.height - 580))
+      compare(timeline.height, 580)
+      for (var i = 0; i < 12; i++) view.zoomHours(-1)
+      compare(timeline.contentHeight, timeline.height, "24 hours without scrolling")
+      resizeTo(height)
+    }
+    function test_zooming_out_reaches_the_whole_day_at_a_larger_scale() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var height = view.height
+      Style.spacingScale = 1.5
+      resizeTo(height - (timeline.height - 1410))
+      compare(timeline.height, 1410)
+      for (var i = 0; i < 12; i++) view.zoomHours(-1)
+      var whole = timeline.contentHeight
+      Style.spacingScale = 1
+      resizeTo(height)
+      compare(whole, 1410, "a saved height does not round past the fit")
+    }
+    function test_hours_too_short_for_a_label_each_label_every_other_hour() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      var height = view.height
+      compare(view.hourLabelStep, 1)
+      fixture.hourHeight = 10
+      resizeTo(height - (timeline.height - 240))
+      verify(timeline.hourHeight < Style.font.caption)
+      compare(view.hourLabelStep, 2)
+      resizeTo(height)
+    }
     function test_zooming_out_and_back_returns_to_the_same_hour() {
       var timeline = findChild(view, "calendar-time-scroll")
       timeline.contentY = 12 * timeline.hourHeight
@@ -230,8 +261,29 @@ Item {
       fixture.calendarScope = "other"
       compare(timeline.contentY, top)
       mouseRelease(drag, drag.width / 2, drag.height / 2 + 40)
+      wait(0)
+      fuzzyCompare(topHour(), view.openingHour, 0.01, "opens once the drag has finished")
       fixture.calendarScope = ""
+      view.resetTimeScroll()
+    }
+    function test_switching_mailbox_waits_for_a_save_to_finish() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      wait(0)
+      timeline.contentY = 8 * timeline.hourHeight
+      view.pendingGesture = {key: "meeting", start: 0, end: 0}
+      fixture.calendarScope = "other"
+      fixture.events = plannedAt(5)
+      wait(50)
+      fuzzyCompare(topHour(), 8, 0.01, "the save is still running")
       view.pendingGesture = null
+      wait(0)
+      fuzzyCompare(topHour(), 5, 0.01, "opens at the new mailbox's first event")
+      fixture.events = plannedAt(9)
+      wait(50)
+      fuzzyCompare(topHour(), 5, 0.01, "its events have loaded, so it stays there")
+      fixture.calendarScope = ""
+      fixture.events = plannedAt(10)
+      view.resetTimeScroll()
     }
     function test_switching_mailbox_opens_at_its_first_event() {
       var timeline = findChild(view, "calendar-time-scroll")
