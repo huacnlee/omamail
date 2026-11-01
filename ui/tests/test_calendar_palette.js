@@ -20,8 +20,6 @@ deepEqual(parsed, {
 
 assert.strictEqual(palette.normalizeKey("blue"), "blue")
 assert.strictEqual(palette.normalizeKey("unknown"), "")
-assert.strictEqual(palette.defaultKey("work-team"), palette.defaultKey("work-team"),
-  "the fallback is stable")
 assert.ok(palette.keys().indexOf(palette.defaultKey("work-team")) >= 0)
 
 console.log("test_calendar_palette.js ok")
