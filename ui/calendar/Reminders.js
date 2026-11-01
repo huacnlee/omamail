@@ -36,8 +36,10 @@ function candidates(events, sources) {
       var key = occurrence + "\n" + minutes
       if (seen[key]) continue
       seen[key] = true
+      // A point in time (a pill to take, a deadline) ends where it starts;
+      // the ledger wants an end after the start, or it refuses the whole poll.
       out.push({ key: key, occurrence: occurrence, due: Number(event.start.ms) - minutes * 60000,
-        start: Number(event.start.ms), end: Number(event.end.ms), eventId: String(event.googleId || event.uid || ""),
+        start: Number(event.start.ms), end: Math.max(Number(event.end.ms), Number(event.start.ms) + 60000), eventId: String(event.googleId || event.uid || ""),
         sourceId: String(source.id), title: String(event.summary || "Event"), accountId: String(source.accountId || "") })
     }
   }
