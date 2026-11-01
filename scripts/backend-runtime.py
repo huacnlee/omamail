@@ -207,8 +207,9 @@ class ReleaseRedirect(urllib.request.HTTPRedirectHandler):
 
 def download(url, limit):
     require(release_url_allowed(url), "Release URL was refused.")
-    # Ignore proxy environment variables; redirects remain fixed HTTPS release hosts.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), ReleaseRedirect())
+    # The default opener chain follows the standard HTTPS_PROXY/NO_PROXY
+    # environment variables; redirects remain fixed HTTPS release hosts.
+    opener = urllib.request.build_opener(ReleaseRedirect())
     with opener.open(url, timeout=20) as response:
         require(response.status == 200, "Release download failed.")
         content = response.read(limit + 1)

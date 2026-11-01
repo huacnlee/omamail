@@ -2,17 +2,21 @@
 """Synthetic release tests; never access releases or the installed plugin."""
 import fcntl
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts/backend-runtime.py"
@@ -575,6 +579,79 @@ touch linked
         self.assertFalse(self.manager.run("status")["cliInstalled"])
         self.old()
         self.assertFalse(self.manager.run("status")["cliInstalled"])
+
+
+class ProxyEnvironmentTests(unittest.TestCase):
+    """Synthetic proxy-discovery checks; a local recorder is the only peer."""
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("proxy_runtime_manager", SOURCE)
+        self.manager = importlib.util.module_from_spec(spec)
+        with patch.dict(os.environ, {}, clear=True):
+            spec.loader.exec_module(self.manager)
+        patch.dict(os.environ, {}, clear=True).start()
+        self.addCleanup(patch.stopall)
+
+    def release_url(self):
+        return "https://github.com/huacnlee/omamail/releases/download/v0.8.2/SHA256SUMS"
+
+    def test_download_honors_standard_proxy_environment_variables(self):
+        # With HTTPS_PROXY set, the request must travel through that proxy as a
+        # CONNECT tunnel; a downloader that ignores it dials the release host
+        # directly, which the guarded socket refuses without any real network.
+        tunnels = []
+
+        class RecordingProxy(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_CONNECT(self):
+                tunnels.append(self.path)
+                self.send_response(502)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RecordingProxy)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        connect = socket.socket.connect
+
+        def local_only(sock, address):
+            if address[0] not in ("127.0.0.1", "::1"):
+                raise AssertionError("unexpected direct connection to " + address[0])
+            return connect(sock, address)
+
+        with patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:%d" % server.server_address[1]}), \
+                patch("socket.socket.connect", local_only):
+            with self.assertRaises(urllib.error.URLError):
+                self.manager.download(self.release_url(), 64 * 1024)
+        self.assertEqual(tunnels, ["github.com:443"])
+
+    def test_download_without_proxy_variables_keeps_direct_connections(self):
+        # With no proxy variables set, the URL's own host is resolved and
+        # contacted directly; the transport must not gain a default proxy.
+        resolved = []
+        real_resolver = socket.getaddrinfo
+
+        def resolver(host, port, *args):
+            resolved.append(host)
+            if host == "github.com":
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", port))]
+            return real_resolver(host, port, *args)
+
+        connected = []
+
+        def refusing(sock, address):
+            connected.append(address[0])
+            raise OSError("synthetic offline")
+
+        with patch("socket.getaddrinfo", resolver), patch("socket.socket.connect", refusing):
+            with self.assertRaises(urllib.error.URLError):
+                self.manager.download(self.release_url(), 64 * 1024)
+        self.assertEqual(resolved, ["github.com"])
+        self.assertEqual(connected, ["192.0.2.1"])
 
 
 if __name__ == "__main__":
