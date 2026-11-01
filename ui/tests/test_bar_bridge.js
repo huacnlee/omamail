@@ -35,6 +35,21 @@ for (const direction of ["ltr", "rtl", "", null, { secret }, "x".repeat(4097)]) 
   const message = bridge.snapshot({ barMessages: [{ subjectDirection: direction }] }).barMessages[0]
   assert.equal(message.subjectDirection, direction === "rtl" || direction === "ltr" ? direction : "")
 }
+// Only a valid detached millisecond timestamp may cross the preview boundary.
+for (const date of [1780000000000, new Date(1780000000000), new Date(1780000000000).toISOString()]) {
+  const message = bridge.snapshot({barMessages:[{date}]}).barMessages[0]
+  assert.equal(message.date, 1780000000000)
+}
+for (const date of [null, undefined, "", secret, {secret}, Infinity, 9e15, new Date(NaN)]) {
+  const message = bridge.snapshot({barMessages:[{date}]}).barMessages[0]
+  assert.equal(message.date, null)
+  assert(!JSON.stringify(message).includes(secret))
+}
+let conversions = 0
+const hostileDate = {getTime() { conversions++; return 1780000000000 },
+  toString() { conversions++; return secret }, valueOf() { conversions++; return 1780000000000 }}
+assert.equal(bridge.snapshot({barMessages:[{date:hostileDate}]}).barMessages[0].date, null)
+assert.equal(conversions, 0, "preview snapshots must not execute arbitrary date conversions")
 result.barMessages[0].from.display = "Changed"
 result.barEvents[0].start.ms = 0
 assert.equal(source.barMessages[0].from.display, "Ada", "snapshots cannot mutate the service")

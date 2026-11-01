@@ -581,8 +581,8 @@ grep -q 'root.gmail.refreshCalendarPreview()' BarWidget.qml \
   || fail "opening the bar preview must refresh its upcoming events"
 grep -q 'width: parent ? parent.width : 0' BarWidget.qml \
   || fail "bar preview rows must stay inside the panel's padded content area"
-grep -q '"MMM d · ddd HH:mm"' bar/BarPreview.qml \
-  || fail "upcoming events must show a calendar date as well as a weekday"
+# The real bar-preview locale test asserts the rendered date, weekday, clock
+# and source together; do not pin its implementation to a 24-hour pattern.
 if awk '
   /function activateEvent\(event\)/ { in_function = 1 }
   in_function && /Qt\.openUrlExternally/ { found = 1 }

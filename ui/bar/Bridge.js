@@ -13,6 +13,18 @@ function identifier(value) {
   return typeof value === "string" && value.length <= 4096 ? value : ""
 }
 
+function timestamp(value) {
+  var ms = NaN
+  if (typeof value === "number" || (typeof value === "string" && value.length <= 64))
+    ms = new Date(value).getTime()
+  else if (value && typeof value === "object") {
+    // Check the Date's internal value, including Dates from another realm;
+    // do not invoke an arbitrary object's conversion methods.
+    try { ms = Date.prototype.getTime.call(value) } catch (_) {}
+  }
+  return isFinite(ms) ? ms : null
+}
+
 function settings(values, defaults) {
   var out = {}
   var source = values || {}
@@ -40,7 +52,8 @@ function snapshot(value) {
       subjectDirection: message.subjectDirection === "rtl" || message.subjectDirection === "ltr"
         ? message.subjectDirection : "",
       from: { display: text(message.from && message.from.display) },
-      sourceLabel: text(message.sourceLabel), receivedLabel: text(message.receivedLabel)
+      sourceLabel: text(message.sourceLabel), receivedLabel: text(message.receivedLabel),
+      date: timestamp(message.date)
     })
   }
   for (var j = 0; j < Math.min(events.length, 2); j++) {

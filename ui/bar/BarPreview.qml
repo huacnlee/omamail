@@ -3,6 +3,8 @@ import qs.Commons
 import qs.Ui
 import "../components"
 import "../message/Direction.js" as Direction
+import "../message/Message.js" as Mail
+import "../message/Clock.js" as Clock
 
 Column {
   id: root
@@ -86,7 +88,7 @@ Column {
         }
         Text {
           width: parent.width
-          text: mailRow.modelData.receivedLabel || ""
+          text: Mail.displayTimeLabel(mailRow.modelData.receivedLabel || "", mailRow.modelData.date)
           color: root.dimColor
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.caption
@@ -163,7 +165,8 @@ Column {
         Text {
           width: parent.width
           text: new Date(eventRow.modelData.start.ms).toLocaleString(
-            Qt.locale(), "MMM d · ddd HH:mm")
+            Qt.locale(), "MMM d · ddd")
+            + " " + Clock.time(new Date(eventRow.modelData.start.ms))
             + "  ·  " + eventRow.modelData.sourceLabel
           color: root.dimColor
           font.family: root.panelFontFamily

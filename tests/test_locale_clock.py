@@ -20,7 +20,7 @@ for locale in ("en_US", "en_GB", "fi_FI", "zh_CN", "zh_TW"):
             path = profile / name
             path.mkdir()
             env[key] = str(path)
-        for test in ("tst_locale_clock.qml", "tst_native_locale_clock.qml", "tst_calendar_event_composer.qml", "tst_message_row_layout.qml"):
+        for test in ("tst_bar_preview_clock.qml", "tst_locale_clock.qml", "tst_native_locale_clock.qml", "tst_calendar_event_composer.qml", "tst_message_row_layout.qml"):
             print(f"Real Qt locale={locale}, timezone=America/New_York, {test}", flush=True)
             subprocess.run([runner, "-input", str(ROOT / "ui/tests/qml" / test),
                             "-import", str(ROOT / "ui/tests/qml/imports")],
