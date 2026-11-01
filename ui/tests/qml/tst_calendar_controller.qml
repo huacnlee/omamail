@@ -12,6 +12,9 @@ Item {
     property var requests: []
     property var nextResult: ({ body: "{}", status: 200 })
     property var nextError: null
+    property var settings: ({})
+    property int saves: 0
+    function persistSetting(name, value) { var next = ({}); next[name] = value; settings = next; saves++ }
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: false
     property var discoveryCallback: null
@@ -70,6 +73,35 @@ Item {
     SignalSpy { id: discoverySpy; target: controller; signalName: "discoveryFinished" }
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
+
+    function test_the_week_view_can_watch_what_it_follows() {
+      compare(typeof controller.pendingRangeStart, "number")
+      compare(typeof controller.enabledSourceKey, "string")
+      compare(typeof controller.calendarScope, "string")
+    }
+
+    function test_a_run_of_zoom_presses_shows_at_once_and_saves_once() {
+      var saved = mailService.settings
+      mailService.settings = ({})
+      mailService.saves = 0
+      compare(controller.hourHeight, 0, "automatic until zoomed")
+      controller.zoomHours(-1, 60, 0)
+      controller.zoomHours(-1, 55, 0)
+      controller.zoomHours(-1, 50, 0)
+      compare(controller.hourHeight, 45)
+      compare(mailService.saves, 0)
+      tryCompare(mailService, "saves", 1)
+      compare(mailService.settings.calendarHourHeight, 45)
+      compare(controller.hourHeight, 45)
+      controller.zoomHours(0, 45, 0)
+      compare(controller.hourHeight, 0, "a reset shows at once")
+      tryCompare(mailService, "saves", 2)
+      compare(mailService.settings.calendarHourHeight, 0, "and stays automatic after a restart")
+      compare(controller.hourHeight, 0)
+      mailService.settings = ({ calendarHourHeight: 5000 })
+      compare(controller.hourHeight, 120, "a hand-edited value stays in range")
+      mailService.settings = saved
+    }
 
     function test_settings_can_target_another_accounts_calendar() {
       controller.accountId = "one@gmail.com"

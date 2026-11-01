@@ -1048,6 +1048,9 @@ Item {
     if (id === "calendarPreviousPeriod") return calendarView.movePeriod(-1)
     if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
     if (id === "calendarToday") return calendarView.goToday()
+    if (id === "calendarZoomIn") return calendarView.zoomHours(1)
+    if (id === "calendarZoomOut") return calendarView.zoomHours(-1)
+    if (id === "calendarZoomReset") return calendarView.zoomHours(0)
     if (id === "calendarWeek") return calendarView.setView("week")
     if (id === "calendarDay") return calendarView.setView("day")
     if (id === "calendarAgenda") return calendarView.setView("agenda")
@@ -2864,6 +2867,9 @@ Item {
         panelFontFamily: root.fontFamily
         labels: root.service ? root.service.labels : []
         currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
+        folders: root.service
+          ? !Provider.can(root.service.providerId, "labels") && Provider.can(root.service.providerId, "move")
+          : false
         onLabelChosen: function(labelId) {
           root.actOnCursor("label:" + labelId, root.labelPickerOnlyCursor)
         }

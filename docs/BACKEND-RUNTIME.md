@@ -19,8 +19,13 @@ directory, `scripts/install-backend.sh` requests the same installation and
 access. Linux x86_64 and aarch64 are supported. Installation downloads only from
 the pinned release in `huacnlee/omamail`, verifies SHA256SUMS and the strict archive
 layout, checks the candidate executable's version and atomically replaces the
-old executable. A failed installation preserves the working runtime. Checksums
-protect integrity, not against a compromised publisher.
+old executable. The download itself follows the standard `HTTPS_PROXY` and
+`NO_PROXY` environment variables through urllib's default proxy discovery, so
+networks that require an outbound HTTP proxy can install the backend; the
+release URLs are always HTTPS, the proxy only carries the encrypted transport,
+and SOCKS-style proxies are not supported. A failed installation preserves the
+working runtime. Checksums protect integrity, not against a compromised
+publisher.
 
 `python3 scripts/backend-runtime.py enable-cli` explicitly creates
 `~/.local/bin/omamail` as a symlink to that same private executable; it refuses

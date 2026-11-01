@@ -23,6 +23,7 @@ private slots:
     void acceptsSpellingSettings();
     void invalidJsonIsPreserved();
     void rejectsCredentialAndUnknownFields();
+    void acceptsTheSettingsServiceSends();
     void fileStoreReadsWritesAndWatches();
     void fileStoreWriteOutlastsABriefShareLock();
     void watchReportsExternalCreation();
@@ -119,6 +120,32 @@ void SettingsTest::rejectsCredentialAndUnknownFields()
     QVERIFY(!QFile::exists(path));
     QVERIFY(!store.replace({{QStringLiteral("futureUnreviewedField"), true}}, &error));
     QVERIFY(!QFile::exists(path));
+}
+
+// Service.persistSetting() always sends its whole settings map, so one refused
+// key loses every change. These are its defaultSettingValues plus the values
+// it saves without a default.
+void SettingsTest::acceptsTheSettingsServiceSends()
+{
+    QTemporaryDir directory;
+    SettingsStore store(directory.filePath(QStringLiteral("settings.json")));
+    const QVariantMap sent{
+        {QStringLiteral("refreshIntervalSec"), 120}, {QStringLiteral("maxMessages"), 50},
+        {QStringLiteral("heavyMessageRendering"), QStringLiteral("Show plain text first")},
+        {QStringLiteral("contentDirection"), QStringLiteral("Auto")},
+        {QStringLiteral("appearance"), QStringLiteral("Auto")},
+        {QStringLiteral("defaultQuery"), QStringLiteral("in:inbox")},
+        {QStringLiteral("notifyNewMail"), QStringLiteral("On")}, {QStringLiteral("oauthPort"), 9481},
+        {QStringLiteral("undoSendSeconds"), 10}, {QStringLiteral("unifiedCalendarView"), false},
+        {QStringLiteral("calendarRemindersEnabled"), true},
+        {QStringLiteral("calendarSnoozeMinutes"), 5}, {QStringLiteral("showBarIcon"), true},
+        {QStringLiteral("unifiedMailboxes"), false}, {QStringLiteral("suggestEvents"), false},
+        {QStringLiteral("aiAgent"), QStringLiteral("System default")},
+        {QStringLiteral("aiModel"), QString()}, {QStringLiteral("calendarHourHeight"), 40},
+        {QStringLiteral("invitationCalendars"), QVariantMap{}}, {QStringLiteral("aiChatResetAt"), 1}};
+    QString error;
+    QVERIFY2(store.replace(sent, &error), qPrintable(error));
+    QCOMPARE(store.load(&error).value(QStringLiteral("calendarHourHeight")).toInt(), 40);
 }
 
 void SettingsTest::fileStoreReadsWritesAndWatches()

@@ -17,6 +17,21 @@ assert.strictEqual(imap.presetFor("jane@hotmail.com").id, "outlook", "aliases re
 assert.strictEqual(imap.presetFor("jane@me.com").id, "icloud")
 assert.strictEqual(imap.presetFor("jane@example.org"), null)
 
+// Yahoo Germany uses the same servers as yahoo.com, not imap.yahoo.de.
+for (const address of ["jane@yahoo.de", "Jane@Yahoo.DE", "jane@yahoo.com", "jane@ymail.com", "jane@rocketmail.com"]) {
+  assert.strictEqual(imap.presetFor(address).id, "yahoo", address)
+  const yahoo = imap.suggestedSettings(address)
+  assert.strictEqual(yahoo.imapHost, "imap.mail.yahoo.com", address)
+  assert.strictEqual(yahoo.smtpHost, "smtp.mail.yahoo.com", address)
+  assert.strictEqual(yahoo.imapPort, 993, address)
+  assert.strictEqual(yahoo.smtpPort, 465, address)
+  assert.strictEqual(yahoo.username, address.trim(), address)
+  assert.strictEqual(yahoo.insecure, false, address)
+  assert.ok(/app password/i.test(yahoo.note), address)
+}
+for (const address of ["jane@notyahoo.de", "jane@yahoo.de.example.org"])
+  assert.strictEqual(imap.presetFor(address), null, "only exact provider domains match")
+
 // 163 has an entry for its note, not its servers — those are what
 // `imap.<domain>` would have guessed anyway. The note is the part no address
 // can imply: this mailbox refuses the account password.

@@ -30,6 +30,10 @@ Item {
   property string selectedEventId: ""
   property bool monthPointerDown: false
   property Item hoveredMonthDay: null
+  function zoomHours(direction) {
+    if ((viewMode === "day" || viewMode === "week") && !detailOpen) weekView.zoomHours(direction)
+  }
+
   function updateMonthHover() {
     if (overflowHover.hovered) return
     if (!monthHover.hovered || monthPointerDown || viewMode !== "month" || detailOpen) {
@@ -973,6 +977,7 @@ Item {
     }
 
     WeekCalendarView {
+      id: weekView
       width: parent.width
       height: parent.height - y
        visible: root.viewMode === "day" || root.viewMode === "week"

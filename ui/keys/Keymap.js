@@ -144,6 +144,12 @@ var BINDINGS = [
     group: "Calendar", label: "Undo the last event change", hint: { calendar: "undo" } },
   { id: "calendarMonth", keys: ["m"], contexts: ["calendar"],
     group: "Calendar", label: "Show month view" },
+  { id: "calendarZoomIn", keys: ["Ctrl++", "Ctrl+="], contexts: ["calendar"],
+    group: "Calendar", label: "Make hours taller in the day and week views" },
+  { id: "calendarZoomOut", keys: ["Ctrl+-"], contexts: ["calendar"],
+    group: "Calendar", label: "Make hours shorter in the day and week views" },
+  { id: "calendarZoomReset", keys: ["Ctrl+0"], contexts: ["calendar"],
+    group: "Calendar", label: "Return to the automatic hour height" },
   // Both Enters: the main keyboard's is Return, the numpad's is Enter, and
   // a hand on the numpad expects the same thing of them.
   { id: "spellingSuggestions", keys: ["Ctrl+."], contexts: ["compose"],
