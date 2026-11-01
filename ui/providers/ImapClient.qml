@@ -74,6 +74,7 @@ Item {
     var owner = auth
     var account = String(owner.accountId || "")
     var settingsSnapshot = JSON.stringify(owner.settings)
+    var revision = owner.passwordRevision
     function current() {
       return owner === auth && String(owner.accountId || "") === account
         && JSON.stringify(owner.settings) === settingsSnapshot
@@ -93,13 +94,34 @@ Item {
       backend.call(method, params, function(result, failure) {
         root.inFlight = Math.max(0, root.inFlight - 1)
         if (handle.aborted || !current()) return
-        if (typeof callback === "function") callback(result, failure ? root.backendError(failure) : "")
+        // The saved password, refused at IMAP LOGIN. A send's refusal is the
+        // SMTP server's, which can differ from the mailbox's.
+        var refused = !!failure && suppliedCredential === undefined && method !== "imap.send"
+          && String(failure.message || "") === "mail_auth_failed"
+          && typeof owner.refuseSavedPassword === "function"
+          && owner.refuseSavedPassword(revision)
+        if (typeof callback === "function")
+          callback(result, refused ? owner.lastError : failure ? root.backendError(failure) : "")
       })
     }
     if (suppliedCredential !== undefined) perform(suppliedCredential, "")
     else perform("", "")
     return handle
   }
+
+  // The background poller reads the keyring itself, so its refusal cannot say
+  // which password was refused. One request from here can, and goes through
+  // the same check as any other. Each is a LOGIN with that password, so only
+  // one at a time, and none while a check or a keyring write decides anyway.
+  property bool savedPasswordRecheck: false
+  function recheckSavedPassword() {
+    if (savedPasswordRecheck || !auth || typeof auth.refuseSavedPassword !== "function"
+        || !auth.loggedIn || auth.loginBusy || auth.replacementBusy || auth.credentialWriteBusy) return
+    savedPasswordRecheck = true
+    nativeRequest("imap.folders", { refresh: true }, function() { root.savedPasswordRecheck = false })
+  }
+  // An answer for another mailbox or other servers is dropped unanswered.
+  onAuthChanged: savedPasswordRecheck = false
 
   function ensureFolders(callback) {
     if (foldersLoaded) { if (typeof callback === "function") callback(""); return }
@@ -320,6 +342,7 @@ Item {
 
   Connections {
     target: root.auth
+    function onAccountIdChanged() { root.savedPasswordRecheck = false }
     function onVerifyRequested(settings, credentials) {
       var owner = root.auth
       var generation = owner.sessionGeneration
@@ -328,6 +351,7 @@ Item {
       })
     }
     function onSettingsChanged() {
+      root.savedPasswordRecheck = false
       root.foldersLoaded = false
       root.folders = []
       root.special = ({})
