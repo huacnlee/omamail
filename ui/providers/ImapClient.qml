@@ -49,6 +49,14 @@ Item {
     var code = String(error && error.message || "")
     if (code === "smtp_delivery_unknown") return "The server did not confirm delivery. Check Sent before sending again."
     if (code === "mail_auth_failed" || code === "auth_signed_out") return "The server rejected the sign-in. Sign in again."
+    // RFC 5530 codes the backend read off a refused LOGIN. The two a user can
+    // act on differently from "wrong password" come first: an outage and an
+    // expired password look identical without them.
+    if (code === "mail_auth_unavailable") return "The server could not check the sign-in right now. Wait a few minutes, then sign in again."
+    if (code === "mail_auth_expired") return "The server says this password has expired. Create a new password or app password, then sign in again."
+    if (code === "mail_auth_contact_admin") return "The server refused the sign-in and asks you to contact your mail administrator."
+    if (code === "mail_auth_unauthorized") return "The server accepted the password but does not let this account use the mailbox."
+    if (code === "mail_auth_privacy_required") return "The server requires an encrypted connection before it accepts a sign-in."
     if (code === "mail_tls_failed") return "The mail server's secure connection could not be verified"
     if (code === "request_timed_out") return "The mail server did not answer in time"
     if (code === "imap_search_expired") return "This search has expired. Refresh to search again."

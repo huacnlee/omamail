@@ -429,7 +429,12 @@ fn backoff_doubles_to_its_ceiling_resets_after_a_refresh_and_stops_only_for_miss
         backoff.after("mail_connection_closed", false),
         Some(Duration::from_secs(10))
     );
-    for credential in ["mail_auth_failed", "auth_signed_out", "auth_refresh_failed"] {
+    for credential in [
+        "mail_auth_failed",
+        "mail_auth_expired",
+        "auth_signed_out",
+        "auth_refresh_failed",
+    ] {
         assert_eq!(backoff.after(credential, false), Some(timing.last_retry));
     }
     assert_eq!(

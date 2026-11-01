@@ -987,7 +987,9 @@ Column {
     function onCalendarSaved(ok, error) {
       resultText.ok = ok
       if (!ok) { resultText.text = error; return }
-      resultText.text = "Calendar saved"
+      // A save can still have something to say, such as that the password
+      // was not checked.
+      resultText.text = String(error || "") === "" ? "Calendar saved" : "Calendar saved. " + error
       calendarName.text = ""
       calendarUrl.text = ""
       calendarUsername.text = ""

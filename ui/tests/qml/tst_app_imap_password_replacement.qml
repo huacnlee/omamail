@@ -56,7 +56,24 @@ Item {
       }
     }
 
-    function test_a_refused_replacement_is_shown_on_the_page_that_typed_it() {
+    // The sentence follows the RFC 5530 code the backend read off the
+    // refusal: an outage and an expired password each get their own, instead
+    // of both reading as a wrong password.
+    function test_a_refused_replacement_is_shown_on_the_page_that_typed_it_data() {
+      return [
+        {tag: "refused", code: "mail_auth_failed",
+          text: "The server rejected the sign-in. Sign in again."},
+        {tag: "unavailable", code: "mail_auth_unavailable",
+          text: "The server could not check the sign-in right now. Wait a few minutes, then sign in again."},
+        {tag: "expired", code: "mail_auth_expired",
+          text: "The server says this password has expired. Create a new password or app password, then sign in again."},
+        {tag: "contact admin", code: "mail_auth_contact_admin",
+          text: "The server refused the sign-in and asks you to contact your mail administrator."}
+      ]
+    }
+
+    function test_a_refused_replacement_is_shown_on_the_page_that_typed_it(data) {
+      held = null
       app.opened = true
       mailService.accountsLoaded = true
       mailService.accountList = ({ version: 1, accounts: [
@@ -84,8 +101,8 @@ Item {
       compare(app.page, "setup")
       verify(findChild(app, "setup-page").item === page, "and the page is the same one")
 
-      BackendFixture.respond(mailService, held, undefined, {code: -32000, message: "mail_auth_failed"})
-      tryCompare(findChild(app, "imap-error"), "text", "The server rejected the sign-in. Sign in again.")
+      BackendFixture.respond(mailService, held, undefined, {code: -32000, message: data.code})
+      tryCompare(findChild(app, "imap-error"), "text", data.text)
       compare(app.page, "setup", "the refusal is read where it was typed")
       compare(findChild(app, "imap-password-field").text, "wrong-password", "and the field keeps it")
       verify(!fixture.requests.some(function(request) { return request.method === "credentials.put" }),
