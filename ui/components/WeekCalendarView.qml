@@ -83,7 +83,7 @@ Item {
   // height from one week to the next.
   readonly property real automaticHourHeight: Calendar.automaticHourHeight(
     timeline.height + allDayHeight - Style.space(32), Style.space(Calendar.HOUR_HEIGHT_USUAL),
-    Math.max(Style.space(Calendar.HOUR_HEIGHT_MIN), Style.font.caption * 2.5))
+    Math.max(Style.space(Calendar.HOUR_HEIGHT_READABLE), Style.font.caption * 2.5))
   // A short hour shrinks what is fixed for a tall one, or a resize edge would
   // leave nothing to drag by and a card's margin nothing to show its title in.
   readonly property real hourScale: Math.min(1, timeline.hourHeight / Style.space(60))

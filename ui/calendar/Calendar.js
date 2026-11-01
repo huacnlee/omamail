@@ -1232,10 +1232,12 @@ function dayMinutes(timeMs, day) {
 // How tall one hour is in the day and week views. By default a window shows a
 // waking day, without hours growing past their usual height or shrinking past
 // what a short event can be read at. The zoom keys save a height of their own
-// in unscaled pixels; 0, or anything unusable, means automatic.
+// in unscaled pixels, which can go on down until the whole day fits, for someone
+// whose day has no quiet hours; 0, or anything unusable, means automatic.
 var HOUR_HEIGHT_AUTOMATIC = 0
 var HOUR_HEIGHT_USUAL = 60
-var HOUR_HEIGHT_MIN = 25
+var HOUR_HEIGHT_READABLE = 25
+var HOUR_HEIGHT_MIN = 10
 var HOUR_HEIGHT_MAX = 120
 var HOUR_HEIGHT_STEP = 5
 var HOURS_TO_SHOW = 16
@@ -1256,10 +1258,12 @@ function normalizeHourHeight(value) {
 // window. A press that could not show changes nothing, so it saves nothing.
 function zoomedHourHeight(saved, shown, direction, filled) {
   if (!direction) return HOUR_HEIGHT_AUTOMATIC
-  var fill = Math.ceil(Number(filled) || 0)
-  var from = Math.max(Math.round(Number(shown) || HOUR_HEIGHT_USUAL), fill)
-  var next = Math.max(Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, from + direction * HOUR_HEIGHT_STEP)),
-    Math.min(fill, HOUR_HEIGHT_MAX))
+  var fill = Number(filled) || 0
+  var from = Math.max(Math.round(Number(shown) || HOUR_HEIGHT_USUAL), Math.ceil(fill))
+  if (direction < 0 && from <= Math.ceil(fill)) return normalizeHourHeight(saved)
+  var next = Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, from + direction * HOUR_HEIGHT_STEP))
+  // Rounded down, so that the window takes over and the whole day fits exactly.
+  if (next < fill) next = Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, Math.floor(fill)))
   return next === from ? normalizeHourHeight(saved) : next
 }
 

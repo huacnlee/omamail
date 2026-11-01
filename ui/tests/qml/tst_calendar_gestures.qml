@@ -135,6 +135,14 @@ Item {
       fuzzyCompare(topHour(), 2, 0.01, "still a scroll by hand")
       fixture.events = original
     }
+    function test_zooming_out_stops_when_the_whole_day_fits() {
+      var timeline = findChild(view, "calendar-time-scroll")
+      fixture.hourHeight = 0
+      wait(0)
+      for (var i = 0; i < 12; i++) view.zoomHours(-1)
+      compare(timeline.contentHeight, timeline.height, "24 hours without scrolling")
+      compare(fixture.hourHeight, Math.floor(timeline.height / 24 / Style.space(60) * 60))
+    }
     function test_zooming_out_and_back_returns_to_the_same_hour() {
       var timeline = findChild(view, "calendar-time-scroll")
       timeline.contentY = 12 * timeline.hourHeight
