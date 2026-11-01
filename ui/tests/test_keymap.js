@@ -304,6 +304,12 @@ deepEqual(keymap.hintsFor("list", [], true, { archive: "archive", trash: "trash"
   "the keys' own verbs change nothing")
 deepEqual(keymap.hintsFor("list", [], true, { archive: "untrash", trash: "unarchive" }), selectedListHints,
   "a key's hint changes only for its own way back")
+const spellingSuggestions = byId("spellingSuggestions")
+assert.strictEqual(keymap.displayFor(spellingSuggestions), "Ctrl+.")
+assert.strictEqual(keymap.isEnabled(spellingSuggestions, "compose", false), true)
+for (const context of ["list", "reader", "search", "page", "calendar", "assistant"]) {
+  assert.strictEqual(keymap.isEnabled(spellingSuggestions, context, false), false)
+}
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],

@@ -48,6 +48,8 @@ readonly property string keyContext:
 | `page` | Setup or settings | `Escape`, and the modified keys |
 | `calendar` | The calendar | Calendar navigation, hour zoom in the day and week views, and the modified keys |
 
+`Ctrl+.` opens spelling suggestions for the word at the caret when the composer body has focus. Right-click a word for the same corrections and Ignore for this session. Fcitx5 commonly uses `Ctrl+.` to toggle punctuation width and may consume it before Omamail receives it; use right-click or change the input method binding in that case. There is no application menu-key or `Shift+F10` binding.
+
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
 
@@ -146,6 +148,7 @@ used to exist, and they had.
 | `calendarZoomIn` | `Ctrl++`, `Ctrl+=` | calendar | Make hours taller in the day and week views |
 | `calendarZoomOut` | `Ctrl+-` | calendar | Make hours shorter in the day and week views |
 | `calendarZoomReset` | `Ctrl+0` | calendar | Return to the automatic hour height |
+| `spellingSuggestions` | `Ctrl+.` | compose | Spelling suggestions... |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |
