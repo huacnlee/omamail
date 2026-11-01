@@ -1,5 +1,6 @@
 #include "application_host.h"
 
+#include "hyprland_window.h"
 #include "resource_check.h"
 
 #include <QClipboard>
@@ -105,6 +106,11 @@ void ApplicationHost::requestOpen(const QString &payload)
 {
     m_pendingOpen = payload.isEmpty() ? QStringLiteral("{}") : payload;
     emit openRequested(m_pendingOpen);
+}
+
+bool ApplicationHost::restoreParkedWindow()
+{
+    return HyprlandWindow::restoreParkedWindow();
 }
 
 QString ApplicationHost::takePendingOpen()

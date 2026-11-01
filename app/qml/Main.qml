@@ -105,6 +105,8 @@ ApplicationWindow {
     if (!root.visible) root.show()
     root.raise()
     root.requestActivate()
+    // Minimized on Hyprland, the window is shown but parked out of sight.
+    if (root.nativeHost) root.nativeHost.restoreParkedWindow()
   }
 
   readonly property bool startedInBackground: Qt.application.arguments.indexOf("--background") >= 0
