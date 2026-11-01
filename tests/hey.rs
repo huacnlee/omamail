@@ -263,7 +263,9 @@ fn optional_read_flags_negotiate_without_retrying_real_failures() {
     fs::write(
         &executable,
         br##"#!/bin/sh
+printf '%s\n' "$*" >> "$HEY_TEST_CALLS"
 case "$*" in
+  threads\ 4\ *) printf '%s' '{"ok":false,"error":"provider refused this read"}'; exit 1 ;;
   *--allow-partial*) printf '%s' '{"ok":false,"error":"unknown flag: --allow-partial"}'; exit 1 ;;
   *--html*) printf '<!doctype html><html><body>Whole conversation</body></html>'; exit 0 ;;
   *) exit 9 ;;
@@ -275,6 +277,7 @@ esac
     let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
         .args(["call", "hey.read", "--json"])
         .env("PATH", &dir)
+        .env("HEY_TEST_CALLS", dir.join("calls"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -306,6 +309,39 @@ esac
             .unwrap()
             .contains("Whole conversation")
     );
-    fs::remove_file(executable).unwrap();
-    fs::remove_dir(dir).unwrap();
+    assert_eq!(
+        fs::read_to_string(dir.join("calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
+    fs::write(dir.join("calls"), "").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
+        .args(["call", "hey.read", "--json"])
+        .env("PATH", &dir)
+        .env("HEY_TEST_CALLS", dir.join("calls"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"id":"3:4"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    let refusal: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(refusal["error"]["code"], "HEY refused the request");
+    assert_eq!(
+        fs::read_to_string(dir.join("calls"))
+            .unwrap()
+            .lines()
+            .count(),
+        1,
+        "a real refusal must not trigger optional-flag retries"
+    );
+    fs::remove_dir_all(dir).unwrap();
 }

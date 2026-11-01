@@ -52,6 +52,14 @@ function byId(id) {
 })
 
 const undoSend = byId("undoSend")
+assert.strictEqual(keymap.contextFor({eventComposing:true,eventDescriptionFocused:true}), "eventDescription")
+assert.strictEqual(keymap.contextFor({eventComposing:true,eventDescriptionFocused:false}), "eventCompose")
+for (const key of ["Return", "Enter"]) {
+  assert.ok(!keymap.sequencesFor("eventDescription").some(entry => entry.sequence === key))
+  assert.strictEqual(keymap.sequencesFor("eventDescription").find(entry => entry.sequence === "Ctrl+" + key).id, "saveEvent")
+  assert.strictEqual(keymap.sequencesFor("eventCompose").find(entry => entry.sequence === key).id, "saveEvent")
+}
+assert.strictEqual(keymap.hintsFor("eventDescription").find(hint => hint.label === "save").key, "Ctrl+Enter")
 assert.strictEqual(keymap.contextFor({ assistantEditing: true, composing: true }), "assistant")
 assert.strictEqual(keymap.contextFor({ assistantEditing: true, assistantCommands: true, composing: true }), "assistantCommands")
 assert.strictEqual(keymap.contextFor({ assistantEditing: false, composing: true }), "compose")

@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 
 import "ImapProtocol.js" as Imap
+import "Secrets.js" as Secrets
 
 // An IMAP account's sign-in, which is a server address and a password.
 //
@@ -50,6 +51,9 @@ Item {
   // The same three names `AuthManager` exposes, because `MailAccount` reads
   // them without knowing which provider it has.
   readonly property bool credentialsPresent: configured
+  property bool restoreOwed: true
+  readonly property bool recoveringSession: !loggedIn && !loginBusy && !replacementBusy && configured && restoreOwed
+  property real timeScale: 1
   property bool loginBusy: false
   // A signed-in mailbox checking a replacement password. Kept apart from
   // `loginBusy`, which would take the mailbox out of service while it is
@@ -76,6 +80,10 @@ Item {
   property var credentialWaiters: []
   property bool lookupHandled: false
   property string pendingPassword: ""
+  // Which retry comes next after the store said it was unavailable. The wait
+  // between attempts doubles; the attempts themselves do not stop, because
+  // the store can be unlocked at any point in the session.
+  property int secretRetryAttempt: 0
 
   signal loginSucceeded()
   signal loggedOut()
@@ -122,9 +130,11 @@ Item {
 
   function restoreSession() {
     if (!configured) {
+      restoreOwed = false
       passwordChecked = true
       return
     }
+    if (backend && !backend.ready) return
     if (credentialLookupBusy) return
     startSecretLookup()
   }
@@ -142,16 +152,56 @@ Item {
       if (serial !== root.credentialLookupSerial) return
       root.credentialLookupBusy = false
       if (boundAccount !== root.accountId) return
+      if (root.loginBusy || root.replacementBusy) return
       root.handleSecretLookup(error ? "" : value, error)
     })
+  }
+
+  function scheduleSecretRetry() {
+    if (!configured || credentialLookupBusy || secretRetry.running) return
+    secretRetry.interval = Math.max(1, Math.round(Secrets.retryDelay(secretRetryAttempt) * timeScale))
+    secretRetryAttempt++
+    secretRetry.start()
+  }
+
+  function stopSecretRetry() {
+    secretRetry.stop()
+    secretRetryAttempt = 0
+  }
+
+  Timer {
+    id: secretRetry
+    onTriggered: {
+      if (root.loginBusy || root.replacementBusy) {
+        secretRetry.interval = Math.max(1, Math.round(1000 * root.timeScale))
+        secretRetry.restart()
+        return
+      }
+      if (!root.credentialLookupBusy) root.startSecretLookup()
+    }
   }
 
   function handleSecretLookup(line, error) {
     if (lookupHandled) return
     lookupHandled = true
+    if (loginBusy || replacementBusy) return
+    if (error === "credential_store_unavailable") {
+      passwordChecked = false
+      restoreOwed = true
+      lastError = "The credential store is unavailable"
+      finishWaiters("", lastError)
+      if (configured) sessionUnavailable(lastError)
+      // A store that is starting, or whose database is still locked, answers
+      // exactly like this at login and works a moment later. Asking again is
+      // what turns that into a mailbox that comes up on its own.
+      scheduleSecretRetry()
+      return
+    }
+    stopSecretRetry()
+    restoreOwed = false
     if (error && error !== "credential_missing") {
       passwordChecked = false
-      lastError = "The credential store is unavailable"
+      lastError = safeError(error)
       finishWaiters("", lastError)
       if (configured) sessionUnavailable(lastError)
       return
@@ -165,6 +215,7 @@ Item {
       if (configured) sessionUnavailable("Sign in to this mailbox")
       return
     }
+    lastError = ""
     password = value
     finishWaiters(settings.username + ":" + password, "")
     loginSucceeded()
@@ -206,6 +257,9 @@ Item {
     }
     lastError = ""
     sessionGeneration++
+    credentialLookupSerial++
+    credentialLookupBusy = false
+    finishWaiters("", "Manual sign-in in progress")
     if (password !== "") replacementBusy = true
     else loginBusy = true
     pendingPassword = value
@@ -226,10 +280,15 @@ Item {
       lastError = safeError(error) || "The server rejected that username or password"
       return
     }
+    restoreOwed = false
     password = pendingPassword
     pendingPassword = ""
     passwordChecked = true
     lastError = ""
+    // A password the server just accepted needs no keyring lookup: stop any
+    // retry scheduled while the store was unreachable, so a late one cannot
+    // report the mailbox as unavailable over a working sign-in.
+    stopSecretRetry()
     storePassword()
     loginSucceeded()
   }
@@ -266,6 +325,11 @@ Item {
   function logout() {
     var boundAccount = accountId
     abandonSignIn()
+    stopSecretRetry()
+    restoreOwed = false
+    credentialLookupSerial++
+    credentialLookupBusy = false
+    finishWaiters("", "Signed out")
     password = ""
     passwordChecked = true
     if (credentialWriteBusy && credentialWriteAccount === boundAccount)
@@ -279,6 +343,11 @@ Item {
   // that has started rejecting it should not be asked a hundred more times
   // with the same value.
   function invalidateAccessToken() {
+    stopSecretRetry()
+    restoreOwed = false
+    credentialLookupSerial++
+    credentialLookupBusy = false
+    finishWaiters("", "Session invalidated")
     password = ""
     passwordChecked = false
   }
@@ -303,6 +372,8 @@ Item {
     // is what stops an account rename from leaving the previous account's
     // credential in front of the new one's server.
     abandonSignIn()
+    stopSecretRetry()
+    restoreOwed = true
     password = ""
     passwordChecked = false
     lookupHandled = false
@@ -311,6 +382,14 @@ Item {
     finishWaiters("", "The mailbox changed before its credential was loaded")
     if (credentialWriteBusy && credentialWriteAccount !== "")
       pendingCredentialDelete = credentialWriteAccount
+  }
+
+  Connections {
+    target: root.backend
+    ignoreUnknownSignals: true
+    function onReadyChanged() {
+      if (root.backend && root.backend.ready === true) root.restoreSession()
+    }
   }
 
 }

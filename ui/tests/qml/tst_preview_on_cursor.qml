@@ -82,6 +82,8 @@ Item {
     ]
 
     property var messages: initialMessages.slice()
+    property var agentJobs: ({})
+    property var agentAttentionByMessage: ({})
 
     // What the panel asked for.
     property string selectedId: ""
@@ -222,6 +224,50 @@ Item {
       compare(app.cursorId, "m1")
       compare(mailService.selectedId, "m1")
       compare(scope.keyContext, "reader")
+    }
+
+    function test_hover_during_keyboard_scrolling_cannot_pull_back_the_cursor() {
+      var messages = []
+      for (var i = 1; i <= 40; i++) {
+        var row = Object.assign({}, mailService.initialMessages[0])
+        row.id = "m" + i
+        messages.push(row)
+      }
+      mailService.messages = messages
+      var list = having(app, function(it) { return typeof it.boundsFor === "function" })
+      verify(list)
+      var flick = list.scroller
+      flick.contentY = 0
+      waitForRendering(list)
+      app.cursorId = ""
+      var firstRow = having(list, function(it) { return it.summary !== undefined && it.summary.id === "m1" })
+      verify(firstRow)
+      var pointer = firstRow.mapToItem(flick, firstRow.width / 2, firstRow.height / 2)
+      mouseMove(flick, pointer.x, pointer.y)
+      function hovered() {
+        return having(list, function(it) { return it.summary !== undefined && it.hot && !it.hasCursor })
+      }
+      tryVerify(function() { return hovered() !== null })
+      var first = hovered().summary.id
+      var scope = having(app, function(it) { return it.keyContext !== undefined })
+      scope.applyContextFocus()
+      for (i = 1; i <= 30; i++) {
+        keyClick(Qt.Key_J)
+        waitForRendering(list)
+        // Keep the pointer near the viewport top while the keyboard scrolls.
+        // A one-pixel move makes QtTest deliver a fresh hover event each time.
+        mouseMove(flick, pointer.x + i % 2, pointer.y)
+        compare(app.cursorId, "m" + i)
+      }
+      verify(flick.contentY > 0, "keyboard navigation actually scrolled the list")
+      var otherRow = having(list, function(it) { return it.summary !== undefined && it.summary.id === "m25" })
+      verify(otherRow)
+      verify(otherRow.summary.id !== first)
+      mouseMove(otherRow, otherRow.width / 2, otherRow.height / 2)
+      tryCompare(otherRow, "hot", true)
+      compare(app.cursorId, "m30", "hovering a new row must not select it")
+      compare(mailService.selectedId, "m30")
+      mouseMove(flick, -10, -10)
     }
 
     function test_j_opens_without_waiting_for_an_event_loop_or_dwell() {

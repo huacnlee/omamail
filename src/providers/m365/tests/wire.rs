@@ -445,6 +445,7 @@ async fn confirmed_mutations_do_not_wait_for_or_fail_on_an_unused_response_body(
     isolated!();
     let world = World::new().await;
     inbox(&world, 2);
+    world.warm_token().await;
     world.deadlines(200, 3000);
     for stall in [false, true] {
         world
@@ -473,6 +474,7 @@ async fn an_accepted_send_does_not_become_unknown_when_the_unused_body_stalls() 
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     isolated!();
     let world = World::new().await;
+    world.warm_token().await;
     world.deadlines(200, 3000);
     for stall in [false, true] {
         world.fake.hook(move |req| {

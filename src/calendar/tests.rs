@@ -226,7 +226,7 @@ fn pagination_cannot_change_credential_destination_or_resource() {
     );
 }
 
-async fn server(response: &'static str) -> (Url, tokio::task::JoinHandle<Vec<u8>>) {
+pub(super) async fn server(response: &'static str) -> (Url, tokio::task::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
     let handle = tokio::spawn(async move {
@@ -240,8 +240,9 @@ async fn server(response: &'static str) -> (Url, tokio::task::JoinHandle<Vec<u8>
     (url, handle)
 }
 
-fn local_request(url: Url) -> Request {
+pub(super) fn local_request(url: Url) -> Request {
     Request {
+        operation: "lookup".into(),
         if_match: None,
         url,
         method: Method::GET,

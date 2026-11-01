@@ -1,6 +1,6 @@
 [package]
 name = "omamail"
-version = "0.11.1"
+version = "0.11.3"
 edition = "2024"
 publish = false
 
@@ -29,6 +29,7 @@ encoding_rs = "0.8"
 regex = "1"
 quick-xml = "0.38"
 base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
@@ -38,6 +39,8 @@ rustls-native-certs = "0.8"
 zeroize = "1"
 
 [dev-dependencies]
+flate2 = "1"
+jpeg-encoder = "0.7"
 tokio = { version = "1", features = ["test-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

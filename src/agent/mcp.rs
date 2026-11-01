@@ -184,12 +184,29 @@ mod tests {
 
     #[test]
     fn oversized_input_is_refused_before_any_effect() {
-        let bytes = vec![b'x'; 128 * 1024 + 1];
-        assert!(
-            serve(bytes.as_slice(), Vec::new(), |_, _| panic!(
-                "must not execute"
-            ))
-            .is_err()
-        );
+        let initialize = json!({"jsonrpc":"2.0","id":1,"method":"initialize"}).to_string() + "\n";
+        let request = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"propose_draft","arguments":{"subject":"Hello","body":"Text"}},"padding":""}).to_string();
+        for size in [128 * 1024, 128 * 1024 + 1] {
+            let mut value: Value = serde_json::from_str(&request).unwrap();
+            value["padding"] = json!("x".repeat(size - request.len() - 1));
+            let frame = value.to_string() + "\n";
+            assert_eq!(frame.len(), size);
+            let wire = initialize.clone() + &frame;
+            let mut effects = 0;
+            let result = serve(wire.as_bytes(), Vec::new(), |_, _| {
+                effects += 1;
+                Ok("synthetic-1".into())
+            });
+            if size == 128 * 1024 {
+                assert_eq!(result, Ok(()));
+                assert_eq!(
+                    effects, 1,
+                    "the same valid proposal reaches the observer at the limit"
+                );
+            } else {
+                assert_eq!(result, Err("agent_mcp_limit"));
+                assert_eq!(effects, 0);
+            }
+        }
     }
 }

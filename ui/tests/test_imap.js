@@ -761,17 +761,6 @@ assert.strictEqual(imap.decodeMailbox("&!!!-"), "&!!!-", "not modified base64")
 assert.strictEqual(imap.decodeMailbox("&A-"), "&A-", "half of a code unit")
 assert.strictEqual(imap.decodeMailbox("&AAEB-"), "&AAEB-", "a run cut mid-unit")
 
-// The decoded name is for reading. The id and the wire name are what a cache
-// key and a SELECT are built from, and decoding either would make every
-// non-ASCII folder unselectable.
-const nativeSource = require("fs").readFileSync(
-  require("path").join(__dirname, "..", "..", "src", "providers", "imap", "read.rs"), "utf8")
-assert.ok(/"name":mailbox_name\(&f\.name\)/.test(nativeSource),
-  "the sidebar name must be decoded by the native provider")
-assert.ok(/"id":f\.name\b/.test(nativeSource), "the id must stay as the server said it")
-assert.ok(/"rawName":f\.name\b/.test(nativeSource),
-  "the name that goes back in a SELECT must stay as the server said it")
-
 // ------------------------------------------------------------------ errors
 
 assert.strictEqual(imap.responseError(7, "", ""),

@@ -19,4 +19,15 @@ assert.strictEqual(secrets.fromKeyring(""), "")
 assert.strictEqual(secrets.fromKeyring(null), "")
 assert.strictEqual(secrets.fromKeyring(undefined), "")
 
+// A store that is unavailable is worth asking again, but not in a tight loop:
+// the wait doubles and then stays at five minutes.
+assert.strictEqual(secrets.retryDelay(0), 5000)
+assert.strictEqual(secrets.retryDelay(1), 10000)
+assert.strictEqual(secrets.retryDelay(2), 20000)
+assert.strictEqual(secrets.retryDelay(6), 300000)
+assert.strictEqual(secrets.retryDelay(100), 300000)
+assert.strictEqual(secrets.retryDelay(-1), 5000)
+assert.strictEqual(secrets.retryDelay("2"), 20000)
+assert.strictEqual(secrets.retryDelay(undefined), 5000)
+
 console.log("Secrets.js ok")

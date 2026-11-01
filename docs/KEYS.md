@@ -42,6 +42,7 @@ readonly property string keyContext:
 | `search` | A query being typed | `Escape`, and the modified keys |
 | `compose` | A draft being written | `Escape`, `Ctrl+Return`, and the modified keys |
 | `eventCompose` | Creating or editing an event | `Enter` saves and closes after success; `Escape` closes; modified keys remain available |
+| `eventDescription` | Writing an event description | `Enter` inserts a line break; `Ctrl+Enter` saves; `Escape` closes |
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
@@ -52,7 +53,7 @@ readonly property string keyContext:
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
 
-While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock. An open command suggestion or history view is left first.
+While an AI request is running, Escape interrupts it and keeps the dock open; otherwise Escape closes the dock before leaving the underlying mail or draft and restores the previous focus. An open command suggestion or history view is left first.
 
 The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts a newline. Ctrl+Return/Enter also sends for compatibility. Typing `/` offers `/clear` (new chat), `/history` (conversation history), and `/diagnose` (diagnostics). Up/Down selects a suggestion; Return/Enter completes a partial command or executes an exact command immediately; choosing `/history` always opens the history at once. Commands stay local. Outside suggestions, Up/Down retain normal text navigation.
 
@@ -70,7 +71,7 @@ event is left alone, preserving normal typing, IME input and line breaks.
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
 
-**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in the single-line event editor.**
+**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in single-line event fields.** The multiline event description keeps Return/Enter for line breaks, including pasted paragraphs; Ctrl+Return/Enter saves from either type of field. Its native text area forwards keys through the same router as the AI input.
 There is no "is the user typing" question anywhere in the code, because there is
 nothing left for it to answer: if a bare letter is not bound in `compose`, it
 cannot fire there, and the field gets it the way any other character arrives.
@@ -146,7 +147,7 @@ used to exist, and they had.
 | `calendarMonth` | `m` | calendar | Show month view |
 | `spellingSuggestions` | `Ctrl+.` | compose | Spelling suggestions... |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
-| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose | Save and close the event |
+| `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |
 | `guestPrevious` | `Up` | eventGuests | Previous guest suggestion |
 | `guestChoose` | `Return`, `Enter` | eventGuests | Choose guest suggestion |
@@ -252,7 +253,7 @@ name, by the name they were given or their address; `Down` and `Up`, or `Ctrl`
 with `j`, `k`, `n` or `p`, walk what is left; `Enter` opens the row the cursor
 is on. A bare `j` or `k` is a letter there now, as it has to be for "jack" to
 find a mailbox.
-`ui/tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
+`ui/tests/qml/tst_account_switcher.qml` exercises this on the production popup, and
 `Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
 message list clamps.
 
@@ -314,7 +315,7 @@ pointer that has not moved, and the list scrolls to follow the keyboard. With
 hover writing `cursorId`, pressing `j` moved the cursor, the scroll brought a
 different row under the still pointer, and the cursor snapped back to it — so
 `j` and `k` stuck on whichever rows the mouse was resting near.
-`ui/tests/qml/tst_hover_under_scroll.qml` pins the Qt behaviour that makes this so.
+`ui/tests/qml/tst_preview_on_cursor.qml` drives the production list with hover events while keyboard navigation scrolls it, and checks that hover cannot take the cursor back.
 
 A mouse with a back button takes the same step `Escape` takes — `goBack()`, so the two do not become separate implementations of going back — with one exception. It never closes the window. `Escape` on a root with nothing left to clear ends the window, which is right for a key somebody pressed on purpose and wrong for a button sitting under the hand with no affordance saying the next press shuts the mailbox, so the mouse stops there instead. `ui/components/MouseBack.qml` reports the press and `ui/App.qml` decides what it means, the same way `KeyRouter` does for keys.
 
@@ -364,5 +365,3 @@ it changed no behaviour.
 **User-configurable bindings.** The table makes it possible — the rows are data
 — but nothing has asked for it, and a config file for bindings needs a merge
 story and a conflict story this does not need.
-
-The AI dock occupies the right side and reduces the mail/composer area. Its own text-entry context prevents mailbox keys from firing while asking AI. Clicking back into the draft restores its normal editing context. Escape closes the dock before leaving the underlying mail or draft, and restores the previous focus.

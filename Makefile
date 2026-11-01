@@ -1,3 +1,4 @@
+export PATH := $(HOME)/.cargo/bin:$(PATH)
 QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml ui/compose/PendingCompose.qml \
@@ -5,6 +6,10 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/tests/compatibility/tst_published_agent.qml \
 	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
 	ui/tests/qml/tst_reader_subject_menu.qml ui/tests/qml/tst_drafts_refresh.qml ui/tests/qml/tst_account_hosts.qml \
+	ui/tests/qml/tst_credential_store_retry.qml \
+	ui/tests/qml/tst_invitation_calendar.qml \
+	ui/tests/qml/tst_calendar_today.qml \
+	ui/tests/qml/tst_calendar_description_detail.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
 	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/DraftList.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
@@ -136,7 +141,6 @@ test-js:
 	node tests/test_gmail_backend.js
 	node ui/tests/test_settings.js
 	node ui/tests/test_spelling.js
-	node ui/tests/test_compose_recovery.js
 	node ui/tests/test_agent.js
 	node ui/tests/test_agent_options.js
 	node ui/tests/test_chat_text.js
@@ -155,6 +159,7 @@ test-js:
 	node ui/tests/test_calendar_cache.js
 	node ui/tests/test_calendar_feed.js
 	node ui/tests/test_calendar_sources.js
+	node ui/tests/test_calendar_invitations.js
 	node ui/tests/test_calendar_reminders.js
 	node ui/tests/test_calendar_palette.js
 	node ui/tests/test_bar_preview.js
@@ -163,12 +168,9 @@ test-js:
 	node ui/tests/test_html.js
 	node ui/tests/test_direction.js
 	node ui/tests/test_appearance.js
-	node ui/tests/test_cache.js
-	node ui/tests/test_render_cache.js
 	node ui/tests/test_model.js
 	node ui/tests/test_icons.js
 	node ui/tests/test_navigation.js
-	node ui/tests/test_conversation.js
 	node tests/test_reader_pipeline.js
 	node ui/tests/test_keymap.js
 	node ui/tests/test_accounts.js

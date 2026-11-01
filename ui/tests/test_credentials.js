@@ -91,36 +91,39 @@ assert.strictEqual(
 
 // -------------------------------------------------------- built-in client
 //
-// Shipping a client is a one-constant change once the project passes Google's
-// OAuth verification. Until then BUILTIN is empty on purpose: an unverified
-// project is stuck in "Testing", where refresh tokens expire after seven days,
-// so a shipped client would sign every user out weekly.
+// A release backend reports the client it was built with; a development build
+// reports none. Absent, empty and malformed values all mean "no client".
 
-assert.strictEqual(credentials.hasBuiltin(), false, "no client is shipped yet")
-deepEqual(credentials.builtin(), { clientId: "", clientSecret: "", projectId: "" })
+var shipped = { clientId: "999-shipped.apps.googleusercontent.com", clientSecret: "GOCSPX-shipped" }
+var none = { clientId: "", clientSecret: "", projectId: "" }
+for (var missing of [undefined, null, "", {}, { clientId: "", clientSecret: "" },
+    { clientId: "not-a-client", clientSecret: "x" },
+    { clientId: shipped.clientId, clientSecret: "GOCSPX-x\n" },
+    { clientId: shipped.clientId + "\n", clientSecret: "x" }]) {
+  assert.strictEqual(credentials.hasBuiltin(missing), false, JSON.stringify(missing))
+  deepEqual(credentials.builtin(missing), none)
+  deepEqual(credentials.effective("", "", missing), none)
+  assert.strictEqual(credentials.usingBuiltin("", "", missing), false)
+}
 
 // With no built-in and no file, there is nothing to sign in with.
-deepEqual(credentials.effective(""), { clientId: "", clientSecret: "", projectId: "" })
+deepEqual(credentials.effective(""), none)
 assert.strictEqual(credentials.usingBuiltin(""), false)
+
+// The shipped client is the fallback once nothing else is configured.
+assert.strictEqual(credentials.hasBuiltin(shipped), true)
+deepEqual(credentials.builtin(shipped),
+  { clientId: shipped.clientId, clientSecret: "GOCSPX-shipped", projectId: "" })
+assert.strictEqual(credentials.effective("", "one@gmail.com", shipped).clientId, shipped.clientId)
+assert.strictEqual(credentials.usingBuiltin("", "one@gmail.com", shipped), true)
 
 // The user's own client always wins over anything shipped: someone who made
 // one wants their own quota and their own consent screen.
 deepEqual(credentials.effective(serialized), parsed.credentials)
 assert.strictEqual(credentials.usingBuiltin(serialized), false)
-
-// Simulate the post-verification state by filling the constant the same way a
-// release would, and check the fallback actually engages.
-credentials.BUILTIN.clientId = "999-shipped.apps.googleusercontent.com"
-credentials.BUILTIN.clientSecret = "GOCSPX-shipped"
-assert.strictEqual(credentials.hasBuiltin(), true)
-assert.strictEqual(credentials.effective("").clientId, "999-shipped.apps.googleusercontent.com")
-assert.strictEqual(credentials.usingBuiltin(""), true)
-assert.strictEqual(credentials.effective(serialized).clientId, parsed.credentials.clientId,
-  "a user's own client still wins once one exists")
-assert.strictEqual(credentials.usingBuiltin(serialized), false)
-credentials.BUILTIN.clientId = ""
-credentials.BUILTIN.clientSecret = ""
-
+assert.strictEqual(credentials.effective(serialized, "", shipped).clientId, parsed.credentials.clientId,
+  "a user's own client still wins over the shipped one")
+assert.strictEqual(credentials.usingBuiltin(serialized, "", shipped), false)
 
 // ------------------------------------------------------ keyring attributes
 //

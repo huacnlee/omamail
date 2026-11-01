@@ -37,16 +37,17 @@ Three plugin entry points (`manifest.kinds`):
 
 ## Authentication
 
-Gmail has no shared public client the way Spotify does — Google issues API
-access per Cloud project — so each user creates their own OAuth client once,
-guided by an in-app four-step walkthrough.
+Release backends ship a Google desktop OAuth client compiled in from CI
+secrets (see BACKEND-RUNTIME.md). A user may still create their own client,
+guided by an in-app four-step walkthrough; it always takes precedence, and
+development builds ship none.
 
 - Authorization Code + PKCE, loopback redirect `http://127.0.0.1:9481/oauth2callback`
 - Listener is a single-shot `socat`; the browser does the rest
 - Scopes: `gmail.modify` (read, label, archive, trash — cannot permanently
   delete), `gmail.send` and `calendar.events` (read calendars, write events)
 - Refresh token → GNOME Keyring via `secret-tool`, keyed by client and account
-- Client id/secret → `~/.config/omamail/credentials.json`, mode 0600.
+- User-supplied client id/secret → `~/.config/omamail/credentials.json`, mode 0600.
   Not plugin settings: `shell.json` is world-readable.
 - Access token → process memory only
 

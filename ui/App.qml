@@ -1457,6 +1457,7 @@ Item {
         composing: root.composing,
         eventComposing: eventComposer.opened,
         guestSuggestions: eventComposer.guestSuggestionsOpen,
+        eventDescriptionFocused: eventComposer.descriptionFocused,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
         currentView: root.currentView,
@@ -1476,7 +1477,7 @@ Item {
           if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
           else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
         }
-        else if (keyContext === "eventCompose" || keyContext === "eventGuests") {
+        else if (keyContext === "eventCompose" || keyContext === "eventGuests" || keyContext === "eventDescription") {
           if (!focusWithin(eventComposer)) eventComposer.takeFocus()
         }
         else if (keyContext === "compose") {
@@ -2075,6 +2076,7 @@ Item {
 
         CalendarEventComposer {
           id: eventComposer
+          onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
           anchors.fill: parent
           z: 20
           visible: opened && !root.showPage
@@ -2121,7 +2123,12 @@ Item {
             // follows it.
             onDetailOpenChanged: {
               if (detailOpen) { if (root.page !== "calendarDetail") root.pushEntry("calendarDetail", {}) }
-              else if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+              else {
+                if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+                // Closing a preview keeps the calendar context, so restore its
+                // focus explicitly rather than leaving hidden text selected.
+                if (focusScope.focusWithin(calendarView)) Qt.callLater(focusScope.applyContextFocus)
+              }
             }
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }
@@ -2708,7 +2715,11 @@ Item {
               proposalComposer: compose
               onApplyProposalRequested: function(envelope, parentId) {
                 compose.beginProposal(envelope, parentId)
-                Qt.callLater(function() { root.composeAgent.open() })
+                // Keep the conversation alongside the draft, with typing in the editor.
+                Qt.callLater(function() {
+                  focusScope.applyContextFocus()
+                  root.composeAgent.open(false)
+                })
               }
               onOpenedChanged: if (opened) root.composeAgent.close()
               objectName: "agent-prompt"

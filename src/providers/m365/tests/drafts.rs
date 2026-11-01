@@ -194,6 +194,7 @@ async fn a_save_with_no_answer_may_have_made_a_draft_and_is_never_repeated() {
     isolated!();
     let world = World::new().await;
     world.fake.state().add(5, Role::Drafts, "Old draft");
+    world.warm_token().await;
     world.deadlines(300, 2000);
     let raw = URL_SAFE_NO_PAD.encode(mime());
     let posts = |world: &World| {
@@ -240,6 +241,7 @@ async fn a_large_draft_is_given_longer_to_upload_and_a_small_one_is_not() {
     isolated!();
     let world = World::new().await;
     inbox(&world, 1);
+    world.warm_token().await;
     world.deadlines(300, 5000);
     let sized = |size: usize| {
         let mut message = mime();
