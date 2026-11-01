@@ -25,9 +25,13 @@ const QSet<QString> &allowedSettings()
         QStringLiteral("heavyMessageRendering"), QStringLiteral("contentDirection"),
         QStringLiteral("defaultQuery"), QStringLiteral("notifyNewMail"),
         QStringLiteral("oauthPort"), QStringLiteral("undoSendSeconds"),
-        QStringLiteral("unifiedCalendarView"), QStringLiteral("openOnClick"),
+        QStringLiteral("unifiedCalendarView"), QStringLiteral("calendarHourHeight"),
+        QStringLiteral("openOnClick"),
         QStringLiteral("showBarIcon"), QStringLiteral("suggestEvents"),
-        QStringLiteral("unifiedMailboxes")};
+        QStringLiteral("unifiedMailboxes"), QStringLiteral("appearance"),
+        QStringLiteral("calendarRemindersEnabled"), QStringLiteral("calendarSnoozeMinutes"),
+        QStringLiteral("invitationCalendars"), QStringLiteral("aiAgent"),
+        QStringLiteral("aiModel"), QStringLiteral("aiChatResetAt")};
     return keys;
 }
 

@@ -46,7 +46,7 @@ readonly property string keyContext:
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
-| `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `calendar` | The calendar | Calendar navigation, hour zoom in the day and week views, and the modified keys |
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
@@ -143,6 +143,9 @@ used to exist, and they had.
 | `calendarAgenda` | `a` | calendar | Show agenda view |
 | `calendarUndo` | `u` | calendar | Undo the last event change |
 | `calendarMonth` | `m` | calendar | Show month view |
+| `calendarZoomIn` | `Ctrl++`, `Ctrl+=` | calendar | Make hours taller in the day and week views |
+| `calendarZoomOut` | `Ctrl+-` | calendar | Make hours shorter in the day and week views |
+| `calendarZoomReset` | `Ctrl+0` | calendar | Return to the automatic hour height |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |

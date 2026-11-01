@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtTest 1.3
 import "../.." as Omamail
 import "../../account/Unified.js" as Unified
+import "../../bar/Bridge.js" as BarBridge
 
 Item {
   width: 400
@@ -82,6 +83,21 @@ Item {
       compare(shellStore.updatedId, "omamail")
       verify(shellStore.updatedEntry !== null)
       compare(shellStore.updatedEntry.unifiedCalendarView, true)
+    }
+
+    function test_zooming_the_calendar_reaches_the_shell_and_survives_a_restart() {
+      mailService.applySettings({})
+      shellStore.updatedEntry = null
+      mailService.calendarController.zoomHours(-1, 60, 0)
+      compare(mailService.calendarController.hourHeight, 55)
+      tryVerify(function() { return shellStore.updatedEntry !== null })
+      compare(shellStore.updatedEntry.calendarHourHeight, 55)
+      // What the shell hands back on the next start, directly and through a bar.
+      mailService.applySettings({})
+      compare(mailService.calendarController.hourHeight, 0)
+      mailService.applySettings(BarBridge.settings(shellStore.updatedEntry, mailService.defaultSettingValues))
+      compare(mailService.calendarController.hourHeight, 55)
+      mailService.applySettings({})
     }
 
     function test_ai_settings_reach_the_native_runner_and_preserve_other_preferences() {

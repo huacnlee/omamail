@@ -150,6 +150,10 @@ keymap.CONTEXTS.forEach(function (context) {
   assert.strictEqual(live, true, "Ctrl+R must check for mail from " + context)
 })
 
+// The zoom keys size the message in the reader and the hours in the calendar.
+assert.strictEqual(keymap.isEnabled(byId("calendarZoomIn"), "calendar", false), true)
+assert.strictEqual(keymap.isEnabled(byId("calendarZoomIn"), "reader", false), false)
+assert.strictEqual(keymap.isEnabled(byId("zoomIn"), "calendar", false), false)
 const zoomIn = byId("zoomIn")
 assert.strictEqual(keymap.isEnabled(zoomIn, "reader", false), true)
 assert.strictEqual(keymap.isEnabled(zoomIn, "page", false), false,

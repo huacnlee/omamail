@@ -13,9 +13,17 @@ function identifier(value) {
   return typeof value === "string" && value.length <= 4096 ? value : ""
 }
 
+// Saved numbers with no default in the Service, which a replacement bar hands
+// back with the rest of its entry.
+var SAVED_NUMBERS = ["calendarHourHeight"]
+
 function settings(values, defaults) {
   var out = {}
   var source = values || {}
+  for (var i = 0; i < SAVED_NUMBERS.length; i++) {
+    var saved = source[SAVED_NUMBERS[i]]
+    if (typeof saved === "number" && isFinite(saved)) out[SAVED_NUMBERS[i]] = saved
+  }
   for (var key in defaults) {
     var value = source[key]
     if (typeof value !== typeof defaults[key]) continue
