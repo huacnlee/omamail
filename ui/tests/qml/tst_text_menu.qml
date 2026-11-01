@@ -153,7 +153,7 @@ Item {
       // Nothing selected: Cut and Copy are out, Paste is the first row.
       compare(menu.cursorIndex, menu.menuRows.indexOf(menu.pasteRow))
     }
-  
+
     // ------------------------------------------------------------- zoom
 
     // A message body's zoom, for a hand on the mouse alone; nowhere else.

@@ -402,7 +402,7 @@ Item {
       compare(menu.archived, false)
       compare(unarchiveRow().visible, false)
     }
-  
+
     // ------------------------------------------------- selecting by pointer
 
     // Ticking a first row used to need Ctrl held: the menu offers it, and

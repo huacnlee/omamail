@@ -82,9 +82,9 @@ Item {
       backend.connected = true
       backend.protocolInfo = ({ apiVersion: 9 })
       service.refreshRecipientContacts()
-      compare(service.contactsLoading, true)
+      compare(service.contactBook.loading, true)
       backend.connected = false
-      compare(service.contactsLoading, false, "a dropped backend must not leave contacts loading")
+      compare(service.contactBook.loading, false, "a dropped backend must not leave contacts loading")
     }
     function test_calendar_requests_obey_the_connected_api() {
       var service = createTemporaryObject(factory, parent)

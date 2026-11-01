@@ -1,6 +1,8 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
+import "../calendar"
 import "../calendar/Calendar.js" as Calendar
 
 // The month and the picked day's events, in a pane at the right of the mail,
@@ -11,14 +13,19 @@ import "../calendar/Calendar.js" as Calendar
 Rectangle {
   id: root
 
-  required property var controller
-  required property color textColor
-  required property color backgroundColor
-  required property color accentColor
-  required property color dimColor
-  required property color urgentColor
-  required property color borderColor
-  required property string fontFamily
+  required property var service
+  readonly property var controller: paneLoader.item
+  property color textColor: Commons.Color.foreground
+  property color backgroundColor: Commons.Color.background
+  property color accentColor: Commons.Color.accent
+  // As the window's own dim: the text colour two thirds of the way over.
+  property color dimColor: Qt.rgba(
+    textColor.r * 0.68 + backgroundColor.r * 0.32,
+    textColor.g * 0.68 + backgroundColor.g * 0.32,
+    textColor.b * 0.68 + backgroundColor.b * 0.32, 1)
+  property color urgentColor: Commons.Color.urgent
+  property color borderColor: Style.normalBorderColor
+  property string fontFamily: Style.font.family
 
   signal openDay(var date)
 
@@ -110,7 +117,7 @@ Rectangle {
 
   onVisibleMonthChanged: Qt.callLater(refresh)
   onSelectedIsoChanged: Qt.callLater(refresh)
-  onVisibleChanged: if (visible) { checkToday(); Qt.callLater(refresh) }
+  onVisibleChanged: if (visible) { wanted = true; checkToday(); Qt.callLater(refresh) }
   onControllerChanged: Qt.callLater(refresh)
   Connections {
     target: root.controller || null
@@ -330,7 +337,7 @@ Rectangle {
           Text {
             visible: dayBlock.modelData.events.length === 0
             width: parent.width
-            text: root.controller && root.controller.loading ? "Loading…" : "Nothing planned"
+            text: root.controller && root.controller.loading ? "Loading..." : "Nothing planned"
             color: root.dimColor
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -404,5 +411,32 @@ Rectangle {
         }
       }
     }
+  }
+
+  // Its own controller, so the pane's month and the calendar view's range
+  // never refetch over each other; the calendars shown are the view's. Made
+  // the first time the pane shows, so a window that never opens it reads
+  // nothing for it.
+  property bool wanted: false
+  readonly property var shared: service ? service.calendarController || null : null
+  Loader {
+    id: paneLoader
+    active: root.wanted || root.visible
+    sourceComponent: CalendarController {
+      service: root.service
+      pluginDir: root.service ? String(root.service.pluginDir || "") : ""
+      cacheName: "calendar-pane"
+      accountId: root.service ? String(root.service.calendarAccountId || "") : ""
+      Component.onCompleted: {
+        if (!root.shared) return
+        sourceList = root.shared.sourceList
+        sourcesLoaded = root.shared.sourcesLoaded
+      }
+    }
+  }
+  Connections {
+    target: paneLoader.item ? root.shared : null
+    function onSourceListChanged() { paneLoader.item.sourceList = root.shared.sourceList }
+    function onSourcesLoadedChanged() { paneLoader.item.sourcesLoaded = root.shared.sourcesLoaded }
   }
 }

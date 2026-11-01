@@ -102,7 +102,6 @@ Item {
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
   readonly property bool backendCanSuggestGoogleContacts: backend.ready && backend.apiVersion >= 10
-  readonly property bool backendCanReadAddressBook: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
@@ -443,23 +442,11 @@ Item {
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
-  // Local address books and Google Contacts; see account/ContactBook.qml.
+  // See account/ContactBook.qml.
   ContactBook { id: contactBook; service: root }
   readonly property var recipientContacts: contactBook.contacts
-  readonly property bool contactsLoading: contactBook.loading
   function refreshRecipientContacts() { contactBook.refresh() }
-  readonly property var addressBook: contactBook.people
-  readonly property bool addressBookLoading: contactBook.peopleLoading || contactBook.loading
-  function refreshAddressBook(force) { contactBook.refreshPeople(force) }
-  // A contact's photo, through the backend like any remote picture: the window
-  // itself never asks a host for one. `done` receives a data: URI or "".
-  function contactPhoto(url, done) {
-    if (!url || !backend || !backend.ready) { done(""); return }
-    backend.call("public.image", { url: url }, function(result, error) {
-      var data = result && !error ? String(result.data || "") : ""
-      done(data.indexOf("data:image/") === 0 ? data : "")
-    })
-  }
+  readonly property alias contactBook: contactBook
 
   function registerMailtoHandler() {
     if (!hasMailto || pluginDir === "" || mailtoInstaller.running) return
@@ -1236,7 +1223,7 @@ Item {
   // the window cannot recompute lives here.
 
   property bool sidebarCollapsed: false
-  // The month and the day's events at the right of the mail, as Outlook has.
+  // The month and its events right of the mail.
   property bool calendarPaneOpen: false
   // How wide the rail and the list were dragged to, in pixels; 0 is "never
   // dragged", which each pane reads as its own default.
@@ -1351,12 +1338,7 @@ Item {
   // list the Ctrl digits number.
   readonly property var visibleLabels: Model.visibleLabels(labels, collapsedFolders)
 
-  function setCalendarPaneOpen(value) {
-    var next = value === true
-    if (next === calendarPaneOpen) return
-    calendarPaneOpen = next
-    saveWindowPrefs()
-  }
+  function toggleCalendarPane() { calendarPaneOpen = !calendarPaneOpen; saveWindowPrefs() }
 
   function setSidebarCollapsed(value) {
     var next = value === true
@@ -1687,9 +1669,6 @@ Item {
   }
 
   readonly property alias calendarController: sharedCalendar
-  // Its own controller, so the pane's month and the calendar view's range
-  // never refetch over each other.
-  readonly property alias calendarPaneController: paneCalendar
   readonly property bool noCalendars: sharedCalendar.noCalendars
   readonly property var barEvents: Preview.upcomingEvents(
     barCalendar.events, Date.now(), 2)
@@ -2624,21 +2603,9 @@ Item {
     accountId: root.calendarAccountId
     onSourceListChanged: {
       barCalendar.sourceList = sourceList
-      paneCalendar.sourceList = sourceList
       Qt.callLater(root.refreshCalendarPreview)
     }
-    onSourcesLoadedChanged: {
-      barCalendar.sourcesLoaded = sourcesLoaded
-      paneCalendar.sourcesLoaded = sourcesLoaded
-    }
-  }
-
-  CalendarController {
-    id: paneCalendar
-    service: root
-    pluginDir: root.pluginDir
-    cacheName: "calendar-pane"
-    accountId: root.calendarAccountId
+    onSourcesLoadedChanged: barCalendar.sourcesLoaded = sourcesLoaded
   }
 
   CalendarController {

@@ -312,8 +312,7 @@ Item {
       : (page === "contacts" ? "contacts" : "list"))
   readonly property bool calendarVisible: currentView === "calendar"
   readonly property bool contactsVisible: currentView === "contacts"
-  // Either of the other two things the window is for: the mail chrome (search,
-  // list, reader, compose button) stands down for both.
+  // The mail chrome stands down for both.
   readonly property bool otherRootVisible: calendarVisible || contactsVisible
   // With no calendar connected anywhere the view cannot hold an event, so the
   // window stops offering it; Settings still adds one.
@@ -462,13 +461,9 @@ Item {
   // rail used to come back open on every restart, which is a preference the
   // user had already expressed and the window kept forgetting.
   readonly property bool sidebarCollapsed: !!service && service.sidebarCollapsed
-  // The month and the day's events at the right of the mail; never on a
-  // narrow window, where the reader has no room to give.
+  // Never on a narrow window, where the reader has no room to give.
   readonly property bool calendarPaneShown: !!service && service.calendarPaneOpen
     && !compact && !showPage && !composing && !otherRootVisible && calendarAvailable
-  function toggleCalendarPane() {
-    if (service) service.setCalendarPaneOpen(!service.calendarPaneOpen)
-  }
   function toggleSidebar() {
     if (service) service.setSidebarCollapsed(!service.sidebarCollapsed)
   }
@@ -638,12 +633,8 @@ Item {
     return true
   }
 
-  // From the address book: a draft to that person, or their mail listed.
-  function writeToContact(recipient) {
-    backToList()
-    openDraft({ to: recipient })
-  }
-
+  // An address book row's mail: by address where the provider can say so,
+  // else the address as plain text, which is what the bar then shows.
   function mailsOfContact(address) {
     if (!service) return
     var provider = Provider.get(service.providerId)
@@ -651,8 +642,6 @@ Item {
       searchAddress("from", address)
       return
     }
-    // No address operator here (IMAP, Microsoft, HEY, or every mailbox at
-    // once): the address as plain text, which is what the bar then shows.
     backToList()
     searchBar.setQuery(address)
     service.search(address)
@@ -1117,19 +1106,9 @@ Item {
       return
     }
     if (id === "toggleSidebar") return toggleSidebar()
-    if (id === "toggleCalendarPane") return toggleCalendarPane()
+    if (id === "toggleCalendarPane") return service && service.toggleCalendarPane()
     if (id === "contactsView") return showContacts()
-    // Down in the search field arrives here too, the field having no use for
-    // it: the keyboard leaves the field for the list, on the first match.
-    if (id === "contactNext") {
-      if (!contactsView.searchFocused) contactsView.move(1)
-      focusScope.parkKeyboard()
-      return
-    }
-    if (id === "contactPrevious") { contactsView.move(-1); focusScope.parkKeyboard(); return }
-    if (id === "contactWrite") return contactsView.writeToSelected()
-    if (id === "contactMails") return contactsView.mailsOfSelected()
-    if (id === "contactSearch") return contactsView.focusSearch()
+    if (/^contact[A-Z]/.test(id)) { if (contactsView.runKey(id)) focusScope.parkKeyboard(); return }
     if (id === "zoomIn") return zoomBy(0.1)
     if (id === "zoomOut") return zoomBy(-0.1)
     if (id === "zoomReset") { if (service) service.setBodyZoom(1.0); return }
@@ -1919,7 +1898,7 @@ Item {
                   root.listWidth > 0 ? root.listWidth
                     : Math.min(Style.space(460), Math.round(parent.width * 0.34))))
           visible: width > 0 && !root.showPage && !root.composing
-            && !root.otherRootVisible
+            && !root.calendarVisible && !root.contactsVisible
 
           // The scroller fills the column so its bar sits on the column edge;
           // the breathing room is padding on the content, not a margin on the
@@ -2023,14 +2002,7 @@ Item {
           anchors.bottom: parent.bottom
           width: Style.space(250)
           visible: root.calendarPaneShown
-          controller: (root.service && root.service.calendarPaneController) || null
-          textColor: root.foreground
-          backgroundColor: root.background
-          accentColor: root.accent
-          dimColor: root.dim
-          urgentColor: root.urgent
-          borderColor: root.calendarBorder
-          fontFamily: root.fontFamily
+          service: root.service
           onOpenDay: function(date) {
             if (root.showCalendar()) calendarView.showDay(date)
           }
@@ -2042,7 +2014,7 @@ Item {
           anchors.right: calendarPane.visible ? calendarPane.left : parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          visible: !root.showPage && !root.composing && !root.otherRootVisible
+          visible: !root.showPage && !root.composing && !root.calendarVisible && !root.contactsVisible
             && (!root.compact || root.currentView === "reader")
           service: root.service
           textColor: root.foreground
@@ -2218,7 +2190,8 @@ Item {
           }
         }
 
-        Rectangle {
+        ContactsView {
+          id: contactsView
           objectName: "contacts-container"
           anchors.top: parent.top
           anchors.right: parent.right
@@ -2226,24 +2199,11 @@ Item {
           anchors.left: sidebarSplitter.visible ? sidebarSplitter.right
             : (sidebar.visible ? sidebar.right : parent.left)
           visible: root.contactsVisible && !root.showPage && !root.composing
-          color: root.background
           z: 10
-
-          ContactsView {
-            id: contactsView
-            anchors.fill: parent
-            visible: parent.visible
-            service: root.service
-            textColor: root.foreground
-            backgroundColor: root.background
-            accentColor: root.accent
-            dimColor: root.dim
-            borderColor: root.calendarBorder
-            fontFamily: root.fontFamily
-            onWriteRequested: function(recipient) { root.writeToContact(recipient) }
-            onMailsRequested: function(address) { root.mailsOfContact(address) }
-            onCopyRequested: function(text) { root.copyText(text) }
-          }
+          service: root.service
+          onWriteRequested: function(to) { root.backToList(); root.openDraft({ to: to }) }
+          onMailsRequested: function(address) { root.mailsOfContact(address) }
+          onCopyRequested: function(text) { root.copyText(text) }
         }
 
         // The one Back for every page the window goes into — settings, the
@@ -2694,8 +2654,7 @@ Item {
           }
         }
 
-        // The calendar pane's switch, at the far right as the rail's is at the
-        // far left: each sits under the pane it shows.
+        // Under the pane it shows, as the rail's switch is.
         IconButton {
           id: calendarPaneToggle
           objectName: "calendar-pane-toggle"
@@ -2711,7 +2670,7 @@ Item {
           iconSize: Style.font.icon
           size: Style.space(24)
           fontFamily: root.fontFamily
-          onClicked: root.toggleCalendarPane()
+          onClicked: root.service.toggleCalendarPane()
         }
 
         KeyHints {

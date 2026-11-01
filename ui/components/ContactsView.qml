@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "../account/People.js" as People
 
@@ -13,12 +14,16 @@ Rectangle {
   id: root
 
   required property var service
-  required property color textColor
-  required property color backgroundColor
-  required property color accentColor
-  required property color dimColor
-  required property color borderColor
-  required property string fontFamily
+  property color textColor: Commons.Color.foreground
+  property color backgroundColor: Commons.Color.background
+  property color accentColor: Commons.Color.accent
+  // As the window's own dim: the text colour two thirds of the way over.
+  property color dimColor: Qt.rgba(
+    textColor.r * 0.68 + backgroundColor.r * 0.32,
+    textColor.g * 0.68 + backgroundColor.g * 0.32,
+    textColor.b * 0.68 + backgroundColor.b * 0.32, 1)
+  property color borderColor: Style.normalBorderColor
+  property string fontFamily: Style.font.family
 
   signal writeRequested(string recipient)
   signal mailsRequested(string address)
@@ -26,13 +31,14 @@ Rectangle {
 
   color: backgroundColor
 
+  readonly property var book: service ? service.contactBook || null : null
   property bool savedOnly: true
   property string query: ""
   property string selectedId: ""
-  readonly property var people: service ? service.addressBook || [] : []
+  readonly property var people: book ? book.people || [] : []
   readonly property var shown: People.filter(people, query, savedOnly)
   readonly property var selected: personById(selectedId)
-  readonly property bool loading: !!service && service.addressBookLoading === true
+  readonly property bool loading: !!book && (book.peopleLoading || book.loading)
   readonly property bool searchFocused: searchField.activeFocus
   property string photoData: ""
 
@@ -42,7 +48,7 @@ Rectangle {
   }
 
   function refresh(force) {
-    if (service) service.refreshAddressBook(force === true)
+    if (book) book.refreshPeople(force === true)
   }
 
   function move(step) {
@@ -55,6 +61,17 @@ Rectangle {
   }
 
   function focusSearch() { searchField.forceActiveFocus() }
+
+  // The window's address book keys; true when the keyboard should leave the
+  // search field. Down there has no use of its own, so it goes to the list.
+  function runKey(id) {
+    if (id === "contactNext") { if (!searchFocused) move(1); return true }
+    if (id === "contactPrevious") { move(-1); return true }
+    if (id === "contactWrite") writeToSelected()
+    else if (id === "contactMails") mailsOfSelected()
+    else if (id === "contactSearch") focusSearch()
+    return false
+  }
   function leaveSearch() {
     if (searchField.text !== "") searchField.text = ""
   }
@@ -73,9 +90,9 @@ Rectangle {
   onSelectedChanged: {
     photoData = ""
     var person = selected
-    if (!person || !person.photo || !service) return
+    if (!person || !person.photo || !book) return
     var wanted = person.id
-    service.contactPhoto(person.photo, function(data) {
+    book.photo(person.photo, function(data) {
       if (root.selected && root.selected.id === wanted) root.photoData = data
     })
   }
@@ -169,7 +186,7 @@ Rectangle {
 
       Text {
         width: parent.width
-        text: root.loading && root.people.length === 0 ? "Loading…"
+        text: root.loading && root.people.length === 0 ? "Loading..."
           : (root.shown.length === 1 ? "1 contact" : root.shown.length + " contacts")
         color: root.dimColor
         font.family: root.fontFamily

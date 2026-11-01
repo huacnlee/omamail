@@ -954,6 +954,8 @@ oversized=$(cd ..
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
         (app/resources/macos/omamail.icns) ceiling=111809 ;;
+        # The window's one root file, not an asset: it holds every page's wiring.
+        (ui/App.qml) ceiling=$((136 * 1024)) ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")

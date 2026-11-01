@@ -46,11 +46,22 @@ QtObject {
     })
   }
 
+  // A contact's photo, through the backend like any remote picture: the window
+  // itself never asks a host for one. `done` receives a data: URI or "".
+  function photo(url, done) {
+    var backend = service.backend
+    if (!url || !backend || !backend.ready) { done(""); return }
+    backend.call("public.image", { url: url }, function(result, error) {
+      var data = result && !error ? String(result.data || "") : ""
+      done(data.indexOf("data:image/") === 0 ? data : "")
+    })
+  }
+
   function refreshPeople(force) {
     var backend = service.backend
     if (!backend || !backend.ready) return
     refreshLocal()
-    if (!service.backendCanReadAddressBook) { mergePeople(); return }
+    if (!service.backendCanSuggestGoogleContacts) { mergePeople(); return }
     var accounts = service.accountList ? service.accountList.accounts : []
     for (var i = 0; i < accounts.length; i++) {
       if (accounts[i].provider === "gmail") refreshGooglePeople(accounts[i].id, force === true)
