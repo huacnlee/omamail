@@ -1281,8 +1281,7 @@ function eventHeight(event, day, hourHeight) {
 // Where "now" sits in a day column, or -1 when it does not belong on the grid:
 // another day, or an hour outside the range the week view drew. The caller
 // draws nothing on -1 rather than clamping to an edge, because a line pinned to
-// the top of the grid states a time that is not the time — and the range here
-// is elastic, since weekHourRange widens it to whatever the week's events need.
+// the top of the grid states a time that is not the time.
 function nowOffset(day, firstHour, lastHour, hourHeight, nowMs) {
   if (!day) return -1
   var now = Number(nowMs)

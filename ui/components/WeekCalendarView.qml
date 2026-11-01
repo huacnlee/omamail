@@ -37,6 +37,7 @@ Item {
     }
     function onLoadingChanged() {
       if (!root.controller.loading && !root.controller.eventWriting) root.pendingGesture = null
+      if (!root.controller.loading && !root.controller.pendingRangeStart) root.followsFirstEvent = false
     }
   }
 
@@ -78,18 +79,21 @@ Item {
   readonly property real hourScale: Math.min(1, timeline.hourHeight / Style.space(60))
   readonly property int resizeEdge: Style.space(9 * hourScale)
   readonly property int cardMargin: Style.space(5 * hourScale)
-  property real openedAtHour: -1
+  // A week's events can arrive after the week does, so the view follows its first
+  // one until they have loaded, or until it is scrolled or an event is dragged.
+  // After that, an event changing does not move what is on screen.
+  property bool followsFirstEvent: true
+  function showOpeningHour() {
+    timeline.topHour = openingHour
+    timeline.relayout()
+  }
   function resetTimeScroll() {
-    timeline.contentY = Math.max(0, Math.min(openingHour * timeline.hourHeight,
-      timeline.contentHeight - timeline.height))
-    openedAtHour = timeline.contentY / timeline.hourHeight
+    followsFirstEvent = true
+    showOpeningHour()
   }
-  // A week's events can arrive after the week does. The view follows them until
-  // it has been scrolled, and leaves alone the event being dragged.
-  onOpeningHourChanged: {
-    if (pendingGesture || dragPreview) return
-    if (Math.abs(timeline.contentY / timeline.hourHeight - openedAtHour) < 0.01) Qt.callLater(root.resetTimeScroll)
-  }
+  onOpeningHourChanged: if (followsFirstEvent) showOpeningHour()
+  onDragPreviewChanged: if (dragPreview) followsFirstEvent = false
+  onPendingGestureChanged: if (pendingGesture) followsFirstEvent = false
   function zoomHours(direction) {
     if (!controller || pendingGesture || dragPreview) return
     var unscaled = Calendar.HOUR_HEIGHT_USUAL / Style.space(Calendar.HOUR_HEIGHT_USUAL)
@@ -316,13 +320,35 @@ Item {
     anchors.bottom: parent.bottom
     readonly property real hourHeight: Math.max(height / root.hourCount,
       root.savedHourHeight > 0 ? Style.space(root.savedHourHeight) : root.automaticHourHeight)
-    // Whatever changes the height, the hour at the top of the view stays there,
-    // where the same pixel offset would land on a different time.
-    property real placedHourHeight: 0
-    onHourHeightChanged: {
-      if (placedHourHeight > 0)
-        contentY = Math.max(0, Math.min(contentY / placedHourHeight * hourHeight, hourHeight * root.hourCount - height))
-      placedHourHeight = hourHeight
+    // The hour the view keeps at its top when a window or a zoom changes the layout,
+    // where the same pixel offset would land on a different time, and returns to
+    // when there is room again. Flickable limits contentY by the old contentHeight
+    // during such a change, so that is not a scroll, and the hour is placed again
+    // once the layout has settled.
+    property real topHour: 0
+    property real placedY: 0
+    property bool relayingOut: false
+    function placeTopHour() {
+      contentY = Math.max(0, Math.min(topHour * hourHeight, hourHeight * root.hourCount - height))
+      placedY = contentY
+    }
+    function relayout() {
+      relayingOut = true
+      placeTopHour()
+      Qt.callLater(settleLayout)
+    }
+    function settleLayout() {
+      placeTopHour()
+      relayingOut = false
+    }
+    onHourHeightChanged: relayout()
+    onHeightChanged: relayout()
+    onContentYChanged: {
+      // Flickable also rounds contentY to a whole pixel, which is not a scroll.
+      if (relayingOut || Math.abs(contentY - placedY) < 1) return
+      placedY = contentY
+      topHour = contentY / hourHeight
+      root.followsFirstEvent = false
     }
     contentWidth: width
     contentHeight: Math.max(height, hourHeight * root.hourCount)
@@ -578,9 +604,9 @@ Item {
                 Rectangle {
                   anchors.horizontalCenter: parent.horizontalCenter
                   anchors.top: parent.top
-                  anchors.topMargin: Style.space(3)
+                  anchors.topMargin: Style.space(3 * root.hourScale)
                   width: Math.min(Style.space(24), parent.width * 0.4)
-                  height: Style.space(3)
+                  height: Style.space(3 * root.hourScale)
                   radius: height / 2
                   color: eventBlock.eventColor
                   visible: eventBlock.canReschedule && (eventMouse.containsMouse || eventMouse.pressed)
@@ -588,9 +614,9 @@ Item {
                 Rectangle {
                   anchors.horizontalCenter: parent.horizontalCenter
                   anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(3)
+                  anchors.bottomMargin: Style.space(3 * root.hourScale)
                   width: Math.min(Style.space(24), parent.width * 0.4)
-                  height: Style.space(3)
+                  height: Style.space(3 * root.hourScale)
                   radius: height / 2
                   color: eventBlock.eventColor
                   visible: eventBlock.canReschedule && (eventMouse.containsMouse || eventMouse.pressed)
