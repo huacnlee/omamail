@@ -46,6 +46,12 @@ public:
 
     Q_INVOKABLE bool openExternal(const QString &urlOrPath);
     Q_INVOKABLE bool setClipboard(const QString &text);
+    // A launch asked for the window, with what to open in it (a JSON payload,
+    // e.g. a mailto: draft). One that arrives before QML is ready waits.
+    void requestOpen(const QString &payload);
+    Q_INVOKABLE QString takePendingOpen();
+    // A minimized window brought back onto the workspace in front (Hyprland).
+    Q_INVOKABLE bool restoreParkedWindow();
     Q_INVOKABLE bool showNotification(const QString &id, const QString &title,
                                       const QString &body, const QString &accountId,
                                       const QString &messageId);
@@ -68,6 +74,7 @@ signals:
     void settingsChanged();
     void hideRequested();
     void reopenRequested();
+    void openRequested(const QString &payload);
     void closeRequested();
     void notificationErrorChanged();
     void pendingNotificationActivationChanged();
@@ -78,6 +85,7 @@ private:
     void activateFromNotification(const QString &accountId, const QString &messageId);
 
     QVariantMap m_manifest;
+    QString m_pendingOpen;
     QVariantMap m_capabilities;
     QVariantMap m_settings;
     QString m_backendPath;

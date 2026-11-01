@@ -1,5 +1,6 @@
 #include "application_host.h"
 
+#include "hyprland_window.h"
 #include "resource_check.h"
 
 #include <QClipboard>
@@ -61,9 +62,14 @@ ApplicationHost::ApplicationHost(
     // notifications. Activating the application again with nothing on screen
     // is the desktop's way of asking for the window back; on macOS Qt reports
     // a Dock click as exactly that, even when the process was already active.
+    // Elsewhere the session reports the app active as it starts, window or
+    // not, which would undo a --background start; launching Omamail again
+    // is the way back there (see main.cpp).
+#ifdef Q_OS_MACOS
     if (auto *application = qobject_cast<QGuiApplication *>(QCoreApplication::instance()))
         connect(application, &QGuiApplication::applicationStateChanged, this,
                 &ApplicationHost::handleApplicationStateChanged);
+#endif
     loadManifest(manifestPath);
     QVariantMap defaults = m_manifest.value(QStringLiteral("barWidget")).toMap()
                                .value(QStringLiteral("defaults")).toMap();
@@ -94,6 +100,24 @@ bool ApplicationHost::openExternal(const QString &urlOrPath)
                                        QStringLiteral("mailto"), QStringLiteral("file")};
     if (!url.isValid() || !allowed.contains(url.scheme().toLower())) return false;
     return QDesktopServices::openUrl(url);
+}
+
+void ApplicationHost::requestOpen(const QString &payload)
+{
+    m_pendingOpen = payload.isEmpty() ? QStringLiteral("{}") : payload;
+    emit openRequested(m_pendingOpen);
+}
+
+bool ApplicationHost::restoreParkedWindow()
+{
+    return HyprlandWindow::restoreParkedWindow();
+}
+
+QString ApplicationHost::takePendingOpen()
+{
+    const QString payload = m_pendingOpen;
+    m_pendingOpen.clear();
+    return payload;
 }
 
 bool ApplicationHost::setClipboard(const QString &text)
