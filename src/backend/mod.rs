@@ -412,6 +412,9 @@ impl Session {
                 .await
                 .map_err(|_| "calendar_reminders_unavailable")?;
         }
+        if method == "calendar.verify" {
+            return Box::pin(crate::calendar::verify(params)).await;
+        }
         if method == "calendar.discover" {
             if let Some(account) = params["accountId"]
                 .as_str()

@@ -80,6 +80,22 @@ class Diagnostics(unittest.TestCase):
         self.assertNotIn('SECRET', report)
         self.assertNotIn('SECRET', (self.root / 'state/launched').read_text())
 
+    # The allowlist here is independent of the Rust one: a CalDAV password
+    # check's context must survive, and the password or address never can.
+    def test_caldav_verification_details_survive_regeneration(self):
+        safe = {'provider': 'caldav', 'operation': 'verify', 'stage': 'request', 'httpStatus': 401}
+        event = {'method': 'calendar.verify', 'error': {
+            'code': -32000, 'message': 'calendar_auth_refused',
+            'data': dict(safe, url='SECRET', username='SECRET', password='SECRET')}}
+        self.call('record', [event])
+        self.call('open')
+        entries = json.loads((self.folder / 'errors.json').read_text())
+        self.assertEqual(entries[0]['data'], safe)
+        report = (self.folder / 'report.txt').read_text()
+        self.assertIn('calendar_auth_refused', report)
+        self.assertIn('verify', report)
+        self.assertNotIn('SECRET', report)
+
     def test_calendar_details_reject_arbitrary_values_and_invalid_statuses(self):
         for value in ['badRequest\r', 'badRequest\n', 'badRequest\r\n', 'badRequest\0',
                       'badRequest_PRIVATE', 'SECRET "\\日本語', None, {}, [], True]:

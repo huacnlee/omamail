@@ -144,6 +144,10 @@ One-off invitation exports (including individual recurring occurrences) send the
 
 Google private imports require the destination calendar to be the organizer or an attendee. The backend includes exactly that calendar as an attendee, resolving `primary` to the signed-in account, with the chosen response. It never copies guests from the invitation. Existing managed copies update only this participant using `attendeesOmitted`, preserve other attendees, and retain `sendUpdates=none`; creation still uses the private `events.import` endpoint. The safe reason vocabulary includes `participantIsNeitherOrganizerNorAttendee` so this failure is distinguishable from invalid times and access errors.
 
+## CalDAV password checks (API 10)
+
+`calendar.verify` is the API 10 method. It takes `{source: {kind: "caldav", url, username}, password}` and tries that password once against the calendar, a `PROPFIND` at depth 0 under the same HTTPS-only, no-redirect client and 24-second deadline as every other CalDAV request. It answers `{verified: true}` or refuses with `calendar_auth_refused`, `calendar_not_found`, `calendar_redirected`, `calendar_request_failed`, `calendar_network_failed` or `calendar_timeout`, with the usual `error.data` context; input that fails the address or password rules is refused before any connection. The backend neither reads nor writes the keyring here: the password travels only to the configured origin, and the frontend stores it, with the calendar, only after this answer. The frontend gates on `CalendarController.backendCanVerifyCalendars()` (API 10 or newer). An older backend keeps the earlier unchecked save, since the plugin pins its binary and would otherwise lose the feature until the next release, and the success message says the password was not checked.
+
 ## Released and unreleased: one step ahead of the pin
 
 Backends ship in batches, not per merge, so `main` may implement an API the pinned

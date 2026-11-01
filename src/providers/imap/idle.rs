@@ -85,7 +85,7 @@ impl Backoff {
         if refreshed {
             self.next = self.timing.first_retry;
         }
-        let delay = if error == "mail_auth_failed" || error.starts_with("auth_") {
+        let delay = if error.starts_with("mail_auth_") || error.starts_with("auth_") {
             // A refused login or a missing credential is unlikely to be
             // different in a few seconds, and each attempt costs the server a
             // LOGIN or Microsoft a token request. Polling reports the error.
