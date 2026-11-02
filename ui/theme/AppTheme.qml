@@ -31,9 +31,13 @@ QtObject {
   // Every installed Omarchy theme, with the user's copy of a name first. Only a
   // host that can pick a theme reads the directories: the scan is a process,
   // and the standalone window never asks for one.
-  readonly property ThemeCatalog catalog: catalogItem
-  readonly property var options: catalogItem.options
-  readonly property string directory: root.enabled ? catalogItem.directoryFor(root.selected) : ""
+  // Declared as a property, because a plain object has no default property to
+  // hold a child.
+  readonly property ThemeCatalog catalog: ThemeCatalog {
+    objectName: "theme-catalog"
+  }
+  readonly property var options: catalog.options
+  readonly property string directory: root.enabled ? catalog.directoryFor(root.selected) : ""
 
   // Where the window draws from, for the parts of the app that read a palette
   // out of a file rather than out of Paint.
@@ -43,7 +47,7 @@ QtObject {
       : Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml")
 
   function refresh() {
-    if (root.enabled) catalogItem.refresh()
+    if (root.enabled) catalog.refresh()
   }
 
   // What a stored setting is allowed to become: a name that is installed or
@@ -57,11 +61,6 @@ QtObject {
   // A theme picked before this window opened needs its directory resolved
   // before the first paint; settings that arrive later go through storedValue.
   Component.onCompleted: Qt.callLater(root.refresh)
-
-  ThemeCatalog {
-    id: catalogItem
-    objectName: "theme-catalog"
-  }
 
   Binding {
     target: Paint
