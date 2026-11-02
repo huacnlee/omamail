@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 
 // A stand-in for the shell's button. It keeps the public surface the kit's
 // Button reaches for — including the tooltip palette and `borderSpec`, which
