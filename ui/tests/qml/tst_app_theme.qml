@@ -6,6 +6,7 @@ import "../../theme"
 import "../../kit" as Kit
 import "../../components" as Components
 import "../../bar" as Bar
+import "../../calendar/Palette.js" as CalendarPalette
 
 // The window's own theme.
 //
@@ -364,7 +365,7 @@ Item {
   QtObject {
     id: calendarController
     property var availableSources: ({ version: 1, sources: [
-      { id: "one", kind: "google", name: "Work", colorKey: "blue", enabled: true }
+      { id: "one", kind: "google", name: "Work", colorKey: CalendarPalette.keys()[4], enabled: true }
     ] })
     property bool savingSource: false
     property bool discoveringCalendars: false
