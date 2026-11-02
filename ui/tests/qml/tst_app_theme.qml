@@ -479,6 +479,109 @@ Item {
     function chooseFiles() {}
   }
 
+  // The two views a person spends the day in, and the two the review asked to
+  // see drawn: the real message list and the real composer, with the smallest
+  // services they will start against. Off screen, below the settings page,
+  // where they cost the walk above nothing and still paint.
+  QtObject {
+    id: listServiceStub
+    property var messages: [
+      ({ id: "1:INBOX", threadId: "", from: { email: "ada@example.org", display: "Ada" },
+        subject: "Quarterly report", snippet: "The numbers are attached.", time: "09:12",
+        date: "", unread: true, starred: false, inInbox: true, labelIds: ["INBOX"] }),
+      ({ id: "2:INBOX", threadId: "", from: { email: "bob@example.net", display: "Bob" },
+        subject: "Lunch", snippet: "Thursday?", time: "08:40",
+        date: "", unread: false, starred: false, inInbox: true, labelIds: ["INBOX"] })
+    ]
+    property bool hasMore: false
+    property bool listLoading: false
+    property bool listLoaded: true
+    property string searchQuery: ""
+    property string selectedId: ""
+    property bool canArchive: true
+    property string contentDirection: "auto"
+    property var agentJobs: ({})
+    property var agentAttentionByMessage: ({})
+    function loadMore() {}
+  }
+
+  Components.MessageList {
+    id: messageList
+    objectName: "real-message-list"
+    x: 1500; y: 1900
+    width: 700
+    height: 320
+    service: listServiceStub
+    textColor: Paint.foreground
+    accentColor: Paint.accent
+    dimColor: scene.dim
+    urgentColor: Paint.urgent
+    panelFontFamily: Style.font.family
+  }
+
+  QtObject {
+    id: composeServiceStub
+    property string activeAccountId: "ada@example.org"
+    property string accountEmail: "ada@example.org"
+    property var backend: null
+    property var recipientContacts: []
+    property var sendAsAliases: []
+    property var sendIdentities: []
+    property var senderSources: []
+    property var accountSignatures: [{ id: "ada@example.org", email: "ada@example.org", signature: "Ada" }]
+    property var attachments: []
+    property string selectedId: ""
+    property string contentDirection: "auto"
+    property bool alwaysShowImages: false
+    property bool alwaysRenderHeavyMessages: false
+    property int undoSendSeconds: 10
+    function signatureFor(id) { return "Ada\nada.example.org" }
+    function cachePath(kind) { return "/tmp/omamail-theme-test-" + kind }
+    function refreshRecipientContacts() {}
+    function loadAttachments(id, list, callback) { if (callback) callback([]) }
+    function send(fields) { return true }
+    function fail(result, message) {}
+    function sendAgentProposal(id, fields) { return false }
+    function accountEmailFor(id) { return String(id || "ada@example.org") }
+  }
+
+  // The composer is a DropArea, and a DropArea fills its parent whatever
+  // geometry it is given: it is put in a frame of its own so it covers that
+  // frame and not the whole scene.
+  Item {
+    id: composeFrame
+    x: 1500; y: 2240
+    width: 700
+    height: 620
+
+    Components.ComposeView {
+      id: composeView
+      objectName: "real-compose-view"
+      anchors.fill: parent
+      service: composeServiceStub
+      opened: true
+      textColor: Paint.foreground
+      backgroundColor: Paint.background
+      accentColor: Paint.accent
+      dimColor: scene.dim
+      dimmerColor: scene.dimmer
+      popupBackgroundColor: Paint.popupBackground
+      popupBorderColor: Paint.popupBorder
+      panelFontFamily: Style.font.family
+    }
+  }
+
+  // The sidebar's secondary text blends foreground toward background, as the
+  // window does; the header and rows above use the same recipe.
+  readonly property color dim: Qt.rgba(
+    Paint.foreground.r * 0.68 + Paint.background.r * 0.32,
+    Paint.foreground.g * 0.68 + Paint.background.g * 0.32,
+    Paint.foreground.b * 0.68 + Paint.background.b * 0.32, 1)
+  readonly property color dimmer: Qt.rgba(
+    Paint.foreground.r * 0.45 + Paint.background.r * 0.55,
+    Paint.foreground.g * 0.45 + Paint.background.g * 0.55,
+    Paint.foreground.b * 0.45 + Paint.background.b * 0.55, 1)
+
   Components.SettingsPage {
     id: settingsPage
     objectName: "real-settings-page"
@@ -712,6 +815,35 @@ Item {
       verify(picker.popupOpen, "the picker's popup opens in a picked theme")
       picker.close(); wait(20)
       verify(!picker.popupOpen)
+    }
+
+    // The two views people spend the day in — the real list and the real
+    // composer, not stand-ins for them. While following, the desktop's colours
+    // are what they paint; with a theme picked, none of them may be. The first
+    // half is what makes the second mean anything.
+    function test_the_real_mail_list_and_composer_follow_the_picked_theme() {
+      scene.followOmarchy(); wait(80)
+      var following = scene.neutralColours(messageList)
+      verify(following.length > 0,
+        "following leaves the list on the desktop's palette")
+
+      scene.pickTheme("fixture-light")
+      // An opened composer with a draft in it. An empty one shows Qt's own
+      // placeholder grey, which belongs to neither palette.
+      var toField = findChild(composeView, "compose-to-field")
+      var subjectField = findChild(composeView, "compose-subject-field")
+      verify(toField !== null && subjectField !== null, "the composer offers its fields")
+      toField.text = "ada@example.org"
+      subjectField.text = "Quarterly report"
+      wait(80)
+
+      var listNeutral = scene.neutralColours(messageList)
+      compare(listNeutral.length, 0,
+        "the message list paints only the window's colours: " + listNeutral.join(", "))
+      var composeNeutral = scene.neutralColours(composeView)
+      compare(composeNeutral.length, 0,
+        "the composer paints only the window's colours: " + composeNeutral.join(", "))
+      compare(String(Paint.background), "#eff1f5", "and it is a picked theme being drawn")
     }
 
     // A chosen control keeps its non-colour indication: the current mailbox
