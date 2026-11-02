@@ -202,7 +202,15 @@ class ReleaseRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, request, fp, code, msg, headers, newurl):
         require(release_url_allowed(newurl), "Release redirect was refused.")
-        return super().redirect_request(request, fp, code, msg, headers, newurl)
+        redirected = super().redirect_request(request, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            # urllib copies request headers onto redirects; proxy credentials
+            # belong to the proxy alone. A hop that bypasses the proxy must not
+            # inherit them, and a proxied hop re-derives them from the environment.
+            for field in list(redirected.headers):
+                if field.lower() == "proxy-authorization":
+                    del redirected.headers[field]
+        return redirected
 
 
 def download(url, limit):

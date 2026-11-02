@@ -23,9 +23,10 @@ old executable. The download itself follows the standard `HTTPS_PROXY` and
 `NO_PROXY` environment variables through urllib's default proxy discovery, so
 networks that require an outbound HTTP proxy can install the backend; the
 release URLs are always HTTPS, the proxy only carries the encrypted transport,
-and SOCKS-style proxies are not supported. A failed installation preserves the
-working runtime. Checksums protect integrity, not against a compromised
-publisher.
+proxy credentials are presented only to the proxy itself and never to a release
+host even across redirects, and SOCKS-style proxies are not supported. A
+failed installation preserves the working runtime. Checksums protect
+integrity, not against a compromised publisher.
 
 `python3 scripts/backend-runtime.py enable-cli` explicitly creates
 `~/.local/bin/omamail` as a symlink to that same private executable; it refuses

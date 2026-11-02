@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic release tests; never access releases or the installed plugin."""
+import base64
+import email.message
 import fcntl
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -652,6 +654,101 @@ class ProxyEnvironmentTests(unittest.TestCase):
                 self.manager.download(self.release_url(), 64 * 1024)
         self.assertEqual(resolved, ["github.com"])
         self.assertEqual(connected, ["192.0.2.1"])
+
+    def redirected_release_url(self):
+        return "https://release-assets.githubusercontent.com/huacnlee/omamail/releases/download/v0.8.2/SHA256SUMS"
+
+    def fake_transport(self, exchanges):
+        # A synthetic https transport: each hop records its CONNECT tunnel and
+        # request headers, github.com answers with the release redirect and
+        # every other host with a small checksum body. No socket is opened.
+        redirected = self.redirected_release_url()
+
+        class Response(io.BytesIO):
+            def __init__(self, status, body, headers=()):
+                super().__init__(body)
+                self.status = self.code = status
+                self.reason = "Synthetic"
+                self.msg = self.reason
+                self.headers = email.message_from_string("".join(line + "\r\n" for line in headers))
+
+            def info(self):
+                return self.headers
+
+        class Connection:
+            debuglevel = 0
+            _http_vsn = 11
+            sock = None
+
+            def __init__(self, host, timeout=None, **kwargs):
+                self.host = host
+                self.tunnel_host = None
+                self.tunnel_headers = {}
+                exchanges.append(self)
+
+            def set_debuglevel(self, level):
+                pass
+
+            def set_tunnel(self, host, headers=None):
+                self.tunnel_host = host
+                self.tunnel_headers = {name.lower(): value for name, value in (headers or {}).items()}
+
+            def request(self, method, selector, body=None, headers=None, encode_chunked=False):
+                self.request_headers = {name.lower(): value for name, value in (headers or {}).items()}
+
+            def getresponse(self):
+                if self.tunnel_host == "github.com":
+                    return Response(302, b"", ["Location: " + redirected])
+                return Response(200, b"abc123  omamail-linux-x86_64.tar.gz\n")
+
+            def close(self):
+                pass
+
+        return Connection
+
+    def authenticated_proxy(self):
+        credentials = base64.b64encode(b"synthetic-user:synthetic-secret").decode("ascii")
+        return ("http://synthetic-user:synthetic-secret@127.0.0.1:9", "Basic " + credentials)
+
+    def test_download_keeps_proxy_credentials_off_a_bypassed_redirect_origin(self):
+        # The proxy is authenticated and NO_PROXY lets the redirected release
+        # host bypass it. urllib copies request headers onto redirects, so the
+        # inherited credentials must be discarded: they may ride the proxy's
+        # CONNECT tunnel only, never the direct request to the origin.
+        exchanges = []
+        proxy, credentials = self.authenticated_proxy()
+        with patch.dict(os.environ, {"HTTPS_PROXY": proxy,
+                                     "NO_PROXY": "release-assets.githubusercontent.com"}), \
+                patch("http.client.HTTPSConnection", self.fake_transport(exchanges)):
+            content = self.manager.download(self.release_url(), 64 * 1024)
+        self.assertEqual(content, b"abc123  omamail-linux-x86_64.tar.gz\n")
+        self.assertEqual(len(exchanges), 2)
+        proxy_hop, origin_hop = exchanges
+        self.assertEqual(proxy_hop.host, "127.0.0.1:9")
+        self.assertEqual(proxy_hop.tunnel_host, "github.com")
+        self.assertEqual(proxy_hop.tunnel_headers.get("proxy-authorization"), credentials)
+        self.assertNotIn("proxy-authorization", proxy_hop.request_headers)
+        self.assertEqual(origin_hop.host, "release-assets.githubusercontent.com")
+        self.assertIsNone(origin_hop.tunnel_host)
+        self.assertNotIn("proxy-authorization", origin_hop.request_headers)
+        self.assertNotIn(credentials, " ".join(origin_hop.request_headers.values()))
+
+    def test_download_keeps_authenticating_the_proxy_across_redirects(self):
+        # Discarding inherited credentials must not leave the proxy unnamed on
+        # the redirected hop: while that hop is still proxied, its CONNECT
+        # tunnel carries fresh credentials from the environment again.
+        exchanges = []
+        proxy, credentials = self.authenticated_proxy()
+        with patch.dict(os.environ, {"HTTPS_PROXY": proxy}), \
+                patch("http.client.HTTPSConnection", self.fake_transport(exchanges)):
+            content = self.manager.download(self.release_url(), 64 * 1024)
+        self.assertEqual(content, b"abc123  omamail-linux-x86_64.tar.gz\n")
+        self.assertEqual([hop.host for hop in exchanges], ["127.0.0.1:9", "127.0.0.1:9"])
+        self.assertEqual([hop.tunnel_host for hop in exchanges],
+                         ["github.com", "release-assets.githubusercontent.com"])
+        for hop in exchanges:
+            self.assertEqual(hop.tunnel_headers.get("proxy-authorization"), credentials)
+            self.assertNotIn("proxy-authorization", hop.request_headers)
 
 
 if __name__ == "__main__":
