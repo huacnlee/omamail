@@ -44,6 +44,10 @@ development builds ship none.
 
 - Authorization Code + PKCE, loopback redirect `http://127.0.0.1:9481/oauth2callback`
 - Listener is a single-shot `socat`; the browser does the rest
+- The native token exchange and Gmail calls connect directly to
+  `oauth2.googleapis.com` and `gmail.googleapis.com`. They do not use HTTP
+  proxy environment variables or desktop proxy settings, so a network that
+  requires a proxy needs a system-wide VPN that routes those hosts
 - Scopes: `gmail.modify` (read, label, archive, trash — cannot permanently
   delete), `gmail.send` and `calendar.events` (read calendars, write events)
 - Refresh token → GNOME Keyring via `secret-tool`, keyed by client and account
