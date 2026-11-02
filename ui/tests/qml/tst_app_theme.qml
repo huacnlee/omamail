@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../../theme"
 import "../../kit" as Kit
 import "../../components" as Components
@@ -41,7 +42,7 @@ Item {
     // `-import /usr/share/omarchy/shell`) needs neither switch.
     if (Style.bakedStateColors !== undefined) {
       Style.bakedStateColors = true
-      Style.bakedForeground = Color.foreground
+      Style.bakedForeground = Commons.Color.foreground
     }
   }
 
@@ -140,6 +141,7 @@ Item {
     }
 
     Rectangle {
+      id: card
       objectName: "card"
       width: surface.width
       height: 28
@@ -239,10 +241,10 @@ Item {
     width: 300
     messages: []
     events: []
-    textColor: Color.popups.text
-    backgroundColor: Color.popups.background
-    accentColor: Color.accent
-    dimColor: Qt.rgba(Color.popups.text.r, Color.popups.text.g, Color.popups.text.b, 0.62)
+    textColor: Commons.Color.popups.text
+    backgroundColor: Commons.Color.popups.background
+    accentColor: Commons.Color.accent
+    dimColor: Qt.rgba(Commons.Color.popups.text.r, Commons.Color.popups.text.g, Commons.Color.popups.text.b, 0.62)
     panelFontFamily: Style.font.family
   }
 
@@ -298,35 +300,35 @@ Item {
 
       var painted = scene.paintedColours(surface, [])
       verify(painted.length > 0, "the tree paints something")
-      verify(scene.paintColour(painted, Color.foreground),
+      verify(scene.paintColour(painted, Commons.Color.foreground),
         "a followed window paints the desktop's foreground")
       verify(scene.paintColour(painted, Qt.rgba(1, 1, 1, 1)) || scene.paintColour(painted, Qt.rgba(0, 0, 0, 1)),
         "and one of the desktop's own colours")
       // The helper delegation is exact, not approximate: these are the shell's
       // own answers, from the tokens the desktop baked.
-      compare(String(Paint.hoverFillFor(Color.foreground, Color.accent)),
-        String(Style.hoverFillFor(Color.foreground, Color.accent)))
-      compare(String(Paint.normalBorderFor(Color.foreground, Color.accent)),
-        String(Style.normalBorderFor(Color.foreground, Color.accent)))
-      compare(String(Paint.popupBorder), String(Color.popups.border))
+      compare(String(Paint.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)),
+        String(Style.hoverFillFor(Commons.Color.foreground, Commons.Color.accent)))
+      compare(String(Paint.normalBorderFor(Commons.Color.foreground, Commons.Color.accent)),
+        String(Style.normalBorderFor(Commons.Color.foreground, Commons.Color.accent)))
+      compare(String(Paint.popupBorder), String(Commons.Color.popups.border))
     }
 
     // Picking applies live and unpicking restores the original bindings — the
     // promise a dropdown that takes effect without a restart is making.
     function test_switching_back_and_forth_restores_the_bindings() {
       scene.followOmarchy()
-      var desktopBorder = String(surface.children[1].border.color)
+      var desktopBorder = String(card.border.color)
       var desktopAccent = String(Paint.accent)
 
       scene.pickTheme("fixture-light")
-      verify(String(surface.children[1].border.color) !== desktopBorder,
+      verify(String(card.border.color) !== desktopBorder,
         "the card's border followed the picked theme")
 
       scene.followOmarchy()
-      compare(String(surface.children[1].border.color), desktopBorder,
+      compare(String(card.border.color), desktopBorder,
         "following again restores the card's border")
       compare(String(Paint.accent), desktopAccent)
-      compare(String(Paint.popupBorder), String(Color.popups.border))
+      compare(String(Paint.popupBorder), String(Commons.Color.popups.border))
     }
 
     // A settings file is not a trusted theme name. Anything unusable is Follow
@@ -341,7 +343,7 @@ Item {
       Paint.shellText = ""
       Paint.rebuild()
       verify(!Paint.active, "an unreadable theme is Follow Omarchy")
-      compare(String(Paint.foreground), String(Color.foreground))
+      compare(String(Paint.foreground), String(Commons.Color.foreground))
 
       Paint.themeName = ".hidden"
       compare(Paint.selected, "")
