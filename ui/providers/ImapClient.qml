@@ -57,6 +57,7 @@ Item {
     if (code === "mail_auth_contact_admin") return "The server refused the sign-in and asks you to contact your mail administrator."
     if (code === "mail_auth_unauthorized") return "The server accepted the password but does not let this account use the mailbox."
     if (code === "mail_auth_privacy_required") return "The server requires an encrypted connection before it accepts a sign-in."
+    if (code === "mail_dns_failed") return "Could not find the mail server. Check the server address and your internet connection."
     if (code === "mail_tls_failed") return "The mail server's secure connection could not be verified"
     if (code === "request_timed_out") return "The mail server did not answer in time"
     if (code === "imap_search_expired") return "This search has expired. Refresh to search again."

@@ -712,6 +712,26 @@ Item {
       app.runShortcut("calendarDay")
       compare(selector.currentText, "Day (d)")
     }
+    function test_zoom_keys_reach_the_hours_only_in_the_day_and_week_views() {
+      var directions = []
+      mailService.calendarController = Qt.createQmlObject(
+        'import QtQuick; QtObject { property var events: []; property int hourHeight: 60; signal zoomed(int direction); function zoomHours(direction) { zoomed(direction) } function refresh(startMs, endMs) {} }',
+        app)
+      mailService.calendarController.zoomed.connect(function(direction) { directions.push(direction) })
+      app.showCalendar()
+      waitForRendering(app)
+      app.runShortcut("calendarMonth")
+      app.runShortcut("calendarZoomOut")
+      compare(directions, [])
+      app.runShortcut("calendarWeek")
+      app.runShortcut("calendarZoomOut")
+      app.runShortcut("calendarDay")
+      app.runShortcut("calendarZoomIn")
+      app.runShortcut("calendarZoomReset")
+      compare(directions, [-1, 1, 0])
+      app.runShortcut("mailView")
+      mailService.calendarController = null
+    }
     function test_status_error_opens_external_diagnosis_once() {
       mailService.lastError = "Could not confirm AI started. Check the conversation before retrying."
       mailService.actionStatus = ""

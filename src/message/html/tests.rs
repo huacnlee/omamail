@@ -390,3 +390,25 @@ fn rendered_remote_image_bytes_have_an_aggregate_budget() {
         assert!(!html.contains("https://"));
     }
 }
+
+#[test]
+fn table_parts_stay_in_their_own_table() {
+    let tree = |source: &str| tree::serialize(&tree::parse(source).unwrap()).unwrap();
+    // A stray row inside a cell closes the cell; its own </td> and </tr> then
+    // match nothing in that table instead of closing the table around it.
+    assert_eq!(
+        tree(
+            "<table><tr><td>a<table><tr><td>in<tr><td>in2</td></tr></td></tr></table>out</td><td>c</td></tr></table>"
+        ),
+        "<table><tr><td>a<table><tr><td>in</td></tr><tr><td>in2</td></tr></table>out</td><td>c</td></tr></table>"
+    );
+    assert_eq!(
+        tree("<table><tr><td><div>a<tr><td>b</table>"),
+        "<table><tr><td><div>a</div></td></tr><tr><td>b</td></tr></table>"
+    );
+    assert_eq!(tree("<div>a</td>b</tr>c</div>"), "<div>abc</div>");
+    assert_eq!(
+        tree("<table><tr><td><table><tr><td>x</td></tr></table></td><td>y</td></tr></table>"),
+        "<table><tr><td><table><tr><td>x</td></tr></table></td><td>y</td></tr></table>"
+    );
+}
