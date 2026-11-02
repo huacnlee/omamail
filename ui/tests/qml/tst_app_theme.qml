@@ -729,16 +729,16 @@ Item {
     // ------------------------------------------------- borders and tooltips
     function test_button_border_and_tooltip_follow_the_picked_theme() {
       scene.followOmarchy(); wait(50)
-      var shellBorder = String(borderedButton.borderSpec.color)
+      var shellBorder = String(borderedButton.border.color)
       var shellTip = String(borderedButton.tooltipForeground)
       scene.pickTheme("fixture-light"); wait(50)
-      compare(String(borderedButton.borderSpec.color),
+      compare(String(borderedButton.border.color),
         String(Paint.normalBorderFor(Paint.foreground, Paint.accent)))
       compare(String(borderedButton.tooltipForeground), String(Paint.tooltipText))
       compare(String(borderedButton.tooltipBackground), String(Paint.tooltipBackground))
 
       scene.followOmarchy(); wait(50)
-      compare(String(borderedButton.borderSpec.color), shellBorder,
+      compare(String(borderedButton.border.color), shellBorder,
         "following again leaves the shell's own border")
       compare(String(borderedButton.tooltipForeground), shellTip,
         "and the shell's own tooltip palette")

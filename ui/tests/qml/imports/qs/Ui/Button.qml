@@ -45,6 +45,10 @@ Rectangle {
   signal hovered(bool isHovered)
 
   color: background
+  // The shell's surface is Rectangle-compatible and drives its own `border`
+  // from the spec, so callers read `border.color` there.
+  border.width: root.borderSpec && root.borderSpec.widths ? root.borderSpec.widths.top : 0
+  border.color: root.borderSpec ? root.borderSpec.color : "transparent"
   activeFocusOnTab: focusable
   Keys.onReturnPressed: if (focusable) clicked()
   Keys.onEnterPressed: if (focusable) clicked()
@@ -61,14 +65,6 @@ Rectangle {
     font.family: parent.fontFamily
     font.pixelSize: parent.fontSize
     font.bold: parent.selected
-  }
-
-  Rectangle {
-    anchors.fill: parent
-    color: "transparent"
-    border.width: root.borderSpec ? Math.max(root.borderSpec.widths.top,
-      root.borderSpec.widths.left) : 0
-    border.color: root.borderSpec ? root.borderSpec.color : "transparent"
   }
 
   MouseArea {
