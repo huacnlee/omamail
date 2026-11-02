@@ -71,8 +71,24 @@ Item {
   implicitHeight: base.implicitHeight
 
   // A theme picked while the shell's popup is open would leave it drawn in the
-  // desktop's colours; closing it is the only honest answer.
-  onThemedChanged: if (!root.themed) themedPopup.close()
+  // desktop's colours; closing it is the only honest answer. The base is also
+  // handed the value the window holds again, because choosing a row made it
+  // assign its own and stop following the wrapper: without this the trigger
+  // would still read the theme that was just left behind.
+  onThemedChanged: {
+    if (!root.themed) themedPopup.close()
+    base.value = root.value
+  }
+
+  // The caller owns `value`, and the base is kept in step with it explicitly:
+  // its own row selection assigns the property directly, which is what severs
+  // a declarative binding.
+  Binding {
+    target: base
+    property: "value"
+    value: root.value
+    restoreMode: Binding.RestoreBindingOrValue
+  }
 
   ShellUi.Dropdown {
     id: base
@@ -80,7 +96,6 @@ Item {
     opacity: root.themed ? 0 : 1
     enabled: !root.themed
     label: root.label
-    value: root.value
     options: root.options
     foreground: root.foreground
     background: root.background
@@ -247,7 +262,11 @@ Item {
           function selectCurrent() {
             if (currentIndex < 0 || currentIndex >= root.options.length) return
             var next = root.optionValue(root.options[currentIndex])
+            // Both values move together: the wrapper's for its caller, and the
+            // base's so the trigger it draws in Follow mode never shows the
+            // theme that was just left.
             root.value = next
+            base.value = next
             root.changed(next)
             themedPopup.close()
           }
