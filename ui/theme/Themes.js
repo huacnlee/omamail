@@ -105,7 +105,7 @@ function parseColors(raw) {
   var text = String(raw === undefined || raw === null ? "" : raw)
   var out = {
     foreground: "", background: "", accent: "", urgent: "", muted: "",
-    selection: "", mode: "", light: false,
+    selection: "", mode: "", light: false, hyprlandActiveBorder: "",
   }
   var color0 = "", color4 = "", color7 = "", color8 = ""
   var foundAccent = false, foundMuted = false, foundBackground = false, foundForeground = false
@@ -127,6 +127,10 @@ function parseColors(raw) {
     else if (key === "color7") color7 = hex
     else if (key === "color8") color8 = hex
     else if (key === "red" || key === "color1") out.urgent = hex
+    // The active border is a Hyprland gradient; only its first colour can be
+    // drawn on a single-colour surface, and the shell's own template uses it as
+    // the popup border when a theme ships no shell.toml of its own.
+    else if (key === "hyprland_active_border") out.hyprlandActiveBorder = hex
   }
   if (!foundBackground) out.background = color0
   if (!foundForeground) out.foreground = color7
@@ -273,6 +277,20 @@ function controlTokens(shell) {
 // values, identical across the stock themes, and a window that changed them
 // would stop matching the bar beside it.
 
+// A popup border. The theme's own shell.toml wins; without one, the stock
+// template asks for the Hyprland active border, which colors.toml states as a
+// gradient — a single-colour surface takes its first colour — and the accent is
+// what the template falls back to when the theme states neither.
+function popupBorder(shell, palette) {
+  if (shell["popups.border"] !== undefined) {
+    return surfaceColor(shell["popups.border"], shell, palette, "accent")
+  }
+  var override = palette && palette.hyprlandActiveBorder !== undefined
+    ? resolveToken(palette.hyprlandActiveBorder, palette) : ""
+  if (override !== "") return override
+  return resolveToken("accent", palette)
+}
+
 function resolveTheme(palette, shellRaw) {
   var colours = palette || parseColors("")
   var shell = parseShell(shellRaw)
@@ -281,7 +299,7 @@ function resolveTheme(palette, shellRaw) {
     popups: {
       background: surfaceColor(shell["popups.background"], shell, colours, "background"),
       text: surfaceColor(shell["popups.text"], shell, colours, "foreground"),
-      border: surfaceColor(shell["popups.border"], shell, colours, "accent"),
+      border: popupBorder(shell, colours),
       backgroundAlpha: parseNumber(shell["popups.background-alpha"], 1),
       borderAlpha: parseNumber(shell["popups.border-alpha"], 1),
     },

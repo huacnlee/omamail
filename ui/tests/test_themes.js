@@ -64,7 +64,7 @@ const modern = themes.parseColors([
 deepEqual(modern, {
   foreground: "#cdd6f4", background: "#1e1e2e", accent: "#89b4fa",
   urgent: "#f38ba8", muted: "#585b70", selection: "#45475a",
-  mode: "dark", light: false,
+  mode: "dark", light: false, hyprlandActiveBorder: "",
 })
 
 // An older theme has only the sixteen terminal colours; the same four
@@ -79,7 +79,7 @@ const legacy = themes.parseColors([
 deepEqual(legacy, {
   foreground: "#e0e0e0", background: "#101010", accent: "#3355ff",
   urgent: "#cc3333", muted: "#707070", selection: "#707070",
-  mode: "dark", light: false,
+  mode: "dark", light: false, hyprlandActiveBorder: "",
 })
 
 // No muted colour means the foreground, and no accent means color4 — an
@@ -136,6 +136,23 @@ const noUrgent = themes.parseColors([
 assert.strictEqual(noUrgent.urgent, "#8839ef")
 assert.strictEqual(noUrgent.selection, noUrgent.muted)
 
+// colors.toml's Hyprland active border is what the stock template puts behind
+// a popup when the theme ships no shell.toml of its own; only its first colour
+// can be drawn on a single-colour surface.
+const hypr = themes.parseColors([
+  'foreground = "#4c4f69"',
+  'background = "#eff1f5"',
+  'accent = "#8839ef"',
+  'hyprland_active_border = "#123456 #654321 45deg"',
+].join("\n"))
+assert.strictEqual(hypr.hyprlandActiveBorder, "#123456")
+assert.strictEqual(themes.resolveTheme(hypr, "").popups.border, "#123456")
+// A theme's own shell.toml still decides the popup border when it states one.
+assert.strictEqual(themes.resolveTheme(hypr, '[popups]\nborder = "accent"\n').popups.border, "#8839ef")
+// Without either, the accent is what the template falls back to.
+assert.strictEqual(themes.resolveTheme(themes.parseColors([
+  'foreground = "#4c4f69"', 'background = "#eff1f5"', 'accent = "#8839ef"',
+].join("\n")), "").popups.border, "#8839ef")
 
 // A theme that does not state its mode is read from its background.
 const inferred = themes.parseColors('foreground = "#4c4f69"\nbackground = "#eff1f5"\n')
