@@ -59,7 +59,7 @@ Item {
   // The colours the shell's button publishes, for the callers that read them.
   // They are the base's own values, whichever mode it is in.
   readonly property alias color: base.color
-  readonly property var border: base.border
+  readonly property var borderSpec: base.borderSpec
   readonly property alias tooltipBackground: base.tooltipBackground
   readonly property alias tooltipForeground: base.tooltipForeground
   readonly property alias tooltipBorder: base.tooltipBorder

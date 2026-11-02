@@ -35,6 +35,16 @@ Item {
     'selection = "#ccd0da"',
   ].join("\n")
 
+  readonly property string darkTheme: [
+    'mode = "dark"',
+    'foreground = "#cdd6f4"',
+    'background = "#1e1e2e"',
+    'accent = "#89b4fa"',
+    'red = "#f38ba8"',
+    'muted = "#6c7086"',
+    'selection = "#45475a"',
+  ].join("\n")
+
   Component.onCompleted: {
     // The real shell behaves this way by construction — its shell.toml has the
     // desktop theme's hex baked in — so the stub is told to. Running this file
@@ -53,9 +63,46 @@ Item {
     Paint.available = true
     Paint.themeName = name
     Paint.themeDir = "/themes/" + name
-    Paint.colorsText = scene.lightTheme
+    Paint.colorsText = name === "fixture-dark" ? scene.darkTheme : scene.lightTheme
     Paint.shellText = ""
     Paint.rebuild()
+  }
+
+  // The stored setting, and the one path a picker's change takes: the window
+  // stores it, then draws with it.
+  property string persistedTheme: ""
+  function changeTheme(next) {
+    scene.persistedTheme = next
+    // The window stores the choice and the picker reads it back, which is what
+    // the settings service does around this row.
+    themePicker.value = next
+    if (next === "") scene.followOmarchy()
+    else scene.pickTheme(next)
+  }
+
+  // The first item below `item` whose text is `label`, so a test can read the
+  // weight or colour of the label a person actually sees.
+  function textItemFor(item, label) {
+    if (item.text !== undefined && String(item.text) === label && item.font !== undefined
+        && item.visible !== false) return item
+    var kids = item.children || []
+    for (var i = 0; i < kids.length; i++) {
+      var found = scene.textItemFor(kids[i], label)
+      if (found !== null) return found
+    }
+    return null
+  }
+
+  // The first object below `item` that publishes a tooltip with `label`.
+  function tooltipItemFor(item, label) {
+    if (item.contentItem !== undefined && item.text !== undefined
+        && String(item.text) === label) return item
+    var kids = item.children || []
+    for (var i = 0; i < kids.length; i++) {
+      var found = scene.tooltipItemFor(kids[i], label)
+      if (found !== null) return found
+    }
+    return null
   }
 
   function followOmarchy() {
@@ -262,6 +309,191 @@ Item {
     accent: Paint.accent
   }
 
+  // The window's own picker, and a bordered action with a tooltip: the two
+  // surfaces whose colours and weight this feature is judged by.
+  Kit.Dropdown {
+    id: themePicker
+    objectName: "theme-picker"
+    x: 8; y: 780
+    width: 320
+    showLabel: false
+    value: scene.persistedTheme
+    options: [
+      { value: "", label: "Follow Omarchy" },
+      { value: "fixture-light", label: "Fixture Light" },
+      { value: "fixture-dark", label: "Fixture Dark" }
+    ]
+    foreground: Paint.popupText
+    background: Paint.popupBackground
+    popupBorder: Paint.popupBorder
+    accent: Paint.accent
+    fontFamily: Style.font.family
+    onChanged: function(next) { scene.changeTheme(next) }
+  }
+
+  Kit.Button {
+    id: borderedButton
+    objectName: "bordered-button"
+    x: 8; y: 830
+    width: 260; height: 40
+    text: "Archive"
+    tooltipText: "Move to archive"
+    bordered: true
+    foreground: Paint.foreground
+    accent: Paint.accent
+  }
+
+  // The real mailbox row: a chosen tab is marked by its weight, not only by a
+  // fill, so a theme must not take that away.
+  Components.MailboxTabs {
+    id: mailboxTabs
+    objectName: "mailbox-tabs"
+    x: 8; y: 890
+    width: 500
+    textColor: Paint.foreground
+    accentColor: Paint.accent
+    panelFontFamily: Style.font.family
+    current: "inbox"
+    allMailboxes: [
+      { key: "inbox", label: "Inbox" },
+      { key: "unread", label: "Unread" }
+    ]
+  }
+
+  // The real calendar colour picker, with the controller shape it reads.
+  QtObject {
+    id: calendarController
+    property var availableSources: ({ version: 1, sources: [
+      { id: "one", kind: "google", name: "Work", colorKey: "blue", enabled: true }
+    ] })
+    property bool savingSource: false
+    property bool discoveringCalendars: false
+    property string discoveringAccountId: ""
+    property var reminderPolicy: null
+    property string defaultId: ""
+    property int colorCalls: 0
+    function setSourceColor(id, key) { calendarController.colorCalls += 1 }
+    function setSourceEnabled(id, on) {}
+    function removeCalendar(id) {}
+    function setDefaultCalendar(id) {}
+    function setRemindersEnabled(on) {}
+    function setSnoozeMinutes(minutes) {}
+    function addCalDavCalendar(source, password) {}
+    function discoverCalendars(accountId, choice) {}
+    function saveInvitations(on) {}
+  }
+
+  QtObject {
+    id: calendarServiceStub
+    property bool unifiedCalendarView: false
+    property bool calendarRemindersEnabled: true
+    property int calendarSnoozeMinutes: 5
+    property string calendarReminderError: ""
+    property var accountSummaries: []
+    property var settings: ({})
+    property var auth: null
+    property bool backendCanDiscoverCalendars: true
+    property bool backendCanGoogleCalendars: true
+    property bool backendCanSaveInvitations: true
+    property bool alwaysShowImages: false
+    property bool alwaysRenderHeavyMessages: false
+    property int undoSendSeconds: 10
+    function persistSetting(name, value) { var next = {}; next[name] = value; calendarServiceStub.settings = next }
+    function setUnifiedCalendarView(value) {}
+  }
+
+  Components.CalendarSettings {
+    id: calendarSettings
+    objectName: "calendar-settings"
+    x: 8; y: 980
+    width: 520
+    service: calendarServiceStub
+    controller: calendarController
+    textColor: Paint.foreground
+    dimColor: Paint.muted
+    accentColor: Paint.accent
+    urgentColor: Paint.urgent
+    panelFontFamily: Style.font.family
+  }
+
+  // The real settings page around the real picker row.
+  QtObject {
+    id: settingsThemeStub
+    property bool enabled: true
+    property string selected: scene.persistedTheme
+    property var options: [
+      { value: "", label: "Follow Omarchy" },
+      { value: "fixture-light", label: "Fixture Light" },
+      { value: "fixture-dark", label: "Fixture Dark" }
+    ]
+    property int refreshes: 0
+    function refresh() { settingsThemeStub.refreshes += 1 }
+    function choose(name) { scene.changeTheme(name) }
+  }
+
+  QtObject {
+    id: settingsServiceStub
+    property var theme: settingsThemeStub
+    property bool hasAppearance: false
+    property string appearance: "system"
+    property bool hasTray: true
+    property bool hasMailto: true
+    property bool hasNotifications: true
+    property bool hasAgent: false
+    property var accountSummaries: []
+    property var accountSignatures: []
+    property string activeAccountId: ""
+    property var backend: null
+    property var backendRuntime: null
+    property var auth: null
+    property bool backendCanNameSender: false
+    property bool backendCanSuggestEvents: false
+    property bool alwaysShowImages: false
+    property bool alwaysRenderHeavyMessages: false
+    property bool notifyNewMail: true
+    property bool suggestEvents: false
+    property bool showBarIcon: true
+    property string contentDirection: "auto"
+    property int undoSendSeconds: 10
+    property string defaultMailClient: ""
+    property bool defaultMailClientBusy: false
+    property string defaultMailClientError: ""
+    property string diagnoseError: ""
+    property bool diagnosing: false
+    property string notificationError: ""
+    function persistSetting(name, value) {}
+    function refreshDefaultMailClient() {}
+    function setDefaultMailClient() {}
+    function setAccountLabel() {}
+    function setAccountSenderName() {}
+    function setAccountSignature() {}
+    function setAccountSignatureHtml() {}
+    function setAppearance() {}
+    function setContentDirection() {}
+    function setAlwaysShowImages() {}
+    function setAlwaysRenderHeavyMessages() {}
+    function setNotifyNewMail() {}
+    function setSuggestEvents() {}
+    function setUndoSendSeconds() {}
+    function setShowBarIcon() {}
+    function chooseFiles() {}
+  }
+
+  Components.SettingsPage {
+    id: settingsPage
+    objectName: "real-settings-page"
+    x: 1500; y: 0
+    width: 700
+    height: 1800
+    service: settingsServiceStub
+    calendarController: calendarController
+    textColor: Paint.foreground
+    dimColor: Paint.muted
+    accentColor: Paint.accent
+    urgentColor: Paint.urgent
+    panelFontFamily: Style.font.family
+  }
+
   TestCase {
     name: "AppTheme"
     when: windowShown
@@ -416,6 +648,200 @@ Item {
       scene.followOmarchy()
       compare(String(numberField.field.background.color), shellsBackground,
         "following again leaves the box the shell drew")
+    }
+
+    // ------------------------------------------------------------ the picker
+    //
+    // Follow -> a light theme -> Follow again -> a dark one, through the kit's
+    // own dropdown. The shell's control assigns its own value when a row is
+    // chosen, so the label a person reads is asserted separately from the
+    // value the window stores.
+    function test_picker_round_trip() {
+      scene.followOmarchy()
+      scene.persistedTheme = ""
+      wait(50)
+      compare(themePicker.currentLabel(), "Follow Omarchy")
+      verify(!Paint.active, "nothing is picked")
+
+      themePicker.open(); wait(60)
+      keyClick(Qt.Key_Down); keyClick(Qt.Key_Return); wait(60)
+      verify(Paint.active, "a theme was picked")
+      compare(scene.persistedTheme, "fixture-light")
+      compare(themePicker.currentLabel(), "Fixture Light")
+
+      themePicker.open(); wait(60)
+      keyClick(Qt.Key_Up); keyClick(Qt.Key_Return); wait(60)
+      verify(!Paint.active, "Follow Omarchy was picked again")
+      compare(scene.persistedTheme, "")
+      compare(themePicker.value, "")
+      compare(themePicker.currentLabel(), "Follow Omarchy",
+        "the picker reads the setting the window stored")
+      compare(String(themePicker.children[0].value), "",
+        "and the shell's own trigger was put in step with it")
+      compare(themePicker.children[0].currentLabel(), "Follow Omarchy")
+
+      themePicker.open(); wait(60)
+      keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return); wait(60)
+      verify(Paint.active, "a later selection still works")
+      compare(scene.persistedTheme, "fixture-dark")
+      compare(themePicker.currentLabel(), "Fixture Dark")
+      compare(String(Paint.background), "#1e1e2e")
+    }
+
+    // The real settings page: its Appearance row is the picker, and its popup
+    // is opened while a theme is picked.
+    function test_the_real_settings_page_opens_the_picker() {
+      scene.pickTheme("fixture-light"); wait(50)
+      var picker = findChild(settingsPage, "app-theme-picker")
+      verify(picker !== null, "the real settings page offers the theme picker")
+      picker.open(); wait(60)
+      verify(picker.popupOpen, "the picker's popup opens in a picked theme")
+      picker.close(); wait(20)
+      verify(!picker.popupOpen)
+    }
+
+    // A chosen control keeps its non-colour indication: the current mailbox
+    // stays bold, and the chosen calendar colour keeps its ring.
+    function test_chosen_mailbox_keeps_its_bold_label() {
+      scene.pickTheme("fixture-light"); wait(50)
+      var label = scene.textItemFor(mailboxTabs, "Inbox")
+      verify(label !== null, "the current mailbox draws its label")
+      verify(label.font.bold, "a chosen mailbox stays bold while a theme is picked")
+
+      scene.followOmarchy(); wait(50)
+      var followed = scene.textItemFor(mailboxTabs, "Inbox")
+      verify(followed !== null && followed.font.bold, "and stays bold while following")
+    }
+
+    function test_chosen_calendar_colour_keeps_its_ring() {
+      var colorButton = findChild(calendarSettings, "calendar-source-color")
+      verify(colorButton !== null, "the calendar row offers a colour")
+      colorButton.forceActiveFocus(); keyClick(Qt.Key_Return); wait(50)
+      var swatch = findChild(calendarSettings, "calendar-color-swatch-blue")
+      verify(swatch !== null, "the palette shows the chosen colour")
+      var ring = swatch.parent
+      verify(ring.border.width > 0, "the chosen colour is ringed while following")
+
+      scene.pickTheme("fixture-light"); wait(50)
+      verify(swatch.parent.border.width > 0, "and keeps its ring while a theme is picked")
+    }
+
+    // ------------------------------------------------- borders and tooltips
+    function test_button_border_and_tooltip_follow_the_picked_theme() {
+      scene.followOmarchy(); wait(50)
+      var shellBorder = String(borderedButton.borderSpec.color)
+      var shellTip = String(borderedButton.tooltipForeground)
+      scene.pickTheme("fixture-light"); wait(50)
+      compare(String(borderedButton.borderSpec.color),
+        String(Paint.normalBorderFor(Paint.foreground, Paint.accent)))
+      compare(String(borderedButton.tooltipForeground), String(Paint.tooltipText))
+      compare(String(borderedButton.tooltipBackground), String(Paint.tooltipBackground))
+
+      scene.followOmarchy(); wait(50)
+      compare(String(borderedButton.borderSpec.color), shellBorder,
+        "following again leaves the shell's own border")
+      compare(String(borderedButton.tooltipForeground), shellTip,
+        "and the shell's own tooltip palette")
+    }
+
+    function test_open_tooltip_uses_the_window_palette() {
+      scene.pickTheme("fixture-light"); wait(50)
+      mouseMove(borderedButton, borderedButton.width / 2, borderedButton.height / 2); wait(600)
+      var tip = findChild(borderedButton, "button-tooltip")
+      verify(tip !== null, "the tooltip is the shell's own")
+      verify(tip.visible, "hovering the button opens its tooltip")
+      compare(String(tip.contentItem.color), String(Paint.tooltipText))
+    }
+
+    function test_number_field_selection_follows_the_theme() {
+      scene.followOmarchy(); wait(50)
+      var shellSelection = String(numberField.field.contentItem.selectionColor)
+      scene.pickTheme("fixture-light"); wait(50)
+      numberField.field.contentItem.forceActiveFocus()
+      numberField.field.contentItem.selectAll(); wait(50)
+      compare(String(numberField.field.contentItem.selectionColor),
+        String(Paint.selectionFillFor(Paint.foreground, Paint.accent)))
+
+      scene.followOmarchy(); wait(50)
+      compare(String(numberField.field.contentItem.selectionColor), shellSelection,
+        "following again restores the shell's own selection tint")
+    }
+
+    // ------------------------------------------------------- palette edges
+    function test_a_palette_without_a_usable_foreground_falls_back() {
+      Paint.available = true
+      Paint.themeName = "broken"
+      Paint.themeDir = "/themes/broken"
+      Paint.colorsText = 'background = "#eff1f5"\nforeground = "garbage"\n'
+      Paint.shellText = ""
+      Paint.rebuild(); wait(20)
+      verify(!Paint.active, "a theme with no usable foreground is not drawn with")
+      compare(String(Paint.foreground), String(Commons.Color.foreground))
+      compare(String(Paint.background), String(Commons.Color.background))
+    }
+
+    function test_the_roles_a_theme_leaves_out_are_filled() {
+      Paint.available = true
+      Paint.themeName = "sparse"
+      Paint.themeDir = "/themes/sparse"
+      Paint.colorsText = 'foreground = "#4c4f69"\nbackground = "#eff1f5"\n'
+      Paint.shellText = ""
+      Paint.rebuild(); wait(20)
+      verify(Paint.active, "a drawable palette is a theme")
+      compare(String(Paint.accent), "#4c4f69", "the accent falls back to the foreground")
+      compare(String(Paint.urgent), "#4c4f69", "and so does the urgent colour")
+    }
+
+    function test_a_valid_theme_that_reloads_broken_falls_back() {
+      scene.pickTheme("fixture-light"); wait(20)
+      verify(Paint.active)
+      // The file on disk lost its foreground while the window was open.
+      Paint.colorsText = 'background = "#eff1f5"\nforeground = "garbage"\n'
+      Paint.rebuild(); wait(20)
+      verify(!Paint.active, "an incomplete reload is Follow Omarchy")
+      compare(String(Paint.background), String(Commons.Color.background))
+      compare(String(Paint.foreground), String(Commons.Color.foreground))
+    }
+
+    function test_colors_toml_active_border_reaches_the_popup() {
+      Paint.available = true
+      Paint.themeName = "border"
+      Paint.themeDir = "/themes/border"
+      Paint.colorsText = [
+        'foreground = "#4c4f69"',
+        'background = "#eff1f5"',
+        'accent = "#8839ef"',
+        'hyprland_active_border = "#123456 #654321 45deg"',
+      ].join("\n")
+      Paint.shellText = ""
+      Paint.rebuild(); wait(20)
+      compare(String(Paint.popupBorder), "#123456",
+        "the popup takes the first colour of the active border")
+    }
+
+    function test_control_spec_keeps_the_live_alpha_and_geometry() {
+      scene.pickTheme("fixture-light"); wait(20)
+      var spec = Paint.controlSpec("normal", Paint.foreground, Paint.accent)
+      compare(String(spec.color), String(Paint.normalBorderFor(Paint.foreground, Paint.accent)),
+        "the stock alpha is the live one")
+      compare(spec.widths.top, Style.normalBorderWidth)
+      var previous = Style.normalBorderAlpha
+      Style.normalBorderAlpha = 0.7
+      var stronger = Paint.controlSpec("normal", Paint.foreground, Paint.accent)
+      compare(stronger.color.a.toFixed(2), "0.70", "a non-default alpha is kept")
+      Style.normalBorderAlpha = previous
+    }
+
+    // The colour walk, with the picker's popup open and a tooltip on screen:
+    // neither may paint a desktop colour.
+    function test_the_walk_with_an_open_popup_and_tooltip() {
+      scene.pickTheme("fixture-light"); wait(50)
+      themePicker.open(); wait(60)
+      mouseMove(borderedButton, borderedButton.width / 2, borderedButton.height / 2); wait(600)
+      var neutral = scene.neutralColours(surface)
+      themePicker.close()
+      compare(neutral.length, 0, "with a popup and a tooltip open the window still paints only its own colours: "
+        + neutral.join(", "))
     }
   }
 }

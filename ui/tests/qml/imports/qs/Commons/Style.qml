@@ -16,10 +16,10 @@ QtObject {
   readonly property real pressedFillAlpha: 0.22
   readonly property real focusFillAlpha: 0.08
   readonly property real selectionFillAlpha: 0.35
-  readonly property real normalBorderAlpha: 0.4
-  readonly property real hoverBorderAlpha: 0.25
-  readonly property real selectedBorderAlpha: 1.0
-  readonly property real focusBorderAlpha: 0.25
+  property real normalBorderAlpha: 0.4
+  property real hoverBorderAlpha: 0.25
+  property real selectedBorderAlpha: 1.0
+  property real focusBorderAlpha: 0.25
 
   readonly property var font: ({
     family: "monospace", title: 22, heading: 18, body: 14, bodySmall: 13, caption: 11,
