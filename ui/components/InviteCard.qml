@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../message/Calendar.js" as Calendar
+import "../theme"
 
 // The meeting inside the message, drawn as the thing it is.
 //
@@ -47,9 +48,9 @@ Rectangle {
   visible: !!invite
   implicitHeight: visible ? column.implicitHeight + Style.space(24) : 0
   radius: Style.cornerRadius
-  color: Style.normalFillFor(root.textColor, root.accentColor)
+  color: Paint.normalFillFor(root.textColor, root.accentColor)
   border.width: 1
-  border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+  border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
 
   Column {
     id: column

@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../providers/Registry.js" as Provider
+import "../theme"
 
 // Which kind of mailbox is being added, asked once and before anything else.
 //
@@ -66,10 +67,10 @@ Column {
         implicitHeight: Math.max(cardText.implicitHeight, cardMark.height) + Style.space(24)
         radius: Style.cornerRadius
         color: card.connectable && hover.hovered
-          ? Style.hoverFillFor(root.textColor, root.accentColor)
-          : Style.normalFillFor(root.textColor, root.accentColor)
+          ? Paint.hoverFillFor(root.textColor, root.accentColor)
+          : Paint.normalFillFor(root.textColor, root.accentColor)
         border.width: 1
-        border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+        border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
         // Not greyed out with a literal colour — the theme owns those. Reduced
         // opacity says "not available" without inventing a grey that some
         // themes render as ordinary body text.

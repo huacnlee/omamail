@@ -3,6 +3,8 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
+import "../theme"
+import "../kit"
 
 // The mailboxes, as one row of chips. What they are depends on the provider —
 // Gmail's are searches, so "Unread" and "All mail" sit next to "Inbox" without
@@ -77,7 +79,7 @@ Flickable {
     radius: Style.cornerRadius
     color: "transparent"
     border.width: 1
-    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
 
     Row {
       id: chips
@@ -115,7 +117,7 @@ Flickable {
               : segment.modelData.label
             foreground: root.textColor
             bordered: false
-            selected: root.current === segment.modelData.key
+            chosen: root.current === segment.modelData.key
             hasCursor: root.cursorIndex === segment.index
             fontSize: Style.font.bodySmall
             onClicked: root.selected(segment.modelData.key)

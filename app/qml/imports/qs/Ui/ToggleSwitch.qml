@@ -14,6 +14,7 @@ Item {
   property color foreground: Commons.Color.foreground
   property color accent: Commons.Color.accent
   signal toggled()
+  signal hovered(bool isHovered)
 
   onCheckedChanged: {
     if (toggle.checked !== checked) toggle.checked = checked

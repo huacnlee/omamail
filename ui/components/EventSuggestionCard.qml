@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../agent/Agent.js" as Agent
+import "../theme"
 
 // What the agent found in the message: one row per event — what, when,
 // where — with Add and Dismiss. Add opens the calendar's composer with the
@@ -33,7 +34,7 @@ Rectangle {
   implicitHeight: visible ? column.implicitHeight + Style.space(24) : 0
   height: implicitHeight
   radius: Style.cornerRadius
-  color: Style.hoverFillFor(root.textColor, root.accentColor)
+  color: Paint.hoverFillFor(root.textColor, root.accentColor)
   border.width: 1
   border.color: root.dimmerColor
 

@@ -2,6 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../providers/Registry.js" as Provider
+import "../theme"
+import "../kit"
 
 // Connecting a mailbox, as two steps instead of a wall of instructions.
 //
@@ -123,9 +125,9 @@ Column {
     visible: root.toolsMissing
     implicitHeight: missingText.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: missingText

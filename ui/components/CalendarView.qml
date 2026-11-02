@@ -6,6 +6,7 @@ import qs.Commons
 import "../calendar/Calendar.js" as Calendar
 import "../backend/Plain.js" as Plain
 import "../keys/Keymap.js" as Keymap
+import "../theme"
 
 Item {
   id: root
@@ -550,7 +551,7 @@ Item {
             }
             background: Rectangle {
               color: root.backgroundColor
-              border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+              border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
               radius: Style.cornerRadius
             }
           }
@@ -1032,9 +1033,9 @@ Item {
         height: Style.space(64)
         radius: Style.cornerRadius
         color: Calendar.eventKey(modelData) === root.selectedEventId
-          ? Style.selectedFillFor(root.textColor, root.accentColor)
-          : agendaMouse.containsMouse ? Style.hoverFillFor(root.textColor, root.accentColor)
-          : Style.normalFillFor(root.textColor, root.accentColor)
+          ? Paint.selectedFillFor(root.textColor, root.accentColor)
+          : agendaMouse.containsMouse ? Paint.hoverFillFor(root.textColor, root.accentColor)
+          : Paint.normalFillFor(root.textColor, root.accentColor)
         Column {
           anchors.fill: parent
           anchors.margins: Style.space(8)
@@ -1098,7 +1099,7 @@ Item {
     height: Math.min(Style.space(460), parent.height - Style.space(24), overflowHeading.implicitHeight
       + overflowEvents.height + padding * 2 + Style.space(10))
     color: root.backgroundColor
-    border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
     radius: Style.cornerRadius
     function place() {
       if (!dayCell) return
@@ -1222,7 +1223,7 @@ Item {
     onHeightChanged: if (opened) place()
     background: Rectangle {
       color: root.backgroundColor
-      border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+      border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
       radius: Style.cornerRadius
     }
     contentItem: Column {

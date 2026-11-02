@@ -4,6 +4,8 @@ import qs.Ui
 import "../providers/ImapProtocol.js" as Imap
 import "../account/Accounts.js" as Accounts
 import "../account/Aliases.js" as Aliases
+import "../theme"
+import "../kit"
 
 // Connecting an ordinary mailbox: an address, a password, and — only if the
 // guess was wrong — the servers.
@@ -204,9 +206,9 @@ Column {
     visible: root.toolsMissing
     implicitHeight: missingText.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: missingText
@@ -275,9 +277,9 @@ Column {
       visible: root.suggestion.note !== ""
       implicitHeight: noteColumn.implicitHeight + Style.space(20)
       radius: Style.cornerRadius
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      color: Paint.normalFillFor(root.textColor, root.accentColor)
       border.width: 1
-      border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+      border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
       Column {
         id: noteColumn

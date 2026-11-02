@@ -2,6 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../providers/Registry.js" as Provider
+import "../theme"
+import "../kit"
 
 // Connecting a HEY mailbox, which is a program and a button.
 //
@@ -98,9 +100,9 @@ Column {
       width: parent.width
       implicitHeight: commandText.implicitHeight + Style.space(20)
       radius: Style.cornerRadius
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      color: Paint.normalFillFor(root.textColor, root.accentColor)
       border.width: 1
-      border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+      border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
       TextEdit {
         id: commandText
@@ -115,7 +117,7 @@ Column {
         wrapMode: TextEdit.WrapAnywhere
         color: root.textColor
         selectedTextColor: root.textColor
-        selectionColor: Style.selectedFillFor(root.textColor, root.accentColor)
+        selectionColor: Paint.selectedFillFor(root.textColor, root.accentColor)
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
       }

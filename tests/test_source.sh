@@ -50,6 +50,31 @@ if grep -nE ':\s*"(red|blue|green|white|black|yellow|orange|purple|gray|grey)"' 
   fail "named display colour in QML: use Color.* instead"
 fi
 
+# 1b. One colour authority for the mail window.
+#
+# The window can be drawn in an Omarchy theme other than the desktop's, so it
+# must take its colours from `theme/Paint`, which delegates to Commons/Style
+# exactly when the desktop's theme is followed. Reaching for the shell's own
+# singletons gets the desktop theme's hex — Omarchy bakes it into shell.toml's
+# [controls] tokens, so Style's helpers ignore the colours they are passed — and
+# a window drawn in a light theme on a dark desktop then paints near-white text
+# on white. `theme/` and `kit/` are where that delegation lives, and the bar
+# envelope, its popup and desktop notifications are the desktop's own surfaces,
+# so they are exempt. Everything else in ui/ — including code written later —
+# must go through Paint.
+colour_offenders=()
+for file in "${QML_FILES[@]}"; do
+  case "$file" in
+    theme/*|kit/*|bar/*|BarWidget.qml|tests/*) continue ;;
+  esac
+  if grep -nE 'Commons\.Color\.|Style\.(normal|hover|selected|pressed|focus|selection)[A-Za-z]*For\(|Border\.controlSpec\(' "$file"; then
+    colour_offenders+=("$file")
+  fi
+done
+if [ "${#colour_offenders[@]}" -gt 0 ]; then
+  fail "window colour read from Commons/Style/Border: route it through Paint (${colour_offenders[*]})"
+fi
+
 # 2. The JS libraries are read by the QML engine, which does not accept ES6.
 #    tests/ is node-only and exempt.
 for file in "${JS_FILES[@]}"; do
@@ -433,7 +458,7 @@ if "calendarBorderColor: root.calendarBorder" not in app:
     raise SystemExit("test_source.sh: App must pass the system calendar border token")
 if "calendarTodayBackgroundColor: root.calendarTodayBackground" not in app:
     raise SystemExit("test_source.sh: App must pass the system Today background token")
-if "readonly property color calendarBorder: Style.normalBorderColor" not in app:
+if "readonly property color calendarBorder: Paint.normalBorderColor" not in app:
     raise SystemExit("test_source.sh: calendar borders must originate from the system border token")
 if "readonly property color calendarTodayBackground: Qt.alpha(root.accent, 0.035)" not in app:
     raise SystemExit("test_source.sh: Today must use the quieter system accent fill token")
@@ -905,7 +930,7 @@ awk '
   || fail "the From dropdown must use an outline treatment"
 awk '
   /id: fromButton/ { in_from = 1 }
-  in_from && /background: Style.normalFillFor\(root.textColor, root.accentColor\)/ { fill = 1 }
+  in_from && /background: Paint.normalFillFor\(root.textColor, root.accentColor\)/ { fill = 1 }
   in_from && /verticalPadding: Style.spacing.inputPaddingY/ { padding = 1 }
   in_from && /^      }/ { exit !(fill && padding) }
   END { exit !(fill && padding) }
@@ -954,6 +979,11 @@ oversized=$(cd ..
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
         (app/resources/macos/omamail.icns) ceiling=111809 ;;
+        # The service is the app's largest source file and grows with each
+        # feature it owns — the per-app theme choice is the latest. Source that
+        # a clone has to carry anyway is not the weight this rule exists for;
+        # its own ceiling keeps it from becoming a place to park assets.
+        (ui/Service.qml) ceiling=$((136 * 1024)) ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")

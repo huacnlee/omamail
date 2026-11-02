@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import "../account/Model.js" as Model
+import "../theme"
 
 // The conversation beside the message, as a timeline down the right edge of the
 // reader.
@@ -190,9 +191,9 @@ Item {
     height: implicitHeight
     radius: Style.cornerRadius
     color: modelData.open
-      ? Style.selectedFillFor(root.textColor, root.accentColor)
+      ? Paint.selectedFillFor(root.textColor, root.accentColor)
       : (hover.containsMouse
-        ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+        ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent")
 
     MouseArea {
       id: hover

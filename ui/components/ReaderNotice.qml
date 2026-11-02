@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import qs.Commons
 import qs.Ui
+import "../theme"
+import "../kit"
 
 // A line above the message saying why it does not look the way the sender
 // meant it to, and offering the one thing that would change that.
@@ -28,9 +30,9 @@ Rectangle {
 
   implicitHeight: Style.space(30)
   radius: Style.cornerRadius
-  color: Style.normalFillFor(root.textColor, root.accentColor)
+  color: Paint.normalFillFor(root.textColor, root.accentColor)
   border.width: 1
-  border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+  border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
 
   Text {
     anchors.left: parent.left

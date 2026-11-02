@@ -4,6 +4,8 @@ import qs.Ui
 import "../providers/Outlook.js" as Outlook
 import "../providers/MicrosoftOAuth.js" as Microsoft
 import "../account/Accounts.js" as Accounts
+import "../theme"
+import "../kit"
 
 // Outlook.com and Hotmail use Microsoft OAuth. The app registration is a
 // public client: its ID is configuration, not a secret, and the account
@@ -182,9 +184,9 @@ Column {
     visible: root.toolsMissing
     implicitHeight: missingText.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: missingText
@@ -416,9 +418,9 @@ Column {
     visible: root.busy && root.auth && root.auth.userCode !== ""
     implicitHeight: deviceColumn.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Column {
       id: deviceColumn

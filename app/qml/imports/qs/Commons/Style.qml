@@ -125,4 +125,48 @@ QtObject {
   function selectedBorderFor(foreground, accent) { return withAlpha(stateColor("selected", foreground, accent, foreground), controlNumber("selected-border-alpha", 1)) }
   function focusFillFor(foreground, accent) { return withAlpha(stateColor("focus", foreground, accent, stateColor("hover-cursor", foreground, accent, foreground)), controlNumber("focus-fill-alpha", controlNumber("hover-cursor-fill-alpha", 0.08))) }
   function focusBorderFor(foreground, accent) { return withAlpha(stateColor("focus", foreground, accent, stateColor("hover-cursor", foreground, accent, foreground)), controlNumber("focus-border-alpha", controlNumber("hover-cursor-border-alpha", 0.25))) }
+
+  // The state vocabulary and alphas the shell's Style exposes, which the window's
+  // Paint singleton delegates to whenever it is not drawing a theme of its own.
+  // The shell names normal/hover/focus/pressed/selection state colours and the
+  // composite control helpers; the standalone host answers them from its own
+  // shell.toml, which is what makes Follow Omarchy the same code on both hosts.
+  readonly property real normalFillAlpha: controlNumber("normal-fill-alpha", 0.04)
+  readonly property real hoverFillAlpha: controlNumber("hover-cursor-fill-alpha", 0.08)
+  readonly property real selectedFillAlpha: controlNumber("selected-fill-alpha", 0.18)
+  readonly property real pressedFillAlpha: controlNumber("pressed-fill-alpha", 0.22)
+  readonly property real focusFillAlpha: controlNumber("focus-fill-alpha", hoverFillAlpha)
+  readonly property real selectionFillAlpha: controlNumber("selection-fill-alpha", 0.35)
+  readonly property real normalBorderAlpha: controlNumber("normal-border-alpha", 0.4)
+  readonly property real hoverBorderAlpha: controlNumber("hover-cursor-border-alpha", 0.25)
+  readonly property real selectedBorderAlpha: controlNumber("selected-border-alpha", 1)
+  readonly property real focusBorderAlpha: controlNumber("focus-border-alpha", hoverBorderAlpha)
+
+  function normalStateColor(foreground, accent) { return stateColor("normal", foreground, accent, foreground) }
+  function hoverStateColor(foreground, accent) { return stateColor("hover-cursor", foreground, accent, foreground) }
+  function focusStateColor(foreground, accent) { return stateColor("focus", foreground, accent, hoverStateColor(foreground, accent)) }
+  function pressedStateColor(foreground, accent) { return stateColor("pressed", foreground, accent, hoverStateColor(foreground, accent)) }
+  function selectionStateColor(foreground, accent) { return stateColor("selection", foreground, accent, foreground) }
+
+  function controlFill(focused, hot, foreground, accent) {
+    if (focused) return focusFillFor(foreground, accent)
+    if (hot) return hoverFillFor(foreground, accent)
+    return normalFillFor(foreground, accent)
+  }
+  function controlBorder(focused, hot, foreground, accent) {
+    if (focused) return focusBorderFor(foreground, accent)
+    if (hot) return hoverBorderFor(foreground, accent)
+    return normalBorderFor(foreground, accent)
+  }
+  function controlBorderWidth(focused, hot) {
+    if (focused) return focusBorderWidth
+    if (hot) return hoverBorderWidth
+    return normalBorderWidth
+  }
+  function controlHasWidth(state) {
+    if (state === "selected") return selectedBorderWidth > 0
+    if (state === "hover" || state === "hover-cursor") return hoverBorderWidth > 0
+    if (state === "focus") return focusBorderWidth > 0
+    return normalBorderWidth > 0
+  }
 }

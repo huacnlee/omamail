@@ -4,6 +4,8 @@ import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
 import "../providers/Registry.js" as Provider
+import "../theme"
+import "../kit"
 
 // The left column: the mailboxes this account's provider has, then whatever
 // labels or folders the server reported, A to Z.
@@ -212,8 +214,8 @@ Item {
     implicitHeight: Style.space(28)
     radius: Style.cornerRadius
     color: entry.selected
-      ? Style.selectedFillFor(root.textColor, root.accentColor)
-      : (hover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+      ? Paint.selectedFillFor(root.textColor, root.accentColor)
+      : (hover.hovered ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent")
 
     ActionIcon {
       id: glyph
@@ -268,7 +270,7 @@ Item {
       // This names a shortcut; it is not another selected state layered over
       // the selected mailbox row. The lighter normal fill stays legible on
       // dark themes without becoming a stack of grey tabs on Lupine.
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      color: Paint.normalFillFor(root.textColor, root.accentColor)
 
       Text {
         anchors.centerIn: parent

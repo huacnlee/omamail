@@ -1,6 +1,8 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../theme"
+import "../kit"
 
 // Gmail's own operator syntax goes straight through — `from:`, `has:attachment`,
 // `older_than:7d`. Translating it would only take away what people already know.
@@ -70,8 +72,8 @@ Item {
     background: Rectangle {
       radius: Style.cornerRadius
       color: field.activeFocus || field.hovered
-        ? Style.hoverFillFor(root.textColor, root.accentColor)
-        : Style.normalFillFor(root.textColor, root.accentColor)
+        ? Paint.hoverFillFor(root.textColor, root.accentColor)
+        : Paint.normalFillFor(root.textColor, root.accentColor)
       border.width: 1
       // A divider's weight, not a control's. The kit's control border is what
       // made this the loudest thing in a row of dim icons; the rail's edge is
@@ -79,7 +81,7 @@ Item {
       // itself, which is what a field nobody uses on most visits should be.
       // Focus still gets the real border, because then it is saying something.
       border.color: field.activeFocus
-        ? Style.hoverBorderFor(root.textColor, root.accentColor)
+        ? Paint.hoverBorderFor(root.textColor, root.accentColor)
         : Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.12)
     }
   }

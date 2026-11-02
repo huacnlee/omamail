@@ -262,6 +262,8 @@ The same distinction applies to large feature systems. Dock's pure-data layout, 
 
 The visual exception is explicit. GPUI Component theme tokens, dimensions, cursor styling, animation curves, shadows, radii, and surface appearance do not transfer. Omarchy remains the visual authority.
 
+That authority is reached through one module rather than through the shell's singletons directly. `ui/theme/Paint.qml` is the window's colour authority: with Follow Omarchy selected it delegates to `Commons.Color`, `Style` and `Border` so the window is drawn by exactly the code it was drawn by before, and with a theme selected it resolves the same roles from that theme's `colors.toml`. `ui/theme/Themes.js` holds the rules as pure functions — name validation, theme-directory ordering, TOML parsing, palette fallback — so they are testable without a window, and `ui/theme/ThemeCatalog.qml` lists installed themes with the user's directory taking precedence over the installed one. Geometry, typography, spacing, alpha and border widths are never taken from a picked theme: they stay live from `Style`, so a per-app theme can change colour and nothing else. `ui/kit` wraps the shell controls whose internal state colours come from tokens the shell rendered with the desktop's theme baked in.
+
 ## Commit design
 
 Commits should preserve the reasoning that makes an architectural choice safe to change later. The best history in both Omamail and GPUI Component follows a consistent structure.

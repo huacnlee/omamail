@@ -3,6 +3,8 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../compose/Recipients.js" as Recipients
+import "../theme"
+import "../kit"
 
 Item {
   id: root
@@ -155,7 +157,7 @@ Item {
           implicitHeight: Style.space(44)
           radius: Style.cornerRadius
           color: contactHover.hovered
-            ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+            ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent"
 
           Rectangle {
             id: avatar
@@ -165,7 +167,7 @@ Item {
             width: Style.space(26)
             height: width
             radius: width / 2
-            color: Style.selectedFillFor(root.textColor, root.accentColor)
+            color: Paint.selectedFillFor(root.textColor, root.accentColor)
 
             Text {
               anchors.centerIn: parent

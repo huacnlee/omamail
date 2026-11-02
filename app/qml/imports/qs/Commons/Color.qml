@@ -81,6 +81,16 @@ QtObject {
         ? 1 : root.shellTheme.popups["border-alpha"])
   }
 
+  // The shell's Color exposes a tooltip surface too; a shared UI file that
+  // passes a tooltip colour would otherwise read undefined here.
+  readonly property QtObject tooltip: QtObject {
+    readonly property color background: root.withAlpha(
+      root.shellColor(root.shellTheme.popups.text, root.background), 0.97)
+    readonly property color text: root.shellColor(root.shellTheme.popups.text, root.foreground)
+    readonly property color border: root.withAlpha(
+      root.shellColor(root.shellTheme.popups.border, root.border), 1)
+  }
+
   function updateWatches(store, paths) {
     var i
     if (watchedStore && typeof watchedStore.watch === "function") {

@@ -5,6 +5,8 @@ import "../calendar/Sources.js" as Sources
 import "../calendar/Invitations.js" as Invitations
 import "../providers/Registry.js" as Provider
 import "../backend/Plain.js" as Plain
+import "../theme"
+import "../kit"
 
 Column {
   id: root
@@ -167,7 +169,7 @@ Column {
     width: parent ? parent.width : 0
     implicitHeight: Math.max(settingText.implicitHeight, rowControls.implicitHeight) + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     Column {
       id: settingText
       anchors.left: parent.left
@@ -225,7 +227,7 @@ Column {
       width: parent.width
       implicitHeight: Math.max(calendarText.implicitHeight, calendarActions.implicitHeight) + Style.space(16)
       radius: Style.cornerRadius
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      color: Paint.normalFillFor(root.textColor, root.accentColor)
 
       Button {
         id: colorButton
@@ -240,7 +242,7 @@ Column {
         horizontalPadding: 0
         verticalPadding: 0
         background: "transparent"
-        selected: root.colorEditingId === String(calendarRow.source.id)
+        chosen: root.colorEditingId === String(calendarRow.source.id)
         foreground: root.textColor
         accent: root.accentColor
         tooltipText: "Change calendar color"
@@ -364,7 +366,7 @@ Column {
           height: width
           horizontalPadding: 0
           verticalPadding: 0
-          selected: String(modelData) === String(calendarRow.source.colorKey || "")
+          chosen: String(modelData) === String(calendarRow.source.colorKey || "")
           foreground: root.textColor
           accent: root.accentColor
           tooltipText: "Use " + modelData

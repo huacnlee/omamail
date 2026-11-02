@@ -6,6 +6,8 @@ import "../message/Direction.js" as Direction
 import "../settings/Appearance.js" as Appearance
 import "../message/Html.js" as Html
 import "../account/Accounts.js" as Accounts
+import "../theme"
+import "../kit"
 
 // Where mailboxes are managed.
 //
@@ -45,6 +47,8 @@ Column {
   // is a component with its own heading, so its top stands in.
   readonly property var sections: {
     var values = [{ key: "backend", title: "Mail backend", y: backendSetup.y }]
+    if (root.service && root.service.hasAppTheme === true)
+      values.push({ key: "appTheme", title: "Appearance", y: appThemeHeading.y })
     if (!root.service || root.service.hasTray !== false)
       values.push({ key: "bar", title: "Bar", y: barHeading.y })
     if (root.service && root.service.hasMailto === true)
@@ -270,8 +274,20 @@ Column {
     if (visible && service && typeof service.refreshDefaultMailClient === "function")
       service.refreshDefaultMailClient()
   }
-  onServiceChanged: refreshDefaultMailClient()
-  onVisibleChanged: refreshDefaultMailClient()
+  // The installed themes can change from a terminal while the window is open,
+  // and the list is what the picker offers, so ask whenever the page comes
+  // into view.
+  function refreshThemes() {
+    if (visible && service && typeof service.refreshThemes === "function") service.refreshThemes()
+  }
+  onServiceChanged: {
+    refreshDefaultMailClient()
+    refreshThemes()
+  }
+  onVisibleChanged: {
+    refreshDefaultMailClient()
+    refreshThemes()
+  }
   Component.onCompleted: {
     refreshDefaultMailClient()
     renderSignaturePreview()
@@ -304,10 +320,84 @@ Column {
     font.bold: true
   }
 
+  // ----------------------------------------------------- theme (plugin)
+  //
+  // The plugin window's colours are the shell's, so it chooses an Omarchy theme
+  // of its own instead: Follow Omarchy, or any theme installed on the machine.
+  // The desktop itself is never changed. The standalone window has no Omarchy
+  // theme to offer and keeps its System/Light/Dark choice below.
+
+  readonly property bool showsAppTheme: !!root.service && root.service.hasAppTheme === true
+
+  Text {
+    id: appThemeHeading
+    visible: root.showsAppTheme
+    text: "APPEARANCE"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    objectName: "app-theme-settings"
+    visible: root.showsAppTheme
+    width: parent.width
+    implicitHeight: Math.max(appThemeText.implicitHeight, appThemePicker.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: appThemeText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: appThemePicker.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Theme"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Follow Omarchy draws this window in the desktop's theme. Any other choice recolours this window only."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+    }
+
+    Dropdown {
+      id: appThemePicker
+      objectName: "app-theme-picker"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(220)
+      showLabel: false
+      value: root.service ? root.service.appTheme : ""
+      options: root.service ? root.service.themeOptions : []
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) { if (root.service) root.service.setAppTheme(next) }
+    }
+  }
+
   // ------------------------------------------------------------ appearance
   //
-  // Standalone only. The plugin's palette is the shell's, and the row would
-  // have nothing to change.
+  // Standalone only: the plugin window picks an Omarchy theme of its own in the
+  // row above, and this one would have nothing to change.
 
   Text {
     id: appearanceHeading
@@ -326,7 +416,7 @@ Column {
     implicitHeight: Math.max(appearanceText.implicitHeight, appearanceTrack.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: appearanceText
@@ -366,7 +456,7 @@ Column {
       radius: Style.cornerRadius
       color: "transparent"
       border.width: 1
-      border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+      border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
 
       Row {
         id: appearanceSegments
@@ -398,7 +488,7 @@ Column {
     implicitHeight: Math.max(barIconText.implicitHeight, barIconSwitch.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: barIconText
@@ -483,7 +573,7 @@ Column {
     implicitHeight: Math.max(mailClientText.implicitHeight, mailClientButton.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     readonly property bool isDefault: !!root.service
       && root.service.defaultMailClient === "default"
@@ -565,7 +655,7 @@ Column {
     implicitHeight: Math.max(imagesText.implicitHeight, imagesSwitch.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: imagesText
@@ -616,7 +706,7 @@ Column {
     implicitHeight: Math.max(heavyText.implicitHeight, heavySwitch.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: heavyText
@@ -663,7 +753,7 @@ Column {
     implicitHeight: Math.max(directionText.implicitHeight, directionTrack.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: directionText
@@ -708,7 +798,7 @@ Column {
       radius: Style.cornerRadius
       color: "transparent"
       border.width: 1
-      border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+      border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
 
       Row {
         id: directionSegments
@@ -747,7 +837,7 @@ Column {
     implicitHeight: Math.max(suggestText.implicitHeight, suggestSwitch.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: suggestText
@@ -840,7 +930,7 @@ Column {
     implicitHeight: Math.max(notifyText.implicitHeight, notifySwitch.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: notifyText
@@ -910,7 +1000,7 @@ Column {
     implicitHeight: Math.max(undoText.implicitHeight, undoSeconds.implicitHeight)
       + Style.space(16)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
 
     Column {
       id: undoText
@@ -997,7 +1087,7 @@ Column {
       implicitHeight: Math.max(signatureEdit.implicitHeight, Style.space(56))
         + Style.space(20)
       radius: Style.cornerRadius
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      color: Paint.normalFillFor(root.textColor, root.accentColor)
 
       // The padding is part of the field visually, so it is part of its click
       // target too. Kept behind the editor so clicks on text still place the
@@ -1017,7 +1107,7 @@ Column {
         wrapMode: TextEdit.Wrap
         textFormat: TextEdit.PlainText
         color: root.textColor
-        selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+        selectionColor: Paint.selectionFillFor(root.textColor, root.accentColor)
         selectedTextColor: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
@@ -1093,7 +1183,7 @@ Column {
       visible: root.selectedSignatureHtml !== ""
       implicitHeight: Math.min(Style.space(220), signaturePreview.implicitHeight + Style.space(20))
       radius: Style.cornerRadius
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      color: Paint.normalFillFor(root.textColor, root.accentColor)
       clip: true
 
       TextEdit {
@@ -1289,7 +1379,7 @@ Column {
         // signature section names the mailbox it signs — and the row answers
         // no click, so marking it borrowed the switcher's "you are here, click
         // another" fill for a row that switches nothing.
-        color: Style.normalFillFor(root.textColor, root.accentColor)
+        color: Paint.normalFillFor(root.textColor, root.accentColor)
 
         Column {
           id: rowText
@@ -1478,9 +1568,9 @@ Column {
     required property string mode
     property bool firstSegment: false
     objectName: "appearance-" + mode.toLowerCase()
-    selected: !!root.service && root.service.appearance === mode
+    chosen: !!root.service && root.service.appearance === mode
     bordered: false
-    foreground: selected ? root.textColor : root.dimColor
+    foreground: chosen ? root.textColor : root.dimColor
     accent: root.accentColor
     fontFamily: root.panelFontFamily
     fontSize: Style.font.caption
@@ -1500,9 +1590,9 @@ Column {
   component DirectionButton: Button {
     required property string mode
     property bool firstSegment: false
-    selected: !!root.service && root.service.contentDirection === mode
+    chosen: !!root.service && root.service.contentDirection === mode
     bordered: false
-    foreground: selected ? root.textColor : root.dimColor
+    foreground: chosen ? root.textColor : root.dimColor
     accent: root.accentColor
     fontFamily: root.panelFontFamily
     fontSize: Style.font.caption

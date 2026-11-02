@@ -170,6 +170,9 @@ BarWidget {
           iconSize: Style.space(12)
           color: button.glyphColor
           markColor: Commons.Color.accent
+          // The bar is the desktop's surface, so its dot stays the desktop's
+          // accent even when the window is drawn in a theme of its own.
+          badgeColor: Commons.Color.urgent
           // The dot is simply whether unread mail is waiting. It used to mean
           // "something arrived since you last looked", which was a different
           // question from the one anyone asks of a mail icon, and it could not

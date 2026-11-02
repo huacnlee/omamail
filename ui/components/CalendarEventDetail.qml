@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Ui
 import "../calendar/Calendar.js" as Calendar
 import "../message/Html.js" as Html
+import "../theme"
 
 Rectangle {
   id: root
@@ -79,7 +80,7 @@ Rectangle {
     readOnly: true
     selectByMouse: true
     textFormat: TextEdit.PlainText
-    selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+    selectionColor: Paint.selectionFillFor(root.textColor, root.accentColor)
     selectedTextColor: color
   }
 

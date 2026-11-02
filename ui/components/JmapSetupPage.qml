@@ -3,6 +3,8 @@ import qs.Commons
 import qs.Ui
 import "../providers/JmapProtocol.js" as Jmap
 import "../account/Accounts.js" as Accounts
+import "../theme"
+import "../kit"
 
 // Connecting a mailbox on a server that speaks JMAP: an address, a secret, and
 // — only if the address does not lead anywhere — the server.
@@ -182,9 +184,9 @@ Column {
     visible: root.toolsMissing
     implicitHeight: missingText.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: missingText
@@ -238,9 +240,9 @@ Column {
       width: parent.width
       implicitHeight: noteText.implicitHeight + Style.space(20)
       radius: Style.cornerRadius
-      color: Style.normalFillFor(root.textColor, root.accentColor)
+      color: Paint.normalFillFor(root.textColor, root.accentColor)
       border.width: 1
-      border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+      border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
       Text {
         id: noteText
@@ -416,9 +418,9 @@ Column {
     // The same surface every other note on this page draws on, with the
     // sentence in the danger colour rather than the box: colour alone never
     // carries state here, and the words are what says what happened.
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: rejectedText

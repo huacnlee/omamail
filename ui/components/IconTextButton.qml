@@ -2,6 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "../theme"
+import "../kit"
 
 // A bordered button carrying a drawn icon beside its label.
 //
@@ -15,8 +17,8 @@ Rectangle {
   property string iconName: ""
   property string text: ""
   property string tooltipText: ""
-  property color foreground: Commons.Color.foreground
-  property color accent: Commons.Color.accent
+  property color foreground: Paint.foreground
+  property color accent: Paint.accent
   property bool bordered: true
   // Reserve the normal border but leave the field clear until interaction.
   property bool outline: false
@@ -50,15 +52,15 @@ Rectangle {
     : Style.spacing.controlHeight
   radius: Style.cornerRadius
   opacity: enabled ? 1.0 : 0.4
-  color: mouse.pressed ? Style.pressedFillFor(root.foreground, root.accent)
-    : (root.selected ? Style.selectedFillFor(root.foreground, root.accent)
-      : (hot ? Style.hoverFillFor(root.foreground, root.accent)
+  color: mouse.pressed ? Paint.pressedFillFor(root.foreground, root.accent)
+    : (root.selected ? Paint.selectedFillFor(root.foreground, root.accent)
+      : (hot ? Paint.hoverFillFor(root.foreground, root.accent)
         : (bordered && !ghost && !outline
-          ? Style.normalFillFor(root.foreground, root.accent) : "transparent")))
+          ? Paint.normalFillFor(root.foreground, root.accent) : "transparent")))
   border.width: (ghost ? root.selected : (bordered || hot || root.selected)) ? Style.normalBorderWidth : 0
   border.color: hot || root.selected
-    ? Style.hoverBorderFor(root.foreground, root.accent)
-    : Style.normalBorderFor(root.foreground, root.accent)
+    ? Paint.hoverBorderFor(root.foreground, root.accent)
+    : Paint.normalBorderFor(root.foreground, root.accent)
 
   Row {
     id: row

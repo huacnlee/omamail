@@ -12,7 +12,7 @@ Omamail is a compact, keyboard-capable desktop mail client. It should feel like 
 - quiet enough for the message to remain primary;
 - explicit about state without depending on color alone;
 - predictable under keyboard, pointer, and window resizing;
-- native to the active Omarchy theme.
+- native to the active Omarchy theme, or to the theme chosen for the window.
 
 The screenshots in `preview.png` express the visual baseline: a narrow mailbox rail, a dense list, a generous reader, monospace typography, restrained rules, and controls that appear where their actions belong.
 
@@ -27,6 +27,16 @@ All visual tokens come from the active Omarchy theme:
 - normal, hovered, pressed, and selected fills.
 
 Semantic colors originate in `App.qml` and travel through required component properties. Muted text mixes foreground toward background. Derived fills use the shared `Style` helpers or alpha from an inherited semantic color.
+
+## A theme for this window alone
+
+The desktop's theme is the default and Follow Omarchy the default choice, but a window may be drawn in any theme installed on the machine. That is a convenience for one purpose: reading mail in a light room, or in a higher-contrast theme than the desktop is set to, without changing the desktop, the bar, or any other window. Omamail is still the shell's client; it is not offering a second desktop.
+
+Only colours are chosen. Font, spacing, corner radius, border widths, alpha and every other measurement stay the live shell's, so a window drawn in another theme still fits the desktop's grid and responds to the shell's scale — and a theme that changes one role cannot change the layout. A theme that states no urgent colour, or writes an older file without selection, is answered with the nearest role rather than with a missing colour.
+
+One authority draws the window. `ui/theme/Paint.qml` resolves every colour the app paints, from the desktop's own singletons when Follow Omarchy is selected and from the picked theme's file otherwise. Nothing in the window reads `Commons.Color`, `Style`'s state helpers, or `Border.controlSpec` directly, because the shell renders those from the desktop's theme and they ignore the colour they are handed — a window that asked them for a light theme's foreground would be given the dark desktop's near-white and paint it on white. The bar widget, its popup and desktop notifications are the desktop's own surfaces and keep the desktop's palette, including the unread dot.
+
+Choosing a theme is not a restart: every binding above the choice reads `Paint`, so a window redraws when it changes. An unreadable, missing or malformed choice falls back to Follow Omarchy rather than failing to open, and the settings file's value is treated as a path segment and validated before it is used as one.
 
 Do not import GPUI Component colors, shadows, radii, typography, sidebar width, or control decoration. A GPUI example may demonstrate an interaction contract; its pixels are not a design token for this application.
 

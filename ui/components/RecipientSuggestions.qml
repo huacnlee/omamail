@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import "../theme"
 
 Rectangle {
   id: root
@@ -65,9 +66,9 @@ Rectangle {
       height: Style.space(40)
       radius: Style.cornerRadius
       color: root.currentIndex === suggestion.index
-        ? Style.selectedFillFor(root.textColor, root.accentColor)
+        ? Paint.selectedFillFor(root.textColor, root.accentColor)
         : (suggestionHover.hovered
-          ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+          ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent")
 
       Column {
         anchors.left: parent.left

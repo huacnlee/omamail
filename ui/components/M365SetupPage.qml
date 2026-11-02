@@ -3,6 +3,8 @@ import qs.Commons
 import qs.Ui
 import "../providers/M365Protocol.js" as M365
 import "../account/Accounts.js" as Accounts
+import "../theme"
+import "../kit"
 
 // A work or school mailbox on Microsoft 365: an address, the Application (client)
 // ID of an app registered once in Microsoft Entra, and one code.
@@ -110,9 +112,9 @@ Column {
     visible: root.backendProblem !== "" && !root.signedIn
     implicitHeight: missingText.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Text {
       id: missingText
@@ -271,9 +273,9 @@ Column {
     visible: root.busy && !!root.auth && root.auth.userCode !== ""
     implicitHeight: deviceColumn.implicitHeight + Style.space(20)
     radius: Style.cornerRadius
-    color: Style.normalFillFor(root.textColor, root.accentColor)
+    color: Paint.normalFillFor(root.textColor, root.accentColor)
     border.width: 1
-    border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+    border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
     Column {
       id: deviceColumn

@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../theme"
 
 // The rail beside the settings page: its section names, one highlighted.
 //
@@ -42,8 +43,8 @@ Column {
       implicitHeight: Style.space(28)
       radius: Style.cornerRadius
       color: entry.selected
-        ? Style.selectedFillFor(root.textColor, root.accentColor)
-        : (hover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+        ? Paint.selectedFillFor(root.textColor, root.accentColor)
+        : (hover.hovered ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent")
 
       Text {
         anchors.left: parent.left

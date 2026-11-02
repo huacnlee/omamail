@@ -7,6 +7,8 @@ import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
 import "../account/Model.js" as Model
+import "../theme"
+import "../kit"
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -739,7 +741,7 @@ Item {
                 direction: root.bodyDirection
               }), root.bodySource === "html"))
       color: root.textColor
-      selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
+      selectionColor: Paint.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
       // Body text, where the chrome around it is bodySmall: this is the one
@@ -842,7 +844,7 @@ Item {
       fontSize: Style.font.caption
       horizontalPadding: Style.space(6)
       verticalPadding: Style.space(3)
-      selected: root.attachmentsExpanded
+      chosen: root.attachmentsExpanded
       onClicked: root.attachmentsExpanded = !root.attachmentsExpanded
     }
 
@@ -1064,7 +1066,7 @@ Item {
           radius: Style.cornerRadius
           color: "transparent"
           border.width: 1
-          border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+          border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
 
           Row {
             id: modeSegments

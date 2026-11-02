@@ -11,4 +11,5 @@ Item {
   property color foreground: "transparent"
   property color accent: "transparent"
   signal toggled()
+  signal hovered(bool isHovered)
 }

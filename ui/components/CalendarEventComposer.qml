@@ -6,6 +6,8 @@ import qs.Ui
 import "../calendar/Calendar.js" as Calendar
 import "../compose/Recipients.js" as Recipients
 import "../backend/Plain.js" as Plain
+import "../theme"
+import "../kit"
 
 Rectangle {
   id: root
@@ -189,10 +191,10 @@ Rectangle {
       iconSize: Style.font.iconSmall
     }
     background: Rectangle {
-      color: option.popup.opened ? Style.selectedFillFor(root.textColor, root.accentColor)
-        : Style.normalFillFor(root.textColor, root.accentColor)
+      color: option.popup.opened ? Paint.selectedFillFor(root.textColor, root.accentColor)
+        : Paint.normalFillFor(root.textColor, root.accentColor)
       border.width: Style.normalBorderWidth
-      border.color: option.popup.opened ? root.accentColor : Style.normalBorderFor(root.textColor, root.accentColor)
+      border.color: option.popup.opened ? root.accentColor : Paint.normalBorderFor(root.textColor, root.accentColor)
       radius: Style.cornerRadius
     }
     delegate: QQC.ItemDelegate {
@@ -212,7 +214,7 @@ Rectangle {
         elide: Text.ElideRight
       }
       background: Rectangle {
-        color: optionRow.highlighted ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+        color: optionRow.highlighted ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent"
       }
     }
     popup: QQC.Popup {
@@ -239,7 +241,7 @@ Rectangle {
       }
       background: Rectangle {
         color: root.backgroundColor
-        border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+        border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
         border.width: Style.normalBorderWidth
         radius: Style.cornerRadius
       }
@@ -633,11 +635,11 @@ Rectangle {
           iconSize: Style.font.iconSmall
         }
         background: Rectangle {
-          color: calendarSelector.popup.opened ? Style.selectedFillFor(root.textColor, root.accentColor)
-            : calendarSelector.hovered ? Style.hoverFillFor(root.textColor, root.accentColor)
-            : Style.normalFillFor(root.textColor, root.accentColor)
+          color: calendarSelector.popup.opened ? Paint.selectedFillFor(root.textColor, root.accentColor)
+            : calendarSelector.hovered ? Paint.hoverFillFor(root.textColor, root.accentColor)
+            : Paint.normalFillFor(root.textColor, root.accentColor)
           border.width: Style.normalBorderWidth
-          border.color: calendarSelector.popup.opened ? root.accentColor : Style.normalBorderFor(root.textColor, root.accentColor)
+          border.color: calendarSelector.popup.opened ? root.accentColor : Paint.normalBorderFor(root.textColor, root.accentColor)
           radius: Style.cornerRadius
         }
         delegate: QQC.ItemDelegate {
@@ -691,7 +693,7 @@ Rectangle {
             }
           }
           background: Rectangle {
-            color: calendarOption.highlighted ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+            color: calendarOption.highlighted ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent"
             radius: Style.cornerRadius
           }
         }
@@ -721,7 +723,7 @@ Rectangle {
           background: Rectangle {
             color: root.backgroundColor
             border.width: Style.normalBorderWidth
-            border.color: Style.normalBorderFor(root.textColor, root.accentColor)
+            border.color: Paint.normalBorderFor(root.textColor, root.accentColor)
             radius: Style.cornerRadius
           }
         }
@@ -770,10 +772,10 @@ Rectangle {
           onCursorRectangleChanged: Qt.callLater(root.revealDescriptionCursor)
           onHeightChanged: Qt.callLater(root.revealDescriptionCursor)
           background: Rectangle {
-            color: Style.normalFillFor(root.textColor, root.accentColor)
+            color: Paint.normalFillFor(root.textColor, root.accentColor)
             border.width: Style.normalBorderWidth
             border.color: notesField.activeFocus ? root.accentColor
-              : Style.normalBorderFor(root.textColor, root.accentColor)
+              : Paint.normalBorderFor(root.textColor, root.accentColor)
             radius: Style.cornerRadius
           }
         }
@@ -922,7 +924,7 @@ Rectangle {
           dimColor: root.dimColor
           accentColor: root.accentColor
           popupBackgroundColor: root.backgroundColor
-          popupBorderColor: Style.normalBorderFor(root.textColor, root.accentColor)
+          popupBorderColor: Paint.normalBorderFor(root.textColor, root.accentColor)
           panelFontFamily: root.panelFontFamily
           onChosen: function(contact) { root.acceptGuest(contact) }
         }

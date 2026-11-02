@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
 import "Menu.js" as Menu
+import "../theme"
 
 // Where a label goes: the top level, or under another label. The rows are
 // `Model.labelMoveTargets` — not the label itself, nothing beneath it, not
@@ -119,9 +120,9 @@ Item {
             implicitHeight: Style.spacing.popupRowHeight
             radius: Style.cornerRadius
             color: rowHover.hovered || hasCursor
-              ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+              ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent"
             border.width: hasCursor ? Style.normalBorderWidth : 0
-            border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+            border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
             ActionIcon {
               id: rowIcon

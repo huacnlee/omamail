@@ -1,0 +1,6 @@
+Button 1.0 Button.qml
+Dropdown 1.0 Dropdown.qml
+NumberField 1.0 NumberField.qml
+PanelToolTip 1.0 PanelToolTip.qml
+TextField 1.0 TextField.qml
+ToggleSwitch 1.0 ToggleSwitch.qml

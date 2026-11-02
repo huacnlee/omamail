@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../keys/Keymap.js" as Keymap
+import "../theme"
 
 // What the keyboard offers from wherever you are standing.
 //
@@ -39,7 +40,7 @@ Row {
         radius: Style.cornerRadius
         // Fill only. An outline as well made these read as buttons you could
         // press, which drew far more attention than a hint deserves.
-        color: Style.normalFillFor(root.textColor, root.accentColor)
+        color: Paint.normalFillFor(root.textColor, root.accentColor)
 
         Text {
           id: cap

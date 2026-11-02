@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "../theme"
 
 // The mark, drawn rather than rasterised from an SVG: the bar slot is about
 // 16px and Qt's SVG renderer smears strokes at that size.
@@ -13,9 +14,9 @@ Item {
   id: root
 
   property real iconSize: Style.font.icon
-  property color color: Commons.Color.foreground
+  property color color: Paint.foreground
   property color markColor: color
-  property color badgeColor: Commons.Color.urgent
+  property color badgeColor: Paint.urgent
   // A dot, not a count: the bar says "something arrived", the tooltip says
   // how much, and the window says what.
   property bool dot: false
@@ -103,6 +104,6 @@ Item {
     anchors.rightMargin: -parent.width * 0.06
     anchors.top: parent.top
     anchors.topMargin: -parent.height * 0.04
-    borderSpec: Border.flat(Commons.Color.popups.background, 1)
+    borderSpec: Border.flat(Paint.popupBackground, 1)
   }
 }

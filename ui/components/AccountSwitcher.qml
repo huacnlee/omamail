@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
 import "Menu.js" as Menu
+import "../theme"
 
 // The list of mailboxes, opened from the user bar.
 //
@@ -203,11 +204,11 @@ Item {
         implicitHeight: visible ? Style.space(40) : 0
         radius: Style.cornerRadius
         color: root.unifiedActive
-          ? Style.selectedFillFor(root.textColor, root.accentColor)
+          ? Paint.selectedFillFor(root.textColor, root.accentColor)
           : (unifiedHover.hovered || hasCursor
-            ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+            ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent")
         border.width: hasCursor ? Style.normalBorderWidth : 0
-        border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+        border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
         Rectangle {
           id: unifiedAvatar
@@ -217,7 +218,7 @@ Item {
           width: Style.space(22)
           height: width
           radius: width / 2
-          color: Style.selectedFillFor(root.textColor, root.accentColor)
+          color: Paint.selectedFillFor(root.textColor, root.accentColor)
 
           // Not a letter: this row stands for no address, and an initial
           // taken from one of them would claim it belonged to that mailbox.
@@ -315,14 +316,14 @@ Item {
           implicitHeight: Style.space(40)
           radius: Style.cornerRadius
           color: row.inUse
-            ? Style.selectedFillFor(root.textColor, root.accentColor)
+            ? Paint.selectedFillFor(root.textColor, root.accentColor)
             : (rowHover.hovered || hasCursor
-              ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
+              ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent")
           // A border rather than a third fill: the mailbox you are in already
           // owns the selected one, and the keyboard has to be visible standing
           // on that row too.
           border.width: hasCursor ? Style.normalBorderWidth : 0
-          border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+          border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
           Rectangle {
             id: rowAvatar
@@ -332,7 +333,7 @@ Item {
             width: Style.space(22)
             height: width
             radius: width / 2
-            color: Style.selectedFillFor(root.textColor, root.accentColor)
+            color: Paint.selectedFillFor(root.textColor, root.accentColor)
 
             Text {
               anchors.centerIn: parent

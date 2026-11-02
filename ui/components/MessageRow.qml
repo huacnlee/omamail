@@ -4,6 +4,8 @@ import qs.Ui
 import "../message/Direction.js" as Direction
 import "../account/Model.js" as Model
 import "../keys/Keymap.js" as Keymap
+import "../theme"
+import "../kit"
 
 // One message in the list. Unread is carried by weight and by the dot on the
 // left, never by colour alone — the accent is a theme value that some themes
@@ -105,8 +107,8 @@ Rectangle {
   radius: Style.cornerRadius
   // The checkbox identifies bulk selection independently of the reader fill.
   color: selected || hasCursor || checked
-    ? Style.selectedFillFor(textColor, accentColor)
-    : (hot ? Style.hoverFillFor(textColor, accentColor) : "transparent")
+    ? Paint.selectedFillFor(textColor, accentColor)
+    : (hot ? Paint.hoverFillFor(textColor, accentColor) : "transparent")
 
   MouseArea {
     id: mouse
@@ -349,13 +351,13 @@ Rectangle {
         width: Style.space(12)
         height: width
         radius: 0
-        color: checkMouse.pressed ? Style.pressedFillFor(root.textColor, root.accentColor)
-          : (root.checked ? Style.selectedFillFor(root.textColor, root.accentColor)
-            : (checkMouse.containsMouse ? Style.hoverFillFor(root.textColor, root.accentColor)
+        color: checkMouse.pressed ? Paint.pressedFillFor(root.textColor, root.accentColor)
+          : (root.checked ? Paint.selectedFillFor(root.textColor, root.accentColor)
+            : (checkMouse.containsMouse ? Paint.hoverFillFor(root.textColor, root.accentColor)
               : "transparent"))
         borderSpec: root.checked
-          ? Border.controlSpec("selected", root.textColor, root.accentColor)
-          : Border.controlSpec("normal", root.textColor, root.accentColor)
+          ? Paint.controlSpec("selected", root.textColor, root.accentColor)
+          : Paint.controlSpec("normal", root.textColor, root.accentColor)
 
         ActionIcon {
           anchors.centerIn: parent

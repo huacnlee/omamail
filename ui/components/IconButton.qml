@@ -2,6 +2,8 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "../theme"
+import "../kit"
 
 // A drawn icon on the kit's shared hover/cursor surface. qs.Ui's
 // PanelActionButton takes a font glyph, and this app's icons are Canvas paths,
@@ -11,9 +13,9 @@ Item {
 
   property string iconName: ""
   property string tooltipText: ""
-  property color foreground: Commons.Color.foreground
+  property color foreground: Paint.foreground
   property color hoverColor: foreground
-  property color accent: Commons.Color.accent
+  property color accent: Paint.accent
   property bool filled: false
   property bool hasCursor: false
   // Held down for as long as a menu this button opened is on screen. A trigger
@@ -69,9 +71,9 @@ Item {
     anchors.fill: parent
     anchors.margins: root.visualInset
     radius: Style.cornerRadius
-    color: mouse.pressed ? Style.pressedFillFor(root.foreground, root.accent)
-      : (root.selected ? Style.selectedFillFor(root.foreground, root.accent)
-        : (root.hot ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"))
+    color: mouse.pressed ? Paint.pressedFillFor(root.foreground, root.accent)
+      : (root.selected ? Paint.selectedFillFor(root.foreground, root.accent)
+        : (root.hot ? Paint.hoverFillFor(root.foreground, root.accent) : "transparent"))
   }
 
   ActionIcon {

@@ -76,6 +76,9 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/BackBar.qml \
 	ui/components/MouseBack.qml \
 	ui/components/SettingsPage.qml ui/components/AiSettings.qml \
+	ui/theme/Paint.qml ui/theme/ThemeCatalog.qml \
+	ui/kit/Button.qml ui/kit/TextField.qml ui/kit/Dropdown.qml \
+	ui/kit/ToggleSwitch.qml ui/kit/NumberField.qml ui/kit/PanelToolTip.qml \
 	ui/components/SettingsSidebar.qml \
 	ui/components/CalendarSettings.qml \
 	ui/components/CalendarEventComposer.qml \
@@ -166,7 +169,8 @@ test-js:
 	node ui/tests/test_html.js
 	node ui/tests/test_html_tables.js
 	node ui/tests/test_direction.js
-	node ui/tests/test_appearance.js
+		node ui/tests/test_appearance.js
+	node ui/tests/test_themes.js
 	node ui/tests/test_model.js
 	node ui/tests/test_icons.js
 	node ui/tests/test_navigation.js

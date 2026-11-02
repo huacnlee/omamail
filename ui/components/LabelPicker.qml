@@ -3,6 +3,8 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "../account/Model.js" as Model
+import "../theme"
+import "../kit"
 
 // Where a message goes when it leaves the inbox with somewhere to be.
 //
@@ -184,9 +186,9 @@ Item {
           implicitHeight: Style.space(34)
           radius: Style.cornerRadius
           color: labelRow.hasCursor || rowHover.hovered
-            ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+            ? Paint.hoverFillFor(root.textColor, root.accentColor) : "transparent"
           border.width: labelRow.hasCursor ? Style.normalBorderWidth : 0
-          border.color: Style.hoverBorderFor(root.textColor, root.accentColor)
+          border.color: Paint.hoverBorderFor(root.textColor, root.accentColor)
 
           // A child steps in under its parent, and is named by its own
           // leaf; a match to typed letters shows its whole path, flat.

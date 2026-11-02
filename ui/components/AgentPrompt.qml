@@ -5,6 +5,8 @@ import qs.Ui
 import "../agent/Agent.js" as Agent
 import "../agent" as AI
 import "../agent/ChatText.js" as ChatText
+import "../theme"
+import "../kit"
 
 // A contextual conversation. The system AI streams public output in the
 // background; applying a suggestion remains an explicit owner action.
@@ -494,7 +496,7 @@ FocusScope {
               Rectangle {
                 anchors.fill: parent
                 visible: parent.userMessage
-                color: Style.normalFillFor(root.textColor, root.accentColor)
+                color: Paint.normalFillFor(root.textColor, root.accentColor)
                 Rectangle {
                   anchors.fill: parent
                   color: Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.06)
@@ -548,7 +550,7 @@ FocusScope {
               Component.onCompleted: if (queue) queue.watchDelivery(sendId)
               width: parent.width
               height: proposalContent.implicitHeight + Style.space(24)
-              color: Style.normalFillFor(root.textColor, root.accentColor)
+              color: Paint.normalFillFor(root.textColor, root.accentColor)
               border.color: root.popupBorderColor
               radius: Style.space(6)
               Column {
@@ -886,7 +888,7 @@ FocusScope {
           font.family: root.panelFontFamily
           font.pixelSize: Style.font.bodySmall
         }
-        background: Rectangle { color: parent.hovered || (historyList.activeFocus && parent.index === historyList.currentIndex) ? Style.hoverFillFor(root.textColor, root.accentColor) : Style.normalFillFor(root.textColor, root.accentColor) }
+        background: Rectangle { color: parent.hovered || (historyList.activeFocus && parent.index === historyList.currentIndex) ? Paint.hoverFillFor(root.textColor, root.accentColor) : Paint.normalFillFor(root.textColor, root.accentColor) }
         onClicked: root.selectHistory(modelData.id)
       }
       Text {
@@ -929,7 +931,7 @@ FocusScope {
               font.pixelSize: Style.font.bodySmall
               elide: Text.ElideRight
             }
-            background: Rectangle { color: index === root.commandIndex ? Style.selectedFillFor(root.textColor, root.accentColor) : Style.normalFillFor(root.textColor, root.accentColor) }
+            background: Rectangle { color: index === root.commandIndex ? Paint.selectedFillFor(root.textColor, root.accentColor) : Paint.normalFillFor(root.textColor, root.accentColor) }
             onClicked: { field.text = modelData; root.submitCurrent() }
           }
         }
