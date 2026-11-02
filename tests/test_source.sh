@@ -67,7 +67,7 @@ for file in "${QML_FILES[@]}"; do
   case "$file" in
     theme/*|kit/*|bar/*|BarWidget.qml|tests/*) continue ;;
   esac
-  if grep -nE 'Commons\.Color\.|Style\.(normal|hover|selected|pressed|focus|selection)[A-Za-z]*For\(|Border\.controlSpec\(' "$file"; then
+  if grep -nE 'Commons\.Color\.|Style\.(normal|hover|selected|pressed|focus|selection)[A-Za-z]*(For|StateColor)\(|Style\.(normal|hover|selected|pressed|focus|selection)[A-Za-z]*Color\b|Border\.controlSpec\(' "$file"; then
     colour_offenders+=("$file")
   fi
 done

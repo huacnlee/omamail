@@ -364,7 +364,7 @@ Rectangle {
           visible: root.checked
           name: "check"
           iconSize: Math.round(checkBox.height * 0.85)
-          color: Style.selectedStateColor(root.textColor, root.accentColor)
+          color: Paint.selectedStateColor(root.textColor, root.accentColor)
         }
       }
 
