@@ -15,6 +15,8 @@ Item {
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: false
     property var verifyResult: ({ verified: true })
+    property bool holdVerify: false
+    property var verifyCallback: null
     property var discoveryCallback: null
     property var credentialWrites: []
     property var configWrites: []
@@ -26,6 +28,7 @@ Item {
         return
       }
       if (method === "calendar.verify") {
+        if (mailService.holdVerify) { mailService.verifyCallback = callback; return }
         callback(mailService.nextError ? null : mailService.verifyResult, mailService.nextError)
         return
       }
@@ -213,6 +216,8 @@ Item {
       mailService.backendCanDiscoverCalendars = true
       mailService.backendCanGoogleCalendars = false
       mailService.verifyResult = ({ verified: true })
+      mailService.holdVerify = false
+      mailService.verifyCallback = null
       mailService.discoveryCallback = null
       mailService.backend.ready = false
       mailService.backend.apiVersion = 10
@@ -637,6 +642,81 @@ Item {
       compare(savedSpy.count, 1)
       compare(savedSpy.signalArguments[0][0], false)
       compare(savedSpy.signalArguments[0][1], "The calendar server rejected that username or password")
+      compare(controller.savingSource, false)
+    }
+
+    // Cancel while the backend still holds the check. The answer arrives
+    // afterwards and must write nothing: a cancelled add that then saved
+    // would list a calendar and store a password the user withdrew.
+    function test_cancelling_a_held_check_prevents_the_add() {
+      mailService.backend.ready = true
+      mailService.holdVerify = true
+      controller.addCalDavCalendar(homeCalendar, "right-secret")
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.verify")
+      verify(mailService.verifyCallback !== null, "the check is held")
+      compare(controller.savingSource, true)
+      compare(controller.sourceCheckPending, true)
+      compare(controller.cancelSourceSave(), true)
+      compare(controller.savingSource, false)
+      compare(controller.sourceCheckPending, false)
+      compare(controller.sourceSecret, "", "the withdrawn password is not kept around")
+      compare(controller.sourceBeingSaved, null)
+      var late = mailService.verifyCallback
+      mailService.verifyCallback = null
+      late({ verified: true }, null)
+      compare(mailService.configWrites.length, 0, "the cancelled calendar is not written")
+      compare(mailService.credentialWrites.length, 0, "the withdrawn password is not stored")
+      compare(savedSpy.count, 0, "a cancelled check reports nothing")
+      compare(controller.sourceList.sources.length, 1)
+      compare(controller.savingSource, false)
+      // The next add is its own check, not the cancelled one.
+      mailService.holdVerify = false
+      controller.addCalDavCalendar(homeCalendar, "right-secret")
+      compare(mailService.requests.length, 2)
+      compare(mailService.configWrites.length, 1)
+      mailService.configCallback(true, "")
+      compare(mailService.credentialWrites.length, 1)
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], true)
+    }
+
+    function test_cancelling_a_held_check_keeps_the_saved_replacement_password() {
+      mailService.backend.ready = true
+      mailService.holdVerify = true
+      controller.updateCalendarPassword(controller.sourceList.sources[0], "new-secret")
+      compare(mailService.requests.length, 1)
+      verify(mailService.verifyCallback !== null, "the check is held")
+      compare(controller.cancelSourceSave(), true)
+      compare(controller.savingSource, false)
+      var late = mailService.verifyCallback
+      mailService.verifyCallback = null
+      late({ verified: true }, null)
+      compare(mailService.credentialWrites.length, 0, "the saved password is not overwritten")
+      compare(mailService.configWrites.length, 0)
+      compare(savedSpy.count, 0)
+      compare(controller.savingSource, false)
+    }
+
+    // Past the check there is nothing to cancel: the server accepted the
+    // password and the settings write is under way, so it finishes and the
+    // password follows it rather than leaving a calendar with no credential.
+    function test_an_accepted_check_is_not_cancelled_mid_write() {
+      mailService.backend.ready = true
+      compare(controller.cancelSourceSave(), false, "nothing out, nothing to cancel")
+      mailService.holdVerify = true
+      controller.addCalDavCalendar(homeCalendar, "right-secret")
+      var answer = mailService.verifyCallback
+      mailService.verifyCallback = null
+      answer({ verified: true }, null)
+      compare(mailService.configWrites.length, 1, "the calendar list write has started")
+      compare(controller.sourceCheckPending, false)
+      compare(controller.cancelSourceSave(), false)
+      compare(controller.savingSource, true, "the save is still finishing")
+      mailService.configCallback(true, "")
+      compare(mailService.credentialWrites.length, 1)
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], true)
       compare(controller.savingSource, false)
     }
 

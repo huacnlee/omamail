@@ -51,6 +51,11 @@ Item {
   property string sourceSaveNote: ""
   property var sourceBeingSaved: null
   property bool savingSource: false
+  // A password check still waiting on the backend. The serial names the check
+  // whose answer is still wanted; cancelling moves it on, so the answer to a
+  // cancelled check is dropped and writes nothing.
+  property int sourceCheckSerial: 0
+  property bool sourceCheckPending: false
   property bool discoveringCalendars: false
   property string discoveringAccountId: ""
   property string discoveryError: ""
@@ -775,16 +780,37 @@ Item {
       callback("", uncheckedNote)
       return
     }
+    var serial = ++sourceCheckSerial
+    sourceCheckPending = true
     service.backend.call("calendar.verify", {
       source: { kind: "caldav", url: String(source.url || ""), username: String(source.username || "") },
       password: secret
     }, function(result, error) {
+      // The editor cancelled while the backend held this; whatever the
+      // server said, the user withdrew the password.
+      if (serial !== root.sourceCheckSerial) return
+      root.sourceCheckPending = false
       if (error || !result || result.verified !== true) {
         callback(root.verificationFailure(error), "")
         return
       }
       callback("", "")
     })
+  }
+
+  // The editor's Cancel while a check is still out. Returns whether there was
+  // one to cancel: once the server has accepted the password the settings
+  // write is under way and finishes, and Cancel is not offered. Nothing is
+  // reported through calendarSaved; the editor that cancelled knows.
+  function cancelSourceSave() {
+    if (!sourceCheckPending) return false
+    sourceCheckSerial++
+    sourceCheckPending = false
+    savingSource = false
+    sourceSecret = ""
+    sourceSaveNote = ""
+    sourceBeingSaved = null
+    return true
   }
 
   // Known backend reasons only; the raw diagnostic is never displayed.
