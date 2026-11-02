@@ -61,9 +61,12 @@ Item {
   readonly property alias color: base.color
   readonly property var border: base.border
   readonly property var borderSpec: base.borderSpec
-  readonly property alias tooltipBackground: base.tooltipBackground
-  readonly property alias tooltipForeground: base.tooltipForeground
-  readonly property alias tooltipBorder: base.tooltipBorder
+  readonly property color tooltipBackground: base.tooltipBackground !== undefined
+    ? base.tooltipBackground : Commons.Color.tooltip.background
+  readonly property color tooltipForeground: base.tooltipForeground !== undefined
+    ? base.tooltipForeground : Commons.Color.tooltip.text
+  readonly property color tooltipBorder: base.tooltipBorder !== undefined
+    ? base.tooltipBorder : Commons.Color.tooltip.border
 
   // Geometry while themed, measured from the text that is actually drawn: the
   // base's own implicit size is measured from the label it is asked not to draw.
@@ -207,7 +210,7 @@ Item {
   Binding {
     target: base
     property: "tooltipBackground"
-    when: Paint.active
+    when: Paint.active && base.tooltipBackground !== undefined
     restoreMode: Binding.RestoreBindingOrValue
     value: Paint.tooltipBackground
   }
@@ -215,7 +218,7 @@ Item {
   Binding {
     target: base
     property: "tooltipForeground"
-    when: Paint.active
+    when: Paint.active && base.tooltipForeground !== undefined
     restoreMode: Binding.RestoreBindingOrValue
     value: Paint.tooltipText
   }
@@ -223,7 +226,7 @@ Item {
   Binding {
     target: base
     property: "tooltipBorder"
-    when: Paint.active
+    when: Paint.active && base.tooltipBorder !== undefined
     restoreMode: Binding.RestoreBindingOrValue
     value: Paint.tooltipBorder
   }

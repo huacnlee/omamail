@@ -10,8 +10,11 @@ import "Themes.js" as Themes
 // use. A theme name is untrusted — it comes from a settings file, and only a
 // plain path segment that names an installed theme is anything but Follow
 // Omarchy.
-QtObject {
+Item {
   id: root
+
+  // Nothing is drawn here: the object exists to hold the window's theme choice.
+  visible: false
 
   // The window's service: where the stored setting, the desktop's palette file
   // and the capability to pick a theme at all come from. Only the Omarchy
