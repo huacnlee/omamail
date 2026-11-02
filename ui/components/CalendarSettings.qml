@@ -384,7 +384,7 @@ Column {
             height: width
             radius: width / 2
             color: "transparent"
-            border.width: parent.selected ? Math.max(1, Style.normalBorderWidth) : 0
+            border.width: parent.chosen ? Math.max(1, Style.normalBorderWidth) : 0
             border.color: root.textColor
             Rectangle {
               objectName: "calendar-color-swatch-" + paletteOption.modelData
