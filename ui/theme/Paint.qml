@@ -293,20 +293,22 @@ QtObject {
   readonly property int focusBorderWidth: Style.focusBorderWidth
 
   // A border spec in the shape `Border.controlSpec` returns, which is what a
-  // BorderSurface renders. Widths come from Style in both modes; only the
-  // colour itself is ours.
+  // BorderSurface renders. The geometry and the state's live border alpha come
+  // from the shell's own spec — they are the user's shell-wide values — and
+  // only the colour itself is the theme's.
   function controlSpec(state, foreground, accent, urgent) {
     if (!active) return Border.controlSpec(state, foreground, accent, urgent)
     var name = state === "hover" || state === "hot" ? "hover" : String(state || "normal")
     var tokens = theme.controls[name] !== undefined ? theme.controls[name] : theme.controls.normal
     var colour = stateColor(tokens.border || tokens.color, foreground, accent, urgent, root.foreground)
-    var width = name === "focus" ? focusBorderWidth
-      : name === "hover" ? hoverBorderWidth
-      : name === "selected" ? selectedBorderWidth
-      : normalBorderWidth
+    var alpha = name === "focus" ? Style.focusBorderAlpha
+      : name === "hover" ? Style.hoverBorderAlpha
+      : name === "selected" ? Style.selectedBorderAlpha
+      : Style.normalBorderAlpha
+    var shell = Border.controlSpec(state, foreground, accent, urgent)
     return {
-      color: colour,
-      widths: { top: width, right: width, bottom: width, left: width },
+      color: Qt.alpha(colour, alpha),
+      widths: shell.widths,
       gradient: { colors: [], angle: 0, enabled: false },
     }
   }
