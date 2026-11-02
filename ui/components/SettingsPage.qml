@@ -47,7 +47,7 @@ Column {
   // is a component with its own heading, so its top stands in.
   readonly property var sections: {
     var values = [{ key: "backend", title: "Mail backend", y: backendSetup.y }]
-    if (root.service && root.service.theme.enabled === true)
+    if (root.service && root.appThemeChoice && root.appThemeChoice.enabled === true)
       values.push({ key: "appTheme", title: "Appearance", y: appThemeHeading.y })
     if (!root.service || root.service.hasTray !== false)
       values.push({ key: "bar", title: "Bar", y: barHeading.y })
@@ -327,7 +327,11 @@ Column {
   // The desktop itself is never changed. The standalone window has no Omarchy
   // theme to offer and keeps its System/Light/Dark choice below.
 
-  readonly property bool showsAppTheme: !!root.service && root.service.theme.enabled === true
+  // A host without a theme choice at all is a host whose service has none: the
+  // row is absent rather than empty.
+  readonly property var appThemeChoice: root.service && root.service.theme
+    ? root.service.theme : null
+  readonly property bool showsAppTheme: !!root.appThemeChoice && root.appThemeChoice.enabled === true
 
   Text {
     id: appThemeHeading
@@ -385,12 +389,12 @@ Column {
       anchors.verticalCenter: parent.verticalCenter
       width: Style.space(220)
       showLabel: false
-      value: root.service ? root.service.theme.selected : ""
-      options: root.service ? root.service.theme.options : []
+      value: root.appThemeChoice ? root.appThemeChoice.selected : ""
+      options: root.appThemeChoice ? root.appThemeChoice.options : []
       foreground: root.textColor
       accent: root.accentColor
       fontFamily: root.panelFontFamily
-      onChanged: function(next) { if (root.service) root.service.theme.choose(next) }
+      onChanged: function(next) { if (root.appThemeChoice) root.appThemeChoice.choose(next) }
     }
   }
 
