@@ -100,11 +100,15 @@ DropArea {
   // counts as an edit — it is one — so the signature is not placed over it.
   property string draftKey: newDraftKey()
   function newDraftKey() { return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) }
-  function currentFields() {
+  // `shared` hands out the live attachment entries (whose `data` can be
+  // megabytes of base64) instead of a private copy. Bindings re-evaluate on
+  // every keystroke, so they must take the shared form; only a request that
+  // actually leaves for the agent takes the copy.
+  function currentFields(shared) {
     return ({ to: toField.text, cc: ccField.text, bcc: bccField.text,
       subject: subjectField.text, body: Agent.replyOnly(bodyEdit.text, retainedReplyQuote()),
       from: fromEmail, accountId: accountId, draftId: sourceDraftId, draftKey: draftKey, replyMessageId: replyMessageId,
-      envelope: outgoingEnvelope() })
+      envelope: outgoingEnvelope(shared) })
   }
 
   property string agentParentJobId: ""
@@ -113,12 +117,17 @@ DropArea {
     if (mode !== "reply" && mode !== "replyAll") return ""
     return Agent.replyOnly(bodyEdit.text, bodyQuote) !== bodyEdit.text ? bodyQuote : ""
   }
-  function outgoingEnvelope() {
+  // Who the draft is, without its contents: enough to find its agent jobs.
+  function draftIdentity() {
+    return ({ from: fromEmail, accountId: accountId, draftId: sourceDraftId, draftKey: draftKey,
+      replyMessageId: replyMessageId, subject: subjectField.text })
+  }
+  function outgoingEnvelope(shared) {
     if (forwardAttachmentsLoading || forwardAttachmentError !== "" || attachmentHostPending || attachmentReadPending || attachJobs.length > 0) return null
     return {accountId: accountId, draftKey: draftKey, from: fromEmail,
       to: toField.text, cc: ccField.text, bcc: bccField.text, replyTo: replyToField.text,
       subject: subjectField.text, body: bodyEdit.text,
-      attachments: JSON.parse(JSON.stringify(allOutgoingAttachments())), draftId: sourceDraftId,
+      attachments: shared ? allOutgoingAttachments() : JSON.parse(JSON.stringify(allOutgoingAttachments())), draftId: sourceDraftId,
       threadId: mode === "forward" ? "" : threadId, inReplyTo: mode === "forward" ? "" : inReplyTo,
       replyMessageId: replyMessageId, replyQuote: retainedReplyQuote()}
   }
@@ -1651,7 +1660,7 @@ DropArea {
         onTextChanged: root.noteDraftChanged()
         onAccepted: bodyEdit.forceActiveFocus()
         Keys.priority: Keys.BeforeItem
-        Keys.onPressed: root.pasteKey(event)
+        Keys.onPressed: function(event) { root.pasteKey(event) }
       }
 
       PanelSeparator {
@@ -1908,7 +1917,7 @@ DropArea {
         }
       }
       Keys.priority: Keys.BeforeItem
-      Keys.onPressed: root.pasteKey(event)
+      Keys.onPressed: function(event) { root.pasteKey(event) }
     }
   }
 
