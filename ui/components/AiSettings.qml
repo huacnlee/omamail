@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../agent/Options.js" as Options
+import "../kit"
 
 Column {
   id: root

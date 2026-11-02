@@ -1704,7 +1704,7 @@ Item {
             }
             foreground: root.assistantOpen ? root.foreground : root.dim
             bordered: true
-            selected: root.assistantOpen
+            chosen: root.assistantOpen
             focusable: true
             accent: root.accent
             fontFamily: root.fontFamily

@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../kit"
 
 // The name recipients see beside this mailbox's address, asked for where the
 // mailbox is set up so its first message is not sent nameless. Only on the

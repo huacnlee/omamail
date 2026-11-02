@@ -1110,7 +1110,7 @@ Item {
     }
   }
 
-  // One of the three ways of reading a message. `selected` is the window's
+  // One of the three ways of reading a message. `chosen` is the window's
   // choice rather than what is on screen: a message too heavy to draw the
   // chosen way says so in its own notice, and a picker that quietly moved to
   // the mode it fell back to would leave nothing saying the choice still
@@ -1121,9 +1121,9 @@ Item {
     // Nothing to choose between where there is no markup: the text is then the
     // message rather than one reading of it.
     visible: root.hasHtml
-    selected: root.bodyMode === mode
+    chosen: root.bodyMode === mode
     bordered: false
-    foreground: selected ? root.textColor : root.dimColor
+    foreground: chosen ? root.textColor : root.dimColor
     accent: root.accentColor
     fontFamily: root.panelFontFamily
     fontSize: Style.font.caption

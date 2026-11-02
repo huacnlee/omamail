@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../kit"
 
 // The name a mailbox is listed by, asked for where the mailbox is set up
 // rather than only in the settings list afterwards. Optional: two mailboxes

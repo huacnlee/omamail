@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../kit"
 
 // One word or phrase inside a line of text that is a link out of the window.
 //

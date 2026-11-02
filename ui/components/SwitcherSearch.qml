@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../kit"
 
 // The line at the top of a switcher that typing goes into. Letters narrow
 // the rows to the ones they name; the arrows, or Ctrl with J, K, N or P,

@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Ui
 import "../providers/Registry.js" as Provider
 import "../account/Model.js" as Model
+import "../kit"
 
 // What a setup page opens with: the service's own mark, its name, and one line
 // saying what connecting it involves.

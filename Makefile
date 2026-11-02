@@ -169,7 +169,7 @@ test-js:
 	node ui/tests/test_html.js
 	node ui/tests/test_html_tables.js
 	node ui/tests/test_direction.js
-		node ui/tests/test_appearance.js
+	node ui/tests/test_appearance.js
 	node ui/tests/test_themes.js
 	node ui/tests/test_model.js
 	node ui/tests/test_icons.js

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
+import "../kit"
 
 // One name, asked for: a new label's, or a label's new one. A small modal
 // popup rather than a page, because the answer is a word and the place it

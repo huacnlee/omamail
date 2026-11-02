@@ -4,6 +4,7 @@ import qs.Ui
 import "../account/Model.js" as Model
 import "../account/Unified.js" as Unified
 import "../agent/Agent.js" as Agent
+import "../kit"
 
 // The message list. A Repeater in a Column rather than a ListView because the
 // panel already owns one Flickable and nesting a second scroller inside it

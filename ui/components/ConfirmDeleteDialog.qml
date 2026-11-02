@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
+import "../kit"
 
 // The one confirmation for destructive writes. A calendar event is gone for
 // good once the server says so, so it asks first: the opener names the target

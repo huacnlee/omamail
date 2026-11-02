@@ -3,6 +3,7 @@ import QtQuick.Controls as QQC
 import qs.Commons
 import qs.Ui
 import "Menu.js" as Menu
+import "../kit"
 
 // Links out, plus the handful of actions that have no natural home on screen.
 Item {
