@@ -979,11 +979,6 @@ oversized=$(cd ..
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
         (app/resources/macos/omamail.icns) ceiling=111809 ;;
-        # The service is the app's largest source file and grows with each
-        # feature it owns — the per-app theme choice is the latest. Source that
-        # a clone has to carry anyway is not the weight this rule exists for;
-        # its own ceiling keeps it from becoming a place to park assets.
-        (ui/Service.qml) ceiling=$((136 * 1024)) ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")

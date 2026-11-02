@@ -76,7 +76,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/BackBar.qml \
 	ui/components/MouseBack.qml \
 	ui/components/SettingsPage.qml ui/components/AiSettings.qml \
-	ui/theme/Paint.qml ui/theme/ThemeCatalog.qml \
+	ui/theme/Paint.qml ui/theme/ThemeCatalog.qml ui/theme/AppTheme.qml \
 	ui/kit/Button.qml ui/kit/TextField.qml ui/kit/Dropdown.qml \
 	ui/kit/ToggleSwitch.qml ui/kit/NumberField.qml ui/kit/PanelToolTip.qml \
 	ui/components/SettingsSidebar.qml \

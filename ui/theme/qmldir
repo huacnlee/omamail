@@ -1,2 +1,3 @@
 singleton Paint 1.0 Paint.qml
 ThemeCatalog 1.0 ThemeCatalog.qml
+AppTheme 1.0 AppTheme.qml

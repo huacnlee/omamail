@@ -24,7 +24,6 @@ import "message/Outbox.js" as Outbox
 import "message/Html.js" as Html
 import "message/Direction.js" as Direction
 import "settings/Appearance.js" as Appearance
-import "theme/Themes.js" as Themes
 import "theme"
 
 // Owns each MailAccount and forwards the active mailbox's surface to views.
@@ -177,63 +176,15 @@ Item {
   readonly property bool hasTray: capabilities.tray === true
   readonly property bool hasMailto: capabilities.mailto === true
   readonly property bool hasNotifications: capabilities.notifications === true
-  // Only a host that paints its own window has a palette to choose. The
-  // Omarchy plugin's colours are the shell's, decided in colors.toml — so the
-  // plugin picks a second theme for its own window here instead, and the
-  // standalone window keeps the System/Light/Dark choice below.
   readonly property bool hasAppearance: capabilities.appearance === true
   readonly property string appearance: Appearance.normalizeMode(
     settings ? settings.appearance : null)
-  // A theme picked for this window alone. "" is Follow Omarchy, and anything a
-  // settings file could not name is normalised to it: an invalid answer is the
-  // default, never an error state.
-  readonly property bool hasAppTheme: capabilities.appTheme === true
-  readonly property string appTheme: Themes.normalizeName(settings ? settings.appTheme : null)
-  // Every installed Omarchy theme, with the user's copy of a name first. The
-  // catalog reads the directories; Paint draws with the winner.
-  readonly property var themeCatalog: themeCatalogItem
-  readonly property var themeOptions: themeCatalogItem.options
-  readonly property string appThemeDir: themeCatalogItem.directoryFor(appTheme)
-  function refreshThemes() {
-    if (root.hasAppTheme) themeCatalogItem.refresh()
-  }
-  function setAppTheme(value) {
-    persistSetting("appTheme", Themes.normalizeName(value))
-  }
-  onAppThemeChanged: if (root.appTheme !== "") root.refreshThemes()
-
-  ThemeCatalog {
-    id: themeCatalogItem
-    // Only a host that can pick a theme needs the list, and reading it costs a
-    // process: the standalone window never asks.
-    objectName: "theme-catalog"
-  }
-
-  Binding {
-    target: Paint
-    property: "available"
-    value: root.hasAppTheme
-    restoreMode: Binding.RestoreNone
-  }
-  Binding {
-    target: Paint
-    property: "themeName"
-    value: root.appTheme
-    restoreMode: Binding.RestoreNone
-  }
-  Binding {
-    target: Paint
-    property: "themeDir"
-    value: root.appThemeDir
-    restoreMode: Binding.RestoreNone
-  }
+  // The window's own theme; AppTheme owns the rest of it.
+  readonly property var theme: appThemeChoice
+  AppTheme { id: appThemeChoice; host: root }
   readonly property string notificationError: platform && platform.notificationError
     ? String(platform.notificationError) : ""
-  readonly property string calendarPalettePath: Paint.active && Paint.themeDir !== ""
-    ? Paint.themeDir + "/colors.toml"
-    : (platform && platform.calendarPalettePath !== undefined
-      ? String(platform.calendarPalettePath || "")
-      : Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml")
+  readonly property string calendarPalettePath: theme.colorsPath
   // Credential RPC was introduced in API 4. This minimum stays fixed after
   // release; it is a capability of the connected backend, not release state.
   readonly property bool backendCanStoreCredentials: backend.ready && backend.apiVersion >= 4
@@ -2980,10 +2931,6 @@ Item {
     Qt.callLater(root.restoreAccountRegistry)
     Qt.callLater(root.refreshRecipientContacts)
     Qt.callLater(root.registerMailtoHandler)
-    // A theme picked before this window opened needs its directory resolved
-    // before the first paint; the settings that carry it may also arrive later,
-    // which `onAppThemeChanged` covers.
-    Qt.callLater(root.refreshThemes)
     Qt.callLater(root.refreshDefaultMailClient)
   }
 
