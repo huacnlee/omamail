@@ -656,6 +656,12 @@ Item {
     // own dropdown. The shell's control assigns its own value when a row is
     // chosen, so the label a person reads is asserted separately from the
     // value the window stores.
+    //
+    // Each step waits for the state it is about to drive rather than for a
+    // number of milliseconds. A popup that reports itself open is not yet
+    // necessarily the thing the keyboard reaches, and this suite runs every
+    // file in one process, so a fixed delay is a guess that can land early and
+    // make the picker look broken when it is only late.
     function test_picker_round_trip() {
       scene.followOmarchy()
       scene.persistedTheme = ""
@@ -663,15 +669,21 @@ Item {
       compare(themePicker.currentLabel(), "Follow Omarchy")
       verify(!Paint.active, "nothing is picked")
 
-      themePicker.open(); wait(60)
-      keyClick(Qt.Key_Down); keyClick(Qt.Key_Return); wait(60)
-      verify(Paint.active, "a theme was picked")
+      themePicker.open()
+      tryVerify(function() { return themePicker.popupOpen }, 2000,
+        "the picker's popup opened")
+      keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
+      tryVerify(function() { return Paint.active }, 2000, "a theme was picked")
       compare(scene.persistedTheme, "fixture-light")
       compare(themePicker.currentLabel(), "Fixture Light")
 
-      themePicker.open(); wait(60)
-      keyClick(Qt.Key_Up); keyClick(Qt.Key_Return); wait(60)
-      verify(!Paint.active, "Follow Omarchy was picked again")
+      themePicker.open()
+      tryVerify(function() { return themePicker.popupHasFocus }, 2000,
+        "the themed popup's list holds the keyboard")
+      keyClick(Qt.Key_Up); keyClick(Qt.Key_Return)
+      tryVerify(function() { return !Paint.active }, 2000, "Follow Omarchy was picked again"
+        + " (popup open: " + themePicker.popupOpen + ", picker value: \"" + themePicker.value
+        + "\", label: \"" + themePicker.currentLabel() + "\")")
       compare(scene.persistedTheme, "")
       compare(themePicker.value, "")
       compare(themePicker.currentLabel(), "Follow Omarchy",
@@ -680,9 +692,11 @@ Item {
         "and the shell's own trigger was put in step with it")
       compare(themePicker.children[0].currentLabel(), "Follow Omarchy")
 
-      themePicker.open(); wait(60)
-      keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return); wait(60)
-      verify(Paint.active, "a later selection still works")
+      themePicker.open()
+      tryVerify(function() { return themePicker.popupOpen }, 2000,
+        "the picker opens again after following")
+      keyClick(Qt.Key_Down); keyClick(Qt.Key_Down); keyClick(Qt.Key_Return)
+      tryVerify(function() { return Paint.active }, 2000, "a later selection still works")
       compare(scene.persistedTheme, "fixture-dark")
       compare(themePicker.currentLabel(), "Fixture Dark")
       compare(String(Paint.background), "#1e1e2e")

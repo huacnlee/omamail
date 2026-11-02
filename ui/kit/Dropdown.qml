@@ -35,6 +35,10 @@ Item {
 
   readonly property bool themed: Paint.active
   readonly property bool popupOpen: root.themed ? themedPopup.opened : base.popupOpen === true
+  // An open popup is not the same as an operable one: its rows only answer keys
+  // while the list holds the keyboard. Stated here so a caller can wait for the
+  // popup it just opened to be ready instead of guessing how long that takes.
+  readonly property bool popupHasFocus: root.themed && themedPopup.opened && optionList.activeFocus
 
   function open() {
     if (root.themed) themedPopup.open()
