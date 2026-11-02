@@ -59,7 +59,7 @@ QtObject {
     controlPaddingY: spacingToken("control-padding-y", 6),
     inputPaddingY: spacingToken("input-padding-y", 7),
     controlHeight: spacingToken("control-height", 28),
-    controlGap: spacingToken("control-gap", 8),
+    hairline: 1, panelGap: 14, controlGap: spacingToken("control-gap", 8),
     popupRowHeight: spacingToken("popup-row-height", 28),
     dropdownWidth: spacingToken("dropdown-width", 240),
     searchableDropdownWidth: spacingToken("searchable-dropdown-width", 260),

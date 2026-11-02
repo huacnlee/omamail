@@ -35,10 +35,14 @@ Item {
   ].join("\n")
 
   Component.onCompleted: {
-    // The real shell's behaviour, off for every other test: the helpers below
-    // answer with the desktop's foreground however they are called.
-    Style.bakedStateColors = true
-    Style.bakedForeground = Color.foreground
+    // The real shell behaves this way by construction — its shell.toml has the
+    // desktop theme's hex baked in — so the stub is told to. Running this file
+    // against the real shell instead (a supplied theme state and
+    // `-import /usr/share/omarchy/shell`) needs neither switch.
+    if (Style.bakedStateColors !== undefined) {
+      Style.bakedStateColors = true
+      Style.bakedForeground = Color.foreground
+    }
   }
 
   // Paint reads a theme through FileView. The test supplies the file's text and
@@ -62,18 +66,28 @@ Item {
     Paint.rebuild()
   }
 
-  // Every colour a visible item paints: its own fill and its border's.
-  function paintedColours(item, found) {
+  // Every colour a visible item paints — its own fill and its border's — with
+  // the item it came from, so a failure names the thing that painted it. A
+  // subtree at zero opacity is the base control a wrapper hides while it draws
+  // its own copy.
+  function paintedColours(item, found, trail) {
     if (!item) return found
     if (item.visible === false || item.opacity <= 0.01) return found
+    var where = (trail === undefined ? "" : trail) + "/"
+      + (item.objectName !== "" && item.objectName !== undefined ? item.objectName : String(item))
     if (item.color !== undefined && item.color !== null && typeof item.color === "object") {
-      found.push(item.color)
+      found.push({ where: where, colour: item.color })
     }
-    if (item.border && item.border.width > 0 && typeof item.border.color === "object") {
-      found.push(item.border.color)
+    // A Rectangle's pen defaults to an opaque black at width 1 whether or not
+    // anything asked for a border, and Qt draws nothing while that pen is
+    // unset. An unset pen is therefore exactly this colour, and the theme's are
+    // never opaque black.
+    if (item.border && item.border.width > 0 && typeof item.border.color === "object"
+        && String(item.border.color) !== "#000000") {
+      found.push({ where: where + ".border", colour: item.border.color })
     }
     var kids = item.children || []
-    for (var i = 0; i < kids.length; i++) paintedColours(kids[i], found)
+    for (var i = 0; i < kids.length; i++) paintedColours(kids[i], found, where)
     return found
   }
 
@@ -90,14 +104,14 @@ Item {
     var found = paintedColours(item, [])
     var out = []
     for (var i = 0; i < found.length; i++) {
-      if (isDesktopNeutral(found[i])) out.push(String(found[i]))
+      if (isDesktopNeutral(found[i].colour)) out.push(found[i].where + " " + String(found[i].colour))
     }
     return out
   }
 
   function paintColour(list, wanted) {
     for (var i = 0; i < list.length; i++) {
-      if (String(list[i]) === String(wanted)) return true
+      if (String(list[i].colour) === String(wanted)) return true
     }
     return false
   }
@@ -345,7 +359,7 @@ Item {
         "/usr/share/omarchy/themes/nord/colors.toml",
         "/usr/share/omarchy/themes/catppuccin-latte/colors.toml",
         "/home/u/.config/omarchy/themes/nord/colors.toml",
-        "/usr/share/omarchy/themes/../nope/colors.toml",
+        "/usr/share/omarchy/themes/../colors.toml",
       ].join("\n"))
       catalog.userThemes = found.user
       catalog.systemThemes = found.system
@@ -372,23 +386,34 @@ Item {
       var after = scene.paintedColours(barPreview, [])
       compare(after.length, before.length)
       for (var i = 0; i < before.length; i++) {
-        compare(String(after[i]), String(before[i]), "bar colour " + i + " did not change")
+        compare(String(after[i].colour), String(before[i].colour),
+          "bar colour at " + before[i].where + " did not change")
       }
-      verify(scene.paintColour(after, Color.popups.text), "the bar still paints the desktop's text colour")
+      // Nothing in the bar came from the picked theme: its lines are the
+      // desktop's, at the desktop's alphas.
+      for (var j = 0; j < after.length; j++) verify(scene.isDesktopNeutral(after[j].colour),
+        "the bar paints a desktop colour at " + after[j].where)
     }
 
     // The one part of the spin box the wrapper replaces, and the only part of it
     // that came from the shell's baked tokens.
     function test_number_field_background_follows_the_theme() {
+      // The wrapper replaces the box's background rather than recolouring it, so
+      // each state has to be read from the box afresh.
+      scene.followOmarchy()
+      verify(numberField.field.background !== null, "the spin box has a background")
+      var shellsBackground = String(numberField.field.background.color)
+
       scene.pickTheme("fixture-light")
-      var background = numberField.field.background
-      verify(background !== null && background !== undefined, "the spin box has a background")
-      compare(String(background.color), String(Paint.normalFillFor(Paint.foreground, Paint.accent)))
-      verify(!scene.isDesktopNeutral(background.border.color), "its border is the window's, not the desktop's")
+      compare(String(numberField.field.background.color),
+        String(Paint.normalFillFor(Paint.foreground, Paint.accent)),
+        "the box is drawn in the picked theme's own fill")
+      verify(!scene.isDesktopNeutral(numberField.field.background.border.color),
+        "its border is the window's, not the desktop's")
 
       scene.followOmarchy()
-      compare(String(numberField.field.background.color),
-        String(Style.controlFill(false, false, Paint.foreground, Paint.accent)))
+      compare(String(numberField.field.background.color), shellsBackground,
+        "following again leaves the box the shell drew")
     }
   }
 }

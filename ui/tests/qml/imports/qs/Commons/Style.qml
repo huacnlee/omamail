@@ -30,7 +30,7 @@ QtObject {
   // the popup to whatever the window had underneath.
   readonly property var spacing: ({
     controlPaddingX: 8, controlPaddingY: 5, inputPaddingY: 5,
-    controlHeight: 30, controlGap: 6, sm: 3, md: 6, popupRowHeight: 28,
+    controlHeight: 30, hairline: 1, panelGap: 14, controlGap: 6, sm: 3, md: 6, popupRowHeight: 28,
     huge: 18, xxs: 2, xs: 2, lg: 8, xl: 10, xxl: 12, xxxl: 14,
     labelGap: 4, dropdownWidth: 240, popupPadding: 14, panelPadding: 18,
     rowGap: 8, rowPaddingX: 12, numberFieldWidth: 120,

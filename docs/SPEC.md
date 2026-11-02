@@ -107,8 +107,8 @@ Qt behaviours this design is shaped around.
 
 ## Constraints
 
-- Every colour comes from the active Omarchy theme. No hard-coded hex outside
-  a brand asset.
+- Every colour comes from the active Omarchy theme, or from the Omarchy theme
+  picked for this window alone. No hard-coded hex outside a brand asset.
 - All parsing, formatting, and decision logic lives in `.pragma library` JS
   files so it is testable under node without a compositor.
 - No dependency beyond what Omarchy already ships: `socat`, `secret-tool`,
