@@ -131,9 +131,19 @@ function parseColors(raw) {
   if (!foundBackground) out.background = color0
   if (!foundForeground) out.foreground = color7
   if (!foundAccent) out.accent = color4
-  if (!foundMuted) out.muted = color8 !== "" ? color8 : out.foreground
+  // A theme has to be drawable before it may be used: foreground text on a
+  // background surface. A file that states neither, or only one of the two, is
+  // not a theme, and the caller falls back to Follow Omarchy.
+  if (out.foreground === "" || out.background === "") return null
+  // The remaining roles are optional in a theme, so they are filled
+  // deliberately rather than left empty: an accent the theme did not state is
+  // its foreground, as the shell's own accent falls back to its foreground, and
+  // an urgent colour is its accent. A caller that paints one of them therefore
+  // always has a real colour to paint.
+  if (out.accent === "") out.accent = out.foreground
+  if (out.urgent === "") out.urgent = out.accent
+  if (!foundMuted || out.muted === "") out.muted = color8 !== "" ? color8 : out.foreground
   if (out.selection === "") out.selection = out.muted
-  if (out.foreground === "" && out.background === "") return null
   if (out.mode === "") out.mode = luminance(out.background) > 0.5 ? "light" : "dark"
   out.light = out.mode === "light"
   return out
@@ -262,6 +272,7 @@ function controlTokens(shell) {
 // purpose. They come from the live Style — they are the user's shell-wide
 // values, identical across the stock themes, and a window that changed them
 // would stop matching the bar beside it.
+
 function resolveTheme(palette, shellRaw) {
   var colours = palette || parseColors("")
   var shell = parseShell(shellRaw)

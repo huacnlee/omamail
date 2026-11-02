@@ -116,6 +116,27 @@ assert.strictEqual(themes.parseColors(""), null)
 assert.strictEqual(themes.parseColors(undefined), null)
 assert.strictEqual(themes.parseColors('mode = "dark"\n'), null)
 
+// A theme that cannot be drawn is not a theme. Foreground text on a
+// background surface is the whole of what a window needs, and a file that
+// states only one of the two used to be accepted with an empty role, which
+// paints black text on black or nothing at all.
+assert.strictEqual(themes.parseColors('background = "#eff1f5"\nforeground = "garbage"\n'), null)
+assert.strictEqual(themes.parseColors('foreground = "#4c4f69"\nbackground = "garbage"\n'), null)
+assert.strictEqual(themes.parseColors('color7 = "#e0e0e0"\n'), null)
+
+// The roles a theme leaves out are filled deliberately, never left empty.
+const noAccent = themes.parseColors('foreground = "#4c4f69"\nbackground = "#eff1f5"\n')
+assert.strictEqual(noAccent.accent, "#4c4f69")
+assert.strictEqual(noAccent.urgent, "#4c4f69")
+const noUrgent = themes.parseColors([
+  'foreground = "#4c4f69"',
+  'background = "#eff1f5"',
+  'accent = "#8839ef"',
+].join("\n"))
+assert.strictEqual(noUrgent.urgent, "#8839ef")
+assert.strictEqual(noUrgent.selection, noUrgent.muted)
+
+
 // A theme that does not state its mode is read from its background.
 const inferred = themes.parseColors('foreground = "#4c4f69"\nbackground = "#eff1f5"\n')
 assert.strictEqual(inferred.mode, "light")
