@@ -68,6 +68,16 @@ Item {
   readonly property color tooltipBorder: base.tooltipBorder !== undefined
     ? base.tooltipBorder : Commons.Color.tooltip.border
 
+  // Whether the base publishes a tooltip palette at all: the shell's button
+  // does, the standalone host's does not. The answer is asked once, when the
+  // base exists, because a conditional binding whose `when` re-reads the very
+  // property it writes reports a binding loop — and every themed button in a
+  // window would report one.
+  property bool basePublishesTooltip: false
+
+  Component.onCompleted: root.basePublishesTooltip = base.tooltipBackground !== undefined
+    && base.tooltipForeground !== undefined && base.tooltipBorder !== undefined
+
   // Geometry while themed, measured from the text that is actually drawn: the
   // base's own implicit size is measured from the label it is asked not to draw.
   // The widest border any visual state paints is reserved, so a themed button
@@ -210,7 +220,7 @@ Item {
   Binding {
     target: base
     property: "tooltipBackground"
-    when: Paint.active && base.tooltipBackground !== undefined
+    when: Paint.active && root.basePublishesTooltip
     restoreMode: Binding.RestoreBindingOrValue
     value: Paint.tooltipBackground
   }
@@ -218,7 +228,7 @@ Item {
   Binding {
     target: base
     property: "tooltipForeground"
-    when: Paint.active && base.tooltipForeground !== undefined
+    when: Paint.active && root.basePublishesTooltip
     restoreMode: Binding.RestoreBindingOrValue
     value: Paint.tooltipText
   }
@@ -226,7 +236,7 @@ Item {
   Binding {
     target: base
     property: "tooltipBorder"
-    when: Paint.active && base.tooltipBorder !== undefined
+    when: Paint.active && root.basePublishesTooltip
     restoreMode: Binding.RestoreBindingOrValue
     value: Paint.tooltipBorder
   }
