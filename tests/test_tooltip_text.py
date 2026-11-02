@@ -1,6 +1,7 @@
 """Actual standalone tooltip renders untrusted titles without resource requests."""
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 import subprocess
@@ -147,7 +148,18 @@ def main():
             shutil.copytree(ROOT / "ui/tests/qml/imports/Quickshell", imports / "Quickshell")
             shutil.copytree(ROOT / "ui/tests/qml/imports/qs", imports / "qs", dirs_exist_ok=True)
             color = imports / "qs/Commons/Color.qml"
-            color.write_text(color.read_text().replace("QtObject {", 'QtObject {\n  readonly property var popups: ({text: "#eeeeee", background: "#222222", border: "#555555"})', 1))
+            # The shared fixture may already declare the popup surface; QML
+            # rejects a second property of the same name, and an engine that
+            # refuses to compile the fixture observes no requests at all — an
+            # empty observer is not evidence that nothing was requested. Supply
+            # the surface only where the fixture leaves it out.
+            color_text = color.read_text()
+            if not re.search(r"property\s+\S+\s+popups\b", color_text):
+                color_text = color_text.replace(
+                    "QtObject {",
+                    'QtObject {\n  readonly property var popups: ({text: "#eeeeee", background: "#222222", border: "#555555"})',
+                    1)
+            color.write_text(color_text)
             style = imports / "qs/Commons/Style.qml"
             style.write_text(style.read_text().replace("QtObject {", "QtObject {\n  readonly property int tooltipDelay: 400", 1))
             source = QML.replace("@STYLE@", json.dumps((ROOT / "app/qml/styles/Omamail").as_uri()))
