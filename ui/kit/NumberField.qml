@@ -39,4 +39,17 @@ ShellUi.NumberField {
     restoreMode: Binding.RestoreBindingOrValue
     value: root.themeBackground
   }
+
+  // The text the spin box is edited in is the base's own item, and the tint on
+  // a selection is taken from Style's baked `[controls]` tokens. While a theme
+  // is picked the tint is the window's; with Follow Omarchy the base's own
+  // binding is put back.
+  Binding {
+    target: root.field !== undefined && root.field !== null ? root.field.contentItem : root
+    property: "selectionColor"
+    when: Paint.active && root.field !== undefined && root.field !== null
+      && root.field.contentItem !== undefined && root.field.contentItem !== null
+    restoreMode: Binding.RestoreBindingOrValue
+    value: Paint.selectionFillFor(root.foreground, root.accent)
+  }
 }

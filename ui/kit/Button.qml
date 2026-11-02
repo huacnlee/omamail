@@ -13,54 +13,51 @@ import "../theme"
 // button keeps the shell's non-colour indication: its label stays bold.
 //
 // The shell derives that weight from `selected`, which also recolours the label
-// from those same baked tokens (and keeps the colour private), so with a theme
-// picked the button draws its own label instead: same font, same geometry, in
-// the colour the caller passed. The base still paints the fill, the border, the
-// press and the tooltip, and still owns the click, hover and focus contract.
+// from those same baked tokens and keeps that colour private. So with a theme
+// picked the label the base would draw is not asked for, and one in the
+// window's colour is drawn here instead: same font, same weight, same geometry,
+// in the caller's colour. The base still paints the fill, the border, the press
+// and the tooltip, and still owns the click, hover and focus contract.
 //
-// In Follow Omarchy nothing here applies: `selected` is `chosen`, the base
+// In Follow Omarchy none of that happens: `selected` is `chosen`, the base
 // draws its own label, and the button is the shell's button.
 Item {
   id: root
 
-  // The shell's public surface, forwarded below.
+  // The shell's public surface. `background` and `fontSize` stay unset so a
+  // host's own default — the two hosts disagree on both — still applies.
   property string text: ""
-  property string iconText: ""
   property string tooltipText: ""
   property bool chosen: false
-  property bool active: false
   property bool hasCursor: false
   property bool focusable: false
   property bool bordered: false
   property color foreground: Paint.active ? Paint.foreground : Commons.Color.foreground
-  property color background: "transparent"
   property color accent: Paint.active ? Paint.accent : Commons.Color.accent
+  property var background: undefined
+  property var fontSize: undefined
   property string fontFamily: Style.font.family
-  property real fontSize: Style.font.body
-  property real iconSize: Style.font.icon
-  property real iconRotation: 0
-  property bool iconSpinning: false
   property real horizontalPadding: Style.spacing.controlPaddingX
   property real verticalPadding: Style.spacing.controlPaddingY
   property bool leftAlign: false
 
   signal clicked()
-  signal rightClicked()
   signal hovered(bool isHovered)
 
-  // The shell derives the chosen state's weight from `selected`, so that stays
-  // on in both modes: a chosen button is bold either way. What changes with a
-  // theme picked is the colour: the shell paints a selected label from its
-  // baked `[controls]` tokens and keeps that colour private, so the label drawn
-  // from Paint is the wrapper's own (below) and the base's is not drawn.
+  // The shell derives the chosen state's weight from `selected`, so it stays on
+  // in both modes: a chosen button is bold either way.
   property bool selected: root.chosen
 
   readonly property bool themed: Paint.active
   readonly property bool hot: base.hot === true
   readonly property bool pressing: base.pressing === true
+  readonly property real effectiveFontSize: root.fontSize !== undefined
+    ? root.fontSize : Style.font.body
+  readonly property color effectiveBackground: root.background !== undefined
+    ? root.background : "transparent"
 
-  // The colours the shell's button publishes, for the callers and tests that
-  // read them. They are the base's own values, whichever mode it is in.
+  // The colours the shell's button publishes, for the callers that read them.
+  // They are the base's own values, whichever mode it is in.
   readonly property alias color: base.color
   readonly property var border: base.border
   readonly property alias tooltipBackground: base.tooltipBackground
@@ -69,64 +66,47 @@ Item {
 
   // Geometry while themed, measured from the text that is actually drawn: the
   // base's own implicit size is measured from the label it is asked not to draw.
-  readonly property real iconRoom: root.iconText !== ""
-    ? iconMetrics.advanceWidth + (root.text !== "" ? Style.spacing.controlGap : 0) : 0
-  readonly property real contentWidth: root.iconRoom + (root.text !== "" ? labelMetrics.advanceWidth : 0)
-  // The widest border any visual state paints, so a themed button keeps its
-  // neighbours still as it is hovered and focused, as the shell's does.
+  // The widest border any visual state paints is reserved, so a themed button
+  // keeps its neighbours still as it is hovered and focused.
   readonly property real borderReserve: Math.max(
     root.focusable ? Paint.focusBorderWidth : 0,
     Paint.hoverBorderWidth,
     root.bordered || root.chosen ? Paint.normalBorderWidth : 0)
   readonly property real labelRoom: Math.max(0,
-    root.width - root.horizontalPadding * 2 - root.borderReserve * 2 - root.iconRoom)
+    root.width - root.horizontalPadding * 2 - root.borderReserve * 2)
 
   implicitWidth: root.themed
-    ? root.contentWidth + root.horizontalPadding * 2 + root.borderReserve * 2
+    ? labelMetrics.advanceWidth + root.horizontalPadding * 2 + root.borderReserve * 2
     : base.implicitWidth
   implicitHeight: root.themed
-    ? Math.max(labelMetrics.height, root.iconText !== "" ? iconMetrics.height : 0)
-      + root.verticalPadding * 2 + root.borderReserve * 2
+    ? labelMetrics.height + root.verticalPadding * 2 + root.borderReserve * 2
     : base.implicitHeight
 
   TextMetrics {
     id: labelMetrics
     font.family: root.fontFamily
-    font.pixelSize: root.fontSize
+    font.pixelSize: root.effectiveFontSize
     font.bold: root.chosen
     text: root.text
-  }
-
-  TextMetrics {
-    id: iconMetrics
-    font.family: root.fontFamily
-    font.pixelSize: root.iconSize
-    text: root.iconText
   }
 
   ShellUi.Button {
     id: base
     anchors.fill: parent
+    enabled: root.enabled
 
-    // The label and the icon are the wrapper's while themed, so the weight a
-    // chosen button is owed does not depend on the base's selected colour.
+    // The label is the wrapper's while themed, so the weight a chosen button is
+    // owed does not depend on the base's selected colour.
     text: root.themed ? "" : root.text
-    iconText: root.themed ? "" : root.iconText
 
     tooltipText: root.tooltipText
     selected: root.selected
-    active: root.active
     hasCursor: root.hasCursor
     focusable: root.focusable
     bordered: root.bordered
     foreground: root.foreground
-    background: root.background
     accent: root.accent
     fontFamily: root.fontFamily
-    fontSize: root.fontSize
-    iconSize: root.iconSize
-    iconRotation: root.iconRotation
-    iconSpinning: root.iconSpinning
     horizontalPadding: root.horizontalPadding
     verticalPadding: root.verticalPadding
     leftAlign: root.leftAlign
@@ -136,7 +116,6 @@ Item {
     activeFocusOnTab: false
 
     onClicked: root.clicked()
-    onRightClicked: root.rightClicked()
     onHovered: function(isHovered) { root.hovered(isHovered) }
 
     // The kit's own MouseArea is private, so a passive handler watches the same
@@ -147,6 +126,24 @@ Item {
       id: press
       acceptedButtons: Qt.LeftButton | Qt.RightButton
     }
+  }
+
+  // A caller that names either of these is obeyed; one that does not keeps the
+  // host's own default.
+  Binding {
+    target: base
+    property: "background"
+    when: root.background !== undefined
+    restoreMode: Binding.RestoreBindingOrValue
+    value: root.background
+  }
+
+  Binding {
+    target: base
+    property: "fontSize"
+    when: root.fontSize !== undefined
+    restoreMode: Binding.RestoreBindingOrValue
+    value: root.fontSize
   }
 
   activeFocusOnTab: root.focusable
@@ -163,53 +160,71 @@ Item {
       : (root.focusable && base.activeFocus ? Paint.focusFillFor(root.foreground, root.accent)
         : (root.hot ? Paint.hoverFillFor(root.foreground, root.accent)
           : (root.chosen ? Paint.selectedFillFor(root.foreground, root.accent)
-            : root.background)))
+            : root.effectiveBackground)))
   }
 
-  // The base's own label, in the theme's colour and at the weight the chosen
-  // state is allowed to keep.
-  Row {
+  // The label, in the window's colour and at the weight the chosen state keeps.
+  Text {
     visible: root.themed
-    anchors.verticalCenter: parent.verticalCenter
     anchors.horizontalCenter: root.leftAlign ? undefined : parent.horizontalCenter
     anchors.left: root.leftAlign ? parent.left : undefined
     anchors.leftMargin: root.leftAlign ? root.horizontalPadding + root.borderReserve : 0
-    spacing: Style.spacing.controlGap
+    anchors.verticalCenter: parent.verticalCenter
+    text: root.text
+    textFormat: Text.PlainText
+    color: root.foreground
+    font.family: root.fontFamily
+    font.pixelSize: root.effectiveFontSize
+    font.bold: root.chosen
+    width: Math.min(implicitWidth, root.labelRoom)
+    elide: Text.ElideRight
+  }
 
-    Text {
-      id: themedIcon
-      visible: root.iconText !== ""
-      text: root.iconText
-      textFormat: Text.PlainText
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: root.iconSize
-      rotation: root.iconSpinning ? 0 : root.iconRotation
-      transformOrigin: Item.Center
-      anchors.verticalCenter: parent.verticalCenter
+  // The border is one of the places the shell's `[controls]` tokens reach, so a
+  // picked theme supplies its own spec: the same geometry the live Style asks
+  // for, in the theme's colour. The state ladder and the rule that a plain
+  // button is borderless at rest are the shell's own.
+  readonly property string themedBorderState: {
+    if (root.focusable && base.activeFocus) return "focus"
+    if (base.hot) return "hover"
+    if (root.selected) return Paint.selectedBorderWidth > 0 ? "selected"
+      : (root.bordered ? "normal" : "none")
+    return root.bordered ? "normal" : "none"
+  }
 
-      RotationAnimation on rotation {
-        from: 0
-        to: 360
-        duration: Style.duration(900)
-        loops: Animation.Infinite
-        running: root.iconSpinning && !Style.reduceMotion
-      }
-    }
+  Binding {
+    target: base
+    property: "borderSpec"
+    when: Paint.active
+    restoreMode: Binding.RestoreBindingOrValue
+    value: root.themedBorderState === "none" ? Border.none()
+      : Paint.controlSpec(root.themedBorderState, root.foreground, root.accent)
+  }
 
-    Text {
-      id: themedLabel
-      visible: root.text !== ""
-      text: root.text
-      textFormat: Text.PlainText
-      color: root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: root.fontSize
-      font.bold: root.chosen
-      width: Math.min(implicitWidth, root.labelRoom)
-      elide: Text.ElideRight
-      anchors.verticalCenter: parent.verticalCenter
-    }
+  // The tooltip's palette is published by the shell's button and baked from the
+  // same tokens, so it belongs to the window like everything else.
+  Binding {
+    target: base
+    property: "tooltipBackground"
+    when: Paint.active
+    restoreMode: Binding.RestoreBindingOrValue
+    value: Paint.tooltipBackground
+  }
+
+  Binding {
+    target: base
+    property: "tooltipForeground"
+    when: Paint.active
+    restoreMode: Binding.RestoreBindingOrValue
+    value: Paint.tooltipText
+  }
+
+  Binding {
+    target: base
+    property: "tooltipBorder"
+    when: Paint.active
+    restoreMode: Binding.RestoreBindingOrValue
+    value: Paint.tooltipBorder
   }
 
   Accessible.role: Accessible.Button
