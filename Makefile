@@ -6,6 +6,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
 	ui/tests/qml/tst_reader_subject_menu.qml ui/tests/qml/tst_drafts_refresh.qml ui/tests/qml/tst_account_hosts.qml \
 	ui/tests/qml/tst_credential_store_retry.qml \
+	ui/tests/qml/tst_google_sign_in_errors.qml \
 	ui/tests/qml/tst_invitation_calendar.qml \
 	ui/tests/qml/tst_calendar_today.qml \
 	ui/tests/qml/tst_calendar_description_detail.qml \

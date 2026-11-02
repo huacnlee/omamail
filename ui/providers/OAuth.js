@@ -172,6 +172,46 @@ function tokenErrorMessage(payload, fallback) {
   return fallback
 }
 
+// A browser callback only proves that Google returned a code. The native
+// exchange and the profile read that follow can still fail because Google's
+// API hosts are unreachable. Each of those failures needs its own sentence:
+// "sign-in failed" sends the user back to the consent page, which already
+// worked, instead of to the network path that did not.
+var SIGN_IN_SENTENCES = {
+  auth_cancelled: "Google sign-in was cancelled. Try again",
+  auth_flow_missing: "The Google sign-in expired. Try again",
+  auth_invalid_callback: "The browser sent a sign-in answer Omamail could not accept. Try again",
+  auth_invalid_profile: "Google accepted the sign-in, but did not return the mailbox address. Try again",
+  auth_invalid_response: "Google's answer could not be read. Try again",
+  auth_keyring_failed: "Could not save the Google session to the keyring. Please try again",
+  auth_listener_failed: "The local sign-in listener stopped. Try again",
+  auth_missing_scope: "Google sign-in is missing permissions. Sign in again and leave every checkbox ticked",
+  auth_offline_access_missing: "Google did not return a lasting session. Remove Omamail's access in your Google Account, then sign in again",
+  auth_redirect_refused: "Google's sign-in service redirected the request unexpectedly. Try again",
+  auth_response_too_large: "Google's answer was larger than Omamail accepts. Try again",
+  auth_timeout: "Google sign-in did not finish in time. Check your internet connection and try again. Omamail's Google API calls do not use an HTTP proxy, so a proxy-only network needs a system-wide VPN",
+  auth_transport_failed: "Could not reach Google's sign-in service. Check your internet connection. Omamail's Google API calls do not use an HTTP proxy, so a proxy-only network needs a system-wide VPN",
+  gmail_forbidden: "Google refused this app's access to your mailbox. Allow the app in your account or Workspace admin settings, then sign in again",
+  gmail_http_failed: "Google accepted the sign-in, but Gmail could not be reached. Check your internet connection. Omamail's Google API calls do not use an HTTP proxy, so a proxy-only network needs a system-wide VPN",
+  gmail_invalid_response: "Gmail's answer could not be read. Try again",
+  gmail_length_required: "Gmail rejected the request format. Try again",
+  gmail_rate_limited: "Google is limiting requests for this account. Wait a moment, then sign in again",
+  gmail_response_too_large: "Gmail's answer was larger than Omamail accepts. Try again",
+  gmail_timeout: "Google accepted the sign-in, but Gmail did not answer in time. Check your internet connection and try again. Omamail's Google API calls do not use an HTTP proxy, so a proxy-only network needs a system-wide VPN",
+  gmail_unauthorized: "Google accepted the sign-in, but refused the Gmail request. Sign in again"
+}
+
+var SIGN_IN_GENERIC = "Google sign-in failed. Please try again"
+
+// Backend errors arrive as an error object or, in older paths, as a bare
+// string. Both mean the same code here.
+function signInErrorMessage(error) {
+  var code = error === undefined || error === null
+    ? "" : String(typeof error === "object" ? error.message : error)
+  return Object.prototype.hasOwnProperty.call(SIGN_IN_SENTENCES, code)
+    ? SIGN_IN_SENTENCES[code] : SIGN_IN_GENERIC
+}
+
 function parseTokenResponse(status, text, previousRefreshToken) {
   var payload = parseJson(text, null)
   if (status < 200 || status >= 300 || !payload || !payload.access_token) {
