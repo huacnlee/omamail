@@ -230,6 +230,12 @@ Item {
           optionList.forceActiveFocus()
         }
 
+        // An open popup that has lost the keyboard cannot be used: its rows
+        // ignore keys and the trigger behind it answers them instead, so the
+        // first Return closes the popup without choosing anything. Take the
+        // keyboard back while the rows are the thing on screen.
+        onActiveFocusChanged: if (opened && !optionList.activeFocus) optionList.forceActiveFocus()
+
         contentItem: ListView {
           id: optionList
           spacing: Style.spacing.labelGap
