@@ -380,10 +380,12 @@ fn copy(text: &str, p: &Value) -> Result<Component, &'static str> {
         return Err("invalid_params");
     }
     let calendar = Component::parse(text).map_err(|_| "invalid_params")?;
+    // The markers are this importer's; a sender may not write them, not even
+    // as a parameter.
     let allowed = |c: &Component, names: &[&str]| {
         c.lines
             .iter()
-            .all(|line| names.contains(&ics::name(line).as_str()))
+            .all(|line| names.contains(&ics::name(line).as_str()) && !marker_parameter(line))
     };
     let mut events = 0;
     for child in &calendar.children {
@@ -446,11 +448,36 @@ fn is_exdate(line: &str) -> bool {
     })
 }
 
-fn exdate_key(line: &str) -> (String, String) {
-    (
-        ics::param(line, "TZID").unwrap_or_default(),
-        ics::value(line).trim().to_ascii_uppercase(),
-    )
+fn marker_parameter(line: &str) -> bool {
+    let head = &line[..line.len() - ics::value(line).len()];
+    head.split(';').skip(1).any(|piece| {
+        piece
+            .get(..9)
+            .is_some_and(|key| key.eq_ignore_ascii_case("X-OMAMAIL"))
+    })
+}
+
+/// Whether an EXDATE line excludes this occurrence; a line may list several dates.
+fn excludes(line: &str, key: &(String, String)) -> bool {
+    is_exdate(line)
+        && ics::param(line, "TZID").unwrap_or_default() == key.0
+        && ics::value(line)
+            .split(',')
+            .any(|date| date.trim().eq_ignore_ascii_case(&key.1))
+}
+
+/// The EXDATE line without this occurrence's date, or nothing when that was
+/// its only date.
+fn without_date(line: &str, key: &(String, String)) -> Option<String> {
+    if !excludes(line, key) {
+        return Some(line.to_owned());
+    }
+    let value = ics::value(line);
+    let rest: Vec<&str> = value
+        .split(',')
+        .filter(|date| !date.trim().eq_ignore_ascii_case(&key.1))
+        .collect();
+    (!rest.is_empty()).then(|| format!("{}{}", &line[..line.len() - value.len()], rest.join(",")))
 }
 
 /// The sequence of a decline this importer wrote as an EXDATE.
@@ -465,7 +492,7 @@ fn declined_sequence(master: &Component, key: &(String, String)) -> Option<u64> 
     master
         .lines
         .iter()
-        .filter(|line| is_exdate(line) && exdate_key(line) == *key)
+        .filter(|line| excludes(line, key))
         .filter_map(|line| decline_sequence(line))
         .max()
 }
@@ -682,15 +709,27 @@ where
                 .find(|c| c.name == "VEVENT" && c.property("RECURRENCE-ID").is_none())
                 .ok_or("calendar_invitation_series_required")?;
             // This answer replaces any earlier decline of the same occurrence.
-            master
+            master.lines = master
                 .lines
-                .retain(|line| !is_exdate(line) || exdate_key(line) != *key);
+                .iter()
+                .filter_map(|line| without_date(line, key))
+                .collect();
             if remove {
                 // The decline's sequence travels in the EXDATE, so an older
                 // acceptance cannot bring the occurrence back.
                 let line = event.property("RECURRENCE-ID").unwrap();
+                // RANGE belongs to RECURRENCE-ID only; the decline excludes this date.
                 let value = ics::value(line);
-                let head = &line["RECURRENCE-ID".len()..line.len() - value.len() - 1];
+                let head: String = line["RECURRENCE-ID".len()..line.len() - value.len() - 1]
+                    .split(';')
+                    .skip(1)
+                    .filter(|piece| {
+                        !piece
+                            .get(..6)
+                            .is_some_and(|key| key.eq_ignore_ascii_case("RANGE="))
+                    })
+                    .map(|piece| format!(";{piece}"))
+                    .collect();
                 master
                     .lines
                     .push(format!("EXDATE{head};{SEQUENCE}={sequence}:{value}"));
@@ -1003,6 +1042,7 @@ mod tests {
             "BEGIN:VALARM\r\nACTION:EMAIL\r\nEND:VALARM\r\n",
             "UID:other\r\n",
             "URL:https://example.org\r\n",
+            "EXDATE;X-OMAMAIL-SEQUENCE=9999:20261103T100000Z\r\n",
         ] {
             let mut p = caldav_params();
             p["calendar"] = json!(invitation(extra));
@@ -1210,6 +1250,65 @@ mod tests {
             calls[1]["body"].as_str().unwrap().contains("EXDATE"),
             "a series retry keeps a newer decline"
         );
+    }
+    #[tokio::test]
+    async fn caldav_grouped_exdates_are_matched_date_by_date() {
+        let grouped =
+            "EXDATE;TZID=Europe/Stockholm;X-OMAMAIL-SEQUENCE=4:20261103T100000,20261110T100000\r\n";
+        let series = saved_with(grouped, None);
+        let (result, calls) = run_caldav(
+            &occurrence_params(3, "accepted"),
+            vec![report(&[("/copy.ics", &series)])],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "newer");
+        assert_eq!(calls.len(), 1);
+        let (result, calls) = run_caldav(
+            &occurrence_params(5, "accepted"),
+            vec![report(&[("/copy.ics", &series)]), json!({})],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        let body = calls[1]["body"].as_str().unwrap();
+        assert!(
+            body.contains("EXDATE;TZID=Europe/Stockholm;X-OMAMAIL-SEQUENCE=4:20261110T100000\r\n"),
+            "{body}"
+        );
+        assert!(!body.contains("20261103T100000,"));
+    }
+    #[tokio::test]
+    async fn caldav_repeat_declines_keep_one_exdate_without_range() {
+        let series = saved("imap:me@example.org", 2);
+        let mut p = occurrence_params(3, "declined");
+        p["calendar"] = json!(MOVED.replace(
+            "RECURRENCE-ID;TZID",
+            "RECURRENCE-ID;RANGE=THISANDFUTURE;TZID"
+        ));
+        let (result, calls) =
+            run_caldav(&p, vec![report(&[("/copy.ics", &series)]), json!({})]).await;
+        assert_eq!(result.unwrap()["status"], "removed");
+        let once = calls[1]["body"].as_str().unwrap().to_owned();
+        assert!(
+            once.contains("EXDATE;TZID=Europe/Stockholm;X-OMAMAIL-SEQUENCE=3:20261103T100000\r\n"),
+            "{once}"
+        );
+        p["sequence"] = json!(4);
+        let (result, calls) =
+            run_caldav(&p, vec![report(&[("/copy.ics", &once)]), json!({})]).await;
+        assert_eq!(result.unwrap()["status"], "removed");
+        let twice = calls[1]["body"].as_str().unwrap();
+        assert_eq!(twice.matches("EXDATE").count(), 1, "{twice}");
+        assert!(twice.contains("X-OMAMAIL-SEQUENCE=4:20261103T100000"));
+    }
+    #[tokio::test]
+    async fn caldav_unreadable_report_object_stops_the_save() {
+        let (result, calls) = run_caldav(
+            &caldav_params(),
+            vec![report(&[("/broken.ics", "BEGIN:VCALENDAR\r\nmeeting")])],
+        )
+        .await;
+        assert_eq!(result, Err("calendar_invalid_response"));
+        assert_eq!(calls.len(), 1, "no second copy is created");
     }
     #[test]
     fn import_transport_is_fixed_origin_post_and_contains_no_notification_parameter() {

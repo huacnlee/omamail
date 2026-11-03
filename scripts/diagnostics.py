@@ -155,7 +155,7 @@ METHODS = set(json.loads((ROOT / 'backend-api.json').read_text())['methods']) | 
 
 DETAIL_FIELDS = {
     'provider': {'google', 'microsoft', 'caldav', 'icloud'},
-    'operation': {'list', 'get', 'lookup', 'instances', 'create', 'update', 'delete', 'move', 'import', 'saveInvitation', 'attendance', 'verify'},
+    'operation': {'list', 'get', 'lookup', 'instances', 'create', 'update', 'delete', 'move', 'import', 'saveInvitation', 'attendance', 'verify', 'addresses'},
     'stage': {'validation', 'authentication', 'request', 'response'},
     'field': {'start', 'end', 'start.dateTime', 'end.dateTime', 'start.timeZone', 'end.timeZone', 'recurrence', 'iCalUID', 'calendarId', 'eventId', 'timeMin', 'timeMax'},
     'reason': set('''badRequest invalid invalidParameter required authError
