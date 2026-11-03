@@ -1416,7 +1416,8 @@ Item {
       }
       // A revalidation started before the optimistic read may still contain
       // UNREAD. Apply the pending read natively before it reaches list/reader,
-      // and never send a second read for the same opening.
+      // and never send a second read for the same opening, nor undo the user's.
+      if (root.explicitReadSerial === serial) markedRead = true
       var keepRead = markedRead && (root.actionPreparations > 0 || root.pendingAction === "markRead"
         || (root.selectedMessage && root.selectedMessage.unread === false))
       if (keepRead) {
@@ -1815,14 +1816,21 @@ Item {
     return runNativeAction([String(id || "")], action, quiet === true, memberOnly === true, false)
   }
 
+  // See `Model.readActionSerial`; a failed action restores the one before it.
+  property int explicitReadSerial: -1
+
   function runNativeAction(ids, action, quiet, memberOnly, allRead, completion) {
     if (!ready || !backend || (!allRead && ids.length === 0) || (allRead && messages.length === 0)) return false
     if (refuseUnavailableAction(action)) return false
+    var readBefore = explicitReadSerial
+    var readMarked = explicitReadSerial = Model.readActionSerial(readBefore, detailSerial, selectedId,
+      selectedThread, ids, action, memberOnly, allRead, messages)
     var reported = false
     var cancel = function() { finish(ids, "Account signed out") }
     function finish(failedIds, error) {
       if (reported) return
       reported = true
+      if (error && root.explicitReadSerial === readMarked) root.explicitReadSerial = readBefore
       root.actionCompletions = root.actionCompletions.filter(function(callback) { return callback !== cancel })
       if (typeof completion === "function") completion({failedIds: failedIds || [], error: String(error || "")})
     }
