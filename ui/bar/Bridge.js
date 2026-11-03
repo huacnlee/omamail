@@ -13,9 +13,10 @@ function identifier(value) {
   return typeof value === "string" && value.length <= 4096 ? value : ""
 }
 
-// Saved numbers with no default in the Service, which a replacement bar hands
+// Saved values with no default in the Service, which a replacement bar hands
 // back with the rest of its entry.
 var SAVED_NUMBERS = ["calendarHourHeight"]
+var SAVED_BOOLEANS = ["markReadOnOpen"]
 
 function settings(values, defaults) {
   var out = {}
@@ -23,6 +24,9 @@ function settings(values, defaults) {
   for (var i = 0; i < SAVED_NUMBERS.length; i++) {
     var saved = source[SAVED_NUMBERS[i]]
     if (typeof saved === "number" && isFinite(saved)) out[SAVED_NUMBERS[i]] = saved
+  }
+  for (var b = 0; b < SAVED_BOOLEANS.length; b++) {
+    if (typeof source[SAVED_BOOLEANS[b]] === "boolean") out[SAVED_BOOLEANS[b]] = source[SAVED_BOOLEANS[b]]
   }
   for (var key in defaults) {
     var value = source[key]

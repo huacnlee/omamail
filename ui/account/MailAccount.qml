@@ -243,6 +243,9 @@ Item {
       if (readerSourceKey !== "") renderSource(readerSourceKey)
     }
   }
+  // Whether opening a message marks it read. Only a stored `false` turns it
+  // off, so a missing key or a hand-edited typo keeps the default.
+  readonly property bool markReadOnOpen: !settings || settings.markReadOnOpen !== false
   property bool remoteImagesAllowed: false
   property bool remoteImagesLoading: false
   property var remoteImageData: ({})
@@ -1406,8 +1409,9 @@ Item {
       // its conversation with the read rather than before it.
       root.selectConversation(messageId, summary)
       root.rememberMember(summary)
-      // A preview is not opening; only an opened message is marked read here.
-      if (!markedRead && Model.marksReadOnArrival(summary, root.selectionIsPreview))
+      // A preview is not opening; only an opened message is marked read here,
+      // and only while the reader's setting says opening counts as reading.
+      if (!markedRead && Model.marksReadOnArrival(summary, root.selectionIsPreview, root.markReadOnOpen))
         markedRead = root.act(messageId, "markRead", true) === true
       }
       // A revalidation started before the optimistic read may still contain

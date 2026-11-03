@@ -1308,6 +1308,11 @@ assert.strictEqual(model.marksReadOnArrival(null, false), false)
 // than silently previewing — the safe way round for the read mark.
 assert.strictEqual(model.marksReadOnArrival({ unread: true }, undefined), true)
 
+// With "Mark messages read when opened" off, opening leaves the message
+// unread; anything but an explicit false keeps the default.
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, false, false), false)
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, false, true), true)
+
 // The sender learns nothing from a message nobody opened.
 assert.strictEqual(model.showsRemoteImages(true, false), true)
 assert.strictEqual(model.showsRemoteImages(true, true), false,

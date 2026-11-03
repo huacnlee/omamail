@@ -1807,8 +1807,13 @@ function settingsScrollTarget(sections, key, contentHeight, viewportHeight) {
 // the reason moving stopped opening in the first place — so the panel marks a
 // previewed message read once the cursor has stayed on it, and arrival leaves
 // it alone.
-function marksReadOnArrival(summary, isPreview) {
+//
+// `markOnOpen` is the reader's "Mark messages read when opened" setting. Only
+// an explicit `false` turns it off, so a caller that does not pass it keeps
+// the default of marking read.
+function marksReadOnArrival(summary, isPreview, markOnOpen) {
   return !!summary && summary.unread === true && isPreview !== true
+    && markOnOpen !== false
 }
 
 // Whether a dwell on a previewed message has anything to mark: it has to still

@@ -134,6 +134,7 @@ Item {
       transport.pending = ({})
       backend.cached = ({})
       fixture.unreadMoments = []
+      account.settings = account.defaultSettingValues
     }
     function test_a_member_opened_again_from_its_cached_copy_stays_read() {
       // The conversation as the list and the rail left it: the first message
@@ -192,6 +193,21 @@ Item {
       compare(account.selectedMessage.unread, false, "the row's block, not the file's, says whether the thread is read")
       compare(account.selectedMessage.thread.unread, false)
       compare(account.readMarks, [], "so nothing is marked read again")
+    }
+    // "Mark messages read when opened" off: the reader shows the message and
+    // leaves it unread until the user marks it.
+    function test_opening_with_mark_read_on_open_off_leaves_the_message_unread() {
+      var settings = JSON.parse(JSON.stringify(account.defaultSettingValues))
+      settings.markReadOnOpen = false
+      account.settings = settings
+      account.messages = [summary("first", "Hello", false, true)]
+      account.memberSummaries = {reply: summary("reply", "Reply", true)}
+      account.selectedThread = {id: "t", memberIds: ["first", "reply"], count: 2, unread: true}
+      account.select("reply", false)
+      transport.pending.reply(resource("reply", "Reply", true), "")
+      compare(account.selectedBody.text, "Reply", "the message is shown")
+      compare(account.readMarks, [], "and nothing is marked read")
+      compare(account.selectedMessage.unread, true)
     }
   }
 }
