@@ -116,12 +116,7 @@
         "key": "aiAgent",
         "type": "enum",
         "label": "AI agent",
-        "options": [
-          "System default",
-          "OpenCode",
-          "Codex",
-          "Claude"
-        ],
+        "options": ["System default", "OpenCode", "Codex", "Claude"],
         "defaultValue": "System default",
         "description": "Agent for new mail chats and calendar suggestions. System default follows Omarchy; unsupported defaults disable AI. Changing the selection starts fresh chats and keeps previous chats read-only. Requires backend API 6."
       },
