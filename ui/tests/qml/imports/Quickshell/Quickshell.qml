@@ -3,6 +3,9 @@ import QtQuick
 
 QtObject {
   property var notifications: []
+  // A test that reads files through FileView supplies a store; none is the
+  // stub's old behaviour, a file that never loads.
+  property var fileStore: null
   signal notificationActivated(string accountId, string messageId)
   function env(name) { return "" }
   property var detachedCommands: []

@@ -58,13 +58,27 @@ QtObject {
   property string colorsText: ""
   property string shellText: ""
 
+  // Every input is read from its own plain property here, never from
+  // `selected`: the change handlers below can run before that derived binding
+  // has caught up, and a reload that saw the old name would settle on a valid
+  // theme without ever opening its files. Read this way, whichever input
+  // arrives last reloads with all of them.
   function reload() {
     root.theme = null
     root.colorsText = ""
     root.shellText = ""
-    if (root.available && root.selected !== Themes.FOLLOW && root.themeDir !== "") {
-      colorsFile.path = root.themeDir + "/colors.toml"
-      shellFile.path = root.themeDir + "/shell.toml"
+    if (root.available && Themes.normalizeName(root.themeName) !== Themes.FOLLOW
+        && root.themeDir !== "") {
+      // The theme was just cleared, so the files are read again even when the
+      // path is the one already open: the name and the directory can arrive
+      // in either order, and the second to arrive must not leave the window
+      // with no theme because the path it computes did not change.
+      var colorsPath = root.themeDir + "/colors.toml"
+      var shellPath = root.themeDir + "/shell.toml"
+      if (colorsFile.path === colorsPath) colorsFile.reload()
+      else colorsFile.path = colorsPath
+      if (shellFile.path === shellPath) shellFile.reload()
+      else shellFile.path = shellPath
     } else {
       colorsFile.path = ""
       shellFile.path = ""
