@@ -167,6 +167,12 @@ FocusScope {
     value: root.fontSize
   }
 
+  // A Tab stop wherever the host's own button is one, and callers ask the
+  // wrapper so; landing on the scope puts the focus on the base inside it.
+  // The shell's button is its own stop. The standalone host's is not: its
+  // stop is the control inside it, which is already in the chain, and a
+  // second stop here would make Tab land on each button twice.
+  activeFocusOnTab: root.focusable && base.activeFocusOnTab === true
 
   Binding {
     target: base
