@@ -12,11 +12,11 @@ Whole recurring series preserve their recurrence rule and excluded dates. An occ
 
 ## CalDAV and iCloud destinations
 
-A CalDAV copy is the invitation's own event: its UID, sequence, summary, description, location, recurrence rule and exclusions, and the organiser's DTSTART/DTEND lines with their VTIMEZONE definitions. ORGANIZER and ATTENDEE lines are never written. A CalDAV server that schedules (RFC 6638) would otherwise send its own reply to the organiser, and the mail reply has already done that. The backend refuses a copy that holds any other property or component, including alarms and URLs.
+A CalDAV copy is the invitation's own event: its UID, sequence, summary, description, location, recurrence rule and exclusions, and the organiser's DTSTART/DTEND lines with their VTIMEZONE definitions. ORGANIZER and ATTENDEE lines are never written. A CalDAV server that schedules (RFC 6638) would otherwise send its own reply to the organiser, and the mail reply has already done that. The backend refuses a copy that holds any other property or component, including alarms and URLs (a time zone's `TZURL` too).
 
-The backend finds an existing copy with a `calendar-query` REPORT on the UID. It identifies a managed copy by its `X-OMAMAIL-MAILBOX`, `X-OMAMAIL-ORGANIZER` and `X-OMAMAIL-SEQUENCE` properties. An event with the same UID and the same organiser but no marker is a native copy and is left alone; a different organiser is refused. A new copy is created with `If-None-Match: *`; updates and removals use the resource's ETag. An occurrence update replaces or adds that occurrence in the saved series; declining or cancelling an occurrence adds an EXDATE to it.
+The backend finds an existing copy with a `calendar-query` REPORT on the UID. It identifies a managed copy by its `X-OMAMAIL-MAILBOX`, `X-OMAMAIL-ORGANIZER` and `X-OMAMAIL-SEQUENCE` properties. An event with the same UID and the same organiser but no marker is a native copy and is left alone; a different organiser is refused. A new copy is created with `If-None-Match: *`; updates and removals use the resource's ETag. An occurrence update replaces or adds that occurrence in the saved series; declining or cancelling an occurrence adds an EXDATE that records the decline's sequence, and a later answer to that occurrence replaces it. An occurrence is checked against its own saved sequence, or the series' when it has none, so an older invitation never overwrites a newer answer. Saving the whole series again keeps occurrence changes and declines that came from newer mail. A REPORT object the backend cannot read stops the save rather than risk a second copy.
 
-CalDAV and iCloud destinations require API 10. On an API-9 backend the settings list offers only Google calendars.
+CalDAV and iCloud destinations require API 10. On an API-9 backend the settings list offers only Google calendars and says the backend needs an update when a CalDAV calendar is connected.
 
 ## Backend versions
 

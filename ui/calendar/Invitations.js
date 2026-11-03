@@ -22,7 +22,7 @@ function supported(backend, source) {
 
 // Property lines a CalDAV copy may keep from the sender's time zones. The
 // backend refuses anything else, so unknown extensions are dropped here.
-var ZONE_LINES = /^(BEGIN|END|TZID|LAST-MODIFIED|TZURL|X-LIC-LOCATION|DTSTART|TZOFFSETFROM|TZOFFSETTO|RRULE|RDATE|TZNAME|COMMENT)[;:]/i
+var ZONE_LINES = /^(BEGIN|END|TZID|LAST-MODIFIED|X-LIC-LOCATION|DTSTART|TZOFFSETFROM|TZOFFSETTO|RRULE|RDATE|TZNAME|COMMENT)[;:]/i
 
 function zoneLines(block) {
   return String(block || "").split(/\r?\n/).filter(function(line) {

@@ -157,6 +157,9 @@ Item {
       wait(1)
       var picker = findChild(settings,"invitation-calendar-picker")
       compare(picker.options.length,1)
+      var row = picker
+      while (row && row.detail === undefined) row = row.parent
+      compare(row.detail,"Update the backend to save to CalDAV calendars")
       mailService.backend = { ready: true, apiVersion: 10 }
       wait(1)
       compare(picker.options.length,2)

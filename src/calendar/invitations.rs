@@ -10,7 +10,7 @@ use std::future::Future;
 
 const COPY_LIMIT: usize = 512 * 1024;
 const CALENDAR_PROPERTIES: &[&str] = &["VERSION", "PRODID", "CALSCALE"];
-const ZONE_PROPERTIES: &[&str] = &["TZID", "LAST-MODIFIED", "TZURL", "X-LIC-LOCATION"];
+const ZONE_PROPERTIES: &[&str] = &["TZID", "LAST-MODIFIED", "X-LIC-LOCATION"];
 const RULE_PROPERTIES: &[&str] = &[
     "DTSTART",
     "TZOFFSETFROM",
@@ -440,6 +440,36 @@ fn recurrence_key(event: &Component) -> Option<(String, String)> {
     ))
 }
 
+fn is_exdate(line: &str) -> bool {
+    line.get(..7).is_some_and(|name| {
+        name.eq_ignore_ascii_case("EXDATE;") || name.eq_ignore_ascii_case("EXDATE:")
+    })
+}
+
+fn exdate_key(line: &str) -> (String, String) {
+    (
+        ics::param(line, "TZID").unwrap_or_default(),
+        ics::value(line).trim().to_ascii_uppercase(),
+    )
+}
+
+/// The sequence of a decline this importer wrote as an EXDATE.
+fn decline_sequence(line: &str) -> Option<u64> {
+    if !is_exdate(line) {
+        return None;
+    }
+    ics::param(line, SEQUENCE)?.trim().parse().ok()
+}
+
+fn declined_sequence(master: &Component, key: &(String, String)) -> Option<u64> {
+    master
+        .lines
+        .iter()
+        .filter(|line| is_exdate(line) && exdate_key(line) == *key)
+        .filter_map(|line| decline_sequence(line))
+        .max()
+}
+
 fn copy_organizer(event: &Component) -> Option<String> {
     event.text(ORGANIZER).or_else(|| {
         let address = ics::value(event.property("ORGANIZER")?);
@@ -524,8 +554,10 @@ where
     // text-match is a substring match: keep only resources holding this UID.
     let mut matching = Vec::new();
     for object in super::discovery::dav_objects(body)? {
+        // An object this cannot read might be the saved copy; creating a
+        // second one beside it would be worse than refusing.
         let Ok(calendar) = Component::parse(&object.data) else {
-            continue;
+            return Err("calendar_invalid_response");
         };
         if calendar
             .children
@@ -561,14 +593,17 @@ where
             .as_ref()
             .and_then(|c| c.children.iter().find(|c| c.name == "VEVENT"))
             .and_then(recurrence_key);
-        let current = match &key {
-            Some(key) => events
-                .iter()
-                .find(|e| recurrence_key(e).as_ref() == Some(key))
-                .copied(),
-            None => Some(*master),
-        };
-        if current.is_some_and(|e| copy_sequence(e) > sequence) {
+        // An occurrence not saved on its own yet is as new as its series.
+        let current = key
+            .as_ref()
+            .and_then(|key| {
+                events
+                    .iter()
+                    .find(|e| recurrence_key(e).as_ref() == Some(key))
+            })
+            .unwrap_or(master);
+        let declined = key.as_ref().and_then(|key| declined_sequence(master, key));
+        if copy_sequence(current) > sequence || declined.is_some_and(|s| s > sequence) {
             return Ok(json!({"status":"newer"}));
         }
     }
@@ -613,24 +648,52 @@ where
     let invitation = invitation.ok_or("invalid_params")?;
     let event = event.ok_or("invalid_params")?;
     match &occurrence {
-        // A whole series or single event replaces the saved one.
+        // A whole series or single event replaces the saved one. Occurrence
+        // changes and declines from later mail than this one stay.
         None => {
-            calendar.children.retain(|c| c.name != "VEVENT");
-            calendar.children.push(managed(&event, p));
+            let declines: Vec<String> = calendar
+                .children
+                .iter()
+                .find(|c| c.name == "VEVENT" && c.property("RECURRENCE-ID").is_none())
+                .map(|master| {
+                    master
+                        .lines
+                        .iter()
+                        .filter(|line| decline_sequence(line).is_some_and(|s| s > sequence))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            calendar.children.retain(|c| {
+                c.name != "VEVENT"
+                    || (c.property("RECURRENCE-ID").is_some() && copy_sequence(c) > sequence)
+            });
+            let mut master = managed(&event, p);
+            master.lines.extend(declines);
+            calendar.children.push(master);
         }
         Some(key) => {
             calendar
                 .children
                 .retain(|c| c.name != "VEVENT" || recurrence_key(c).as_ref() != Some(key));
+            let master = calendar
+                .children
+                .iter_mut()
+                .find(|c| c.name == "VEVENT" && c.property("RECURRENCE-ID").is_none())
+                .ok_or("calendar_invitation_series_required")?;
+            // This answer replaces any earlier decline of the same occurrence.
+            master
+                .lines
+                .retain(|line| !is_exdate(line) || exdate_key(line) != *key);
             if remove {
+                // The decline's sequence travels in the EXDATE, so an older
+                // acceptance cannot bring the occurrence back.
                 let line = event.property("RECURRENCE-ID").unwrap();
-                let exdate = format!("EXDATE{}", &line["RECURRENCE-ID".len()..]);
-                let master = calendar
-                    .children
-                    .iter_mut()
-                    .find(|c| c.name == "VEVENT" && c.property("RECURRENCE-ID").is_none())
-                    .ok_or("calendar_invitation_series_required")?;
-                master.lines.push(exdate);
+                let value = ics::value(line);
+                let head = &line["RECURRENCE-ID".len()..line.len() - value.len() - 1];
+                master
+                    .lines
+                    .push(format!("EXDATE{head};{SEQUENCE}={sequence}:{value}"));
             } else {
                 calendar.children.push(managed(&event, p));
             }
@@ -948,6 +1011,16 @@ mod tests {
             assert!(calls.is_empty());
         }
         let mut p = caldav_params();
+        p["calendar"] = json!(invitation("").replace(
+            "TZID:Europe/Stockholm\r\n",
+            "TZID:Europe/Stockholm\r\nTZURL:https://tz.example.org/zone\r\n"
+        ));
+        let (result, calls) = run_caldav(&p, vec![]).await;
+        assert!(
+            result.is_err() && calls.is_empty(),
+            "a sender's zone URL is refused"
+        );
+        let mut p = caldav_params();
         p["event"] = json!({});
         assert!(validate(&p).is_err());
         let p = caldav_params();
@@ -1021,7 +1094,122 @@ mod tests {
         assert_eq!(result.unwrap()["status"], "removed");
         let body = calls[1]["body"].as_str().unwrap();
         assert_eq!(body.matches("BEGIN:VEVENT").count(), 1);
-        assert!(body.contains("EXDATE;TZID=Europe/Stockholm:20261103T100000"));
+        assert!(body.contains("EXDATE;TZID=Europe/Stockholm;X-OMAMAIL-SEQUENCE=2:20261103T100000"));
+    }
+    const MOVED: &str = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:meeting\r\nRECURRENCE-ID;TZID=Europe/Stockholm:20261103T100000\r\nDTSTART;TZID=Europe/Stockholm:20261103T120000\r\nDTEND;TZID=Europe/Stockholm:20261103T130000\r\nSUMMARY:Moved\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+    fn occurrence_params(sequence: u64, response: &str) -> Value {
+        let mut p = caldav_params();
+        p["calendar"] = json!(MOVED);
+        p["originalStart"] = json!("2026-11-03T09:00:00Z");
+        p["sequence"] = json!(sequence);
+        p["response"] = json!(response);
+        p
+    }
+    /// The saved series with a managed moved occurrence or a declined one.
+    fn saved_with(extra_master: &str, override_sequence: Option<u64>) -> String {
+        let marks =
+            "X-OMAMAIL-MAILBOX:imap:me@example.org\r\nX-OMAMAIL-ORGANIZER:host@example.org\r\n";
+        let mut text = invitation(&format!("{marks}X-OMAMAIL-SEQUENCE:2\r\n{extra_master}"));
+        if let Some(sequence) = override_sequence {
+            let child = format!(
+                "BEGIN:VEVENT\r\nUID:meeting\r\nRECURRENCE-ID;TZID=Europe/Stockholm:20261103T100000\r\nDTSTART;TZID=Europe/Stockholm:20261103T120000\r\nDTEND;TZID=Europe/Stockholm:20261103T130000\r\nSUMMARY:Moved\r\n{marks}X-OMAMAIL-SEQUENCE:{sequence}\r\nEND:VEVENT\r\n"
+            );
+            text = text.replace("END:VCALENDAR", &format!("{child}END:VCALENDAR"));
+        }
+        text
+    }
+    #[tokio::test]
+    async fn caldav_occurrence_without_override_is_checked_against_its_series() {
+        let series = saved("imap:me@example.org", 5);
+        let (result, calls) = run_caldav(
+            &occurrence_params(1, "accepted"),
+            vec![report(&[("/copy.ics", &series)])],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "newer");
+        assert_eq!(calls.len(), 1, "a stale occurrence writes nothing");
+    }
+    #[tokio::test]
+    async fn caldav_series_resave_keeps_newer_occurrence_changes() {
+        let series = saved_with("", Some(3));
+        let (result, calls) = run_caldav(
+            &caldav_params(),
+            vec![report(&[("/copy.ics", &series)]), json!({})],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        let body = calls[1]["body"].as_str().unwrap();
+        assert_eq!(
+            body.matches("BEGIN:VEVENT").count(),
+            2,
+            "the moved occurrence survives a retry of the series"
+        );
+        assert!(body.contains("SUMMARY:Moved"));
+        let mut newer = caldav_params();
+        newer["sequence"] = json!(4);
+        let (result, calls) =
+            run_caldav(&newer, vec![report(&[("/copy.ics", &series)]), json!({})]).await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        assert_eq!(
+            calls[1]["body"]
+                .as_str()
+                .unwrap()
+                .matches("BEGIN:VEVENT")
+                .count(),
+            1,
+            "a newer series replaces older occurrence changes"
+        );
+    }
+    #[tokio::test]
+    async fn caldav_declined_occurrence_keeps_its_sequence() {
+        let series = saved("imap:me@example.org", 2);
+        let (result, calls) = run_caldav(
+            &occurrence_params(4, "declined"),
+            vec![report(&[("/copy.ics", &series)]), json!({})],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "removed");
+        let declined = calls[1]["body"].as_str().unwrap().to_owned();
+        let (result, calls) = run_caldav(
+            &occurrence_params(3, "accepted"),
+            vec![report(&[("/copy.ics", &declined)])],
+        )
+        .await;
+        assert_eq!(
+            result.unwrap()["status"],
+            "newer",
+            "an older acceptance does not undo a newer decline"
+        );
+        assert_eq!(calls.len(), 1);
+        let (result, calls) = run_caldav(
+            &occurrence_params(5, "accepted"),
+            vec![report(&[("/copy.ics", &declined)]), json!({})],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        let body = calls[1]["body"].as_str().unwrap();
+        assert!(
+            !body.contains("EXDATE"),
+            "a newer acceptance brings the occurrence back"
+        );
+        assert!(body.contains("SUMMARY:Moved"));
+        let resaved = saved_with("", None).replace(
+            "X-OMAMAIL-SEQUENCE:2\r\n",
+            &format!(
+                "X-OMAMAIL-SEQUENCE:2\r\n{}\r\n",
+                declined.lines().find(|l| l.starts_with("EXDATE")).unwrap()
+            ),
+        );
+        let (result, calls) = run_caldav(
+            &caldav_params(),
+            vec![report(&[("/copy.ics", &resaved)]), json!({})],
+        )
+        .await;
+        assert_eq!(result.unwrap()["status"], "saved");
+        assert!(
+            calls[1]["body"].as_str().unwrap().contains("EXDATE"),
+            "a series retry keeps a newer decline"
+        );
     }
     #[test]
     fn import_transport_is_fixed_origin_post_and_contains_no_notification_parameter() {

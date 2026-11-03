@@ -130,6 +130,11 @@ Column {
     return source.kind === "google" || ((source.kind === "caldav" || source.kind === "icloud")
       && !!root.service && Invitations.supported(root.service.backend, source))
   })
+  // A connected CalDAV calendar this backend is too old to save invitations to.
+  readonly property bool invitationSourcesNeedBackend: settingsSources.some(function(source) {
+    return (source.kind === "caldav" || source.kind === "icloud") && !source.readOnly && !root.orphaned(source)
+      && !(!!root.service && Invitations.supported(root.service.backend, source))
+  })
 
   function reminderMode(source) {
     return source.remindersEnabled !== true ? "off"
@@ -860,7 +865,9 @@ Column {
         readonly property var target: Invitations.destination(root.service.settings, String(modelData.id))
         title: String(modelData.email || modelData.label || modelData.id)
         detail: root.service.backendCanSaveInvitations !== true ? "Update the backend to choose a calendar"
-          : root.invitationSources.length ? "Save accepted invitations to" : "Connect a writable calendar above"
+          : root.invitationSources.length ? "Save accepted invitations to"
+          : root.invitationSourcesNeedBackend ? "Update the backend to save to CalDAV calendars"
+          : "Connect a writable calendar above"
         Dropdown {
           objectName: "invitation-calendar-picker"
           width: Style.space(240)

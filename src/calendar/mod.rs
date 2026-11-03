@@ -128,7 +128,7 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         // Creating a resource that must not exist yet; nothing else is sent.
         if_none_match: match params.get("ifNoneMatch") {
             None => false,
-            Some(value) if value == "*" => true,
+            Some(value) if value == "*" && op == "create" => true,
             Some(_) => return Err("calendar_invalid_input"),
         },
     };

@@ -674,6 +674,7 @@ fn only_a_create_may_require_an_absent_resource() {
     .unwrap();
     assert!(request.if_none_match);
     assert!(prepare(&json!({"source":source,"operation":"create","href":"a.ics","body":"x","ifNoneMatch":"\"v1\""})).is_err());
+    assert!(prepare(&json!({"source":source,"operation":"update","href":"a.ics","body":"x","ifNoneMatch":"*"})).is_err());
     assert_eq!(
         prepare(&json!({"source":{"kind":"google"},"operation":"addresses"})).err(),
         Some("calendar_invalid_operation")
