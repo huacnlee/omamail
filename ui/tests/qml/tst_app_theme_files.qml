@@ -39,8 +39,27 @@ Item {
     }
   }
 
+  QtObject {
+    id: standalonePlatform
+    property string calendarPalettePath: ""
+  }
+
+  QtObject {
+    id: standaloneHost
+    property var capabilities: ({ appTheme: false })
+    property var settings: ({ appTheme: "alpha" })
+    property var platform: standalonePlatform
+    function persistSetting(key, value) {}
+  }
+
   AppTheme { id: chooser; host: pluginHost }
 
+  // Every AppTheme drives the one Paint, so the standalone host's is made only
+  // for the test that asks about it.
+  Component {
+    id: standaloneComponent
+    AppTheme { host: standaloneHost }
+  }
 
   TestCase {
     name: "AppThemeFiles"
@@ -93,6 +112,26 @@ Item {
       expectTheme("alpha", "#eff1f5")
       chooser.choose("")
       expectFollowing()
+    }
+
+    // The palette file a host gets when nothing is picked: the desktop's when
+    // the host names none, and nothing when the host says "" — the standalone
+    // window, which has no desktop palette and must not read one.
+    function test_an_empty_host_palette_path_stays_empty() {
+      var standaloneChoice = createTemporaryObject(standaloneComponent, scene)
+      verify(standaloneChoice)
+      compare(standaloneChoice.colorsPath, "", "an explicit empty path is an answer")
+      standaloneChoice.destroy()
+      wait(0)
+      // Hand Paint back to the plugin's choice.
+      pluginHost.capabilities = ({ appTheme: false })
+      pluginHost.capabilities = ({ appTheme: true })
+      chooser.choose("beta")
+      expectTheme("beta", "#1e1e2e")
+      chooser.choose("")
+      expectFollowing()
+      verify(String(chooser.colorsPath).endsWith("/.local/state/omarchy/current/theme/colors.toml"),
+        "a host that names no palette gets the desktop's: " + chooser.colorsPath)
     }
   }
 }

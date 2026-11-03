@@ -26,10 +26,14 @@ Item {
   readonly property var settings: host !== null ? host.settings : null
   readonly property string selected: Themes.normalizeName(settings ? settings.appTheme : null)
 
-  // The palette file this host would use with no theme picked: the plugin
-  // supplies the desktop's, and the standalone host has none.
+  // The palette file this host would use with no theme picked. A host that
+  // names one is obeyed, and an empty name is an answer: the standalone host
+  // says "" because it has no desktop palette to read. Only a host that names
+  // nothing gets the desktop's current theme.
   readonly property string desktopColorsPath: host !== null && host.platform
-    ? String(host.platform.calendarPalettePath || "") : ""
+    && host.platform.calendarPalettePath !== undefined
+    ? String(host.platform.calendarPalettePath || "")
+    : Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml"
 
   // Every installed Omarchy theme, with the user's copy of a name first. Only a
   // host that can pick a theme reads the directories: the scan is a process,
@@ -46,8 +50,7 @@ Item {
   // out of a file rather than out of Paint.
   readonly property string colorsPath: Paint.active && Paint.themeDir !== ""
     ? Paint.themeDir + "/colors.toml"
-    : (root.desktopColorsPath !== "" ? root.desktopColorsPath
-      : Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml")
+    : root.desktopColorsPath
 
   function refresh() {
     if (root.enabled) catalog.refresh()
