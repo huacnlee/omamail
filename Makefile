@@ -207,6 +207,7 @@ test-shell-portable:
 	python3 tests/test_qml_text_format.py
 	python3 tests/test_clipboard.py
 	bash tests/test_source.sh
+	bash tests/test_source_hash_tools.sh
 	bash tests/test_service_source.sh
 	bash tests/test_config_store.sh
 	bash tests/test_agent_job.sh
