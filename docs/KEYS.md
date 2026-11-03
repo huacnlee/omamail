@@ -177,7 +177,7 @@ used to exist, and they had.
 The bare `?` opens the complete key sheet from mail. In a text-entry context it
 stays text, like every other bare character except `Escape`.
 
-In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with what was written in it; `j`, `k` and a click open it in the reader. Leaving an unchanged draft closes it immediately. After edits, Back offers Save draft, Discard, or Cancel; saving updates the draft it came from, and sending takes that draft away. In every other mailbox, `c` starts a new message.
+In Drafts, `Enter`, `o`, `Right` and `c` open the selected draft in the composer, with what was written in it; a click opens it in the reader, and so do `j` and `k` once the reader is open. Leaving an unchanged draft closes it immediately. After edits, Back offers Save draft, Discard, or Cancel; saving updates the draft it came from, and sending takes that draft away. In every other mailbox, `c` starts a new message.
 
 `Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 
@@ -267,13 +267,7 @@ area: movement was anchored on the opened message, so in the list — where
 nothing is open — every step resolved to the first row, and `j` moved once and
 then stopped.
 
-`j`, `k`, `Down` and `Up` now move the cursor and immediately open the row in
-the reader, in both wide and narrow windows. There is no preview settling delay
-or read dwell: the same explicit-open path displays cached content or fetches
-the message and marks it read when that path normally would. Prefetching stays
-separate and never marks a message read. Moving at a list boundary does not
-reopen the same message. The context continues to park focus outside text fields,
-so successive navigation keys work while the reader is open.
+In the list, `j`, `k`, `Down` and `Up` only move the cursor; `Right`, `Enter` or `o` open the cursor row and `Left` or `u` go back to the list with the cursor where it was. Once the reader is open, `j`, `k`, `Down` and `Up` move the cursor and immediately open that row in the reader, in both wide and narrow windows. There is no preview settling delay or read dwell: the same explicit-open path displays cached content or fetches the message and marks it read when that path normally would. Prefetching stays separate and never marks a message read. Moving at a list boundary does not reopen the same message. The context continues to park focus outside text fields, so successive navigation keys work while the reader is open.
 
 `s` is the one acting key that follows the reader rather than the cursor. With a message open it stars the open message, on every provider, because that is the star the button beside it draws; `e` and `d` act on the cursor row, which is the row the open message belongs to. The difference only shows on a provider whose listing collapses to conversations, where `n` and `p` can walk the reader onto a member while the cursor stays on the row.
 

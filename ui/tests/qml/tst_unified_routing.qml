@@ -171,6 +171,8 @@ Item {
       var mailboxA = ada().mailboxKey
       var mailboxB = bob().mailboxKey
       app.moveCursor(1)
+      compare(service.selectedId, "", "moving in the list only moves the cursor")
+      app.runShortcut("openReader", "Right")
       compare(service.selectedId, Unified.unifiedId(adaId, "1"))
       compare(ada().selectedId, "1")
       compare(ada().selectionIsPreview, false)

@@ -214,6 +214,10 @@ Item {
       wait(20)
       app.cursorId = ""
       keyClick(Qt.Key_J)
+      compare(app.cursorId, "m1")
+      compare(mailService.selectedId, "", "j in the list only moves the cursor")
+      compare(scope.keyContext, "list")
+      keyClick(Qt.Key_Right)
       compare(mailService.selectedId, "m1")
       tryCompare(scope, "keyContext", "reader")
       wait(20)
@@ -266,24 +270,33 @@ Item {
       mouseMove(otherRow, otherRow.width / 2, otherRow.height / 2)
       tryCompare(otherRow, "hot", true)
       compare(app.cursorId, "m30", "hovering a new row must not select it")
-      compare(mailService.selectedId, "m30")
+      compare(mailService.selectedId, "", "and moving in the list opened nothing")
       mouseMove(flick, -10, -10)
     }
 
-    function test_j_opens_without_waiting_for_an_event_loop_or_dwell() {
+    function test_j_in_the_list_moves_and_right_opens() {
       mailService.previewOnCursor = false
       mailService.markReadDelaySec = 30
       app.runShortcut("cursorDown", "J")
       compare(app.cursorId, "m1")
+      compare(mailService.selectedId, "")
+      compare(mailService.openSelects, 0)
+      compare(app.currentView, "list")
+      app.runShortcut("openReader", "Right")
       compare(mailService.selectedId, "m1")
       compare(mailService.openSelects, 1)
       compare(mailService.previewSelects, 0)
       compare(mailService.selectionIsPreview, false)
       compare(app.currentView, "reader")
+      app.runShortcut("backToList", "Left")
+      compare(app.currentView, "list")
+      compare(mailService.selectedId, "")
+      compare(app.cursorId, "m1", "the cursor stays on the row it came from")
     }
 
-    function test_repeated_movement_opens_each_selected_row_and_replaces_reader_history() {
+    function test_repeated_movement_in_the_reader_opens_each_row_and_replaces_reader_history() {
       app.moveCursor(1)
+      app.runShortcut("openReader", "Right")
       app.moveCursor(1)
       app.moveCursor(1)
       compare(app.cursorId, "m3")
@@ -300,6 +313,9 @@ Item {
       waitForRendering(app)
       compare(app.compact, true)
       app.moveCursor(1)
+      compare(mailService.selectedId, "")
+      compare(app.currentView, "list")
+      app.runShortcut("openReader", "Right")
       compare(mailService.selectedId, "m1")
       compare(app.currentView, "reader")
     }
@@ -307,6 +323,7 @@ Item {
     function test_bounds_do_not_reopen_the_same_message() {
       app.moveCursor(-1)
       compare(app.cursorId, "m3")
+      app.runShortcut("openReader", "Right")
       app.moveCursor(1)
       compare(mailService.openSelects, 1)
       app.moveCursor(-1)
@@ -321,6 +338,7 @@ Item {
       mailService.messages = [mailService.initialMessages[0]]
       app.cursorId = ""
       app.moveCursor(1)
+      app.runShortcut("openReader", "Right")
       app.moveCursor(1)
       app.moveCursor(-1)
       compare(mailService.selectedId, "m1")
@@ -332,12 +350,13 @@ Item {
       compare(mailService.openSelects, 1)
     }
 
-    function test_drafts_navigation_reads_without_opening_the_composer() {
+    function test_drafts_navigation_moves_without_opening_the_composer() {
       mailService.mailboxKey = "drafts"
       app.moveCursor(1)
-      compare(app.currentView, "reader")
+      compare(app.cursorId, "m1")
+      compare(app.currentView, "list")
       compare(app.composing, false)
-      compare(mailService.selectedId, "m1")
+      compare(mailService.selectedId, "")
     }
 
     function test_navigation_preserves_the_current_query() {
@@ -368,6 +387,7 @@ Item {
       var reader = readerView()
       verify(reader)
       app.moveCursor(1)
+      app.runShortcut("openReader", "Right")
       reader.forceRichAnyway = true
       app.moveCursor(1)
       compare(reader.forceRichAnyway, false)
@@ -375,6 +395,7 @@ Item {
 
     function test_navigation_never_uses_the_preview_mark_read_timer() {
       app.moveCursor(1)
+      app.runShortcut("openReader", "Right")
       compare(mailService.openSelects, 1)
       wait(220)
       compare(mailService.previewSelects, 0)

@@ -635,9 +635,9 @@ Item {
       listFlick.contentHeight, Style.space(8))
   }
 
-  // Keyboard selection is explicit reading, with the same cache, network and
-  // mark-read behavior as opening a row. Cursor and reader move together while
-  // the cursor remains the anchor for the next key press.
+  // In the list, moving only moves the cursor: Right (or Enter / o) opens the
+  // row and Left goes back. Once the reader is open, moving shows the next
+  // message in it, so reading down a mailbox stays one key per message.
   function moveCursor(delta) {
     if (!service || (focusScope.keyContext !== "list" && focusScope.keyContext !== "reader")
         || labelPicker.opened) return
@@ -645,7 +645,7 @@ Item {
     if (next === "") return
     cursorId = next
     revealCursorRow()
-    if (service.selectedId !== next || service.selectionIsPreview || currentView !== "reader")
+    if (currentView === "reader" && (service.selectedId !== next || service.selectionIsPreview))
       openMessage(next)
   }
 
