@@ -43,6 +43,34 @@ TestCase {
     function discoveredCount(id) { return 1 }
   }
 
+  // The shared dialogs on the standalone host's own controls: its button has
+  // no key handling of its own, so Return reaches a choice only through the
+  // dialog asking which button holds the focus.
+  Component {
+    id: confirmDeleteComponent
+    Components.ConfirmDeleteDialog {
+      textColor: Commons.Color.foreground
+      dimColor: Commons.Color.foreground
+      dangerColor: Commons.Color.accent
+      popupBackgroundColor: Commons.Color.background
+      popupBorderColor: Commons.Color.foreground
+      panelFontFamily: Style.font.family
+    }
+  }
+
+  Component {
+    id: composeExitComponent
+    Components.ComposeExitDialog {
+      textColor: Commons.Color.foreground
+      dimColor: Commons.Color.foreground
+      dangerColor: Commons.Color.accent
+      popupBackgroundColor: Commons.Color.background
+      popupBorderColor: Commons.Color.foreground
+      panelFontFamily: Style.font.family
+      currentDraftKey: "draft-one"
+    }
+  }
+
   Component {
     id: calendarComponent
     Components.CalendarSettings {
@@ -709,6 +737,82 @@ TestCase {
     composition.height = 850
     composition.saveWindowSize()
     compare(JSON.parse(host.files[path]), {width:1000, height:680})
+  }
+
+  function test_delete_dialog_answers_return_on_standalone_buttons() {
+    var dialog = createTemporaryObject(confirmDeleteComponent, testCase)
+    verify(dialog)
+    var answers = []
+    dialog.confirmed.connect(function(request) { answers.push(request) })
+
+    dialog.openFor({kind: "event", name: "Synthetic meeting", event: {googleId: "one"}})
+    tryCompare(dialog, "opened", true)
+    // The buttons live in the popup, which findChild does not walk into.
+    function named(item, name) {
+      if (!item) return null
+      if (item.objectName === name) return item
+      var kids = item.children || []
+      for (var i = 0; i < kids.length; i++) {
+        var found = named(kids[i], name)
+        if (found) return found
+      }
+      return null
+    }
+    var popup = popupOf(dialog)
+    verify(popup, "the delete question is a Popup")
+    var confirm = named(popup.contentItem, "delete-confirm")
+    verify(confirm, "the Delete button")
+    tryVerify(function() { return confirm.activeFocus }, 2000, "Delete holds the focus")
+    keyClick(Qt.Key_Return)
+    compare(answers.length, 1, "Return on the default answers it")
+    compare(answers[0].event.googleId, "one")
+    tryCompare(dialog, "opened", false)
+
+    dialog.openFor({kind: "event", name: "Synthetic meeting", event: {googleId: "two"}})
+    tryCompare(dialog, "opened", true)
+    var cancel = named(popup.contentItem, "delete-cancel")
+    verify(cancel, "the Cancel button")
+    tryVerify(function() { return confirm.activeFocus }, 2000)
+    keyClick(Qt.Key_Tab)
+    verify(cancel.activeFocus, "Tab reaches Cancel")
+    keyClick(Qt.Key_Return)
+    tryCompare(dialog, "opened", false)
+    compare(answers.length, 1, "Return on Cancel deletes nothing")
+  }
+
+  function test_draft_dialog_answers_return_on_standalone_buttons() {
+    var dialog = createTemporaryObject(composeExitComponent, testCase)
+    verify(dialog)
+    var saved = []
+    var discarded = []
+    dialog.saveRequested.connect(function(key) { saved.push(key) })
+    dialog.discardRequested.connect(function(key) { discarded.push(key) })
+    var popup = popupOf(dialog)
+    verify(popup, "the draft question is a Popup")
+    var row = popup.contentItem.children[2]
+    var cancel = row.children[0]
+    var discard = row.children[1]
+    var save = row.children[2]
+    verify(cancel.text === "Cancel" && discard.text === "Discard" && save.text === "Save draft")
+
+    dialog.open()
+    tryCompare(dialog, "opened", true)
+    tryVerify(function() { return save.activeFocus }, 2000, "Save draft holds the focus")
+    keyClick(Qt.Key_Return)
+    compare(saved, ["draft-one"], "Return on the default saves the draft")
+    tryCompare(dialog, "opened", false)
+
+    dialog.open()
+    tryCompare(dialog, "opened", true)
+    tryVerify(function() { return save.activeFocus }, 2000)
+    keyClick(Qt.Key_Tab)
+    verify(cancel.activeFocus, "Tab from Save draft reaches Cancel")
+    keyClick(Qt.Key_Tab)
+    verify(discard.activeFocus, "and then Discard")
+    keyClick(Qt.Key_Return)
+    compare(discarded, ["draft-one"], "Return on Discard discards")
+    compare(saved.length, 1)
+    tryCompare(dialog, "opened", false)
   }
 
   function test_shell_persists_settings_and_routes_activation_payload() {

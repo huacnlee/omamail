@@ -21,7 +21,12 @@ import "../theme"
 //
 // In Follow Omarchy none of that happens: `selected` is `chosen`, the base
 // draws its own label, and the button is the shell's button.
-Item {
+//
+// The wrapper is a focus scope around the base, so focus given to either is
+// focus on both: callers that ask `button.activeFocus` — the dialogs that turn
+// Return into a click, because the standalone host's button does not — get the
+// answer they got when the button was the shell's own.
+FocusScope {
   id: root
 
   // The shell's public surface. `background` and `fontSize` stay unset so a
@@ -125,9 +130,11 @@ Item {
     verticalPadding: root.verticalPadding
     leftAlign: root.leftAlign
 
-    // The focus stop is the wrapper, which hands focus here so the base's own
-    // key handling and focus ring keep working.
-    activeFocusOnTab: false
+    // Inside the wrapper's scope the base is the item that holds the focus,
+    // and the Tab stop is still the base's own, as it was before the wrapper:
+    // its key handling, its focus ring and the dialogs that walk Tab
+    // themselves all see the button they saw then.
+    focus: true
 
     onClicked: root.clicked()
     onHovered: function(isHovered) { root.hovered(isHovered) }
@@ -160,8 +167,6 @@ Item {
     value: root.fontSize
   }
 
-  activeFocusOnTab: root.focusable
-  onActiveFocusChanged: if (root.activeFocus && !base.activeFocus) base.forceActiveFocus()
 
   Binding {
     target: base
@@ -211,8 +216,11 @@ Item {
     property: "borderSpec"
     when: Paint.active
     restoreMode: Binding.RestoreBindingOrValue
-    value: root.themedBorderState === "none" ? Border.none()
-      : Paint.controlSpec(root.themedBorderState, root.foreground, root.accent)
+    // A Binding evaluates its value even while `when` is false, and the
+    // standalone host's Border has no `none()`: only a themed window asks.
+    value: !Paint.active ? null
+      : (root.themedBorderState === "none" ? Border.none()
+        : Paint.controlSpec(root.themedBorderState, root.foreground, root.accent))
   }
 
   // The tooltip's palette is published by the shell's button and baked from the
