@@ -78,8 +78,14 @@ var BINDINGS = [
     group: "Acting", label: "Archive (in Archive: move to Inbox)",
     hint: { list: "archive", reader: "archive" },
     inverse: { action: "unarchive", hint: "move to inbox" } },
-  { id: "trash", keys: ["d"], contexts: MAIL,
+  // Delete beside d: one action, two keys, the way the sheet enumerates a row.
+  // The desktop mail clients a new arrival knows make Delete the trash key,
+  // and issue #58 asks after it. Mail contexts only — a bare Delete in a
+  // draft or a query stays text editing, like every bare key outside the
+  // mailbox, so the field keeps it.
+  { id: "trash", keys: ["d", "Delete"], contexts: MAIL,
     group: "Acting", label: "Move to trash (in the trash: restore)",
+    hintKey: "d",
     hint: { list: "trash", reader: "trash" },
     inverse: { action: "untrash", hint: "restore" } },
   { id: "star", keys: ["s"], contexts: MAIL,
