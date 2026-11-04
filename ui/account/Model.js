@@ -426,13 +426,23 @@ function labelChangesFor(action, sourceLabelId) {
 // under its parent, each row saying how deep it sits so the picker can step
 // it in. Typed, the best matches first, flat — the letters name the label,
 // not its place. The label the list is already in is left out either way.
-function movableLabels(labels, query, currentLabelId) {
+function movableKeep(folders) {
+  if (folders !== true) return function() { return false }
+  return function(label) { return isInboxLabel(label) }
+}
+
+function isInboxLabel(label) {
+  return String(label && (label.id || label.name) || "").toLowerCase() === "inbox"
+}
+
+function movableLabels(labels, query, currentLabelId, folders) {
   var candidates = Array.isArray(labels) ? labels : []
   var typed = String(query || "").trim()
   var current = String(currentLabelId || "")
+  var keep = movableKeep(folders)
   var destinations = []
   if (typed === "") {
-    var rows = labelTree(candidates, [])
+    var rows = labelTree(candidates, [], keep)
     for (var r = 0; r < rows.length; r++) {
       if (!rows[r].selectable || rows[r].id === current) continue
       var at = indexById(candidates, rows[r].id)
@@ -447,7 +457,7 @@ function movableLabels(labels, query, currentLabelId) {
   }
   for (var i = 0; i < candidates.length; i++) {
     var label = candidates[i]
-    if (!label || label.system === true) continue
+    if (!label || (label.system === true && !keep(label))) continue
     if (String(label.id || "") === current) continue
     var labelName = String(label.name || "")
     var score = fuzzyScore(typed, labelName)
@@ -2001,7 +2011,7 @@ function batchFailureNote(asked, failed, actionLabel, error) {
 // Rows come back depth-first, siblings in name order, with the rows under a
 // folded parent left out. `unread` on a folded parent is its subtree's, so
 // folding a queue does not hide that it has mail in it.
-function labelTree(labels, collapsedPaths) {
+function labelTree(labels, collapsedPaths, keep) {
   var all = Array.isArray(labels) ? labels : []
   var folded = Array.isArray(collapsedPaths) ? collapsedPaths : []
   // Children keyed on a prototype-less object: a label named "constructor"
@@ -2009,7 +2019,10 @@ function labelTree(labels, collapsedPaths) {
   var root = { children: Object.create(null), order: [] }
   for (var i = 0; i < all.length; i++) {
     var label = all[i]
-    if (!label || label.system) continue
+    // `keep` belongs to the move picker: on a folder provider the Inbox is a
+    // destination a key cannot reach, so it is let through there and nowhere
+    // else. The rail, which shares this tree, still drops every system label.
+    if (!label || (label.system && !(keep && keep(label)))) continue
     var delimiter = labelDelimiter(label)
     var full = String(label.name || label.rawName || "")
     if (full === "") continue

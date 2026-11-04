@@ -46,7 +46,7 @@ readonly property string keyContext:
 | `assistant` | Typing or reading in the AI dock | `Return`/`Enter` sends, `Escape`, and the modified keys |
 | `assistantCommands` | Slash-command suggestions | Up/Down selects, Return/Enter completes or executes, Escape dismisses |
 | `page` | Setup or settings | `Escape`, and the modified keys |
-| `calendar` | The calendar month | Calendar navigation and the modified keys |
+| `calendar` | The calendar | Calendar navigation, hour zoom in the day and week views, and the modified keys |
 
 `Ctrl+,` opens Settings from every context, including a focused draft field.
 Back returns to the previous screen with the draft intact.
@@ -143,6 +143,9 @@ used to exist, and they had.
 | `calendarAgenda` | `a` | calendar | Show agenda view |
 | `calendarUndo` | `u` | calendar | Undo the last event change |
 | `calendarMonth` | `m` | calendar | Show month view |
+| `calendarZoomIn` | `Ctrl++`, `Ctrl+=` | calendar | Make hours taller in the day and week views |
+| `calendarZoomOut` | `Ctrl+-` | calendar | Make hours shorter in the day and week views |
+| `calendarZoomReset` | `Ctrl+0` | calendar | Return to the automatic hour height |
 | `send` | `Ctrl+Return`, `Ctrl+Enter` | compose | Send |
 | `saveEvent` | `Return`, `Enter`, `Ctrl+Return`, `Ctrl+Enter` | eventCompose+eventDescription | Save and close the event |
 | `guestNext` | `Down` | eventGuests | Next guest suggestion |
@@ -178,7 +181,7 @@ In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with wh
 
 `Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 
-`e` and `d` are the archive and trash buttons, and where a button's action is already done for every row it will reach, the button is its inverse, and so is the key: in the trash they restore, and in Archive they move an archived message to the Inbox. The rows are the ones the control acts on: the ticked rows when it is about one of them (a key, a ticked row's menu or middle-click, the reader on a ticked message), else the cursor's row (before there is one, the listing's rows, which is what the hint row and the empty reader's key list describe), the row itself, or the row the open message belongs to. A mixed selection gets the key's own verb, the way `s` stars a mixed one. Restore is the provider's untrash, which every client has, so it is also the way out of the trash on HEY, which has no archive and no move. It is not called Move to Inbox because where it lands is the provider's: Gmail takes the TRASH label off and leaves the rest, the others move the message to the Inbox. `e` turns back only in Archive: on IMAP every folder but the Inbox reads as archived, and `e` in one of them still files the message in Archive. `Model.keyActionFor` is the rule. `MessageList` applies it over each control's rows, with App's own `selectionActive` deciding whether the ticked rows are reached, and App sends the keys and the hint row through its `keyActions`. A button's tooltip, on a row or in the reader, names `e` or `d` only when the key reaches the same rows and asks the same of them. Hovering does not move the cursor, so a row names its keys only when it is the cursor's row, or ticked while the selection is active. A message that is not one of the listing's rows, such as one a notification opened over the Trash, is judged by its own labels.
+`e` and `d` are the archive and trash buttons, and where a button's action is already done for every row it will reach, the button is its inverse, and so is the key: in the trash they restore, and in Archive they move an archived message to the Inbox. The rows are the ones the control acts on: the ticked rows when it is about one of them (a key, a ticked row's menu or middle-click, the reader on a ticked message), else the cursor's row (before there is one, the listing's rows, which is what the hint row and the empty reader's key list describe), the row itself, or the row the open message belongs to. A mixed selection gets the key's own verb, the way `s` stars a mixed one. Restore is the provider's untrash, which every client has, so it is also the way out of the trash on HEY, which has no archive and no move. It is not called Move to Inbox because where it lands is the provider's: Gmail takes the TRASH label off and leaves the rest, the others move the message to the Inbox. `e` turns back only in Archive: on IMAP every folder but the Inbox reads as archived, and `e` in one of them still files the message in Archive. `Model.keyActionFor` is the rule. `MessageList` applies it over each control's rows, with App's own `selectionActive` deciding whether the ticked rows are reached, and App sends the keys and the hint row through its `keyActions`. A button's tooltip, on a row or in the reader, names `e` or `d` only when the key reaches the same rows and asks the same of them. Hovering does not move the cursor, so a row names its keys only when it is the cursor's row, or ticked while the selection is active. A message that is not one of the listing's rows, such as one a notification opened over the Trash, is judged by its own labels. Because `e` files a message into Archive from every folder but Archive, a message read in Junk has no one-key way back, so on a mailbox whose labels are folders `v` offers the Inbox as well.
 
 `n` and `p` walk the conversation rail beside the message on a provider whose listing collapses to conversations, opening the next and previous member in the same reader and stopping at the ends. The rail runs newest at the top, so `n` opens the stop below the open message, which is the older one, and `p` the stop above it, the newer — the keys follow the rail as it is drawn, the way `j` and `k` follow the list. They move the reader and nothing else. `j` and `k` move the list cursor and immediately open the representative of that row, leaving the conversation member selected with `n` or `p`. A message whose conversation has one member draws no rail, and both keys then do nothing. A right-click on a stop opens the same menu a row has — reply, archive, trash, spam, read, star — for that one message: the action reaches the member alone, where the same verb on the row reaches every counted member, and if the open message is the one taken out of the view the reader moves to the stop beside it, the newer one above or else the older below.
 
@@ -250,7 +253,7 @@ name, by the name they were given or their address; `Down` and `Up`, or `Ctrl`
 with `j`, `k`, `n` or `p`, walk what is left; `Enter` opens the row the cursor
 is on. A bare `j` or `k` is a letter there now, as it has to be for "jack" to
 find a mailbox.
-`ui/tests/qml/tst_popup_keys.qml` holds the Qt behaviour that makes it so, and
+`ui/tests/qml/tst_account_switcher.qml` exercises this on the production popup, and
 `Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
 message list clamps.
 
@@ -312,7 +315,7 @@ pointer that has not moved, and the list scrolls to follow the keyboard. With
 hover writing `cursorId`, pressing `j` moved the cursor, the scroll brought a
 different row under the still pointer, and the cursor snapped back to it — so
 `j` and `k` stuck on whichever rows the mouse was resting near.
-`ui/tests/qml/tst_hover_under_scroll.qml` pins the Qt behaviour that makes this so.
+`ui/tests/qml/tst_preview_on_cursor.qml` drives the production list with hover events while keyboard navigation scrolls it, and checks that hover cannot take the cursor back.
 
 A mouse with a back button takes the same step `Escape` takes — `goBack()`, so the two do not become separate implementations of going back — with one exception. It never closes the window. `Escape` on a root with nothing left to clear ends the window, which is right for a key somebody pressed on purpose and wrong for a button sitting under the hand with no affordance saying the next press shuts the mailbox, so the mouse stops there instead. `ui/components/MouseBack.qml` reports the press and `ui/App.qml` decides what it means, the same way `KeyRouter` does for keys.
 

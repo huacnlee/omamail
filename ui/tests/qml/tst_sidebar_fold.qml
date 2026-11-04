@@ -59,9 +59,23 @@ Item {
     }
 
     function init() {
+      sidebar.service = fake
       folded.clear(); opened.clear(); mailbox.clear()
       sidebar.numbersVisible = false
       sidebar.collapsed = false
+    }
+
+    function test_search_clears_mailbox_selection_without_changing_its_number() {
+      var entry = textItem(sidebar, "Inbox")
+      while (entry && entry.selected === undefined) entry = entry.parent
+      verify(entry)
+      compare(entry.selected, true)
+      compare(entry.slotNumber, 1)
+      sidebar.service = Object.assign({}, fake, { searchQuery: "invoice" })
+      compare(entry.selected, false)
+      compare(entry.slotNumber, 1)
+      sidebar.service = fake
+      compare(entry.selected, true)
     }
 
     function test_the_calendar_entry_follows_whether_one_is_connected() {

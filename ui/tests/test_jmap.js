@@ -2403,15 +2403,8 @@ assert.strictEqual(provider.capabilities.send, true)
 assert.strictEqual(provider.capabilities.web, false, "no web UI this plugin knows the address of")
 assert.strictEqual(provider.capabilities.webBox, false)
 
-// `conversations` is the word arriving with that hook, and this is the one
-// assertion that has to be written for both trees: absent from the registry's
-// vocabulary it is `undefined` here, and present it must be the `true` the
-// description declares — a registry that learned the word and dropped this
-// provider's answer would be one row per message on a mailbox that has threads.
-if (provider.capabilities.conversations !== undefined) {
-  assert.strictEqual(provider.capabilities.conversations, true,
-    "one row per conversation, from the server's own thread id")
-}
+assert.strictEqual(provider.capabilities.conversations, true,
+  "one row per conversation, from the server's own thread id")
 
 // IMAP's eight rows, keyed on RFC 8621 roles rather than on folder names, and
 // the last three optional because an account may have no such mailbox at all.

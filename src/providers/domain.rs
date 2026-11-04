@@ -183,6 +183,43 @@ pub fn resolve(p: &Value) -> Result<Value, &'static str> {
 mod tests {
     use super::*;
     #[test]
+    fn imap_search_operators_keep_values_and_search_the_whole_account() {
+        // Migrated from the retired JS query tests. Expected values describe
+        // the current account-wide search contract, not its old INBOX scope.
+        for (search, expected) in [
+            ("from: ada@example.com", "search:FROM \"ada@example.com\""),
+            (
+                "to:*@example.com invoice",
+                "search:TO \"@example.com\" TEXT \"invoice\"",
+            ),
+            ("plain words", "search:TEXT \"plain words\""),
+            (
+                "from:\"Jane Doe\" report",
+                "search:FROM \"Jane Doe\" TEXT \"report\"",
+            ),
+            ("from:", "search:TEXT \"from:\""),
+            ("from:*", "search:TEXT \"from:*\""),
+            ("from:*** invoice", "search:TEXT \"from:*** invoice\""),
+            ("say \"hi\"", "search:TEXT \"say \\\"hi\\\"\""),
+        ] {
+            assert_eq!(
+                resolve(&json!({"provider":"imap","search":search,"mailbox":"trash"})).unwrap()["value"],
+                expected,
+                "{search}"
+            );
+        }
+        for (provider, direction, value, expected) in [
+            ("gmail", "to", " ada@example.com ", "to:ada@example.com"),
+            ("gmail", "from", "a b", ""),
+            ("imap", "to", "a\"b", "search:TO \"a\\\"b\""),
+            ("imap", "from", "", ""),
+            ("hey", "to", "ada@example.com", "search:ada@example.com"),
+        ] {
+            assert_eq!(resolve(&json!({"provider":provider,"operation":"addressQuery","field":direction,"value":value})).unwrap()["value"], expected);
+        }
+    }
+
+    #[test]
     fn control_bytes_are_rejected_before_any_query_or_url_is_returned() {
         for id in ["gmail", "outlook", "hey", "jmap", "m365", "imap"] {
             for suffix in ["\r", "\n", "\r\n", "\0", "\t", "\u{7f}"] {
@@ -210,19 +247,7 @@ mod tests {
         let cases: Value =
             serde_json::from_str(include_str!("../../tests/provider_domain_parity.json")).unwrap();
         for case in cases.as_array().unwrap() {
-            // Legacy fixtures predate account-wide IMAP search. Folder browsing
-            // is unchanged; only resolved search/address queries change scope.
             let expected = case["expected"].as_str().unwrap();
-            let expected = if expected.starts_with("folder:INBOX ")
-                && (case["params"]["search"]
-                    .as_str()
-                    .is_some_and(|s| !s.trim().is_empty())
-                    || case["params"]["operation"] == "addressQuery")
-            {
-                expected.replacen("folder:INBOX ", "search:", 1)
-            } else {
-                expected.to_owned()
-            };
             assert_eq!(
                 resolve(&case["params"]).unwrap()["value"],
                 expected,

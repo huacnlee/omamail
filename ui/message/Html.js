@@ -317,6 +317,25 @@ var IMPLIED_CLOSE = {
   option: { option: true }
 }
 
+// Table parts are scoped to their own table. A row or cell that opens while a
+// cell of the same table is still open closes that cell first, whatever is
+// still open inside it; and an end tag for a table part never reaches past the
+// nearest table to close a cell of the one around it. Instagram's digest puts
+// a stray <tr> inside a <td>; reaching outwards, its </td> closed every table
+// in between and dealt the rest of the message into the outer table's columns.
+var TABLE_SCOPED = {
+  tr: true, td: true, th: true, thead: true, tbody: true, tfoot: true, caption: true
+}
+
+// The stack index of the open cell in the innermost table, or -1.
+function openCellIndex(stack) {
+  for (var i = stack.length - 1; i > 0; i--) {
+    if (stack[i].name === "td" || stack[i].name === "th") return i
+    if (stack[i].name === "table") return -1
+  }
+  return -1
+}
+
 function elementNode(token) {
   return {
     type: "element",
@@ -355,6 +374,10 @@ function parse(html) {
     if (token.type !== "start" && token.type !== "end") return
 
     if (token.type === "start") {
+      if (token.name === "tr" || token.name === "td" || token.name === "th") {
+        var cell = openCellIndex(stack)
+        if (cell > 0) stack.length = cell + 1
+      }
       var implied = IMPLIED_CLOSE[token.name]
       if (implied) {
         while (stack.length > 1 && implied[stack[stack.length - 1].name] === true) stack.pop()
@@ -375,6 +398,7 @@ function parse(html) {
         stack.length = depth
         return
       }
+      if (TABLE_SCOPED[token.name] === true && stack[depth].name === "table") return
     }
   })
 

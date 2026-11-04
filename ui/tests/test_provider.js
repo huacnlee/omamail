@@ -9,11 +9,8 @@ for (const api of [1, 5, 6, 7]) {
   assert.strictEqual(boxes.find(box => box.key === (api < 6 ? "archive" : "all")).query,
     api < 6 ? "folder:\\Archive" : "search:ALL")
 }
-// Historical query assertions stay as oracles; Rust independently matches the
-// captured parameter/result fixtures. Production Registry has no query engine.
-const legacy = load("tests/oracles/providers/Registry.js")
-for (const method of ["query", "cachedSummaryInSearch", "labelQuery", "addressQuery", "webMessageUrl", "webBoxUrl"])
-  provider[method] = legacy[method]
+// Query and message URL construction live in src/providers/domain.rs;
+// cached search scope lives in src/cache/query.rs. Exercise only this registry.
 
 // ------------------------------------------------------------- the registry
 //
@@ -52,30 +49,6 @@ assert.strictEqual(provider.can("gmail", "manageLabels"), true)
 assert.strictEqual(provider.can("imap", "manageLabels"), true)
 assert.strictEqual(provider.can("hey", "manageLabels"), false, "HEY's labels are HEY's own")
 
-// Mail from or to an address, in each provider's own words.
-assert.strictEqual(provider.addressQuery("gmail", "from", "ada@example.com"), "from:ada@example.com")
-assert.strictEqual(provider.addressQuery("gmail", "to", " ada@example.com "), "to:ada@example.com")
-assert.strictEqual(provider.addressQuery("gmail", "from", "a b"), "", "a space would end the operator")
-assert.strictEqual(provider.addressQuery("imap", "from", "ada@example.com"), 'folder:INBOX FROM "ada@example.com"')
-assert.strictEqual(provider.addressQuery("imap", "to", 'a"b'), 'folder:INBOX TO "a\\"b"')
-assert.strictEqual(provider.addressQuery("hey", "to", "ada@example.com"), "search:ada@example.com")
-assert.strictEqual(provider.addressQuery("imap", "from", ""), "")
-
-// The operators people bring from webmail, in IMAP's words.
-assert.strictEqual(provider.query("imap", "inbox", "from: ada@example.com", ""),
-  'folder:INBOX FROM "ada@example.com"', "a webmail from: operator, space and all, becomes the IMAP criterion")
-assert.strictEqual(provider.query("imap", "inbox", "to:*@example.com invoice", ""),
-  'folder:INBOX TO "@example.com" TEXT "invoice"', "wildcards go: IMAP criteria already match substrings")
-assert.strictEqual(provider.query("imap", "inbox", "plain words", ""),
-  'folder:INBOX TEXT "plain words"', "words without an operator stay one TEXT criterion")
-assert.strictEqual(provider.query("imap", "inbox", 'from:"Jane Doe" report', ""),
-  'folder:INBOX FROM "Jane Doe" TEXT "report"', "a quoted operator value keeps its spaces")
-assert.strictEqual(provider.query("imap", "inbox", "from:", ""),
-  'folder:INBOX TEXT "from:"', "an operator with no value searches for what was typed, not for everything")
-assert.strictEqual(provider.query("imap", "inbox", "from:*", ""),
-  'folder:INBOX TEXT "from:*"', "a wildcard alone is not a criterion either")
-assert.strictEqual(provider.query("imap", "inbox", "from:*** invoice", ""),
-  'folder:INBOX TEXT "from:*** invoice"', "an operator that strips to nothing is not quietly dropped")
 // Separate questions. `labels` is whether a message can carry several at once,
 // which is what the reader's strip draws; `move` is whether the user gets to
 // say where it goes. IMAP answers no and yes -- one folder per message is the
@@ -102,13 +75,6 @@ assert.strictEqual(provider.can("hey", "webBox"), false)
 assert.strictEqual(provider.can("imap", "webBox"), false)
 assert.strictEqual(provider.can("outlook", "webBox"), false)
 
-// And the address builders agree with the capabilities, so a caller that asked
-// anyway gets nothing rather than somewhere else's mailbox.
-assert.strictEqual(provider.webMessageUrl("hey", "1:2"), "https://app.hey.com/topics/2")
-assert.strictEqual(provider.webBoxUrl("hey", "box:feedbox"), "")
-assert.strictEqual(provider.webBoxUrl("imap", "folder:INBOX"), "")
-assert.strictEqual(provider.webBoxUrl("gmail", "in:inbox"),
-  "https://mail.google.com/mail/u/0/#search/in%3Ainbox")
 assert.strictEqual(provider.can("gmail", "invented"), false, "an unknown capability is a no")
 
 // HEY's own shape. The two that are off are off because HEY has no such verb —
@@ -269,68 +235,6 @@ assert.strictEqual(provider.mailboxFor("gmail", "nonesuch").key, "inbox",
 assert.strictEqual(provider.mailboxFor("imap", "starred").label, "Flagged",
   "IMAP calls it what the protocol calls it")
 
-// ----------------------------------------------------------------- queries
-
-// Gmail's queries are its own search operators, unchanged from what shipped.
-assert.strictEqual(provider.query("gmail", "inbox", "", ""), "in:inbox")
-assert.strictEqual(provider.query("gmail", "starred", "", ""), "is:starred")
-assert.strictEqual(provider.query("gmail", "trash", "", ""), "in:trash")
-assert.strictEqual(provider.query("gmail", "drafts", "", ""), "in:drafts")
-
-// IMAP's are the folder DSL.
-assert.strictEqual(provider.query("imap", "inbox", "", ""), "folder:INBOX")
-assert.strictEqual(provider.query("imap", "unread", "", ""), "folder:INBOX UNSEEN")
-assert.strictEqual(provider.query("imap", "sent", "", ""), "folder:\\Sent")
-assert.strictEqual(provider.query("imap", "drafts", "", ""), "folder:\\Drafts")
-assert.strictEqual(provider.query("outlook", "unread", "", ""), "folder:INBOX UNSEEN")
-
-// A typed search wins over everything, and is shaped by the provider.
-assert.strictEqual(provider.query("gmail", "trash", "from:jane", ""), "from:jane",
-  "Gmail takes the user's search operators verbatim")
-assert.strictEqual(provider.query("imap", "trash", "invoice", ""),
-  "folder:INBOX TEXT \"invoice\"")
-assert.strictEqual(provider.query("imap", "inbox", "say \"hi\"", ""),
-  "folder:INBOX TEXT \"say \\\"hi\\\"\"", "a quote in a search term is escaped")
-
-// The configured default is described as a default *search*, so it applies to
-// the inbox and to nothing else — filtering Trash is not what it promised.
-assert.strictEqual(provider.query("gmail", "inbox", "", "in:inbox -category:promotions"),
-  "in:inbox -category:promotions")
-assert.strictEqual(provider.query("gmail", "trash", "", "in:inbox -category:promotions"),
-  "in:trash", "the default query does not leak into other mailboxes")
-assert.strictEqual(provider.query("gmail", "inbox", "urgent", "in:inbox -category:promotions"),
-  "urgent", "a typed search beats the default")
-assert.strictEqual(provider.query("gmail", "inbox", "   ", ""), "in:inbox",
-  "whitespace is not a search")
-// The plugin-wide default is Gmail syntax. It must not become an IMAP SEARCH
-// command after a password-provider account signs in, or the first list
-// request is rejected and the mailbox stays empty.
-assert.strictEqual(provider.query("imap", "inbox", "", "in:inbox"), "folder:INBOX")
-assert.strictEqual(provider.query("hey", "inbox", "", "in:inbox"), "box:imbox")
-assert.strictEqual(provider.query("outlook", "inbox", "", "in:inbox"), "folder:INBOX")
-
-// HEY's own queries, which the client reads back as commands.
-assert.strictEqual(provider.query("hey", "inbox", "", ""), "box:imbox")
-assert.strictEqual(provider.query("hey", "feed", "", ""), "box:feedbox")
-assert.strictEqual(provider.query("hey", "trash", "", ""), "box:trash")
-assert.strictEqual(provider.query("hey", "drafts", "", ""), "drafts:")
-assert.strictEqual(provider.query("hey", "inbox", "dentist", ""), "search:dentist")
-
-// A cached preview may only draw rows the provider's live search could return.
-assert.strictEqual(provider.cachedSummaryInSearch("gmail", "in:inbox",
-  { labelIds: ["INBOX"] }), true)
-assert.strictEqual(provider.cachedSummaryInSearch("gmail", "in:trash",
-  { labelIds: ["TRASH"] }), false)
-assert.strictEqual(provider.cachedSummaryInSearch("gmail", "in:inbox",
-  { labelIds: ["SPAM"] }), false)
-assert.strictEqual(provider.cachedSummaryInSearch("imap", "folder:INBOX UNSEEN", {}), true)
-assert.strictEqual(provider.cachedSummaryInSearch("imap", "folder:\\Sent", {}), false)
-assert.strictEqual(provider.cachedSummaryInSearch("imap", "folder:\"Project Mail\"", {}), false)
-assert.strictEqual(provider.cachedSummaryInSearch("hey", "box:feedbox", {}), true)
-assert.strictEqual(provider.cachedSummaryInSearch("hey", "box:laterbox", {}), true)
-assert.strictEqual(provider.cachedSummaryInSearch("hey", "box:asidebox", {}), true)
-assert.strictEqual(provider.cachedSummaryInSearch("hey", "label:4711", {}), true)
-
 // The badge counts what the Unread mailbox holds, by lookup rather than by a
 // second definition that could drift from the first.
 assert.strictEqual(provider.unreadQuery("gmail"),
@@ -350,24 +254,6 @@ assert.ok(provider.unreadQuery("gmail").indexOf("category:primary") === -1,
   "the Unread scope is not a positive category filter; it fails closed")
 assert.ok(provider.unreadQuery("gmail").indexOf("-category:updates") === -1,
   "Updates carries receipts, deliveries and GitHub's notifications; it stays in")
-
-// Selecting a label in the sidebar is a different act from typing in the search
-// box, even though both end in a query. Routing it through `query` would wrap an
-// IMAP folder in a TEXT search — which looks for the folder's own name inside
-// the inbox rather than opening it.
-assert.strictEqual(provider.labelQuery("gmail", "Receipts"), "label:Receipts")
-assert.strictEqual(provider.labelQuery("imap", "Receipts"), "folder:\"Receipts\"")
-assert.strictEqual(provider.labelQuery("imap", "Old Mail"), "folder:\"Old Mail\"",
-  "a folder name with a space has to arrive quoted")
-// HEY addresses a label by the id `hey labels` gave, which is what the sidebar
-// carries as a label's `rawName` — `hey label` takes nothing else.
-assert.strictEqual(provider.labelQuery("hey", "4711"), "label:4711")
-assert.strictEqual(provider.labelQuery("hey", ""), "")
-assert.strictEqual(provider.labelQuery("imap", ""), "")
-assert.strictEqual(provider.labelQuery("imap", "   "), "")
-
-// And the result must be a folder query the DSL can read back, not a search.
-assert.ok(provider.labelQuery("imap", "Old Mail").indexOf("TEXT") < 0)
 
 // ------------------------------------------------------------- the web home
 

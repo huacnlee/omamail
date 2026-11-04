@@ -262,6 +262,22 @@ impl Session {
                 .await
                 .map_err(|_| "worker_failed")?;
         }
+        if method == "contacts.google" {
+            let account = params["accountId"]
+                .as_str()
+                .filter(|id| {
+                    id.contains('@')
+                        && !id.contains(':')
+                        && id.len() <= 1024
+                        && !id.chars().any(|c| c.is_control() || c.is_whitespace())
+                })
+                .ok_or("invalid_params")?;
+            if params.as_object().is_none_or(|fields| fields.len() != 1) {
+                return Err("invalid_params");
+            }
+            let token = self.gmail.access_token(account).await?;
+            return crate::contacts::suggest_google(&token).await;
+        }
         if matches!(method, "public.image" | "public.unsubscribe") {
             let fields = params.as_object().ok_or("invalid_params")?;
             if fields.len() != 1 {
@@ -411,6 +427,9 @@ impl Session {
             return tokio::task::spawn_blocking(move || crate::calendar::reminders::call(&params))
                 .await
                 .map_err(|_| "calendar_reminders_unavailable")?;
+        }
+        if method == "calendar.verify" {
+            return Box::pin(crate::calendar::verify(params)).await;
         }
         if method == "calendar.discover" {
             if let Some(account) = params["accountId"]

@@ -19,8 +19,14 @@ directory, `scripts/install-backend.sh` requests the same installation and
 access. Linux x86_64 and aarch64 are supported. Installation downloads only from
 the pinned release in `huacnlee/omamail`, verifies SHA256SUMS and the strict archive
 layout, checks the candidate executable's version and atomically replaces the
-old executable. A failed installation preserves the working runtime. Checksums
-protect integrity, not against a compromised publisher.
+old executable. The download itself follows the standard `HTTPS_PROXY` and
+`NO_PROXY` environment variables through urllib's default proxy discovery, so
+networks that require an outbound HTTP proxy can install the backend; the
+release URLs are always HTTPS, the proxy only carries the encrypted transport,
+proxy credentials are presented only to the proxy itself and never to a release
+host even across redirects, and SOCKS-style proxies are not supported. A
+failed installation preserves the working runtime. Checksums protect
+integrity, not against a compromised publisher.
 
 `python3 scripts/backend-runtime.py enable-cli` explicitly creates
 `~/.local/bin/omamail` as a symlink to that same private executable; it refuses
@@ -144,6 +150,14 @@ One-off invitation exports (including individual recurring occurrences) send the
 
 Google private imports require the destination calendar to be the organizer or an attendee. The backend includes exactly that calendar as an attendee, resolving `primary` to the signed-in account, with the chosen response. It never copies guests from the invitation. Existing managed copies update only this participant using `attendeesOmitted`, preserve other attendees, and retain `sendUpdates=none`; creation still uses the private `events.import` endpoint. The safe reason vocabulary includes `participantIsNeitherOrganizerNorAttendee` so this failure is distinguishable from invalid times and access errors.
 
+## CalDAV password checks (API 10)
+
+`calendar.verify` is the API 10 method. It takes `{source: {kind: "caldav", url, username}, password}` and tries that password once against the calendar, a `PROPFIND` at depth 0 under the same HTTPS-only, no-redirect client and 24-second deadline as every other CalDAV request. It answers `{verified: true}` or refuses with `calendar_auth_refused`, `calendar_not_found`, `calendar_redirected`, `calendar_request_failed`, `calendar_network_failed` or `calendar_timeout`, with the usual `error.data` context; input that fails the address or password rules is refused before any connection. The backend neither reads nor writes the keyring here: the password travels only to the configured origin, and the frontend stores it, with the calendar, only after this answer. The frontend gates on `CalendarController.backendCanVerifyCalendars()` (API 10 or newer). An older backend keeps the earlier unchecked save, since the plugin pins its binary and would otherwise lose the feature until the next release, and the success message says the password was not checked.
+
+## Gmail grant refusals (API 10)
+
+When Google's token endpoint refuses a Gmail refresh with HTTP 400 `invalid_grant`, the backend answers `gmail_signed_out` (API 9 answered `gmail_http_failed`), from `auth.token` and from every Gmail method that refreshes on its own. Methods and parameters are unchanged. The contract has no case for it, because only Google's token endpoint produces it; the Rust runtime tests cover it against a local server. The plugin treats a `gmail_signed_out` from `auth.token` as a revoked grant only from API 10 on: it signs the mailbox out and asks to sign in again, and keeps the grant in the keyring, so the next launch hears the same refusal rather than a missing entry. Signing in replaces the grant and signing out deletes it; no refusal deletes one. A Gmail method that hears it mid-session reports the error and leaves the session as it is until the next `auth.token`. A missing or unreadable keyring entry is not a revocation: a Secret Service whose default collection does not exist yet reads every entry as missing, so the plugin retries.
+
 ## Released and unreleased: one step ahead of the pin
 
 Backends ship in batches, not per merge, so `main` may implement an API the pinned
@@ -257,9 +271,9 @@ a contents-write token as described above.
 
 ## Standalone security gates
 
-A standalone release needs a separate security verdict for macOS arm64, Linux x86_64, and Windows x64. The verdict is **PASS** only when the release commit has completed its native job and every boundary below was exercised on that runtime. A shared test on another operating system, successful compilation, or source inspection alone leaves that platform **NOT VERIFIED**. A failing boundary is **BLOCK** and prevents publication.
+A standalone release requires successful automated native CI for macOS arm64, Linux x86_64, and Windows x64. Those jobs provide evidence for a scoped security assessment; a green job does not itself establish a security verdict or prove that every boundary below was exercised. Assess the actual coverage, including fixture limitations, before reporting **PASS**, **BLOCK** or **NOT VERIFIED** for an affected boundary. A demonstrated failure blocks publication. Contributor and reviewer checks follow [CONTRIBUTING.md](../CONTRIBUTING.md#before-you-write-anything), which requires neither contributor hands-on testing nor local macOS/Windows runs.
 
-| Boundary | Evidence required on each native runtime |
+| Boundary | Evidence to assess in native CI results |
 | --- | --- |
 | Credentials | Native Keychain, Secret Service, or Credential Manager success, missing-item, denial, validation, and bounded-prompt cases; secrets absent from argv, settings, and diagnostics. |
 | Untrusted mail and URLs | Plain-text metadata, HTML/resource sanitization, public-address DNS pinning, HTTPS/TLS, redirect, proxy, deadline, and response-size cases using controlled targets. |
@@ -285,7 +299,7 @@ ctest --test-dir build/app --output-on-failure
 QT_QPA_PLATFORM=offscreen qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
 ```
 
-These commands establish evidence only for the operating system that ran them. Package and installer acceptance must use the archive produced on its native release runner; macOS and Linux use `app/scripts/package-release.sh`, while Windows uses `app/scripts/package-release.ps1`.
+Run the applicable local checks on Linux, following [CONTRIBUTING.md](../CONTRIBUTING.md#before-you-write-anything). These commands establish evidence only for the operating system that ran them. Automated package and installer acceptance uses the archive produced on its native release runner; macOS and Linux use `app/scripts/package-release.sh`, while Windows uses `app/scripts/package-release.ps1`.
 
 `make install-plugin` removes the old private backend and its local-build marker,
 then links and reloads only the plugin. It does not compile or download a backend.

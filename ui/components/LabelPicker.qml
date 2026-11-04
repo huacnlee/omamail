@@ -26,12 +26,16 @@ Item {
   // The raw label or folder view already on screen, which cannot be its own
   // move destination.
   property string currentLabelId: ""
+  // True on a provider whose labels are folders. The Inbox is then a real
+  // destination with no key of its own: `e` files a message into Archive from
+  // everywhere but Archive, so a message read in Junk has no one-key way back.
+  property bool folders: false
 
   property string searchQuery: ""
 
   readonly property bool opened: menu.opened
   readonly property var matchingLabels: Model.movableLabels(
-    root.labels, root.searchQuery, root.currentLabelId)
+    root.labels, root.searchQuery, root.currentLabelId, root.folders)
 
   // Where the keyboard is standing. Reset to the top on every keystroke
   // because the list underneath it has changed: holding an index still would

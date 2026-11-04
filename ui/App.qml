@@ -1048,6 +1048,9 @@ Item {
     if (id === "calendarPreviousPeriod") return calendarView.movePeriod(-1)
     if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
     if (id === "calendarToday") return calendarView.goToday()
+    if (id === "calendarZoomIn") return calendarView.zoomHours(1)
+    if (id === "calendarZoomOut") return calendarView.zoomHours(-1)
+    if (id === "calendarZoomReset") return calendarView.zoomHours(0)
     if (id === "calendarWeek") return calendarView.setView("week")
     if (id === "calendarDay") return calendarView.setView("day")
     if (id === "calendarAgenda") return calendarView.setView("agenda")
@@ -2120,7 +2123,12 @@ Item {
             // follows it.
             onDetailOpenChanged: {
               if (detailOpen) { if (root.page !== "calendarDetail") root.pushEntry("calendarDetail", {}) }
-              else if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+              else {
+                if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+                // Closing a preview keeps the calendar context, so restore its
+                // focus explicitly rather than leaving hidden text selected.
+                if (focusScope.focusWithin(calendarView)) Qt.callLater(focusScope.applyContextFocus)
+              }
             }
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }
@@ -2856,6 +2864,9 @@ Item {
         panelFontFamily: root.fontFamily
         labels: root.service ? root.service.labels : []
         currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
+        folders: root.service
+          ? !Provider.can(root.service.providerId, "labels") && Provider.can(root.service.providerId, "move")
+          : false
         onLabelChosen: function(labelId) {
           root.actOnCursor("label:" + labelId, root.labelPickerOnlyCursor)
         }

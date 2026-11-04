@@ -1229,6 +1229,44 @@ function dayMinutes(timeMs, day) {
     + local.getSeconds() / 60 + local.getMilliseconds() / 60000
 }
 
+// How tall one hour is in the day and week views. By default a window shows a
+// waking day, without hours growing past their usual height or shrinking past
+// what a short event can be read at. The zoom keys save a height of their own
+// in unscaled pixels, which can go on down until the whole day fits, for someone
+// whose day has no quiet hours; 0, or anything unusable, means automatic.
+var HOUR_HEIGHT_AUTOMATIC = 0
+var HOUR_HEIGHT_USUAL = 60
+var HOUR_HEIGHT_READABLE = 25
+var HOUR_HEIGHT_MIN = 10
+var HOUR_HEIGHT_MAX = 120
+var HOUR_HEIGHT_STEP = 5
+var HOURS_TO_SHOW = 16
+
+function automaticHourHeight(viewport, usual, readable) {
+  return Math.max(readable, Math.min(usual, Number(viewport) / HOURS_TO_SHOW || 0))
+}
+
+function normalizeHourHeight(value) {
+  var usable = typeof value === "number" || (typeof value === "string" && value.trim() !== "")
+  var height = usable ? Math.floor(Number(value)) : NaN
+  if (!isFinite(height) || height <= 0) return HOUR_HEIGHT_AUTOMATIC
+  return Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, height))
+}
+
+// One press of a zoom key: +1 or -1 steps from the height on screen, 0 returns
+// to automatic. `filled` is the height the timeline already stretches to in this
+// window. A press that could not show changes nothing, so it saves nothing.
+function zoomedHourHeight(saved, shown, direction, filled) {
+  if (!direction) return HOUR_HEIGHT_AUTOMATIC
+  var fill = Number(filled) || 0
+  var from = Math.max(Number(shown) || HOUR_HEIGHT_USUAL, fill)
+  var limit = direction < 0 ? Math.max(HOUR_HEIGHT_MIN, fill) : HOUR_HEIGHT_MAX
+  if (direction < 0 ? from <= limit : from >= limit) return normalizeHourHeight(saved)
+  var next = Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, Math.round(from) + direction * HOUR_HEIGHT_STEP))
+  // Rounded down, so that the window takes over and the whole day fits exactly.
+  return next < fill ? Math.max(HOUR_HEIGHT_MIN, Math.floor(fill)) : next
+}
+
 function eventTop(event, day, firstHour, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))
@@ -1247,8 +1285,7 @@ function eventHeight(event, day, hourHeight) {
 // Where "now" sits in a day column, or -1 when it does not belong on the grid:
 // another day, or an hour outside the range the week view drew. The caller
 // draws nothing on -1 rather than clamping to an edge, because a line pinned to
-// the top of the grid states a time that is not the time — and the range here
-// is elastic, since weekHourRange widens it to whatever the week's events need.
+// the top of the grid states a time that is not the time.
 function nowOffset(day, firstHour, lastHour, hourHeight, nowMs) {
   if (!day) return -1
   var now = Number(nowMs)
@@ -1409,12 +1446,13 @@ function maxAllDayEvents(events, days) {
   return maximum
 }
 
-function weekHourRange(events, days, defaultFirst, defaultLast) {
-  var first = Math.max(0, Math.min(23, Math.floor(Number(defaultFirst) || 0)))
-  var last = Math.max(first + 1, Math.min(24, Math.ceil(Number(defaultLast) || 24)))
+// The hour to open these days at: their first timed event's, or `usual` when
+// they have none.
+function weekOpeningHour(events, days, usual) {
+  var first = 24
   var values = Array.isArray(events) ? events : []
   var week = Array.isArray(days) ? days : []
-  if (week.length === 0) return { first: first, last: last }
+  if (week.length === 0) return usual
   var rangeStart = Number(week[0].startMs)
   var rangeEnd = Number(week[week.length - 1].endMs)
   for (var i = 0; i < values.length; i++) {
@@ -1428,13 +1466,10 @@ function weekHourRange(events, days, defaultFirst, defaultLast) {
       var segmentStart = Math.max(startMs, Number(day.startMs))
       var segmentEnd = Math.min(endMs, Number(day.endMs))
       if (segmentEnd <= segmentStart) continue
-      var startMinutes = dayMinutes(segmentStart, day)
-      var endMinutes = dayMinutes(segmentEnd, day)
-      first = Math.min(first, Math.floor(startMinutes / 60))
-      last = Math.max(last, Math.min(24, Math.ceil(endMinutes / 60)))
+      first = Math.min(first, Math.floor(dayMinutes(segmentStart, day) / 60))
     }
   }
-  return { first: first, last: last }
+  return first < 24 ? first : usual
 }
 
 function slotStart(day, y, firstHour, hourHeight, minuteStep) {
