@@ -10,7 +10,8 @@ private slots:
     void dispatchesNameTheWindowAndTheWorkspace();
     void aParkedWindowComesBackByTheLuaDispatches();
     void aRejectedLuaDispatchFallsBackToTheClassicOnes();
-    void aWindowInPlaceDispatchesNothing();
+    void aWindowOnARegularWorkspaceIsOnlyFocused();
+    void noWindowDispatchesNothing();
     void aNamedWorkspaceGoesByItsName();
 };
 
@@ -55,6 +56,9 @@ void HyprlandWindowTest::findsOnlyThisProcessParkedOnASpecialWorkspace()
     QCOMPARE(HyprlandWindow::parkedAddress(clients, 99), QString());
     QCOMPARE(HyprlandWindow::parkedAddress("not json", 20), QString());
     QCOMPARE(HyprlandWindow::parkedAddress(
+                 R"([{"address":"0xeee","pid":6,"workspace":{"id":-1337,"name":"work"}}])", 6),
+             QString());
+    QCOMPARE(HyprlandWindow::parkedAddress(
                  R"([{"address":"0xddd","pid":5,"workspace":{"id":-99,"name":"special:omarchy-minimized"}}])", 5),
              QStringLiteral("0xddd"));
 }
@@ -73,34 +77,52 @@ void HyprlandWindowTest::dispatchesNameTheWindowAndTheWorkspace()
 void HyprlandWindowTest::aParkedWindowComesBackByTheLuaDispatches()
 {
     FakeHyprland hyprland{parked, [](const QString &) { return true; }, {}};
-    QVERIFY(HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
+    QVERIFY(HyprlandWindow::bringWindowBack(hyprland.hyprctl(), 20));
     QCOMPARE(hyprland.dispatched, HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), QStringLiteral("4")));
 }
 
 void HyprlandWindowTest::aRejectedLuaDispatchFallsBackToTheClassicOnes()
 {
     FakeHyprland hyprland{parked, [](const QString &step) { return !step.startsWith(QStringLiteral("hl.")); }, {}};
-    QVERIFY(HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
+    QVERIFY(HyprlandWindow::bringWindowBack(hyprland.hyprctl(), 20));
     const QStringList classic = HyprlandWindow::classicDispatches(QStringLiteral("0xbbb"), QStringLiteral("4"));
     QCOMPARE(hyprland.dispatched,
              QStringList({HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), QStringLiteral("4")).first()}) + classic);
 
     FakeHyprland deaf{parked, [](const QString &) { return false; }, {}};
-    QVERIFY(!HyprlandWindow::restoreParkedWindow(deaf.hyprctl(), 20));
+    QVERIFY(!HyprlandWindow::bringWindowBack(deaf.hyprctl(), 20));
 }
 
-void HyprlandWindowTest::aWindowInPlaceDispatchesNothing()
+void HyprlandWindowTest::aWindowOnARegularWorkspaceIsOnlyFocused()
 {
-    FakeHyprland hyprland{R"([{"address":"0xaaa","pid":20,"workspace":{"id":3,"name":"3"}}])",
-                          [](const QString &) { return true; }, {}};
-    QVERIFY(!HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
-    QVERIFY(hyprland.dispatched.isEmpty());
+    // Numbered or named, the window stays where it is and the focus goes to it.
+    for (const QByteArray &clients :
+         {QByteArray(R"([{"address":"0xaaa","pid":20,"workspace":{"id":3,"name":"3"}}])"),
+          QByteArray(R"([{"address":"0xaaa","pid":20,"workspace":{"id":-1337,"name":"work"}}])")}) {
+        FakeHyprland hyprland{clients, [](const QString &) { return true; }, {}};
+        QVERIFY(HyprlandWindow::bringWindowBack(hyprland.hyprctl(), 20));
+        QCOMPARE(hyprland.dispatched, QStringList({HyprlandWindow::luaFocus(QStringLiteral("0xaaa"))}));
+    }
+    FakeHyprland classic{R"([{"address":"0xaaa","pid":20,"workspace":{"id":3,"name":"3"}}])",
+                         [](const QString &step) { return !step.startsWith(QStringLiteral("hl.")); }, {}};
+    QVERIFY(HyprlandWindow::bringWindowBack(classic.hyprctl(), 20));
+    QCOMPARE(classic.dispatched.last(), QStringLiteral("focuswindow address:0xaaa"));
+}
+
+void HyprlandWindowTest::noWindowDispatchesNothing()
+{
+    for (const QByteArray &clients :
+         {QByteArray("[]"), QByteArray(R"([{"address":"0xaaa","pid":99,"workspace":{"id":3,"name":"3"}}])")}) {
+        FakeHyprland hyprland{clients, [](const QString &) { return true; }, {}};
+        QVERIFY(!HyprlandWindow::bringWindowBack(hyprland.hyprctl(), 20));
+        QVERIFY(hyprland.dispatched.isEmpty());
+    }
 }
 
 void HyprlandWindowTest::aNamedWorkspaceGoesByItsName()
 {
     FakeHyprland hyprland{parked, [](const QString &) { return true; }, {}, R"({"id":-1337,"name":"mail"})"};
-    QVERIFY(HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
+    QVERIFY(HyprlandWindow::bringWindowBack(hyprland.hyprctl(), 20));
     QCOMPARE(hyprland.dispatched, HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), QStringLiteral("name:mail")));
 }
 

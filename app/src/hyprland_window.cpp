@@ -17,25 +17,46 @@ QString parkedAddress(const QByteArray &clientsJson, qint64 pid)
         if (client.value(QStringLiteral("pid")).toInteger() != pid) continue;
         const QJsonObject workspace = client.value(QStringLiteral("workspace")).toObject();
         const QString name = workspace.value(QStringLiteral("name")).toString();
-        if (workspace.value(QStringLiteral("id")).toInteger() >= 0 && !name.startsWith(QStringLiteral("special:")))
-            continue;
+        if (!name.startsWith(QStringLiteral("special:"))) continue;
         const QString address = client.value(QStringLiteral("address")).toString();
         if (address.startsWith(QStringLiteral("0x"))) return address;
     }
     return {};
 }
 
+QString windowAddress(const QByteArray &clientsJson, qint64 pid)
+{
+    const QJsonArray clients = QJsonDocument::fromJson(clientsJson).array();
+    for (const QJsonValue &value : clients) {
+        const QJsonObject client = value.toObject();
+        if (client.value(QStringLiteral("pid")).toInteger() != pid) continue;
+        const QString address = client.value(QStringLiteral("address")).toString();
+        if (address.startsWith(QStringLiteral("0x"))) return address;
+    }
+    return {};
+}
+
+QString luaFocus(const QString &address)
+{
+    return QStringLiteral("hl.dsp.focus({ window = \"address:%1\" })").arg(address);
+}
+
+QString classicFocus(const QString &address)
+{
+    return QStringLiteral("focuswindow address:%1").arg(address);
+}
+
 QStringList luaDispatches(const QString &address, const QString &workspace)
 {
     const QString target = QStringLiteral("window = \"address:%1\"").arg(address);
     return {QStringLiteral("hl.dsp.window.move({ workspace = \"%1\", %2 })").arg(workspace).arg(target),
-            QStringLiteral("hl.dsp.focus({ %1 })").arg(target)};
+            luaFocus(address)};
 }
 
 QStringList classicDispatches(const QString &address, const QString &workspace)
 {
     return {QStringLiteral("movetoworkspace %1,address:%2").arg(workspace).arg(address),
-            QStringLiteral("focuswindow address:%1").arg(address)};
+            classicFocus(address)};
 }
 
 namespace {
@@ -60,11 +81,16 @@ bool dispatchAll(const Hyprctl &hyprctl, const QStringList &steps)
 }
 }
 
-bool restoreParkedWindow(const Hyprctl &hyprctl, qint64 pid)
+bool bringWindowBack(const Hyprctl &hyprctl, qint64 pid)
 {
     bool ok = false;
-    const QString address = parkedAddress(hyprctl({QStringLiteral("clients"), QStringLiteral("-j")}, &ok), pid);
-    if (address.isEmpty()) return false;
+    const QByteArray clients = hyprctl({QStringLiteral("clients"), QStringLiteral("-j")}, &ok);
+    const QString address = parkedAddress(clients, pid);
+    if (address.isEmpty()) {
+        const QString window = windowAddress(clients, pid);
+        if (window.isEmpty()) return false;
+        return dispatchAll(hyprctl, {luaFocus(window)}) || dispatchAll(hyprctl, {classicFocus(window)});
+    }
     const QJsonObject active = QJsonDocument::fromJson(
         hyprctl({QStringLiteral("activeworkspace"), QStringLiteral("-j")}, &ok)).object();
     // A named workspace has a negative id, so it goes by its name.
@@ -76,10 +102,10 @@ bool restoreParkedWindow(const Hyprctl &hyprctl, qint64 pid)
         || dispatchAll(hyprctl, classicDispatches(address, workspace));
 }
 
-bool restoreParkedWindow()
+bool bringWindowBack()
 {
     if (qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) return false;
-    return restoreParkedWindow(runHyprctl, QCoreApplication::applicationPid());
+    return bringWindowBack(runHyprctl, QCoreApplication::applicationPid());
 }
 
 }

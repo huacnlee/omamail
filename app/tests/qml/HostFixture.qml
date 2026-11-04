@@ -13,7 +13,7 @@ QtObject {
   property bool quitCalled: false
   property var pendingNotificationActivation: ({})
   property string pendingOpen: ""
-  property int parkedWindowRestores: 0
+  property int windowBringBacks: 0
   property var environmentValues: ({
     HOME: "/fixture/home",
     XDG_CONFIG_HOME: "/fixture/config",
@@ -45,7 +45,7 @@ QtObject {
     hidden = false
     quitCalled = false
     pendingOpen = ""
-    parkedWindowRestores = 0
+    windowBringBacks = 0
   }
 
   function requestOpen(payload) {
@@ -57,8 +57,8 @@ QtObject {
     pendingOpen = ""
     return payload
   }
-  function restoreParkedWindow() {
-    parkedWindowRestores++
+  function bringWindowBack() {
+    windowBringBacks++
     return false
   }
 

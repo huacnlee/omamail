@@ -182,6 +182,34 @@ QtObject {
     })
   }
 
+  // Edits are not replaced unasked, including a last session's still waiting
+  // in recovery: the usual question, the link held until it is answered.
+  function openDraft(draft, answered) {
+    if (!draft) return
+    // A saved draft stays in recovery until its save lands: not asked twice.
+    if (!answered && !compose.opened) restoreComposeRecovery()
+    if (compose.opened && compose.hasUserChanges()) {
+      root.heldDraft = draft
+      composeExitDialog.open()
+      return
+    }
+    root.pendingDraftId = ""
+    compose.beginDraft(draft)
+  }
+
+  // After Save or Discard. Another draft may have reopened: that one is asked
+  // about in turn.
+  function releaseHeldDraft() {
+    var draft = root.heldDraft
+    root.heldDraft = null
+    if (draft) openDraft(draft, true)
+  }
+
+  // The question closed unanswered.
+  function dropHeldDraft() {
+    if (!composeExitDialog.opened) root.heldDraft = null
+  }
+
   function restoreComposeRecovery() {
     if (root.composeReceiptChecking || !root.opened || !root.composeRecoveryLoaded || root.composeRecovery.active !== true
         || compose.opened || !root.composeRecovery.draft) return false

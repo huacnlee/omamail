@@ -16,9 +16,7 @@ QtObject {
   }
 
   readonly property FontMetrics metrics: FontMetrics { font: Qt.application.font }
-  // On Omarchy, text follows the desktop font as the shell does: the fontconfig
-  // alias `monospace`, which `omarchy font set` rewrites. Elsewhere it follows
-  // the platform UI font. Only the private
+  // Text follows the platform UI font in the standalone app. Only the private
   // use icon range is bundled; regular labels retain native platform metrics.
   readonly property real baseFontSize: shellTheme.font.baseSize
   readonly property real fontScale: Math.max(1 / 12, baseFontSize / 12)
@@ -36,7 +34,7 @@ QtObject {
   readonly property color normalBorderColor: normalBorderFor(Commons.Color.foreground, Commons.Color.accent)
   readonly property color selectedAccentFill: selectedFillFor(Commons.Color.foreground, Commons.Color.accent)
   readonly property var font: ({
-    family: Commons.Color.hasOmarchyTheme ? "monospace" : metrics.font.family,
+    family: metrics.font.family,
     iconFamily: iconFont.status === FontLoader.Ready ? iconFont.name : metrics.font.family,
     baseSize: baseFontSize,
     title: fontToken("title", 1.167),

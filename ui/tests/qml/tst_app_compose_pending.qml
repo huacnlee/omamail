@@ -638,6 +638,47 @@ Item {
       compare(app.composeRecovery.draft.body,"New local edit")
       compare(recoveryBackend.requests.length,3)
     }
+    function test_a_mailto_link_asks_before_replacing_a_draft_in_recovery() {
+      var compose = composeView()
+      app.open("{}")
+      wait(20)
+      app.composeRecoveryLoaded = true
+      app.composeRecovery = {version:1,active:true,returnView:"",parked:[],
+        draft:{userModified:true,subject:"Last session words",body:""}}
+      app.open(JSON.stringify({mailto:"mailto:eve@example.com?subject=Second"}))
+      var dialog = named(app, "compose-exit-dialog")
+      tryCompare(dialog, "opened", true)
+      compare(named(compose, "compose-subject-field").text, "Last session words")
+      dialog.cancel()
+      tryVerify(function() { return app.heldDraft === null })
+      compare(named(compose, "compose-subject-field").text, "Last session words")
+      compose.finish()
+    }
+
+    function test_a_mailto_link_waits_for_the_edited_draft_to_be_saved() {
+      var compose = composeView()
+      app.open("{}")
+      wait(20)
+      mailService.deferDraftSave = true
+      mailService.draftSaveCallbacks = []
+      app.startCompose("new")
+      var subject = named(compose, "compose-subject-field")
+      subject.text = "My own words"
+      compose.userModified = true
+      app.open(JSON.stringify({mailto:"mailto:eve@example.com?subject=Second"}))
+      var dialog = named(app, "compose-exit-dialog")
+      tryCompare(dialog, "opened", true)
+      compare(subject.text, "My own words")
+      dialog.save()
+      tryVerify(function() { return named(compose, "compose-to-field").text === "eve@example.com" })
+      compare(subject.text, "Second")
+      compare(mailService.lastSavedDraft.subject, "My own words")
+      compare(mailService.draftSaveCallbacks.length, 1)
+      mailService.finishDraftSave(0, "")
+      mailService.deferDraftSave = false
+      compose.finish()
+    }
+
     function test_native_recovery_failure_notice_clears_once_a_save_lands() {
       beginNativeRecovery()
       app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})

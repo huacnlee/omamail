@@ -108,9 +108,9 @@ void ApplicationHost::requestOpen(const QString &payload)
     emit openRequested(m_pendingOpen);
 }
 
-bool ApplicationHost::restoreParkedWindow()
+bool ApplicationHost::bringWindowBack()
 {
-    return HyprlandWindow::restoreParkedWindow();
+    return HyprlandWindow::bringWindowBack();
 }
 
 QString ApplicationHost::takePendingOpen()

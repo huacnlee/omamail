@@ -50,8 +50,8 @@ public:
     // e.g. a mailto: draft). One that arrives before QML is ready waits.
     void requestOpen(const QString &payload);
     Q_INVOKABLE QString takePendingOpen();
-    // A minimized window brought back onto the workspace in front (Hyprland).
-    Q_INVOKABLE bool restoreParkedWindow();
+    // A window out of sight brought back in front of the user (Hyprland).
+    Q_INVOKABLE bool bringWindowBack();
     Q_INVOKABLE bool showNotification(const QString &id, const QString &title,
                                       const QString &body, const QString &accountId,
                                       const QString &messageId);
