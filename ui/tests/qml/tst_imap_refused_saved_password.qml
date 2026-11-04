@@ -114,8 +114,8 @@ Item {
       return client
     }
 
-    function refuse(request) {
-      Transports.reply(request, null, {code: -32000, message: "mail_auth_failed"})
+    function refuse(request, code) {
+      Transports.reply(request, null, {code: -32000, message: code || "mail_auth_failed"})
     }
 
     function test_a_refused_saved_password_signs_the_mailbox_out() {
@@ -221,15 +221,57 @@ Item {
       compare(errors, [auth.lastError], "and the request says so too")
     }
 
+    // RFC 5530 codes on the refused LOGIN. The ones that say the password no
+    // longer gets in sign out and keep what the server said; the others leave
+    // the mailbox signed in.
+    function test_a_coded_login_refusal_data() {
+      return [
+        {tag: "expired", code: "mail_auth_expired", signsOut: true,
+          text: "The server says this password has expired. Create a new password or app password, then sign in again."},
+        {tag: "contact admin", code: "mail_auth_contact_admin", signsOut: true,
+          text: "The server refused the sign-in and asks you to contact your mail administrator."},
+        {tag: "unavailable", code: "mail_auth_unavailable", signsOut: false,
+          text: "The server could not check the sign-in right now. Wait a few minutes, then sign in again."},
+        {tag: "unauthorized", code: "mail_auth_unauthorized", signsOut: false,
+          text: "The server accepted the password but does not let this account use the mailbox."},
+        {tag: "privacy required", code: "mail_auth_privacy_required", signsOut: false,
+          text: "The server requires an encrypted connection before it accepts a sign-in."}
+      ]
+    }
+
+    function test_a_coded_login_refusal(data) {
+      var auth = restored()
+      var client = clientFor(auth)
+      var error = ""
+      client.ensureFolders(function(failure) { error = failure })
+      refuse(Transports.transports(client)[0], data.code)
+      compare(error, data.text)
+      compare(auth.loggedIn, !data.signsOut)
+      compare(auth.savedPasswordRefused, data.signsOut)
+      compare(auth.lastError, data.signsOut ? data.text : "")
+      client.recheckSavedPassword(data.code)
+      compare(Transports.transports(client).length, 1,
+        "a signed-out mailbox, or a refusal that is not the password's, asks nothing more")
+      if (!data.signsOut) return
+      var service = createTemporaryObject(serviceFactory, root, {auth: auth})
+      var page = createTemporaryObject(pageFactory, root, {service: service})
+      compare(findChild(page, "imap-error").text, data.text, "the setup page opens on what the server said")
+      verify(findChild(page, "imap-connect-button").visible)
+    }
+
+    // A keyring answer that arrives while a typed password is checked is
+    // ignored, so the mailbox is not signed in and has nothing to refuse.
     function test_a_check_in_flight_decides_instead() {
       var auth = createTemporaryObject(imapFactory, root)
       verify(auth.signIn("typed-password"))
       verify(auth.loginBusy)
-      // The keyring answers while the typed password is being checked.
       auth.restoreSession()
-      verify(auth.loggedIn)
       verify(!auth.refuseSavedPassword(auth.passwordRevision))
+      verify(!auth.savedPasswordRefused)
+      auth.completeSignIn(true, "")
       verify(auth.loggedIn)
+      compare(auth.password, "typed-password")
+      compare(auth.lastError, "")
     }
 
     function test_an_oauth_mailbox_refused_at_login_is_left_to_its_own_sign_in() {
@@ -240,7 +282,7 @@ Item {
       refuse(Transports.transports(client)[0])
       compare(error, "The server rejected the sign-in. Sign in again.")
       verify(oauthAuth.loggedIn)
-      client.recheckSavedPassword()
+      client.recheckSavedPassword("mail_auth_failed")
       compare(Transports.transports(client).length, 1, "and the poller's refusal asks nothing more")
     }
 
@@ -248,24 +290,25 @@ Item {
     // is checked once more by a request that knows its password.
     function test_a_refusal_in_the_background_is_checked_by_one_request_data() {
       return [
-        {tag: "refused again", refused: true},
-        {tag: "accepted", refused: false}
+        {tag: "refused again", code: "mail_auth_failed", refused: true},
+        {tag: "expired again", code: "mail_auth_expired", refused: true},
+        {tag: "accepted", code: "mail_auth_failed", refused: false}
       ]
     }
 
     function test_a_refusal_in_the_background_is_checked_by_one_request(data) {
       var auth = restored()
       var client = clientFor(auth)
-      client.recheckSavedPassword()
+      client.recheckSavedPassword(data.code)
       var sent = Transports.transports(client)
       compare(sent.length, 1)
       compare(sent[0].method, "imap.folders")
       compare(sent[0].params.accountId, "imap:one@example.org")
       compare(sent[0].params.credential, undefined)
-      if (data.refused) refuse(sent[0])
+      if (data.refused) refuse(sent[0], data.code)
       else Transports.reply(sent[0], {folders: [], special: {}, capabilities: [], labels: []})
       compare(auth.loggedIn, !data.refused)
-      client.recheckSavedPassword()
+      client.recheckSavedPassword(data.code)
       compare(Transports.transports(client).length, data.refused ? 1 : 2,
         "a signed-out mailbox is not asked again")
     }
@@ -273,12 +316,12 @@ Item {
     function test_background_refusals_share_one_recheck() {
       var auth = restored()
       var client = clientFor(auth)
-      client.recheckSavedPassword()
-      client.recheckSavedPassword()
+      client.recheckSavedPassword("mail_auth_failed")
+      client.recheckSavedPassword("mail_auth_failed")
       compare(Transports.transports(client).length, 1, "each one is a LOGIN with the refused password")
       Transports.reply(Transports.transports(client)[0], null, {code: -32000, message: "request_timed_out"})
       verify(auth.loggedIn)
-      client.recheckSavedPassword()
+      client.recheckSavedPassword("mail_auth_failed")
       compare(Transports.transports(client).length, 2, "an answered one frees the next")
     }
 
@@ -298,7 +341,7 @@ Item {
       var client = clientFor(auth)
       data.start(auth)
       var before = Transports.transports(client).length
-      client.recheckSavedPassword()
+      client.recheckSavedPassword("mail_auth_failed")
       compare(Transports.transports(client).length, before)
     }
 

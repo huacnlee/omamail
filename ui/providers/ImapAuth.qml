@@ -378,7 +378,7 @@ Item {
   }
 
   // Kept so `MailAccount` can call the same thing on either provider. An IMAP
-  // password does not expire, so there is nothing to invalidate; a password
+  // mailbox has no access token to invalidate; a password
   // the server refuses goes through `refuseSavedPassword`, which does not read
   // the refused value back from the keyring.
   function invalidateAccessToken() {
@@ -397,15 +397,17 @@ Item {
   // `invalidateAccessToken`, nothing reads the keyring again behind the user's
   // back: that would load the refused password and sign straight back in. The
   // keyring item stays, so a refusal that was only passing is over after a
-  // restart, and the next sign-in overwrites it.
-  function refuseSavedPassword(revision) {
+  // restart, and the next sign-in overwrites it. `message` is what the server's
+  // refusal said, such as an expired password; without one the text says the
+  // saved password was refused.
+  function refuseSavedPassword(revision, message) {
     if (revision !== passwordRevision || password === "") return false
     // A replacement being checked, or being written to the keyring, decides
     // which password counts.
     if (loginBusy || replacementBusy || credentialWriteBusy) return false
     passwordRevision++
     savedPasswordRefused = true
-    lastError = "The server refused the saved password. Enter it again"
+    lastError = message || "The server refused the saved password. Enter it again"
     password = ""
     passwordChecked = true
     sessionUnavailable(lastError)

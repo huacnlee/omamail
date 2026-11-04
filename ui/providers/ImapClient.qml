@@ -104,10 +104,10 @@ Item {
         if (handle.aborted || !current()) return
         // The saved password, refused at IMAP LOGIN. A send's refusal is the
         // SMTP server's, which can differ from the mailbox's.
-        var refused = !!failure && suppliedCredential === undefined && method !== "imap.send"
-          && String(failure.message || "") === "mail_auth_failed"
-          && typeof owner.refuseSavedPassword === "function"
-          && owner.refuseSavedPassword(revision)
+        var code = failure ? String(failure.message || "") : ""
+        var refused = root.refusesSavedPassword(code) && suppliedCredential === undefined
+          && method !== "imap.send" && typeof owner.refuseSavedPassword === "function"
+          && owner.refuseSavedPassword(revision, code === "mail_auth_failed" ? "" : root.backendError(failure))
         if (typeof callback === "function")
           callback(result, refused ? owner.lastError : failure ? root.backendError(failure) : "")
       })
@@ -117,13 +117,24 @@ Item {
     return handle
   }
 
+  // The LOGIN refusals that say the saved password itself no longer gets in,
+  // so sending it again only adds failed sign-ins. Left out on purpose:
+  // `mail_auth_unavailable` asks only for patience, `mail_auth_unauthorized`
+  // means the server accepted the password and refuses the account access,
+  // and `mail_auth_privacy_required` is about the connection. A mailbox
+  // refused with one of those stays signed in and recovers by itself once
+  // the server lets it in.
+  function refusesSavedPassword(code) {
+    return code === "mail_auth_failed" || code === "mail_auth_expired" || code === "mail_auth_contact_admin"
+  }
+
   // The background poller reads the keyring itself, so its refusal cannot say
   // which password was refused. One request from here can, and goes through
   // the same check as any other. Each is a LOGIN with that password, so only
   // one at a time, and none while a check or a keyring write decides anyway.
   property bool savedPasswordRecheck: false
-  function recheckSavedPassword() {
-    if (savedPasswordRecheck || !auth || typeof auth.refuseSavedPassword !== "function"
+  function recheckSavedPassword(code) {
+    if (!refusesSavedPassword(code) || savedPasswordRecheck || !auth || typeof auth.refuseSavedPassword !== "function"
         || !auth.loggedIn || auth.loginBusy || auth.replacementBusy || auth.credentialWriteBusy) return
     savedPasswordRecheck = true
     nativeRequest("imap.folders", { refresh: true }, function() { root.savedPasswordRecheck = false })

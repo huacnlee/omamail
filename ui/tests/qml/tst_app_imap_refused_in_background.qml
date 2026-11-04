@@ -90,9 +90,15 @@ Item {
       compare(sent("imap.folders").length, folders, "a check that timed out refused nothing")
       verify(imap.ready)
 
+      mailService.backend.receive(JSON.stringify({jsonrpc: "2.0", method: "mail.updated",
+        params: {accountId: imapId, sequence: 3, estimate: 0, fingerprint: "", error: "mail_auth_unavailable", messages: []}}))
+      wait(100)
+      compare(sent("imap.folders").length, folders, "a server that cannot check sign-ins now refused no password")
+      verify(imap.ready)
+
       refusing = true
       mailService.backend.receive(JSON.stringify({jsonrpc: "2.0", method: "mail.updated",
-        params: {accountId: imapId, sequence: 3, estimate: 0, fingerprint: "", error: "mail_auth_failed", messages: []}}))
+        params: {accountId: imapId, sequence: 4, estimate: 0, fingerprint: "", error: "mail_auth_failed", messages: []}}))
       tryVerify(function() { return sent("imap.folders").length === folders + 1 }, 1000,
         "the refusal is checked once with the saved password")
       tryCompare(imap, "setupState", "signed_out")
