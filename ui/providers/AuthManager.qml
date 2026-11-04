@@ -455,12 +455,7 @@ Item {
     backend.call("auth.poll", { id: flow }, function(result, error) {
       if (flow !== root.nativeFlow) return
       if (error) {
-        root.failLogin(error.message === "auth_missing_scope"
-          ? "Google sign-in is missing permissions. Sign in again and leave every checkbox ticked"
-          : (error.message === "auth_keyring_failed" ? "Could not save the Google session to the keyring. Please try again"
-            : (error.message === "gmail_forbidden"
-              ? "Google refused this app's access to your mailbox. Allow the app in your account or Workspace admin settings, then sign in again"
-              : "Google sign-in failed. Please try again")))
+        root.failLogin(OAuth.signInErrorMessage(error))
         return
       }
       if (result.pending) { nativePoll.start(); return }

@@ -90,7 +90,7 @@ var PRESETS = [
   {
     id: "yahoo",
     name: "Yahoo",
-    domains: ["yahoo.com", "ymail.com", "rocketmail.com"],
+    domains: ["yahoo.com", "yahoo.de", "ymail.com", "rocketmail.com"],
     imapHost: "imap.mail.yahoo.com", imapPort: 993,
     smtpHost: "smtp.mail.yahoo.com", smtpPort: 465,
     note: "Needs an app password from Account Security."

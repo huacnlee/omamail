@@ -288,6 +288,17 @@ Item {
       compare(host.lastId, "zoomReset")
     }
 
+    function test_the_zoom_keys_size_the_hours_in_the_calendar() {
+      host.context = "calendar"
+      wait(20)
+      keyClick(Qt.Key_Minus, Qt.ControlModifier)
+      compare(host.lastId, "calendarZoomOut")
+      keyClick(Qt.Key_Equal, Qt.ControlModifier)
+      compare(host.lastId, "calendarZoomIn")
+      keyClick(Qt.Key_0, Qt.ControlModifier)
+      compare(host.lastId, "calendarZoomReset")
+    }
+
     // The mechanism, not a key: leaving a text-entry context has to take the
     // keyboard with it. Handing it back to the focus scope does not — that
     // re-elects the scope's current focus item, which is the field being left,

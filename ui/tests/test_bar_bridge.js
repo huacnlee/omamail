@@ -2,6 +2,10 @@ const assert = require("assert")
 const { load, deepEqual } = require("./load")
 const bridge = load("bar/Bridge.js")
 
+// A replacement bar keeps the saved zoom, but nothing else without a default.
+deepEqual(bridge.settings({ calendarHourHeight: 40, accessToken: "x" }, {}), { calendarHourHeight: 40 })
+deepEqual(bridge.settings({ calendarHourHeight: "40" }, {}), {})
+
 const secret = "SYNTHETIC-SECRET-MUST-NOT-LEAVE-SERVICE"
 const source = {
   ready: true, windowOpen: true, showBarIcon: false, unreadTotal: 7,

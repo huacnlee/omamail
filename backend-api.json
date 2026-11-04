@@ -100,6 +100,7 @@
     "calendar.attendance",
     "calendar.saveInvitation",
     "calendar.reminders",
+    "calendar.verify",
     "auth.form",
     "auth.begin",
     "auth.poll",
@@ -1556,6 +1557,47 @@
       }
     },
     {
+      "name": "CalDAV verification refuses a plain-http address before any request",
+      "method": "calendar.verify",
+      "params": {
+        "source": {
+          "kind": "caldav",
+          "url": "http://calendar.example.invalid/dav/",
+          "username": "synthetic"
+        },
+        "password": "synthetic-secret"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_url",
+        "data": {
+          "provider": "caldav",
+          "operation": "verify",
+          "stage": "validation"
+        }
+      }
+    },
+    {
+      "name": "CalDAV verification requires the password it is to check",
+      "method": "calendar.verify",
+      "params": {
+        "source": {
+          "kind": "caldav",
+          "url": "https://calendar.example.invalid/dav/",
+          "username": "synthetic"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_input",
+        "data": {
+          "provider": "caldav",
+          "operation": "verify",
+          "stage": "validation"
+        }
+      }
+    },
+    {
       "name": "outbox accepts the Microsoft 365 provider",
       "method": "outbox.enqueue",
       "params": {
@@ -1574,11 +1616,14 @@
   ],
   "unreleased": {
     "methods": [
+      "calendar.verify",
       "contacts.google"
     ],
     "cases": [
       "Calendar validation errors preserve safe context",
       "Calendar authentication errors preserve safe context",
+      "CalDAV verification refuses a plain-http address before any request",
+      "CalDAV verification requires the password it is to check",
       "Google Contacts refuses an account that is not a Gmail address"
     ]
   }

@@ -436,6 +436,121 @@ async fn independent_calendar_requests_progress_concurrently() {
     server.await.unwrap();
 }
 
+/// A CalDAV password is tried against its calendar before anything keeps it.
+/// The check is one PROPFIND carrying the typed credential, and a refusal
+/// names the credential now rather than a generic fetch failure weeks later.
+#[tokio::test]
+async fn caldav_verification_tries_the_password_and_names_a_refusal() {
+    let client = Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    for (reply, expected) in [
+        (
+            "HTTP/1.1 207 Multi-Status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            Ok(json!({"verified": true})),
+        ),
+        (
+            "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"dav\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            Err("calendar_auth_refused"),
+        ),
+        // A plain web server answers 200 to anything, with any password.
+        (
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 13\r\nConnection: close\r\n\r\n<p>welcome</p>",
+            Err("calendar_not_found"),
+        ),
+        (
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            Err("calendar_auth_refused"),
+        ),
+        (
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            Err("calendar_not_found"),
+        ),
+        (
+            "HTTP/1.1 301 Moved Permanently\r\nLocation: /dav/home/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            Err("calendar_redirected"),
+        ),
+        (
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            Err("calendar_request_failed"),
+        ),
+    ] {
+        let (url, task) = server(reply).await;
+        assert_eq!(
+            verify_with(&client, url, "synthetic", "synthetic secret").await,
+            expected,
+            "{reply:?}"
+        );
+        // Headers only: one read may or may not have the body with them.
+        let raw = String::from_utf8(task.await.unwrap()).unwrap();
+        assert!(raw.starts_with("PROPFIND / HTTP/1.1\r\n"), "{raw:?}");
+        let header = |name: &str| {
+            raw.lines()
+                .find_map(|line| {
+                    let (key, value) = line.split_once(':')?;
+                    key.eq_ignore_ascii_case(name).then(|| value.trim())
+                })
+                .unwrap_or_else(|| panic!("{name} header in {raw:?}"))
+        };
+        assert_eq!(header("depth"), "0");
+        // RFC 7617 Basic for "synthetic:synthetic secret", worked out by hand.
+        assert_eq!(
+            header("authorization"),
+            "Basic c3ludGhldGljOnN5bnRoZXRpYyBzZWNyZXQ="
+        );
+    }
+}
+
+/// Bad input to the check fails before a connection: a plain-http or
+/// userinfo-bearing address, a missing or control-bearing password, or a
+/// source that is not a CalDAV one. The password never travels anywhere.
+#[tokio::test]
+async fn caldav_verification_refuses_bad_input_before_any_request() {
+    let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let plain = format!("http://{}/dav/", target.local_addr().unwrap());
+    let secure = "https://calendar.example/dav/";
+    for (params, expected) in [
+        (
+            json!({"source":{"kind":"caldav","url":plain,"username":"synthetic"},"password":"secret"}),
+            "calendar_invalid_url",
+        ),
+        (
+            json!({"source":{"kind":"caldav","url":"https://user:pw@calendar.example/dav/","username":"synthetic"},"password":"secret"}),
+            "calendar_invalid_url",
+        ),
+        (
+            json!({"source":{"kind":"caldav","url":secure,"username":"synthetic"}}),
+            "calendar_invalid_input",
+        ),
+        (
+            json!({"source":{"kind":"caldav","url":secure,"username":"synthetic"},"password":""}),
+            "calendar_invalid_input",
+        ),
+        (
+            json!({"source":{"kind":"caldav","url":secure,"username":"synthetic"},"password":"bad\r\n"}),
+            "calendar_invalid_input",
+        ),
+        (
+            json!({"source":{"kind":"caldav","url":secure},"password":"secret"}),
+            "calendar_invalid_input",
+        ),
+        (
+            json!({"source":{"kind":"icloud","url":"https://caldav.icloud.com/","accountId":"imap:a@icloud.com"},"password":"secret"}),
+            "calendar_provider_unsupported",
+        ),
+    ] {
+        assert_eq!(verify(&params).await, Err(expected), "{params}");
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), target.accept())
+            .await
+            .is_err()
+    );
+}
+
 #[tokio::test]
 async fn credentials_failure_sends_no_calendar_network_request() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -221,6 +221,11 @@ fn credentials_and_quoting_reject_controls() {
     }
     assert_eq!(quote("a\\\"雪").unwrap(), "\"a\\\\\\\"雪\"");
 }
+/// A refused LOGIN is reported by the RFC 5530 code the server gave, so the
+/// setup page can say "wait" for an outage and "new password" for an expired
+/// one instead of "wrong password" for both. The code is read only where the
+/// protocol puts one, and unknown codes and the server's free text change
+/// nothing: a server cannot choose the sentence the user reads.
 #[tokio::test]
 async fn only_a_tagged_refusal_is_an_auth_failure() {
     for (reply, expected) in [
@@ -228,6 +233,38 @@ async fn only_a_tagged_refusal_is_an_auth_failure() {
             &b"O1 NO [AUTHENTICATIONFAILED] bad\r\n"[..],
             "mail_auth_failed",
         ),
+        (&b"O1 NO LOGIN failed.\r\n"[..], "mail_auth_failed"),
+        (&b"O1 BAD [CLIENTBUG] syntax\r\n"[..], "mail_auth_failed"),
+        (
+            &b"O1 NO [EXPIRED] change your password\r\n"[..],
+            "mail_auth_expired",
+        ),
+        (
+            &b"O1 NO [AUTHORIZATIONFAILED] not yours\r\n"[..],
+            "mail_auth_unauthorized",
+        ),
+        (
+            &b"O1 NO [PRIVACYREQUIRED] use TLS\r\n"[..],
+            "mail_auth_privacy_required",
+        ),
+        (
+            &b"O1 NO [CONTACTADMIN] account locked\r\n"[..],
+            "mail_auth_contact_admin",
+        ),
+        (
+            &b"O1 NO [UNAVAILABLE] try again later\r\n"[..],
+            "mail_auth_unavailable",
+        ),
+        (
+            &b"* CAPABILITY IMAP4rev1\r\nO1 no  [unavailable] later\r\n"[..],
+            "mail_auth_unavailable",
+        ),
+        (&b"O1 NO bad [EXPIRED]\r\n"[..], "mail_auth_failed"),
+        (
+            &b"O1 NO [ALERT] Application-specific password required\r\n"[..],
+            "mail_auth_failed",
+        ),
+        (&b"O1 NO [EXPIRED\r\n"[..], "mail_auth_failed"),
         (&b"* BYE going away\r\n"[..], "mail_connection_closed"),
         (&b""[..], "mail_connection_closed"),
     ] {
@@ -240,9 +277,30 @@ async fn only_a_tagged_refusal_is_an_auth_failure() {
             drop(b);
         });
         let mut w: Wire = BufReader::new(Box::new(a));
-        assert_eq!(login(&mut w, &params(1)).await, Err(expected));
+        assert_eq!(login(&mut w, &params(1)).await, Err(expected), "{reply:?}");
         server.await.unwrap();
     }
+}
+#[tokio::test]
+async fn an_xoauth2_refusal_is_classified_the_same_way() {
+    let (a, mut b) = tokio::io::duplex(4096);
+    let server = tokio::spawn(async move {
+        let mut buf = [0u8; 256];
+        let n = b.read(&mut buf).await.unwrap();
+        assert!(buf[..n].starts_with(b"O1 AUTHENTICATE XOAUTH2"));
+        b.write_all(b"+ \r\n").await.unwrap();
+        let n = b.read(&mut buf).await.unwrap();
+        assert!(n > 2);
+        b.write_all(b"O1 NO [EXPIRED] token expired\r\n")
+            .await
+            .unwrap();
+        drop(b);
+    });
+    let mut w: Wire = BufReader::new(Box::new(a));
+    let mut p = params(1);
+    p["oauth"] = json!(true);
+    assert_eq!(login(&mut w, &p).await, Err("mail_auth_expired"));
+    server.await.unwrap();
 }
 #[tokio::test]
 async fn sequential_requests_reuse_authenticated_connection() {

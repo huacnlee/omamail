@@ -418,7 +418,10 @@ Column {
       }
       IconTextButton {
         id: saveExisting
-        text: "Save"
+        // Says so while the check is out, as the add editor's button does:
+        // the Cancel beside it is withdrawn once the password is accepted,
+        // and dimming alone would not say why.
+        text: root.controller && root.controller.savingSource ? "Saving" : "Save"
         foreground: root.textColor
         fontFamily: root.panelFontFamily
         enabled: !!root.controller && existingPassword.text !== ""
@@ -431,7 +434,15 @@ Column {
         bordered: false
         foreground: root.dimColor
         fontFamily: root.panelFontFamily
-        onClicked: root.passwordEditingId = ""
+        // Offered while the password is still being checked, and the check is
+        // dropped with the editor so a late answer writes nothing. Once the
+        // server has accepted the password the keyring write is under way and
+        // finishes first.
+        enabled: root.cancelOffered()
+        onClicked: {
+          root.cancelPendingSave()
+          root.passwordEditingId = ""
+        }
       }
     }
   }
@@ -736,7 +747,13 @@ Column {
         bordered: false
         foreground: root.dimColor
         fontFamily: root.panelFontFamily
-        onClicked: root.adding = false
+        // As the row editor's Cancel: usable while the check is out, not
+        // during the write that follows an accepted password.
+        enabled: root.cancelOffered()
+        onClicked: {
+          root.cancelPendingSave()
+          root.adding = false
+        }
       }
     }
   }
@@ -973,6 +990,17 @@ Column {
     onClicked: root.clientSetupRequested()
   }
 
+  // Both editors' Cancel: available unless a save is past its check, when the
+  // settings or keyring write is already under way.
+  function cancelOffered() {
+    return !root.controller || !root.controller.savingSource
+      || root.controller.sourceCheckPending === true
+  }
+  function cancelPendingSave() {
+    if (!root.controller || !root.controller.savingSource) return
+    if (typeof root.controller.cancelSourceSave === "function") root.controller.cancelSourceSave()
+  }
+
   function saveCalendar() {
     resultText.text = ""
     root.controller.addCalDavCalendar({
@@ -987,7 +1015,9 @@ Column {
     function onCalendarSaved(ok, error) {
       resultText.ok = ok
       if (!ok) { resultText.text = error; return }
-      resultText.text = "Calendar saved"
+      // A save can still have something to say, such as that the password
+      // was not checked.
+      resultText.text = String(error || "") === "" ? "Calendar saved" : "Calendar saved. " + error
       calendarName.text = ""
       calendarUrl.text = ""
       calendarUsername.text = ""

@@ -1285,12 +1285,14 @@ if grep -E 'secret-tool|scripts/keyring-(lookup|store|clear)\.sh' \
 fi
 
 # A Workspace admin refusing the app's mailbox access surfaces as the static
-# backend error gmail_forbidden. Naming it is the only way the login screen
-# says "allow the app in your account settings"; the generic fallback sends
-# people to sign in again forever against a refusal that never clears.
+# backend error gmail_forbidden. Naming it in the sign-in sentences is the only
+# way the login screen says "allow the app in your account settings"; the
+# generic fallback sends people to sign in again forever against a refusal that
+# never clears.
 python3 - <<'PY'
 from pathlib import Path
-text = Path("providers/AuthManager.qml").read_text()
-if '"gmail_forbidden"' not in text:
+sentences = Path("providers/OAuth.js").read_text()
+manager = Path("providers/AuthManager.qml").read_text()
+if 'gmail_forbidden' not in sentences or "OAuth.signInErrorMessage" not in manager:
     raise SystemExit("test_source.sh: a refused gmail_forbidden sign-in must not read as a transient sign-in failure")
 PY
