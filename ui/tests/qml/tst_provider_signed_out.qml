@@ -16,17 +16,29 @@ Item {
       callback(true, "")
       return true
     }
+    // When set, a write waits in `heldPut` until the test answers it.
+    property var heldPut: null
+    function credentialPut(kind, accountId, clientId, secret, callback) {
+      heldPut = callback
+      return true
+    }
   }
   QtObject {
     id: fakeBackend
     property bool ready: true
-    property int apiVersion: 9
+    property int apiVersion: 10
     property var failure: null
     property var calls: []
     // When set, answers wait in `pending` until the test delivers them.
     property bool deferred: false
     property var pending: []
     function call(method, params, callback) {
+      // AuthManager asks once for the shipped client; the tests are about
+      // what follows it.
+      if (method === "auth.builtinClient") {
+        callback({clientId:"",clientSecret:""}, null)
+        return
+      }
       calls = calls.concat([{method:method,params:params}])
       if (deferred) pending = pending.concat([callback])
       else callback(null, failure)
@@ -58,7 +70,7 @@ Item {
     fakeBackend.calls = []
     fakeBackend.pending = []
     fakeBackend.deferred = false
-    fakeBackend.apiVersion = apiVersion === undefined ? 9 : apiVersion
+    fakeBackend.apiVersion = apiVersion === undefined ? 10 : apiVersion
     fakeBackend.failure = {code:-32000,message:message}
   }
 
@@ -128,6 +140,21 @@ Item {
       compare(answers.length, 1)
     }
 
+    // Signing out during a write deletes the grant that write saved, even if
+    // the client changed before the write finished.
+    function test_a_deferred_sign_out_deletes_the_grant_the_write_saved() {
+      failWith("gmail_signed_out")
+      var auth = createTemporaryObject(gmailFactory, null)
+      auth.storeRefreshToken("synthetic-refresh")
+      verify(fakePlatform.heldPut)
+      auth.logout()
+      compare(fakePlatform.deletes.length, 0, "the write is still running")
+      auth.credentials = {clientId:"456-def.apps.googleusercontent.com",clientSecret:"synthetic"}
+      fakePlatform.heldPut(true, "")
+      compare(fakePlatform.deletes, [{kind:"google-refresh-token", accountId:"alice@gmail.com",
+        clientId:"123-abc.apps.googleusercontent.com"}])
+    }
+
     // Signing out deletes the current grant once; a refusal arriving after it
     // deletes nothing more.
     function test_refusal_after_sign_out_deletes_nothing_more() {
@@ -158,7 +185,7 @@ Item {
           error:"temporarily_unavailable"},
         {tag:"unreadable keyring entry", message:"gmail_token_invalid",
           error:"temporarily_unavailable"},
-        {tag:"revocation from an older backend", message:"gmail_signed_out", api:8,
+        {tag:"revocation from an older backend", message:"gmail_signed_out", api:9,
           error:"temporarily_unavailable"},
         {tag:"refused client", message:"gmail_unauthorized",
           error:"Google rejected the OAuth client. Check the client ID and secret"}

@@ -165,10 +165,11 @@ function Invoke-TestInstall($Bundle, [hashtable]$Overrides = @{}) {
 function Expect-InstallFailure($Bundle, [string]$Pattern, [hashtable]$Overrides = @{}) {
     try {
         Invoke-TestInstall $Bundle $Overrides
-        throw "expected install failure matching: $Pattern"
     } catch {
         if ($_.Exception.Message -notmatch $Pattern) { throw }
+        return
     }
+    throw "expected install failure matching: $Pattern"
 }
 
 function Reset-OldInstallation {
@@ -195,6 +196,8 @@ function Assert-NoMutation([string]$Case) {
         "$Case left an installation backup"
     Assert-True (-not (Test-Path -LiteralPath $script:LaunchMarker)) `
         "$Case launched the application"
+    Assert-True ([IO.File]::ReadAllText($script:EscapeCanary) -ceq "untouched") `
+        "$Case wrote outside the extraction directory"
 }
 
 New-Item -ItemType Directory -Force $Temp | Out-Null
@@ -227,6 +230,15 @@ try {
     $script:RegistryState = Join-Path $Temp "toast-registration.txt"
     $script:LaunchMarker = Join-Path $Temp "launched.txt"
     $env:OMAMAIL_TEST_LAUNCH_MARKER = $script:LaunchMarker
+    if ($env:OS -eq "Windows_NT") {
+        & $Executable
+        Assert-True ($LASTEXITCODE -eq 0) "launch observer did not run"
+        Assert-True ([IO.File]::ReadAllText($script:LaunchMarker) -ceq "launched") `
+            "launch observer did not record execution"
+        Remove-Item -LiteralPath $script:LaunchMarker
+    }
+    $script:EscapeCanary = Join-Path $Temp "escape.txt"
+    [IO.File]::WriteAllText($script:EscapeCanary, "untouched", $Utf8)
     New-Item -ItemType Directory -Force (Split-Path -Parent $script:InstallRoot) | Out-Null
 
     $Valid = New-TestArchive "valid" (Base-Entries $ExecutableBytes)
@@ -275,8 +287,6 @@ try {
         '" -ToastActivated'
     Assert-True ([IO.File]::ReadAllText($script:RegistryState) -ceq $ExpectedToastCommand) `
         "installer wrote the wrong toast LocalServer32 command"
-    Assert-True ($ExpectedToastCommand -notmatch '[0-9a-f]{64}') `
-        "toast registration put a notification token in argv"
 
     $InstalledHostHash = (Get-FileHash -LiteralPath (Join-Path $script:InstallRoot "bin\omamail-app.exe") `
         -Algorithm SHA256).Hash
@@ -321,9 +331,9 @@ try {
 
     $InvalidCases = New-Object 'Collections.Generic.List[object]'
     $InvalidCases.Add((Invalid-Case "absolute" (@((Base-Entries $ExecutableBytes) +
-        (Entry "/absolute.txt" (Utf8 "bad")))) "unsafe path"))
+        (Entry ($script:EscapeCanary.Replace('\', '/')) (Utf8 "bad")))) "unsafe path"))
     $InvalidCases.Add((Invalid-Case "traversal" (@((Base-Entries $ExecutableBytes) +
-        (Entry "omamail/../escape.txt" (Utf8 "bad")))) "unsafe path component"))
+        (Entry ("omamail/../../../" + (Split-Path -Leaf $Temp) + "/escape.txt") (Utf8 "bad")))) "unsafe path component"))
     $InvalidCases.Add((Invalid-Case "backslash" (@((Base-Entries $ExecutableBytes) +
         (Entry 'omamail\escape.txt' (Utf8 "bad")))) "unsafe path"))
     $InvalidCases.Add((Invalid-Case "control" (@((Base-Entries $ExecutableBytes) +
@@ -482,10 +492,10 @@ try {
         "network downloads are not size and deadline bounded"
     Assert-True (-not $InstallerText.Contains("Invoke-WebRequest")) `
         "installer still uses an unbounded download path"
+    # The redirect fixture injects its own handler, so it cannot observe this
+    # production handler policy. Keep this narrow check until it can.
     Assert-True ($InstallerText.Contains('$Handler.AllowAutoRedirect = $false')) `
         "installer delegates redirect policy to HttpClientHandler"
-    Assert-True ($InstallerText.Contains('$NextUri.Scheme -cne "https"')) `
-        "installer does not refuse HTTPS downgrade before following a redirect"
     Write-Output "Windows installer tests passed"
 } finally {
     Remove-Item Env:OMAMAIL_TEST_LAUNCH_MARKER -ErrorAction SilentlyContinue

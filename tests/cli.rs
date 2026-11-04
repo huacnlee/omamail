@@ -177,17 +177,6 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
     set_mode(&config.join("accounts.json"), 0o600);
     let bin = root.join("bin");
     fs::create_dir_all(&bin).unwrap();
-    let secret_tool = bin.join("secret-tool");
-    fs::write(
-        &secret_tool,
-        if keyring_succeeds {
-            "#!/bin/sh\nprintf 'synthetic\\n'\n"
-        } else {
-            "#!/bin/sh\nexit 1\n"
-        },
-    )
-    .unwrap();
-    set_mode(&secret_tool, 0o700);
     fs::write(
         root.join("integration-credential"),
         if keyring_succeeds {
@@ -394,12 +383,6 @@ fn malformed_provider_action_previews_refuse_without_credentials_or_writes() {
         .unwrap()
         .push(serde_json::json!({"provider":"hey","email":"hey@example.org"}));
     fs::write(registry, accounts.to_string()).unwrap();
-    let touched = fixture.0.join("credential-touched");
-    fs::write(
-        fixture.0.join("bin/secret-tool"),
-        format!("#!/bin/sh\n: > '{}'\nexit 1\n", touched.display()),
-    )
-    .unwrap();
     let before = fixture_snapshot(&fixture.0);
     for (account, bad) in [
         ("hey:hey@example.org", "1:INBOX"),
@@ -966,11 +949,6 @@ fn root_mutations_preview_exact_intent_and_never_touch_storage_or_credentials() 
     let config = config_root(&fixture.0).join("omamail/accounts.json");
     let before = (metadata(&config), fs::read(&config).unwrap());
     let sentinel = fixture.0.join("credential-touched");
-    fs::write(
-        fixture.0.join("bin/secret-tool"),
-        format!("#!/bin/sh\n: > '{}'\nexit 1\n", sentinel.display()),
-    )
-    .unwrap();
     for operation in [
         "read", "unread", "star", "unstar", "archive", "trash", "spam",
     ] {
@@ -1110,11 +1088,6 @@ fn invalid_send_inputs_never_reach_credentials_or_outbox_even_with_execute() {
     let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
     assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
     let sentinel = fixture.0.join("credential-touched");
-    fs::write(
-        fixture.0.join("bin/secret-tool"),
-        format!("#!/bin/sh\n: > '{}'\nexit 1\n", sentinel.display()),
-    )
-    .unwrap();
     for extra in [
         vec!["--subject", "secret\r"],
         vec!["--subject", "secret\n"],

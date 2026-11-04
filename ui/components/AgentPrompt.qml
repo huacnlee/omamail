@@ -300,12 +300,12 @@ FocusScope {
   }
   function takeFocus() { if (historyMode) historyList.forceActiveFocus(); else field.forceActiveFocus() }
   function openAt(sceneX, sceneY) { open() }
-  function open() {
+  function open(focusInput) {
     localError = ""
     openedDraftKey = String(fields.draftKey || "")
     if (!opened) returnFocus = root.Window.activeFocusItem
     opened = true
-    root.focusRequested()
+    if (focusInput !== false) root.focusRequested()
     watchJob()
   }
   function openFor(id, subjectText, sceneX, sceneY) {

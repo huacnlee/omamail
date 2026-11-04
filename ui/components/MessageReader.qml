@@ -652,8 +652,10 @@ Item {
       invite: root.service ? root.service.selectedInvite : null
       response: root.service ? root.service.selectedResponse : ""
       canRespond: !!root.service && root.service.canRespondToInvite
-      sending: !!root.service && root.service.rsvpSending
+      sending: !!root.service && (root.service.rsvpSending || !!root.service.invitationCalendarState && root.service.invitationCalendarState.busy)
       fallbackAvailable: !!root.service && root.service.rsvpFallbackAvailable === true
+      calendarState: root.service ? root.service.invitationCalendarState || null : null
+      onSaveCalendarRequested: if (root.service) root.service.saveInvitationCalendar()
       calendarUrl: String(root.service && root.service.rsvpCalendarUrl || "")
       textColor: root.textColor
       accentColor: root.accentColor

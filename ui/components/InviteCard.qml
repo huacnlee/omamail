@@ -28,6 +28,8 @@ Rectangle {
   property bool sending: false
   property bool fallbackAvailable: false
   property string calendarUrl: ""
+  property var calendarState: null
+  signal saveCalendarRequested()
 
   required property color textColor
   required property color accentColor
@@ -323,12 +325,37 @@ Rectangle {
       }
     }
 
+    Column {
+      width: parent.width
+      visible: !!root.calendarState && root.calendarState.visible === true
+      spacing: Style.space(6)
+      Text {
+        objectName: "invitation-calendar-status"
+        width: parent.width
+        text: root.calendarState ? String(root.calendarState.text || "") : ""
+        textFormat: Text.PlainText
+        wrapMode: Text.WordWrap
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+      }
+      IconTextButton {
+        objectName: "invitation-calendar-save"
+        visible: !!root.calendarState && root.calendarState.canSave === true
+        text: root.cancelled || root.response === "declined" ? "Remove saved event" : "Save / update calendar"
+        foreground: root.textColor
+        accent: root.accentColor
+        fontFamily: root.panelFontFamily
+        onClicked: root.saveCalendarRequested()
+      }
+    }
+
     // What was answered, where there is no answering to be done — somebody
     // else's reply, a cancelled meeting, an invitation this account is the
     // organiser of.
     Text {
       width: parent.width
-      visible: !root.canRespond && root.response !== ""
+      visible: !root.cancelled && !root.canRespond && root.response !== ""
       textFormat: Text.PlainText
       text: root.response === "accepted" ? "You are going"
         : (root.response === "declined" ? "You are not going" : "You might be going")

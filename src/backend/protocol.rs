@@ -27,9 +27,13 @@ pub fn serve(input: impl BufRead, mut output: impl Write + Send) -> io::Result<(
     let (sender, receiver) = mpsc::channel::<Frame>(16);
     let (responses, mut completed) = mpsc::channel::<Value>(2);
     let end = std::thread::scope(|scope| -> io::Result<End> {
-        let writer = scope.spawn(|| -> io::Result<()> {
+        let writer_output = &mut output;
+        // Own the receiver so a failed write closes the channel immediately.
+        // Keeping it in the caller leaves dispatch blocked on a full channel
+        // while the caller waits for dispatch to stop.
+        let writer = scope.spawn(move || -> io::Result<()> {
             while let Some(value) = completed.blocking_recv() {
-                reply(&mut output, value)?;
+                reply(writer_output, value)?;
             }
             Ok(())
         });

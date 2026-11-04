@@ -244,6 +244,56 @@ mod tests {
         }
     }
     #[test]
+    fn rail_shows_member_flags_mailboxes_and_nonwrapping_navigation() {
+        let mut p = base();
+        p["summaries"]["b"] = json!({"id":"b","from":{"email":"b@example.org"},"time":"4d","fullTime":"September 2","labelIds":["INBOX","STARRED"]});
+        let result = request(&p).unwrap();
+        assert_eq!(result["missing"], json!([]));
+        assert_eq!(result["caption"], "3 messages · 1 unread");
+        assert_eq!(result["first"], "c");
+        assert_eq!(result["last"], "a");
+        assert_eq!(
+            result["navigation"],
+            json!({
+                "c":{"previous":"","next":"b","neighbor":"b"},
+                "b":{"previous":"c","next":"a","neighbor":"c"},
+                "a":{"previous":"b","next":"","neighbor":"b"}
+            })
+        );
+        let stops = rows(&result["stops"]);
+        assert_eq!(
+            stops
+                .iter()
+                .map(|s| s["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["c", "b", "a"]
+        );
+        assert_eq!(stops[0]["open"], true);
+        assert_eq!(
+            stops[0]["flagged"], false,
+            "aggregate row flags do not override member labels"
+        );
+        assert_eq!(stops[1]["flagged"], true);
+        assert_eq!(stops[1]["sender"], "b@example.org");
+        assert_eq!(stops[1]["time"], "4d");
+        assert_eq!(stops[1]["fullTime"], "September 2");
+        assert_eq!(stops[1]["mailbox"], "");
+        assert_eq!(stops[2]["mailbox"], "Drafts");
+        p["searching"] = json!(true);
+        assert_eq!(request(&p).unwrap()["stops"][1]["mailbox"], "Inbox");
+        p["summaries"] = json!({});
+        let unknown = request(&p).unwrap();
+        assert_eq!(unknown["missing"], json!(["a", "b", "c"]));
+        assert_eq!(unknown["caption"], "3 messages");
+        assert!(
+            rows(&unknown["stops"])
+                .iter()
+                .all(|s| s["known"] == false && s["unread"] == false)
+        );
+        p["conversations"] = json!(false);
+        assert_eq!(request(&p).unwrap()["showsRail"], false);
+    }
+    #[test]
     fn selection_retains_thread_and_seed_avoids_refetching_known_members() {
         let mut p = base();
         p["operation"] = json!("select");

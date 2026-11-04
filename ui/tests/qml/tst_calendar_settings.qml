@@ -19,6 +19,9 @@ Item {
     property var accountSummaries: []
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: true
+    property bool backendCanSaveInvitations: true
+    property var settings: ({})
+    function persistSetting(name, value) { var next = {}; next[name] = value; mailService.settings = next }
     property bool calendarRemindersEnabled: true
     property int calendarSnoozeMinutes: 5
     property string calendarReminderError: ""
@@ -121,6 +124,26 @@ Item {
       compare(mailService.unifiedCalendarView, false)
       compare(mailService.settingChanges, 2)
       compare(toggle.checked, false)
+    }
+
+    function test_invitation_destination_is_opt_in_persisted_and_backend_gated() {
+      mailService.settings = {}
+      mailService.accountSummaries = [{id:"imap:me@example.org",email:"me@example.org",provider:"imap"},
+        {id:"calendar@example.org",email:"calendar@example.org",provider:"gmail",signedIn:true}]
+      calendarController.sourceList = {version:1,sources:[{id:"google:work",kind:"google",name:"Work",accountId:"calendar@example.org",readOnly:false}]}
+      wait(1)
+      var picker = findChild(settings,"invitation-calendar-picker")
+      verify(picker !== null)
+      compare(picker.value,"")
+      verify(picker.enabled)
+      picker.changed("google:work")
+      compare(mailService.settings.invitationCalendars["imap:me@example.org"].id,"google:work")
+      compare(picker.value,"google:work")
+      mailService.backendCanSaveInvitations = false
+      verify(!picker.enabled)
+      mailService.backendCanSaveInvitations = true
+      picker.changed("")
+      compare(picker.value,"")
     }
 
     function test_existing_icloud_account_is_discovered_and_selected_in_calendars() {

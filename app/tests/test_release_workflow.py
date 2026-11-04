@@ -114,6 +114,26 @@ class ReleaseWorkflowContract(unittest.TestCase):
                     # can build or publish an archive.
                     self.assertIn(command + '\n          if ($LASTEXITCODE -ne 0) { throw "standalone Rust tests failed" }', block)
 
+    def test_shipped_google_client_reaches_only_release_builds_and_is_verified(self):
+        steps = re.split(r"(?m)^      - ", self.workflow)
+        holders = [step for step in steps if "secrets.GOOGLE_CLIENT" in step]
+        # One build step per published backend: two static Linux targets share
+        # the matrix job, then macOS, Linux and Windows standalone apps.
+        self.assertEqual(len(holders), 4)
+        for step in holders:
+            with self.subTest(step=step.splitlines()[0]):
+                self.assertIn("OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}", step)
+                self.assertIn("OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}", step)
+                self.assertIn("cargo build --release", step)
+                for forbidden in ("cargo test", "echo", "Write-Host", "printenv", "env |", "set -x"):
+                    self.assertNotIn(forbidden, step)
+        for job in ("build", *APP_JOBS):
+            with self.subTest(job=job):
+                block = job_block(self.workflow, job)
+                self.assertIn("--shipped-google-client", block)
+                self.assertLess(block.index("cargo test"), block.index("secrets.GOOGLE_CLIENT_ID"))
+        self.assertNotIn("GOOGLE_CLIENT", self.ci_workflow)
+
     def test_pull_requests_build_and_exercise_each_production_standalone_archive(self):
         forbidden = ("gh release create", "gh release edit", "publish-backend.sh")
         for job, (runner, target, archive) in CI_APP_JOBS.items():

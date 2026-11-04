@@ -17,12 +17,38 @@ export OMAMAIL_DESKTOP_DIR="$temp/install/applications"
 export OMAMAIL_LAUNCH_LOG="$temp/launched"
 mkdir -p "$HOME" "$temp/fixtures"
 
+# Use a real executable on the running platform: an ELF/Mach-O header alone
+# cannot report an attempted launch. Other-platform archives remain layout fixtures.
+cat > "$temp/launch.c" <<'C'
+#include <stdio.h>
+#include <stdlib.h>
+int main(void) {
+  const char *path = getenv("OMAMAIL_LAUNCH_LOG");
+  if (!path) return 2;
+  FILE *file = fopen(path, "w");
+  if (!file) return 3;
+  fputs("launched\n", file);
+  return fclose(file) != 0;
+}
+C
+cc "$temp/launch.c" -o "$temp/launch"
+export OMAMAIL_TEST_LAUNCH_BINARY="$temp/launch"
+"$temp/launch"
+[ "$(cat "$OMAMAIL_LAUNCH_LOG")" = launched ]
+rm "$OMAMAIL_LAUNCH_LOG"
+mkdir "$temp/work"
+export TMPDIR="$temp/work"
+export OMAMAIL_TEST_ESCAPE="$temp/work/escaped"
+printf 'untouched\n' > "$OMAMAIL_TEST_ESCAPE"
+
 make_archive() {
   output=$1
   kind=$2
   release_version=$3
   python3 - "$output" "$kind" "$release_version" <<'PY'
-import io, json, plistlib, struct, tarfile, sys
+import io, json, os, pathlib, platform, plistlib, struct, tarfile, sys
+
+native = pathlib.Path(os.environ["OMAMAIL_TEST_LAUNCH_BINARY"]).read_bytes()
 
 def elf(machine=62):
     value = bytearray(64)
@@ -48,8 +74,8 @@ if kind in ("mac-valid", "mac-mailto", "mac-missing-info", "mac-wrong-arch"):
     if kind == "mac-mailto":
         plist["CFBundleURLTypes"] = [{"CFBundleURLSchemes": ["mailto"]}]
     entries = {
-        "Contents/MacOS/omamail-app": macho(),
-        "Contents/MacOS/omamail": macho(),
+        "Contents/MacOS/omamail-app": native if platform.system() == "Darwin" and platform.machine() == "arm64" else macho(),
+        "Contents/MacOS/omamail": native if platform.system() == "Darwin" and platform.machine() == "arm64" else macho(),
         "Contents/Resources/qml/Main.qml": b"import QtQuick\nItem {}\n",
         "Contents/Resources/ui/Service.qml": b"import QtQuick\nItem {}\n",
         "Contents/Resources/manifest.json": json.dumps({"version": version}).encode(),
@@ -82,8 +108,8 @@ top = "wrong.app" if kind == "top-level" else "omamail.app"
 target = "macos-aarch64" if kind == "target" else "linux-x86_64"
 metadata_version = "9.9.9" if kind == "version" else version
 entries = {
-    "bin/omamail-app": elf(),
-    "bin/omamail": elf(),
+    "bin/omamail-app": native if platform.system() == "Linux" and platform.machine() == "x86_64" else elf(),
+    "bin/omamail": native if platform.system() == "Linux" and platform.machine() == "x86_64" else elf(),
     "bin/qt.conf": b"[Paths]\nPrefix=..\nPlugins=plugins\nQmlImports=qml\n",
     "qml/Main.qml": b"import QtQuick\nItem {}\n",
     "ui/Service.qml": b"import QtQuick\nItem {}\n",
@@ -120,18 +146,19 @@ with tarfile.open(output, "w:gz") as package:
         package.addfile(info, io.BytesIO(contents))
     elif kind == "traversal":
         contents = b"escape"
-        info = tarfile.TarInfo(f"{top}/../escaped")
+        # Reach a persistent canary outside the installer's disposable root.
+        info = tarfile.TarInfo(f"{top}/../../../escaped")
         info.size = len(contents)
         package.addfile(info, io.BytesIO(contents))
     elif kind == "absolute":
         contents = b"escape"
-        info = tarfile.TarInfo("/tmp/omamail-installer-escape")
+        info = tarfile.TarInfo(os.environ["OMAMAIL_TEST_ESCAPE"])
         info.size = len(contents)
         package.addfile(info, io.BytesIO(contents))
     elif kind == "symlink":
         info = tarfile.TarInfo(f"{top}/escape")
         info.type = tarfile.SYMTYPE
-        info.linkname = "../../outside"
+        info.linkname = os.environ["OMAMAIL_TEST_ESCAPE"]
         package.addfile(info)
     elif kind == "special":
         info = tarfile.TarInfo(f"{top}/pipe")
@@ -167,6 +194,7 @@ assert_old_install() {
   [ "$(readlink "$OMAMAIL_BIN_DIR/omamail")" = "$OMAMAIL_INSTALL_ROOT/bin/omamail-app" ]
   grep -Fq "Exec=\"$OMAMAIL_INSTALL_ROOT/bin/omamail-app\"" "$OMAMAIL_DESKTOP_DIR/omamail.desktop"
   [ ! -e "$OMAMAIL_LAUNCH_LOG" ]
+  [ "$(cat "$OMAMAIL_TEST_ESCAPE")" = untouched ]
   [ ! -e "$OMAMAIL_INSTALL_ROOT.previous" ]
   if find "$temp/install" -name '*.new.*' -print | grep -q .; then
     printf 'rollback left a temporary registration or installation artifact\n' >&2
@@ -219,6 +247,7 @@ if install_archive "$valid" "$oversized_sums" 0.10.1 >"$temp/oversized-sums.out"
   printf 'oversized checksum file was accepted\n' >&2
   exit 1
 fi
+grep -Fq 'checksum file is too large' "$temp/oversized-sums.err"
 assert_old_install
 
 oversized_archive="$temp/fixtures/oversized.tar.gz"
@@ -234,6 +263,7 @@ if install_archive "$oversized_archive" "$oversized_archive_sums" 0.10.1 >"$temp
   printf 'oversized archive was accepted\n' >&2
   exit 1
 fi
+grep -Fq 'release archive is too large' "$temp/oversized-archive.err"
 assert_old_install
 
 if OMAMAIL_TEST_ARCH=aarch64 install_archive "$valid" "$valid_sums" 0.10.1 >"$temp/arch.out" 2>"$temp/arch.err"; then

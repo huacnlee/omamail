@@ -26,6 +26,8 @@ Rectangle {
   property string conferenceRequestId: ""
   property string originalGuestText: ""
   property bool advancedOptionsOpen: false
+  readonly property bool descriptionFocused: notesField.activeFocus
+  signal keyPressed(var event)
   readonly property var contactService: controller && controller.service ? controller.service : null
   readonly property var contactBook: contactService && Array.isArray(contactService.recipientContacts)
     ? contactService.recipientContacts : []
@@ -117,10 +119,42 @@ Rectangle {
       composerFlick.contentY = Math.max(0, Math.min(top, bottom - composerFlick.height))
   }
 
+  function revealDescriptionCursor() {
+    if (!notesField.activeFocus) return
+    var cursor = notesField.cursorRectangle
+    var top = notesField.mapToItem(composerFlick.contentItem, cursor.x, cursor.y).y
+    var margin = Style.space(10)
+    if (top - margin < composerFlick.contentY)
+      composerFlick.contentY = Math.max(0, top - margin)
+    else if (top + cursor.height + margin > composerFlick.contentY + composerFlick.height)
+      composerFlick.contentY = top + cursor.height + margin - composerFlick.height
+  }
+
   component EditorField: TextField {
     id: input
     font.pixelSize: Style.font.bodySmall
     onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealField, input)
+  }
+
+  component StartField: EditorField {
+    id: input
+    // Keep the duration from before typing, including while the input is
+    // incomplete. Programmatic prefills never emit textEdited.
+    property real durationMs: 0
+    onActiveFocusChanged: {
+      if (!activeFocus) return
+      durationMs = !root.allDay && root.dateRange.ok
+        ? root.dateRange.endMs - root.dateRange.startMs : 0
+      Qt.callLater(root.revealField, input)
+    }
+    onTextEdited: {
+      if (root.allDay || durationMs <= 0) return
+      var start = Calendar.editorDateTime(dateField.text, startField.text)
+      if (!start) return
+      var end = new Date(start.getTime() + durationMs)
+      endDateField.text = root.localDate(end)
+      endField.text = root.localTime(end)
+    }
   }
 
   component EventOption: QQC.ComboBox {
@@ -709,15 +743,39 @@ Rectangle {
         width: parent.width
         spacing: Style.space(6)
         FieldLabel { text: "Description" }
-        EditorField {
+        QQC.TextArea {
           id: notesField
           objectName: "event-description-field"
           width: parent.width
-          foreground: root.textColor
-          accent: root.accentColor
+          // Grow with the document; the form owns scrolling, including keeping
+          // the caret visible in descriptions taller than the window.
+          height: Math.max(Style.space(96), contentHeight + topPadding + bottomPadding)
+          textFormat: TextEdit.PlainText
+          wrapMode: TextEdit.Wrap
+          selectByMouse: true
+          KeyNavigation.priority: KeyNavigation.BeforeItem
+          KeyNavigation.tab: dateField
+          KeyNavigation.backtab: titleField
+          color: root.textColor
+          selectionColor: root.accentColor
+          selectedTextColor: root.backgroundColor
+          placeholderTextColor: root.dimColor
           font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          padding: Style.space(10)
           placeholderText: "Add event details"
           Accessible.name: "Description"
+          Keys.onPressed: function(event) { root.keyPressed(event) }
+          onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealDescriptionCursor)
+          onCursorRectangleChanged: Qt.callLater(root.revealDescriptionCursor)
+          onHeightChanged: Qt.callLater(root.revealDescriptionCursor)
+          background: Rectangle {
+            color: Style.normalFillFor(root.textColor, root.accentColor)
+            border.width: Style.normalBorderWidth
+            border.color: notesField.activeFocus ? root.accentColor
+              : Style.normalBorderFor(root.textColor, root.accentColor)
+            radius: Style.cornerRadius
+          }
         }
       }
 
@@ -746,7 +804,7 @@ Rectangle {
       Row {
         width: parent.width
         spacing: Style.space(8)
-        EditorField {
+        StartField {
           id: dateField
           objectName: "event-start-date-field"
           width: parent.width - (startField.visible ? startField.width + parent.spacing : 0)
@@ -755,7 +813,7 @@ Rectangle {
           placeholderText: root.editingAllDay ? "First day (YYYY-MM-DD)" : "YYYY-MM-DD"
         }
 
-        EditorField {
+        StartField {
           id: startField
           objectName: "event-start-time-field"
           visible: !root.editingAllDay

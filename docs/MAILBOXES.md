@@ -2,13 +2,15 @@
 
 Open Settings and choose Add mailbox, then select your provider.
 
-**Gmail** signs in with Google directly. Google issues Gmail API access per
-project, so this route needs an OAuth client you create once — the setup page
-walks through it. In exchange it gets labels, conversations, Gmail's own search
+**Gmail** signs in with Google directly. Released builds include an OAuth
+client, so signing in needs no setup. A development build ships none: create
+your own client once and the setup page walks through it. Your own client
+always takes precedence over the included one, for your own quota and consent
+screen. In exchange Gmail gets labels, conversations, Gmail's own search
 syntax, and a "report spam" that Google actually learns from.
 
-Calendar rides the same sign-in but is a separate API: enable **Google
-Calendar API** in the Cloud project too, alongside Gmail API, from
+Calendar rides the same sign-in but is a separate API. With your own client,
+enable **Google Calendar API** in the Cloud project too, alongside Gmail API, from
 [the API library](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com)
 or `gcloud services enable calendar-json.googleapis.com`. Skipping this step
 does not surface as a missing-permission message — the calendar panel just
