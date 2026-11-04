@@ -142,6 +142,9 @@ Item {
       return
     }
     if (backend && !backend.ready) return
+    // A backend that reconnects restores its mailboxes, and the keyring
+    // still holds the password the server refused.
+    if (savedPasswordRefused) return
     if (credentialLookupBusy) return
     startSecretLookup()
   }
@@ -407,6 +410,10 @@ Item {
     if (loginBusy || replacementBusy || credentialWriteBusy) return false
     passwordRevision++
     savedPasswordRefused = true
+    // A keyring read already under way would bring the same password back.
+    stopSecretRetry()
+    credentialLookupSerial++
+    credentialLookupBusy = false
     lastError = message || "The server refused the saved password. Enter it again"
     password = ""
     passwordChecked = true

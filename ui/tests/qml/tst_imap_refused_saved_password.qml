@@ -13,8 +13,15 @@ Item {
   id: root
 
   QtObject {
+    id: backend
+    property bool ready: true
+  }
+
+  QtObject {
     id: credentials
     property bool backendCanStoreCredentials: true
+    property var heldRead: null
+    property bool holdReads: false
     property bool holdWrites: false
     property var heldWrite: null
     property var writes: []
@@ -22,7 +29,8 @@ Item {
     property int deletes: 0
     function credentialGet(kind, accountId, clientId, callback) {
       reads++
-      callback("old-password", "")
+      if (holdReads) heldRead = callback
+      else callback("old-password", "")
       return true
     }
     function credentialPut(kind, accountId, clientId, secret, callback) {
@@ -92,6 +100,9 @@ Item {
     when: windowShown
 
     function init() {
+      backend.ready = true
+      credentials.holdReads = false
+      credentials.heldRead = null
       credentials.holdWrites = false
       credentials.heldWrite = null
       credentials.writes = []
@@ -133,6 +144,34 @@ Item {
       verify(answer.error !== "")
       compare(credentials.reads, 0, "and the refused password is not read back in behind the user's back")
       verify(!auth.loggedIn)
+    }
+
+    // A backend that restarts restores its mailboxes. The refused password
+    // stays where the refusal left it.
+    function test_a_backend_reconnect_does_not_restore_the_refused_password() {
+      var auth = restored()
+      auth.backend = backend
+      verify(auth.refuseSavedPassword(auth.passwordRevision))
+      backend.ready = false
+      backend.ready = true
+      compare(credentials.reads, 0)
+      verify(!auth.loggedIn)
+      verify(auth.savedPasswordRefused)
+      compare(auth.lastError, "The server refused the saved password. Enter it again")
+    }
+
+    function test_a_keyring_read_under_way_does_not_restore_the_refused_password() {
+      var auth = restored()
+      credentials.holdReads = true
+      auth.restoreSession()
+      verify(credentials.heldRead !== null)
+      verify(auth.refuseSavedPassword(auth.passwordRevision))
+      credentials.heldRead("old-password", "")
+      verify(!auth.loggedIn)
+      verify(auth.savedPasswordRefused)
+      compare(auth.lastError, "The server refused the saved password. Enter it again")
+      verify(auth.signIn("new-app-password"))
+      verify(auth.loginBusy, "and the next sign-in is still a first one")
     }
 
     function test_the_next_sign_in_is_a_first_one_and_overwrites_the_saved_password() {
