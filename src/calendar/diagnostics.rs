@@ -46,6 +46,7 @@ pub(super) fn context(provider: &str, operation: &str, stage: &str) -> Value {
                 "import",
                 "saveInvitation",
                 "attendance",
+                "verify",
             ][..],
         ),
         (

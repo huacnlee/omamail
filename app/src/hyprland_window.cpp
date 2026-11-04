@@ -25,21 +25,21 @@ QString parkedAddress(const QByteArray &clientsJson, qint64 pid)
     return {};
 }
 
-QStringList luaDispatches(const QString &address, int workspace)
+QStringList luaDispatches(const QString &address, const QString &workspace)
 {
     const QString target = QStringLiteral("window = \"address:%1\"").arg(address);
     return {QStringLiteral("hl.dsp.window.move({ workspace = \"%1\", %2 })").arg(workspace).arg(target),
             QStringLiteral("hl.dsp.focus({ %1 })").arg(target)};
 }
 
-QStringList classicDispatches(const QString &address, int workspace)
+QStringList classicDispatches(const QString &address, const QString &workspace)
 {
     return {QStringLiteral("movetoworkspace %1,address:%2").arg(workspace).arg(address),
             QStringLiteral("focuswindow address:%1").arg(address)};
 }
 
 namespace {
-QByteArray hyprctl(const QStringList &arguments, bool *ok = nullptr)
+QByteArray runHyprctl(const QStringList &arguments, bool *ok)
 {
     QProcess process;
     process.start(QStringLiteral("hyprctl"), arguments);
@@ -49,7 +49,7 @@ QByteArray hyprctl(const QStringList &arguments, bool *ok = nullptr)
     return done ? process.readAllStandardOutput() : QByteArray();
 }
 
-bool dispatchAll(const QStringList &steps)
+bool dispatchAll(const Hyprctl &hyprctl, const QStringList &steps)
 {
     for (const QString &step : steps) {
         bool ok = false;
@@ -60,17 +60,26 @@ bool dispatchAll(const QStringList &steps)
 }
 }
 
+bool restoreParkedWindow(const Hyprctl &hyprctl, qint64 pid)
+{
+    bool ok = false;
+    const QString address = parkedAddress(hyprctl({QStringLiteral("clients"), QStringLiteral("-j")}, &ok), pid);
+    if (address.isEmpty()) return false;
+    const QJsonObject active = QJsonDocument::fromJson(
+        hyprctl({QStringLiteral("activeworkspace"), QStringLiteral("-j")}, &ok)).object();
+    // A named workspace has a negative id, so it goes by its name.
+    const int id = active.value(QStringLiteral("id")).toInt(-1);
+    const QString name = active.value(QStringLiteral("name")).toString();
+    if (id < 1 && name.isEmpty()) return false;
+    const QString workspace = id >= 1 ? QString::number(id) : QStringLiteral("name:") + name;
+    return dispatchAll(hyprctl, luaDispatches(address, workspace))
+        || dispatchAll(hyprctl, classicDispatches(address, workspace));
+}
+
 bool restoreParkedWindow()
 {
     if (qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) return false;
-    const QString address = parkedAddress(hyprctl({QStringLiteral("clients"), QStringLiteral("-j")}),
-                                          QCoreApplication::applicationPid());
-    if (address.isEmpty()) return false;
-    const QJsonObject active = QJsonDocument::fromJson(
-        hyprctl({QStringLiteral("activeworkspace"), QStringLiteral("-j")})).object();
-    const int workspace = active.value(QStringLiteral("id")).toInt(-1);
-    if (workspace < 1) return false;
-    return dispatchAll(luaDispatches(address, workspace)) || dispatchAll(classicDispatches(address, workspace));
+    return restoreParkedWindow(runHyprctl, QCoreApplication::applicationPid());
 }
 
 }

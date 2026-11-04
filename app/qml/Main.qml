@@ -109,7 +109,7 @@ ApplicationWindow {
     if (root.nativeHost) root.nativeHost.restoreParkedWindow()
   }
 
-  readonly property bool startedInBackground: Qt.application.arguments.indexOf("--background") >= 0
+  property bool startedInBackground: Qt.application.arguments.indexOf("--background") >= 0
 
   function openInitialWindow() {
     if (initialOpenIssued) return
@@ -183,6 +183,9 @@ ApplicationWindow {
     shell: shellAdapter
     manifest: manifestAdapter.value
     platform: shellAdapter
+    // Started with the session (--background), the window stays out of sight
+    // even if it was open when the session ended.
+    keepWindowShut: root.startedInBackground
     initialSettings: root.nativeHost ? root.nativeHost.settings : ({})
   }
 
@@ -291,11 +294,6 @@ ApplicationWindow {
   Connections {
     target: mailService
     function onAccountsLoadedChanged() { root.routePendingActivation() }
-    // Started with the session (--background), the window stays out of sight
-    // even if it was open when the session ended.
-    function onRestoreWindowChanged() {
-      if (mailService.restoreWindow && root.startedInBackground) mailService.restoreWindow = false
-    }
   }
 
   Connections {

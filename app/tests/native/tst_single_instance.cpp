@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDeadlineTimer>
+#include <QDir>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -42,6 +43,9 @@ private slots:
     void aLaterLaunchForwardsAndLeavesTheSocket();
     void concurrentLaunchesStartOneInstance();
     void aSocketWithoutOwnerIsReplacedByTheOwner();
+    void aMailtoLinkBecomesTheOpenPayload();
+    void aBackgroundLaunchOpensNothing();
+    void theSessionSocketIsNotInTheSharedTemp();
 };
 
 void SingleInstanceTest::onlyOneLaunchOwnsTheSession()
@@ -122,6 +126,39 @@ void SingleInstanceTest::aSocketWithoutOwnerIsReplacedByTheOwner()
     QSignalSpy opened(&owner, &SingleInstance::openRequested);
     QVERIFY(fromAnotherLaunch([&name] { return SingleInstance::forward(name, QStringLiteral("{}")); }));
     QTRY_COMPARE(opened.count(), 1);
+}
+
+void SingleInstanceTest::aMailtoLinkBecomesTheOpenPayload()
+{
+    QCOMPARE(SingleInstance::openPayload(QString()), QStringLiteral("{}"));
+    QCOMPARE(SingleInstance::openPayload(QStringLiteral("https://example.com")), QStringLiteral("{}"));
+    QCOMPARE(SingleInstance::openPayload(QStringLiteral("MAILTO:ada@example.com?subject=Hi")),
+             QStringLiteral("{\"mailto\":\"MAILTO:ada@example.com?subject=Hi\"}"));
+}
+
+void SingleInstanceTest::aBackgroundLaunchOpensNothing()
+{
+    QCOMPARE(SingleInstance::openPayload(QStringLiteral("mailto:ada@example.com"), true),
+             QStringLiteral("{\"mailto\":\"mailto:ada@example.com\"}"));
+    const QString name = uniqueName();
+    SingleInstance owner(name, m_locks.path());
+    QVERIFY(owner.acquire());
+    QVERIFY(owner.listen());
+    QSignalSpy opened(&owner, &SingleInstance::openRequested);
+    const QString background = SingleInstance::openPayload(QString(), true);
+    QVERIFY(fromAnotherLaunch([&name, &background] { return SingleInstance::forward(name, background); }));
+    QVERIFY(fromAnotherLaunch([&name] { return SingleInstance::forward(name, QStringLiteral("{}")); }));
+    QTRY_COMPARE(opened.count(), 1);
+    QCOMPARE(opened.first().first().toString(), QStringLiteral("{}"));
+}
+
+void SingleInstanceTest::theSessionSocketIsNotInTheSharedTemp()
+{
+#ifdef Q_OS_UNIX
+    const QString name = SingleInstance::sessionName();
+    QVERIFY2(QDir::isAbsolutePath(name), qPrintable(name));
+    QVERIFY2(!name.startsWith(QDir::tempPath() + QStringLiteral("/omamail")), qPrintable(name));
+#endif
 }
 
 QTEST_GUILESS_MAIN(SingleInstanceTest)

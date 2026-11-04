@@ -109,6 +109,39 @@ assert.strictEqual(revoked.error, "Google rejected the saved session. Sign in ag
 assert.strictEqual(oauth.parseTokenResponse(500, "<html>", "").ok, false)
 assert.strictEqual(oauth.parseTokenResponse(200, "{}", "").ok, false, "no access_token is a failure")
 
+// A finished browser callback does not prove the native token exchange or the
+// Gmail profile read succeeded. Those failures need to name the part that did
+// not answer, or the user goes back to a consent page that already worked.
+{
+  const codes = ["auth_cancelled", "auth_flow_missing", "auth_invalid_callback",
+    "auth_invalid_profile", "auth_invalid_response", "auth_keyring_failed",
+    "auth_listener_failed", "auth_missing_scope", "auth_offline_access_missing",
+    "auth_redirect_refused", "auth_response_too_large", "auth_timeout",
+    "auth_transport_failed", "gmail_forbidden", "gmail_http_failed",
+    "gmail_invalid_response", "gmail_length_required", "gmail_rate_limited",
+    "gmail_response_too_large", "gmail_timeout", "gmail_unauthorized"]
+  for (const code of codes) {
+    const text = oauth.signInErrorMessage({ message: code })
+    assert.ok(text !== oauth.SIGN_IN_GENERIC, code + " has its own sentence")
+    assert.strictEqual(oauth.signInErrorMessage(code), text, code + " accepts a bare string")
+    assert.ok(!/_failed|\b[45]\d\d\b/.test(text), code + " is said plainly: " + text)
+  }
+  assert.ok(/Could not reach Google's sign-in service/.test(oauth.signInErrorMessage("auth_transport_failed")),
+    "an unreachable token host is a network failure, not failed consent")
+  assert.ok(/did not finish in time/.test(oauth.signInErrorMessage("auth_timeout")))
+  assert.ok(/accepted the sign-in, but Gmail could not be reached/.test(oauth.signInErrorMessage("gmail_http_failed")),
+    "the profile read names Gmail after consent succeeded")
+  assert.ok(/accepted the sign-in, but Gmail did not answer/.test(oauth.signInErrorMessage("gmail_timeout")))
+  for (const code of ["auth_transport_failed", "auth_timeout", "gmail_http_failed", "gmail_timeout"])
+    assert.ok(/do not use an HTTP proxy/.test(oauth.signInErrorMessage(code)),
+      code + " says that an HTTP proxy is not used")
+  assert.strictEqual(oauth.signInErrorMessage(""), oauth.SIGN_IN_GENERIC)
+  assert.strictEqual(oauth.signInErrorMessage(null), oauth.SIGN_IN_GENERIC)
+  assert.strictEqual(oauth.signInErrorMessage({ message: "no_such_code" }), oauth.SIGN_IN_GENERIC)
+  assert.strictEqual(oauth.signInErrorMessage({}), oauth.SIGN_IN_GENERIC)
+  assert.strictEqual(oauth.signInErrorMessage(42), oauth.SIGN_IN_GENERIC)
+}
+
 // A network outage did not revoke the saved grant. Treating every failed
 // refresh as signed out strands a valid keyring token until the shell restarts.
 assert.strictEqual(oauth.refreshFailureDisposition({ ok: false, invalidGrant: false }), "retry",
@@ -132,6 +165,12 @@ deepEqual(
 deepEqual(
   oauth.missingScopes("https://www.googleapis.com/auth/gmail.modify"),
   ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"])
+// The contacts scopes are asked for, but a grant that declined them is kept.
+for (var o = 0; o < oauth.OPTIONAL_SCOPES.length; o++)
+  assert.ok(oauth.SCOPES.indexOf(oauth.OPTIONAL_SCOPES[o]) < 0)
+deepEqual(
+  oauth.missingScopes(oauth.SCOPES.join(" ")),
+  [])
 assert.strictEqual(
   oauth.missingScopeMessage(["https://www.googleapis.com/auth/gmail.send"]),
   "Google sign-in finished without the gmail.send permission. Sign in again and leave every checkbox ticked")

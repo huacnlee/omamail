@@ -24,6 +24,15 @@ public:
     explicit SingleInstance(const QString &name, const QString &lockDirectory = QString(),
                             QObject *parent = nullptr);
 
+    // What the session's instance is called. On Unix, a path in the private
+    // runtime directory: a bare name would be a socket in the shared /tmp.
+    static QString sessionName();
+
+    // The payload a launch hands over: a mailto: link becomes a draft, as the
+    // shell plugin's mailto.sh does. A launch with --background asks for no
+    // window, and anything else opens the window as it is.
+    static QString openPayload(const QString &mailto, bool background = false);
+
     // Hand `payload` to the instance listening under `name`; true once it was
     // written to it.
     static bool forward(const QString &name, const QString &payload, int timeoutMs = 500);

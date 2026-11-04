@@ -8,7 +8,40 @@ class HyprlandWindowTest : public QObject {
 private slots:
     void findsOnlyThisProcessParkedOnASpecialWorkspace();
     void dispatchesNameTheWindowAndTheWorkspace();
+    void aParkedWindowComesBackByTheLuaDispatches();
+    void aRejectedLuaDispatchFallsBackToTheClassicOnes();
+    void aWindowInPlaceDispatchesNothing();
+    void aNamedWorkspaceGoesByItsName();
 };
+
+namespace {
+// A Hyprland that answers `clients` and `activeworkspace`, and accepts only
+// the dispatches `accepts` lets through. `dispatched` records what it was told.
+struct FakeHyprland {
+    QByteArray clients;
+    std::function<bool(const QString &)> accepts;
+    QStringList dispatched;
+    QByteArray active = R"({"id":4,"name":"4"})";
+
+    HyprlandWindow::Hyprctl hyprctl()
+    {
+        return [this](const QStringList &arguments, bool *ok) -> QByteArray {
+            const QString verb = arguments.first();
+            *ok = true;
+            if (arguments == QStringList({QStringLiteral("clients"), QStringLiteral("-j")})) return clients;
+            if (arguments == QStringList({QStringLiteral("activeworkspace"), QStringLiteral("-j")})) return active;
+            if (verb != QStringLiteral("dispatch") || arguments.size() != 2) {
+                *ok = false;
+                return {};
+            }
+            dispatched << arguments.at(1);
+            return accepts(arguments.at(1)) ? "ok\n" : "Invalid dispatcher\n";
+        };
+    }
+};
+
+const QByteArray parked = R"([{"address":"0xbbb","pid":20,"workspace":{"id":-98,"name":"special:minimized"}}])";
+}
 
 void HyprlandWindowTest::findsOnlyThisProcessParkedOnASpecialWorkspace()
 {
@@ -28,13 +61,47 @@ void HyprlandWindowTest::findsOnlyThisProcessParkedOnASpecialWorkspace()
 
 void HyprlandWindowTest::dispatchesNameTheWindowAndTheWorkspace()
 {
-    const QStringList lua = HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), 4);
+    const QStringList lua = HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), QStringLiteral("4"));
     QCOMPARE(lua.size(), 2);
     QCOMPARE(lua.at(0), QStringLiteral("hl.dsp.window.move({ workspace = \"4\", window = \"address:0xbbb\" })"));
     QCOMPARE(lua.at(1), QStringLiteral("hl.dsp.focus({ window = \"address:0xbbb\" })"));
-    QCOMPARE(HyprlandWindow::classicDispatches(QStringLiteral("0xbbb"), 4),
+    QCOMPARE(HyprlandWindow::classicDispatches(QStringLiteral("0xbbb"), QStringLiteral("4")),
              QStringList({QStringLiteral("movetoworkspace 4,address:0xbbb"),
                           QStringLiteral("focuswindow address:0xbbb")}));
+}
+
+void HyprlandWindowTest::aParkedWindowComesBackByTheLuaDispatches()
+{
+    FakeHyprland hyprland{parked, [](const QString &) { return true; }, {}};
+    QVERIFY(HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
+    QCOMPARE(hyprland.dispatched, HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), QStringLiteral("4")));
+}
+
+void HyprlandWindowTest::aRejectedLuaDispatchFallsBackToTheClassicOnes()
+{
+    FakeHyprland hyprland{parked, [](const QString &step) { return !step.startsWith(QStringLiteral("hl.")); }, {}};
+    QVERIFY(HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
+    const QStringList classic = HyprlandWindow::classicDispatches(QStringLiteral("0xbbb"), QStringLiteral("4"));
+    QCOMPARE(hyprland.dispatched,
+             QStringList({HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), QStringLiteral("4")).first()}) + classic);
+
+    FakeHyprland deaf{parked, [](const QString &) { return false; }, {}};
+    QVERIFY(!HyprlandWindow::restoreParkedWindow(deaf.hyprctl(), 20));
+}
+
+void HyprlandWindowTest::aWindowInPlaceDispatchesNothing()
+{
+    FakeHyprland hyprland{R"([{"address":"0xaaa","pid":20,"workspace":{"id":3,"name":"3"}}])",
+                          [](const QString &) { return true; }, {}};
+    QVERIFY(!HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
+    QVERIFY(hyprland.dispatched.isEmpty());
+}
+
+void HyprlandWindowTest::aNamedWorkspaceGoesByItsName()
+{
+    FakeHyprland hyprland{parked, [](const QString &) { return true; }, {}, R"({"id":-1337,"name":"mail"})"};
+    QVERIFY(HyprlandWindow::restoreParkedWindow(hyprland.hyprctl(), 20));
+    QCOMPARE(hyprland.dispatched, HyprlandWindow::luaDispatches(QStringLiteral("0xbbb"), QStringLiteral("name:mail")));
 }
 
 QTEST_GUILESS_MAIN(HyprlandWindowTest)

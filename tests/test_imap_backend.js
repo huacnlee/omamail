@@ -18,6 +18,19 @@ context.root = context
 vm.createContext(context)
 for (const name of ["newHandle","backendError","nativeRequest","getMessages","sendMessage","verifyCredentials"])
   vm.runInContext(method(name),context)
+const dnsError = "Could not find the mail server. Check the server address and your internet connection."
+let verification
+context.verifyCredentials({username:"new-user",imapHost:"missing.example.invalid"},"new-user:synthetic",
+  (ok,error)=>{verification={ok,error}})
+const verificationCall=calls.pop()
+assert.equal(verificationCall.method,"imap.folders")
+verificationCall.callback(null,{message:"mail_dns_failed",data:"synthetic-secret"})
+assert.equal(verification.ok,false)
+assert.equal(verification.error,dnsError)
+assert.equal(context.inFlight,0)
+assert.equal(context.backendError({message:"unknown",data:"synthetic-secret"}),"Mail request failed")
+assert.equal(context.backendError({message:"mail_auth_failed"}),"The server rejected the sign-in. Sign in again.")
+assert.equal(context.backendError({message:"request_timed_out"}),"The mail server did not answer in time")
 let result
 context.getMessages(["7:INBOX"],false,(value,error)=>{result={value,error}})
 assert.equal(calls[0].method,"imap.messages")

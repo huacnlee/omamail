@@ -104,6 +104,11 @@ TestCase {
   }
 
   Component {
+    id: backgroundComponent
+    Standalone.Main { nativeHost: host; nativeFileStore: host; startedInBackground: true }
+  }
+
+  Component {
     id: gmailAuthComponent
     Providers.AuthManager {
       pluginDir: "/fixture/plugin"
@@ -515,6 +520,63 @@ TestCase {
     verify(quitRow.visible)
     quitRow.activated()
     compare(host.quitCalled, true)
+  }
+
+  function mailtoPayload() {
+    return JSON.stringify({mailto:"mailto:ada@example.com?subject=Hello%20there&cc=bob@example.com"})
+  }
+
+  function verifyDraft(composition) {
+    tryVerify(function() { return composition.app.composing }, 2000, "a draft opens")
+    compare(findChild(composition, "compose-to-field").text, "ada@example.com")
+    compare(findChild(composition, "compose-cc-field").text, "bob@example.com")
+    compare(findChild(composition, "compose-subject-field").text, "Hello there")
+    compare(host.pendingOpen, "", "the launch was taken")
+  }
+
+  function test_a_background_start_stays_hidden_until_launched_again() {
+    host.files["/fixture/config/omamail/window.json"] = JSON.stringify({windowOpen:true})
+    var composition = createTemporaryObject(backgroundComponent, testCase)
+    verify(composition)
+    tryVerify(function() { return composition.service.windowPrefsLoaded })
+    wait(50)
+    compare(composition.service.restoreWindow, false, "the window open at last logout stays shut")
+    verify(!composition.app.opened)
+    verify(!composition.visible)
+    host.requestOpen("{}")
+    verify(composition.app.opened)
+    tryVerify(function() { return composition.visible })
+    verify(!composition.app.composing, "a plain launch opens no draft")
+    compare(host.parkedWindowRestores, 1)
+  }
+
+  function test_a_relaunch_shows_a_window_hidden_without_telling_the_app() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    tryVerify(function() { return composition.visible })
+    verify(composition.app.opened)
+    composition.hide()
+    verify(!composition.visible)
+    host.requestOpen("{}")
+    tryVerify(function() { return composition.visible })
+    compare(host.parkedWindowRestores, 1, "a minimized window is brought back too")
+  }
+
+  function test_a_mailto_launch_opens_a_draft_in_a_cold_background_app() {
+    var composition = createTemporaryObject(backgroundComponent, testCase)
+    verify(composition)
+    host.requestOpen(mailtoPayload())
+    verifyDraft(composition)
+    tryVerify(function() { return composition.visible })
+  }
+
+  function test_a_mailto_launch_opens_a_draft_in_a_running_app() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    tryVerify(function() { return composition.visible })
+    verify(!composition.app.composing)
+    host.requestOpen(mailtoPayload())
+    verifyDraft(composition)
   }
 
   function test_window_size_restores_and_is_saved_after_resize() {

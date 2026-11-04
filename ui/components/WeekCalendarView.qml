@@ -37,6 +37,18 @@ Item {
     }
     function onLoadingChanged() {
       if (!root.controller.loading && !root.controller.eventWriting) root.pendingGesture = null
+      if (!root.controller.loading && !root.controller.pendingRangeStart) root.followsFirstEvent = false
+    }
+    // Calendars arrive with their account's sign-in, after the first load ended,
+    // and the controller may already have applied their cached events.
+    function onEnabledSourceKeyChanged() {
+      if (root.movedByHand) return
+      root.followsFirstEvent = true
+      root.showOpeningHour()
+    }
+    function onCalendarScopeChanged() {
+      if (root.pendingGesture || root.dragPreview) root.opensAfterGesture = true
+      else root.resetTimeScroll()
     }
   }
 
@@ -63,13 +75,57 @@ Item {
     text: Calendar.timeLabel(new Date(2000, 0, 1, 12, 59).getTime(), root.timeFormat)
   }
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-  readonly property var hourRange: Calendar.weekHourRange(
-    controller ? controller.events : [], days, 7, 19)
+  readonly property int openingHour: Calendar.weekOpeningHour(
+    controller ? controller.events : [], days, 7)
   readonly property int firstHour: 0
   readonly property int lastHour: 24
+  readonly property int savedHourHeight: Calendar.normalizeHourHeight(controller ? controller.hourHeight : undefined)
+  // Measured as if the all-day lane held one row, so that the hours keep their
+  // height from one week to the next.
+  readonly property real automaticHourHeight: Calendar.automaticHourHeight(
+    timeline.height + allDayHeight - Style.space(32), Style.space(Calendar.HOUR_HEIGHT_USUAL),
+    Math.max(Style.space(Calendar.HOUR_HEIGHT_READABLE), Style.font.caption * 2.5))
+  // Not rounded like a spacing, so that a saved height never overshoots the fit.
+  readonly property real hourUnit: Style.space(Calendar.HOUR_HEIGHT_USUAL) / Calendar.HOUR_HEIGHT_USUAL
+  // Hours too short to hold a label each take turns.
+  readonly property int hourLabelStep: timeline.hourHeight < Style.font.caption ? 2 : 1
+  // A short hour shrinks what is fixed for a tall one, or a resize edge would
+  // leave nothing to drag by and a card's margin nothing to show its title in.
+  readonly property real hourScale: Math.min(1, timeline.hourHeight / Style.space(60))
+  readonly property int resizeEdge: Style.space(9 * hourScale)
+  readonly property int cardMargin: Style.space(5 * hourScale)
+  // A week's events can arrive after the week does, so the view follows its first
+  // one until they have loaded, or until it is scrolled or an event is dragged.
+  // After that, an event changing does not move what is on screen.
+  property bool followsFirstEvent: true
+  property bool movedByHand: false
+  function stopFollowing() {
+    movedByHand = true
+    followsFirstEvent = false
+  }
+  function showOpeningHour() {
+    timeline.topHour = openingHour
+    timeline.relayout()
+  }
   function resetTimeScroll() {
-    timeline.contentY = Math.max(0, Math.min(hourRange.first * timeline.hourHeight,
-      timeline.contentHeight - timeline.height))
+    movedByHand = false
+    followsFirstEvent = true
+    showOpeningHour()
+  }
+  onOpeningHourChanged: if (followsFirstEvent) showOpeningHour()
+  // A mailbox switched during a drag or its save opens once that has finished.
+  property bool opensAfterGesture: false
+  function finishGesture() {
+    if (!opensAfterGesture || pendingGesture || dragPreview) return
+    opensAfterGesture = false
+    resetTimeScroll()
+    if (controller && !controller.loading && !controller.pendingRangeStart) followsFirstEvent = false
+  }
+  onDragPreviewChanged: if (dragPreview) stopFollowing(); else Qt.callLater(finishGesture)
+  onPendingGestureChanged: if (pendingGesture) stopFollowing(); else Qt.callLater(finishGesture)
+  function zoomHours(direction) {
+    if (!controller || pendingGesture || dragPreview) return
+    controller.zoomHours(direction, timeline.hourHeight / hourUnit, timeline.height / hourCount / hourUnit)
   }
   Component.onCompleted: Qt.callLater(root.resetTimeScroll)
   onDaysChanged: Qt.callLater(root.resetTimeScroll)
@@ -290,7 +346,44 @@ Item {
     anchors.right: parent.right
     anchors.top: allDayLane.bottom
     anchors.bottom: parent.bottom
-    readonly property real hourHeight: Math.max(Style.space(60), height / root.hourCount)
+    readonly property real hourHeight: Math.max(height / root.hourCount,
+      root.savedHourHeight > 0 ? root.savedHourHeight * root.hourUnit : root.automaticHourHeight)
+    // The hour the view keeps at its top when a window or a zoom changes the layout,
+    // where the same pixel offset would land on a different time, and returns to
+    // when there is room again. Flickable limits contentY by the old contentHeight
+    // during such a change, so that is not a scroll, and the hour is placed again
+    // once the layout has settled.
+    property real topHour: 0
+    property real placedY: 0
+    property real placedHeight: 0
+    property real placedContentHeight: 0
+    property bool relayingOut: false
+    function placeTopHour() {
+      contentY = Math.max(0, Math.min(topHour * hourHeight, hourHeight * root.hourCount - height))
+      placedY = contentY
+      placedHeight = height
+      placedContentHeight = contentHeight
+    }
+    function relayout() {
+      relayingOut = true
+      placeTopHour()
+      Qt.callLater(settleLayout)
+    }
+    function settleLayout() {
+      placeTopHour()
+      relayingOut = false
+    }
+    onHourHeightChanged: relayout()
+    onHeightChanged: relayout()
+    onContentYChanged: {
+      // Flickable also rounds contentY to a whole pixel, which is not a scroll.
+      if (relayingOut || Math.abs(contentY - placedY) < 1) return
+      // A change of layout can move it before any of the handlers above have run.
+      if (height !== placedHeight || contentHeight !== placedContentHeight) return
+      placedY = contentY
+      topHour = contentY / hourHeight
+      root.stopFollowing()
+    }
     contentWidth: width
     contentHeight: Math.max(height, hourHeight * root.hourCount)
     clip: true
@@ -314,6 +407,8 @@ Item {
             anchors.leftMargin: Style.space(4)
             anchors.top: parent.top
             anchors.topMargin: index === 0 ? Style.space(2) : -implicitHeight / 2
+            visible: index % root.hourLabelStep === 0
+              && (index > 0 || root.hourScale >= 1 || timeline.hourHeight >= implicitHeight * 1.5 + Style.space(2))
             text: Calendar.timeLabel(new Date(2000, 0, 1, root.firstHour + index).getTime(), root.timeFormat)
             color: root.dimColor
             font.family: root.panelFontFamily
@@ -457,6 +552,8 @@ Item {
                 Column {
                   anchors.fill: parent
                   anchors.margins: Style.space(5)
+                  anchors.topMargin: root.cardMargin
+                  anchors.bottomMargin: root.cardMargin
                   spacing: Style.space(1)
                   Text {
                     width: parent.width
@@ -496,7 +593,7 @@ Item {
                   hoverEnabled: true
                   enabled: !root.pendingGesture && !(root.controller && root.controller.eventWriting)
                   cursorShape: !eventBlock.canReschedule ? Qt.PointingHandCursor
-                    : mouseY < Style.space(9) || mouseY > height - Style.space(9)
+                    : mouseY < root.resizeEdge || mouseY > height - root.resizeEdge
                     ? Qt.SizeVerCursor : Qt.OpenHandCursor
                   preventStealing: true
                   property point initial: Qt.point(0, 0)
@@ -505,7 +602,7 @@ Item {
                   property var proposed: null
                   onPressed: function(mouse) {
                     initial = mapToItem(timeline, mouse.x, mouse.y)
-                    edge = mouse.y < Style.space(9) ? "start" : mouse.y > height - Style.space(9) ? "end" : ""
+                    edge = mouse.y < root.resizeEdge ? "start" : mouse.y > height - root.resizeEdge ? "end" : ""
                     moved = false
                     proposed = null
                   }
@@ -542,9 +639,9 @@ Item {
                 Rectangle {
                   anchors.horizontalCenter: parent.horizontalCenter
                   anchors.top: parent.top
-                  anchors.topMargin: Style.space(3)
+                  anchors.topMargin: Style.space(3 * root.hourScale)
                   width: Math.min(Style.space(24), parent.width * 0.4)
-                  height: Style.space(3)
+                  height: Style.space(3 * root.hourScale)
                   radius: height / 2
                   color: eventBlock.eventColor
                   visible: eventBlock.canReschedule && (eventMouse.containsMouse || eventMouse.pressed)
@@ -552,9 +649,9 @@ Item {
                 Rectangle {
                   anchors.horizontalCenter: parent.horizontalCenter
                   anchors.bottom: parent.bottom
-                  anchors.bottomMargin: Style.space(3)
+                  anchors.bottomMargin: Style.space(3 * root.hourScale)
                   width: Math.min(Style.space(24), parent.width * 0.4)
-                  height: Style.space(3)
+                  height: Style.space(3 * root.hourScale)
                   radius: height / 2
                   color: eventBlock.eventColor
                   visible: eventBlock.canReschedule && (eventMouse.containsMouse || eventMouse.pressed)

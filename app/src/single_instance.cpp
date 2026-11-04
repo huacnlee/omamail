@@ -1,5 +1,8 @@
 #include "single_instance.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
+
 #include <QDeadlineTimer>
 #include <QDir>
 #include <QLocalSocket>
@@ -7,6 +10,8 @@
 #include <QThread>
 
 namespace {
+const QString backgroundPayload = QStringLiteral("{\"background\":true}");
+
 QString lockPath(const QString &name, QString directory)
 {
     if (directory.isEmpty())
@@ -31,11 +36,29 @@ SingleInstance::SingleInstance(const QString &name, const QString &lockDirectory
             connect(peer, &QLocalSocket::readyRead, this, [this, peer] {
                 while (peer->canReadLine()) {
                     const QString payload = QString::fromUtf8(peer->readLine()).trimmed();
+                    if (payload == backgroundPayload) continue;
                     emit openRequested(payload.isEmpty() ? QStringLiteral("{}") : payload);
                 }
             });
         }
     });
+}
+
+QString SingleInstance::sessionName()
+{
+#ifdef Q_OS_UNIX
+    const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (!runtime.isEmpty()) return QDir(runtime).filePath(QStringLiteral("omamail-app"));
+#endif
+    return QStringLiteral("omamail-app-") + qEnvironmentVariable("USER", QStringLiteral("user"));
+}
+
+QString SingleInstance::openPayload(const QString &mailto, bool background)
+{
+    if (!mailto.startsWith(QStringLiteral("mailto:"), Qt::CaseInsensitive))
+        return background ? backgroundPayload : QStringLiteral("{}");
+    return QString::fromUtf8(QJsonDocument(QJsonObject{{QStringLiteral("mailto"), mailto}})
+                                 .toJson(QJsonDocument::Compact));
 }
 
 bool SingleInstance::forward(const QString &name, const QString &payload, int timeoutMs)
@@ -78,5 +101,6 @@ bool SingleInstance::listen()
     // Holding the lock, nobody else can be listening: a socket by this name
     // is what a crash left behind.
     QLocalServer::removeServer(m_name);
+    m_server.setSocketOptions(QLocalServer::UserAccessOption);
     return m_server.listen(m_name);
 }

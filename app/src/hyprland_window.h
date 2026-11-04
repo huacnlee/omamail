@@ -2,6 +2,9 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
+
+#include <functional>
 
 // Hyprland parks a minimized window on a special workspace (Omarchy's dock
 // uses special:minimized, a Super+M binding may use another). Qt still counts
@@ -16,8 +19,15 @@ QString parkedAddress(const QByteArray &clientsJson, qint64 pid);
 
 // The dispatches that move `address` to `workspace` and focus it, in the Lua
 // syntax Hyprland 0.55+ reads and in the classic one, tried in that order.
-QStringList luaDispatches(const QString &address, int workspace);
-QStringList classicDispatches(const QString &address, int workspace);
+QStringList luaDispatches(const QString &address, const QString &workspace);
+QStringList classicDispatches(const QString &address, const QString &workspace);
+
+// Runs `hyprctl <arguments>`: its output, and whether it succeeded.
+using Hyprctl = std::function<QByteArray(const QStringList &arguments, bool *ok)>;
+
+// Moves the window of process `pid` back in front and focuses it, trying the
+// Lua dispatches and then the classic ones. False when nothing moved.
+bool restoreParkedWindow(const Hyprctl &hyprctl, qint64 pid);
 
 // Does it, when running under Hyprland; false when there was nothing to do.
 bool restoreParkedWindow();
