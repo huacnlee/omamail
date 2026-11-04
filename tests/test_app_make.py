@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def make(*args):
     return subprocess.run(
-        ["make", *args], cwd=ROOT, text=True, stdout=subprocess.PIPE,
+        ["make", "--no-print-directory", *args], cwd=ROOT, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, check=True).stdout
 
 
@@ -34,7 +34,8 @@ assert "OMAMAIL_DEVELOPMENT_RESOURCES=1" in launch
 assert 'OMAMAIL_BIN="' in launch and "/target/standalone/debug/omamail" in launch
 assert "/app/build/omamail-app" in launch
 assert "backend-runtime.py" not in run
-assert "install" not in run
+# Private backend installation is excluded by the helper check above, not by searching paths
+# for "install": a checkout may legitimately be named "installed/omamail".
 assert "PATH=" not in launch
 
 cmake = (ROOT / "app/CMakeLists.txt").read_text()

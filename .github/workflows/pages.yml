@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - docs/index.html
+      - docs/privacy.html
+      - docs/terms.html
+      - docs/legal.css
       - docs/images/**
       - install.sh
       - install.ps1
@@ -41,6 +44,7 @@ jobs:
         run: |
           mkdir -p _site
           cp docs/index.html _site/index.html
+          cp docs/privacy.html docs/terms.html docs/legal.css _site/
           cp -R docs/images _site/images
           cp install.sh _site/install.sh
           cp install.ps1 _site/install.ps1

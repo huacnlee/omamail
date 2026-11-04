@@ -183,6 +183,7 @@ jobs:
           ctest --test-dir build/app -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
           python app/tests/test_qml_inventory.py
+          if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
           qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
           if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
           python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version $version --standalone

@@ -26,6 +26,8 @@ Rectangle {
   property string conferenceRequestId: ""
   property string originalGuestText: ""
   property bool advancedOptionsOpen: false
+  readonly property bool descriptionFocused: notesField.activeFocus
+  signal keyPressed(var event)
   readonly property var contactService: controller && controller.service ? controller.service : null
   readonly property var contactBook: contactService && Array.isArray(contactService.recipientContacts)
     ? contactService.recipientContacts : []
@@ -122,16 +124,23 @@ Rectangle {
   // carries the end with it, the same length later, so a meeting moved to the
   // next day is not first refused for ending before it starts.
   property var heldRange: null
+  // The month picker takes the focus for a while and hands it back: the range
+  // held before it opened still counts, even if the field is unreadable now.
+  property bool pickerKeepsHold: false
+  onAllDayChanged: heldRange = null
   function holdRange() {
-    heldRange = dateRange.ok ? { startMs: dateRange.startMs, endMs: dateRange.endMs } : null
+    if (pickerKeepsHold) { pickerKeepsHold = false; return }
+    heldRange = !allDay && dateRange.ok ? { startMs: dateRange.startMs, endMs: dateRange.endMs } : null
   }
+  // While the start cannot be read the end goes back to where it was, so a
+  // half-typed "1" that read as 01:00 leaves nothing behind.
   function followStart() {
-    var date = readDate(dateField.text), time = allDay ? "00:00" : Calendar.parseEditorTime(startField.text)
-    if (!heldRange || date === "" || time === "") return
-    var end = Calendar.shiftedEditorEnd(heldRange.startMs, heldRange.endMs,
-      new Date(date + "T" + time + ":00").getTime(), allDay)
+    if (allDay || !heldRange) return
+    var start = Calendar.editorDateTime(readDate(dateField.text), Calendar.parseEditorTime(startField.text))
+    var end = start ? Calendar.shiftedEditorEnd(heldRange.startMs, heldRange.endMs, start.getTime())
+      : Calendar.shiftedEditorEnd(heldRange.startMs, heldRange.endMs, heldRange.startMs)
     endDateField.text = end.date
-    if (!allDay) endField.text = end.time
+    endField.text = end.time
   }
   // Set a field from the picker or the arrow keys, as if it had been typed.
   function setWhen(field, text) {
@@ -139,15 +148,29 @@ Rectangle {
     field.text = text
     if (field.leads) followStart()
   }
+  // A time stepped past midnight takes its date along.
   function stepWhen(field, direction) {
-    setWhen(field, field.time ? Calendar.stepEditorTime(field.text, direction * 15)
-      : Calendar.stepEditorDate(field.text, direction, Date.now(), dayFirst))
+    if (!field.time) {
+      setWhen(field, Calendar.stepEditorDate(field.text, direction, Date.now(), dayFirst))
+      return
+    }
+    var before = Calendar.parseEditorTime(field.text)
+    var after = Calendar.stepEditorTime(field.text, direction * 15)
+    if (before !== "" && (direction > 0 ? after < before : after > before)) {
+      var date = field === startField ? dateField : endDateField
+      date.text = Calendar.stepEditorDate(date.text, direction, Date.now(), dayFirst)
+    }
+    setWhen(field, after)
   }
   function tidyWhen(field) {
     var value = field.time ? Calendar.parseEditorTime(field.text) : readDate(field.text)
     if (value !== "" && value !== field.text) field.text = value
   }
   function pickDate(field) {
+    if (field.leads) {
+      if (!field.activeFocus) holdRange()
+      pickerKeepsHold = true
+    }
     datePicker.target = field
     datePicker.openFor(field, readDate(field.text))
   }
@@ -173,6 +196,17 @@ Rectangle {
       composerFlick.contentY = Math.max(0, Math.min(top, bottom - composerFlick.height))
   }
 
+  function revealDescriptionCursor() {
+    if (!notesField.activeFocus) return
+    var cursor = notesField.cursorRectangle
+    var top = notesField.mapToItem(composerFlick.contentItem, cursor.x, cursor.y).y
+    var margin = Style.space(10)
+    if (top - margin < composerFlick.contentY)
+      composerFlick.contentY = Math.max(0, top - margin)
+    else if (top + cursor.height + margin > composerFlick.contentY + composerFlick.height)
+      composerFlick.contentY = top + cursor.height + margin - composerFlick.height
+  }
+
   component EditorField: TextField {
     id: input
     font.pixelSize: Style.font.bodySmall
@@ -195,7 +229,8 @@ Rectangle {
       Qt.callLater(root.revealField, whenInput)
       if (leads) root.holdRange()
     }
-    onTextChanged: if (leads && activeFocus) root.followStart()
+    // Programmatic prefills never emit textEdited.
+    onTextEdited: if (leads) root.followStart()
     onEditingFinished: root.tidyWhen(whenInput)
     Keys.onUpPressed: root.stepWhen(whenInput, 1)
     Keys.onDownPressed: root.stepWhen(whenInput, -1)
@@ -210,6 +245,7 @@ Rectangle {
       iconName: "calendar"
       iconSize: Style.font.iconSmall
       tooltipText: "Pick a date"
+      selected: datePicker.opened && datePicker.target === whenInput
       foreground: root.textColor
       accent: root.accentColor
       onClicked: root.pickDate(whenInput)
@@ -802,15 +838,39 @@ Rectangle {
         width: parent.width
         spacing: Style.space(6)
         FieldLabel { text: "Description" }
-        EditorField {
+        QQC.TextArea {
           id: notesField
           objectName: "event-description-field"
           width: parent.width
-          foreground: root.textColor
-          accent: root.accentColor
+          // Grow with the document; the form owns scrolling, including keeping
+          // the caret visible in descriptions taller than the window.
+          height: Math.max(Style.space(96), contentHeight + topPadding + bottomPadding)
+          textFormat: TextEdit.PlainText
+          wrapMode: TextEdit.Wrap
+          selectByMouse: true
+          KeyNavigation.priority: KeyNavigation.BeforeItem
+          KeyNavigation.tab: dateField
+          KeyNavigation.backtab: titleField
+          color: root.textColor
+          selectionColor: root.accentColor
+          selectedTextColor: root.backgroundColor
+          placeholderTextColor: root.dimColor
           font.family: root.panelFontFamily
+          font.pixelSize: Style.font.bodySmall
+          padding: Style.space(10)
           placeholderText: "Add event details"
           Accessible.name: "Description"
+          Keys.onPressed: function(event) { root.keyPressed(event) }
+          onActiveFocusChanged: if (activeFocus) Qt.callLater(root.revealDescriptionCursor)
+          onCursorRectangleChanged: Qt.callLater(root.revealDescriptionCursor)
+          onHeightChanged: Qt.callLater(root.revealDescriptionCursor)
+          background: Rectangle {
+            color: Style.normalFillFor(root.textColor, root.accentColor)
+            border.width: Style.normalBorderWidth
+            border.color: notesField.activeFocus ? root.accentColor
+              : Style.normalBorderFor(root.textColor, root.accentColor)
+            radius: Style.cornerRadius
+          }
         }
       }
 
@@ -885,6 +945,7 @@ Rectangle {
         backgroundColor: root.backgroundColor
         accentColor: root.accentColor
         fontFamily: root.panelFontFamily
+        onClosed: Qt.callLater(function() { root.pickerKeepsHold = false })
         onPicked: function(isoDate) {
           if (!target) return
           root.setWhen(target, isoDate)

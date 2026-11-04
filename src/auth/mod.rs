@@ -127,6 +127,14 @@ async fn post_with_deadline(
     .map_err(|_| "auth_timeout")?
 }
 
+/// The Google desktop client this build ships, as the UI resolves it: empty
+/// strings when there is none. The secret is not confidential for a desktop
+/// client, and the UI needs it to start the sign-in it already owns.
+fn builtin_client(client: Option<crate::providers::gmail_credentials::Client>) -> Value {
+    let (id, secret) = client.map_or_else(Default::default, |c| (c.client_id, c.client_secret));
+    json!({"clientId": id, "clientSecret": secret})
+}
+
 impl Session {
     pub async fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
         if matches!(method, "auth.store" | "auth.clear") {
@@ -175,6 +183,14 @@ impl Session {
             credentials::invalidate(account).await?;
             return Ok(json!({"invalidated":true}));
         }
+        if method == "auth.builtinClient" {
+            if !params.as_object().ok_or("invalid_params")?.is_empty() {
+                return Err("invalid_params");
+            }
+            return Ok(builtin_client(
+                crate::providers::gmail_credentials::builtin(),
+            ));
+        }
         if method == "outlook.graphSend" {
             return graph::send(params).await;
         }
@@ -193,6 +209,25 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn builtin_client_is_reported_as_strings_and_takes_no_params() {
+        assert_eq!(
+            builtin_client(None),
+            json!({"clientId": "", "clientSecret": ""})
+        );
+        let session = Session::default();
+        let reported = session
+            .call("auth.builtinClient", &json!({}))
+            .await
+            .unwrap();
+        assert!(reported["clientId"].is_string() && reported["clientSecret"].is_string());
+        for params in [json!({"clientId": "x"}), json!([]), Value::Null] {
+            assert_eq!(
+                session.call("auth.builtinClient", &params).await,
+                Err("invalid_params")
+            );
+        }
+    }
     #[tokio::test]
     async fn native_deadline_cancels_a_server_that_never_answers() {
         use tokio::{io::AsyncReadExt, net::TcpListener};

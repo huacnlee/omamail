@@ -291,7 +291,7 @@ fn account_store_roundtrip_bounds_and_legacy_compatibility() {
     let temp = Temp::new();
     let mut store = json!({"version":2,"account":"you@example.org","profile":{"email":"you@example.org"},"labels":[{"id":"INBOX"}],"session":{"url":"https://mail.example.org","session":{"apiUrl":"https://api.example.org"}},"queries":{}});
     for i in 0..15 {
-        store["queries"][format!("{i}|25")] = json!({"at":i,"summaries":(0..105).map(|n| json!({"id":n,"dateMs":123,"unread":false})).collect::<Vec<_>>(),"nextPageToken":"would-skip","estimate":150});
+        store["queries"][format!("{i}|25")] = json!({"at":i,"summaries":(0..105).map(|n| json!({"id":n,"subject":"发票 — 2026 年","dateMs":123,"unread":false,"starred":true,"labelIds":["INBOX","STARRED"],"thread":{"id":"thread","memberIds":["a","b"]}})).collect::<Vec<_>>(),"nextPageToken":"would-skip","estimate":150});
     }
     temp.call("cache.storePut", json!({"store":store})).unwrap();
     let got = temp.call("cache.storeRead", json!({})).unwrap();
@@ -306,6 +306,13 @@ fn account_store_roundtrip_bounds_and_legacy_compatibility() {
     );
     assert_eq!(got["queries"]["14|25"]["nextPageToken"], "");
     assert_eq!(got["queries"]["14|25"]["summaries"][0]["unread"], false);
+    let summary = &got["queries"]["14|25"]["summaries"][0];
+    for key in ["subject", "dateMs", "starred", "labelIds", "thread"] {
+        assert_eq!(
+            summary[key], store["queries"]["14|25"]["summaries"][0][key],
+            "{key}"
+        );
+    }
     assert_eq!(got["session"], store["session"]);
     let path = temp.0.join("omamail/account-you_40example.org.json");
     assert_eq!(

@@ -42,10 +42,11 @@ TestCase {
     property var sendError: null
     property bool deferSend: false
     property var sendCallback: null
+    property string failureText: ""
     property var api: ({sendMessage:function(payload, done) { owner.sent = owner.sent.concat([payload]); if (owner.deferSend) owner.sendCallback = done; else done({},owner.sendError) }})
-    function clearNotice() {}
+    function clearNotice() { failureText = "" }
     function note(text) {}
-    function fail(text) {}
+    function fail(text) { failureText = text }
   }
   Rsvp { id: action; account: owner }
   function init() {
@@ -77,11 +78,44 @@ TestCase {
     action.run("tentative")
     backend.callback(null,{message:"calendar_network_failed"})
     verify(action.calendarState.canSave)
-    verify(action.calendarMessage.indexOf("Not saved") === 0)
+    verify(action.calendarMessage.indexOf("Calendar save not confirmed") === 0)
+    compare(owner.failureText, action.calendarMessage.split("\n")[0])
     action.retryCalendar()
     compare(owner.sent.length,1)
     compare(backend.calls.length,2)
     compare(backend.calls[1].params.response,"tentative")
+  }
+  function test_specific_rejection_preserves_reply_and_exposes_safe_diagnostics() {
+    backend.apiVersion = 10
+    action.run("accepted")
+    backend.callback(null,{message:"calendar_request_failed",data:{provider:"google",operation:"import",stage:"request",httpStatus:400,reason:"badRequest",message:"SECRET"}})
+    verify(action.calendarMessage.indexOf("request is invalid") >= 0)
+    verify(action.calendarMessage.indexOf("Google · import · HTTP 400 · badRequest") >= 0)
+    verify(action.calendarMessage.indexOf("SECRET") < 0)
+    compare(owner.failureText, action.calendarMessage.split("\n")[0])
+    verify(owner.failureText.indexOf("\n") < 0, "the status bar receives one line; technical context stays in the invitation")
+    compare(Calendar.responseOf(owner.selectedInvite,"alias@example.org"),"accepted")
+    compare(owner.sent.length,1)
+    compare(backend.calls.length,1)
+    action.retryCalendar()
+    compare(owner.failureText, "")
+    compare(owner.sent.length,1)
+    compare(backend.calls.length,2)
+  }
+  function test_single_invitation_exports_resolved_instants_without_windows_zone() {
+    owner.selectedInvite = {uid:"windows-meeting",organizer:{email:"host@example.org"},sequence:1,
+      attendees:[{email:"alias@example.org",partstat:"NEEDS-ACTION"}],
+      start:{ms:Date.UTC(2026,9,30,14),resolved:true,tzid:"W. Europe Standard Time"},
+      end:{ms:Date.UTC(2026,9,30,14,30),resolved:true,tzid:"W. Europe Standard Time"}}
+    action.run("accepted")
+    compare(owner.sent.length,1)
+    compare(backend.calls.length,1)
+    compare(backend.calls[0].params.event.start.dateTime,"2026-10-30T14:00:00.000Z")
+    compare(backend.calls[0].params.event.end.dateTime,"2026-10-30T14:30:00.000Z")
+    compare(backend.calls[0].params.event.start.timeZone,undefined)
+    compare(backend.calls[0].params.event.end.timeZone,undefined)
+    backend.callback({status:"saved"},null)
+    compare(action.calendarMessage,"Saved to calendar")
   }
   function test_failed_reply_does_not_save_or_claim_attendance() {
     owner.sendError = "smtp_failed"

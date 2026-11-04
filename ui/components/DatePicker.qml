@@ -20,7 +20,7 @@ QQC.Popup {
   property string selected: ""
   property string cursor: ""
   property Item anchorItem: null
-  readonly property string today: Calendar.isoDate(new Date())
+  property string today: Calendar.isoDate(new Date())
   readonly property var cursorDate: dateOf(cursor || today)
   readonly property var days: Calendar.monthGridDays(cursorDate.getFullYear(), cursorDate.getMonth(), 1)
   readonly property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -34,6 +34,7 @@ QQC.Popup {
 
   function openFor(item, iso) {
     anchorItem = item
+    today = Calendar.isoDate(new Date())
     selected = String(iso || "")
     cursor = selected || today
     open()

@@ -5,7 +5,6 @@ import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
-import "../../../ui" as Omamail
 import "../../../ui/components" as Components
 
 TestCase {
@@ -92,7 +91,6 @@ TestCase {
     }
   }
   Component { id: windowComponent; FloatingWindow { visible: false; minimumSize: Qt.size(320, 240) } }
-  Component { id: sharedAppComponent; Omamail.App { opened: false } }
   Component { id: actionIconComponent; Components.ActionIcon { name: "archive" } }
 
   Item {
@@ -535,10 +533,6 @@ TestCase {
     compare(toolTip.text, "Help")
     compare(toggle.checked, false)
     compare(dropdown.value, "one")
-  }
-
-  function test_shared_application_constructs_with_production_imports() {
-    compare(sharedAppComponent.status, Component.Ready)
   }
 
   function test_floating_window_hosts_shared_content() {

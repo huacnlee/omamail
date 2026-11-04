@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::{sync::OnceLock, time::Duration};
 
 pub mod attendance;
+pub(crate) mod diagnostics;
 mod discovery;
 pub mod invitations;
 pub mod reminders;
@@ -82,6 +83,7 @@ fn event_url(base: &Url, href: &str) -> Result<Url, &'static str> {
 }
 
 struct Request {
+    operation: String,
     url: Url,
     method: Method,
     body: String,
@@ -108,6 +110,7 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
         return Err("calendar_input_too_large");
     }
     let mut request = Request {
+        operation: op.into(),
         url: Url::parse("https://www.googleapis.com/calendar/v3/calendars/primary/events").unwrap(),
         method,
         body,
@@ -297,6 +300,85 @@ pub fn validate(params: &Value) -> Result<(), &'static str> {
     prepare(params).map(|_| ())
 }
 
+const VERIFY_BODY: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+<D:propfind xmlns:D=\"DAV:\"><D:prop><D:resourcetype/></D:prop></D:propfind>";
+
+/// What `calendar.verify` needs before it may make its one request: a CalDAV
+/// source under the address rules of every later request, and the password
+/// the caller is about to store, which no keyring holds yet.
+fn verification(params: &Value) -> Result<(Url, String, String), &'static str> {
+    let source = &params["source"];
+    if text(source, "kind")? != "caldav" {
+        return Err("calendar_provider_unsupported");
+    }
+    let url = configured_url(text(source, "url")?)?;
+    let username = text(source, "username")?.to_owned();
+    let password = text(params, "password")?.to_owned();
+    Ok((url, username, password))
+}
+
+/// Try a CalDAV password against its calendar before anything stores it: one
+/// PROPFIND at depth 0, with the client, address rules and deadline of the
+/// requests that will follow. The backend reads no keyring here and writes
+/// none; a password the server refuses goes no further than this call.
+pub async fn verify(params: &Value) -> Result<Value, &'static str> {
+    let (url, username, password) = verification(params).map_err(|error| {
+        diagnostics::record(
+            error,
+            diagnostics::context("caldav", "verify", "validation"),
+        )
+    })?;
+    tokio::time::timeout(
+        Duration::from_secs(24),
+        verify_with(client()?, url, &username, &password),
+    )
+    .await
+    .map_err(|_| "calendar_timeout")?
+}
+
+async fn verify_with(
+    client: &Client,
+    url: Url,
+    username: &str,
+    password: &str,
+) -> Result<Value, &'static str> {
+    let details = diagnostics::context("caldav", "verify", "request");
+    let response = client
+        .request(Method::from_bytes(b"PROPFIND").unwrap(), url)
+        .basic_auth(username, Some(password))
+        .header("Depth", "0")
+        .header("Content-Type", "application/xml; charset=utf-8")
+        .body(VERIFY_BODY)
+        .send()
+        .await
+        .map_err(|error| {
+            diagnostics::record(
+                if error.is_timeout() {
+                    "calendar_timeout"
+                } else {
+                    "calendar_network_failed"
+                },
+                details.clone(),
+            )
+        })?;
+    let status = response.status();
+    // RFC 4918 answers a PROPFIND with 207. A plain 200 is some other server
+    // at that address, one that takes any password and will serve no events.
+    if status == reqwest::StatusCode::MULTI_STATUS {
+        return Ok(json!({"verified": true}));
+    }
+    // Redirects are not followed anywhere in calendar HTTP; here one means the
+    // address itself needs correcting, which is worth saying before it is saved.
+    let message = match status.as_u16() {
+        200..=299 => "calendar_not_found",
+        300..=399 => "calendar_redirected",
+        401 | 403 => "calendar_auth_refused",
+        404 => "calendar_not_found",
+        _ => "calendar_request_failed",
+    };
+    Err(diagnostics::http(response, details, message).await)
+}
+
 /// OAuth tokens remain inside Rust; CalDAV credentials are loaded only after
 /// validating the exact destination, and redirects are never followed.
 pub async fn call(params: &Value, token: Option<&str>) -> Result<Value, &'static str> {
@@ -463,6 +545,7 @@ async fn execute(
     token: Option<&str>,
     password: Option<&str>,
 ) -> Result<Value, &'static str> {
+    let details = diagnostics::context(&request.kind, &request.operation, "request");
     let mut builder = client.request(request.method.clone(), request.url);
     // Google's empty-body POST endpoints (events.move) require an explicit
     // length. reqwest/hyper may otherwise omit framing for a zero-byte body.
@@ -492,39 +575,50 @@ async fn execute(
             builder = builder.header("Prefer", "outlook.timezone=\"UTC\"");
         }
     }
-    let mut response = builder
-        .body(request.body)
-        .send()
-        .await
-        .map_err(|_| "calendar_network_failed")?;
+    let mut response = builder.body(request.body).send().await.map_err(|error| {
+        diagnostics::record(
+            if error.is_timeout() {
+                "calendar_timeout"
+            } else {
+                "calendar_network_failed"
+            },
+            details.clone(),
+        )
+    })?;
     let status = response.status();
-    if status.as_u16() == 412 {
-        return Err("calendar_conflict");
-    }
-    if status.as_u16() == 404 {
-        return Err("calendar_not_found");
-    }
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err("calendar_auth_refused");
-    }
     if !status.is_success() {
-        return Err("calendar_request_failed");
+        let message = match status.as_u16() {
+            412 => "calendar_conflict",
+            404 => "calendar_not_found",
+            401 | 403 => "calendar_auth_refused",
+            _ => "calendar_request_failed",
+        };
+        return Err(diagnostics::http(response, details, message).await);
     }
+    let mut details = details;
+    details["stage"] = json!("response");
+    details["httpStatus"] = json!(status.as_u16());
     if response.content_length().is_some_and(|n| n > LIMIT as u64) {
-        return Err("calendar_response_too_large");
+        return Err(diagnostics::record("calendar_response_too_large", details));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| "calendar_network_failed")?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        diagnostics::record(
+            if error.is_timeout() {
+                "calendar_timeout"
+            } else {
+                "calendar_network_failed"
+            },
+            details.clone(),
+        )
+    })? {
         if chunk.len() > LIMIT - bytes.len() {
-            return Err("calendar_response_too_large");
+            return Err(diagnostics::record("calendar_response_too_large", details));
         }
         bytes.extend_from_slice(&chunk);
     }
-    let body = String::from_utf8(bytes).map_err(|_| "calendar_invalid_response")?;
+    let body = String::from_utf8(bytes)
+        .map_err(|_| diagnostics::record("calendar_invalid_response", details))?;
     Ok(json!({"body":body,"status":status.as_u16()}))
 }
 

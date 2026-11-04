@@ -13,7 +13,7 @@ def main():
         payload = sys.stdin.buffer.read()
         print(json.dumps({"argv": sys.argv[2:], "stdin": payload.hex()}), flush=True)
     elif mode == "utf8":
-        payload = "first €\nsecond U0001f642\n".encode("utf-8")
+        payload = "first €\nsecond 🙂\n".encode("utf-8")
         for byte in payload:
             os.write(sys.stdout.fileno(), bytes([byte]))
             time.sleep(0.002)

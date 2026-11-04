@@ -59,7 +59,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 8 : 0
+    bundledApiVersion: root.standalone ? 9 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -76,6 +76,7 @@ Item {
       Diagnostics {
         objectName: "diagnostics"
         pluginDir: root.pluginDir
+        backendApiVersion: rustBackend.apiVersion
         onFailed: function(message) { if (root.current) root.current.fail(message) }
       }
     }
@@ -96,7 +97,7 @@ Item {
     }
   }
 
-  // Features gate on fixed API revisions; overall update status is diagnostic.
+  // Features gate on fixed API revisions.
   readonly property bool backendNeedsUpdate: backend.needsUpdate
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2

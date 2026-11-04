@@ -52,6 +52,14 @@ function byId(id) {
 })
 
 const undoSend = byId("undoSend")
+assert.strictEqual(keymap.contextFor({eventComposing:true,eventDescriptionFocused:true}), "eventDescription")
+assert.strictEqual(keymap.contextFor({eventComposing:true,eventDescriptionFocused:false}), "eventCompose")
+for (const key of ["Return", "Enter"]) {
+  assert.ok(!keymap.sequencesFor("eventDescription").some(entry => entry.sequence === key))
+  assert.strictEqual(keymap.sequencesFor("eventDescription").find(entry => entry.sequence === "Ctrl+" + key).id, "saveEvent")
+  assert.strictEqual(keymap.sequencesFor("eventCompose").find(entry => entry.sequence === key).id, "saveEvent")
+}
+assert.strictEqual(keymap.hintsFor("eventDescription").find(hint => hint.label === "save").key, "Ctrl+Enter")
 assert.strictEqual(keymap.contextFor({ assistantEditing: true, composing: true }), "assistant")
 assert.strictEqual(keymap.contextFor({ assistantEditing: true, assistantCommands: true, composing: true }), "assistantCommands")
 assert.strictEqual(keymap.contextFor({ assistantEditing: false, composing: true }), "compose")
@@ -142,6 +150,10 @@ keymap.CONTEXTS.forEach(function (context) {
   assert.strictEqual(live, true, "Ctrl+R must check for mail from " + context)
 })
 
+// The zoom keys size the message in the reader and the hours in the calendar.
+assert.strictEqual(keymap.isEnabled(byId("calendarZoomIn"), "calendar", false), true)
+assert.strictEqual(keymap.isEnabled(byId("calendarZoomIn"), "reader", false), false)
+assert.strictEqual(keymap.isEnabled(byId("zoomIn"), "calendar", false), false)
 const zoomIn = byId("zoomIn")
 assert.strictEqual(keymap.isEnabled(zoomIn, "reader", false), true)
 assert.strictEqual(keymap.isEnabled(zoomIn, "page", false), false,

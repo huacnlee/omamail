@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Omamail</title>
+<meta name="description" content="How Omamail, a desktop email client, accesses, uses, stores and shares mailbox and calendar data, including Google user data.">
+<link rel="icon" type="image/svg+xml" href="images/omamail.svg">
+<link rel="canonical" href="https://huacnlee.github.io/omamail/privacy.html">
+<link rel="stylesheet" href="legal.css">
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<div class="topbar">
+  <div class="wrap">
+    <a href="./"><b>Omamail</b></a>
+    <nav aria-label="Legal">
+      <a href="privacy.html" aria-current="page">Privacy</a>
+      <a href="terms.html">Terms</a>
+    </nav>
+  </div>
+</div>
+
+<main id="content">
+  <div class="wrap">
+    <h1>Privacy Policy</h1>
+    <p class="updated">Effective October 28, 2026</p>
+
+    <div class="summary">
+      <p><b>In short:</b> Omamail is a desktop application that runs entirely on your own computer. It connects your device directly to the mail and calendar services you sign in to. The developer operates no servers for Omamail and never receives, collects or stores your mail, calendar data, contacts or credentials. Omamail contains no analytics, telemetry or advertising.</p>
+    </div>
+
+    <h2>Who we are</h2>
+    <p>Omamail is an open-source email and calendar client developed by Jason Lee and published at <a href="https://github.com/huacnlee/omamail">github.com/huacnlee/omamail</a>. It is available as an Omarchy plugin and as a standalone desktop application for macOS, Linux and Windows. In this policy, "Omamail", "we" and "us" refer to the application and its developer.</p>
+
+    <h2>Data Omamail accesses</h2>
+    <p>Omamail only accesses data from accounts that you add and sign in to yourself. For each account, it accesses:</p>
+    <ul>
+      <li><b>Account identity:</b> the email address of the account and the sender names and aliases configured with your mail provider, so that Omamail can show which account you are using and send from the right address.</li>
+      <li><b>Email:</b> messages, threads, headers, attachments, labels or folders, and read, starred and similar states, so that you can read, search, organize, reply to and compose mail.</li>
+      <li><b>Calendars:</b> your list of calendars and the events on them, so that Omamail can show calendar invitations, record your replies to them and add invited events to a calendar you choose.</li>
+      <li><b>Credentials:</b> the OAuth tokens or passwords needed to connect to your accounts.</li>
+    </ul>
+
+    <h2>Google user data</h2>
+    <p>When you sign in with a Google account, Omamail asks Google for permission to use the following scopes, and uses each one only for the purpose described:</p>
+    <ul>
+      <li><code>https://www.googleapis.com/auth/gmail.modify</code> — to read your messages and attachments, and to apply the changes you make in Omamail, such as archiving, deleting, labeling, marking as read and saving drafts.</li>
+      <li><code>https://www.googleapis.com/auth/gmail.send</code> — to send the messages you write and choose to send.</li>
+      <li><code>https://www.googleapis.com/auth/calendar.events</code> — to read calendar events related to invitations you receive, record your responses, and add events to your calendar when you ask Omamail to.</li>
+      <li><code>https://www.googleapis.com/auth/calendar.calendarlist.readonly</code> — to list your calendars so you can choose where an event is saved.</li>
+    </ul>
+    <p>Google user data is used only to provide and improve the user-facing email and calendar features of Omamail that you use. It is not used for advertising, is not sold, is not used to build user profiles, and is not used by the developer to develop, improve or train generalized artificial intelligence or machine learning models. No human, including the developer, reads your Google user data, unless you explicitly provide it, for example when you attach it to a bug report.</p>
+    <p>Omamail's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+    <h2>How data is stored</h2>
+    <p>All data Omamail keeps is stored locally on your device, in locations only your user account can read:</p>
+    <ul>
+      <li><b>Credentials</b>, such as OAuth refresh tokens and passwords, are stored in your operating system's credential store: Keychain on macOS, Credential Manager on Windows, or the Secret Service keyring on Linux. Access tokens are kept in memory only and are never written to disk.</li>
+      <li><b>OAuth client settings</b> that you supply yourself are stored in a file in Omamail's configuration directory that only your user account can read.</li>
+      <li><b>Cached mail and calendar data</b>, drafts, unsent mail waiting in the outbox, and your settings are stored in Omamail's application directories on your device, so that Omamail can start quickly and keep working while you are offline.</li>
+    </ul>
+    <p>None of this data is uploaded to the developer or to any service other than the provider the data belongs to.</p>
+
+    <h2>How data is shared</h2>
+    <p>Omamail does not share, sell, rent or transfer your data to the developer or to third parties, with the following exceptions, each of which happens only as a direct result of something you do:</p>
+    <ul>
+      <li><b>Your mail and calendar providers.</b> Omamail communicates directly with the services of the accounts you add, such as Google, Microsoft, HEY, or the IMAP, SMTP, JMAP and CalDAV servers you configure, to read and change your data and to send the mail you write.</li>
+      <li><b>AI assistant (optional, off unless you use it).</b> Omamail can work with an AI coding assistant command-line tool that you have installed and signed in to yourself, such as Claude Code, Codex or OpenCode. Only when you explicitly ask the assistant about a message or conversation does Omamail pass the content of that message or conversation to the tool you selected, which then processes it under the terms and privacy policy of its provider and your account with it. The developer of Omamail does not receive this content. Any reply, draft or action the assistant proposes is shown to you, and nothing is sent or changed until you approve it. If you never use the assistant, no mail content is passed to any AI tool.</li>
+      <li><b>Remote content in messages.</b> Images hosted on senders' servers are blocked by default. If you choose to load them for a message, your device requests those images from the sender's servers, which can reveal your IP address to them.</li>
+      <li><b>Links and unsubscribe requests.</b> When you open a link in a message, it opens in your web browser. When you use one-click unsubscribe, Omamail sends the unsubscribe request to the address the sender provided.</li>
+      <li><b>Legal requirements.</b> The developer does not hold your data and so cannot disclose it. Your providers' own policies govern any requests made to them.</li>
+    </ul>
+
+    <h2>Data retention and deletion</h2>
+    <ul>
+      <li>Signing out of an account in Omamail deletes that account's stored OAuth refresh token from your device.</li>
+      <li>You can delete all locally cached data, drafts and settings at any time by removing Omamail's application data directories, or by uninstalling Omamail and removing those directories.</li>
+      <li>You can revoke Omamail's access to your Google account at any time from <a href="https://myaccount.google.com/permissions">your Google Account permissions page</a>. Revoking access stops Omamail from reading or changing your Google data.</li>
+      <li>Your data on your providers' servers remains subject to their own retention policies. Deleting Omamail's local data does not delete mail from your mailbox.</li>
+    </ul>
+
+    <h2>Security</h2>
+    <p>Omamail connects to Google and other cloud providers over encrypted HTTPS connections. Google sign-in uses OAuth 2.0 with PKCE through your web browser, so Omamail never sees your Google password. Credentials are kept out of logs and command lines, and message content is sanitized before it is displayed. The source code is public so that anyone can review how data is handled.</p>
+
+    <h2>Children</h2>
+    <p>Omamail is not directed at children under 13, and the developer does not knowingly collect personal information from anyone.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>If this policy changes, the updated version will be published on this page with a new effective date. Significant changes will also be noted in the release notes on <a href="https://github.com/huacnlee/omamail/releases">GitHub</a>.</p>
+
+    <h2>Contact</h2>
+    <p>For questions about this policy or about how Omamail handles your data, open an issue at <a href="https://github.com/huacnlee/omamail/issues">github.com/huacnlee/omamail/issues</a>.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><a href="./">Omamail</a> · <a href="privacy.html">Privacy Policy</a> · <a href="terms.html">Terms of Service</a> · <a href="https://github.com/huacnlee/omamail">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>
