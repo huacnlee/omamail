@@ -89,6 +89,7 @@
     "cache.calendarRead",
     "cache.calendarPut",
     "contacts.suggest",
+    "contacts.google",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -1356,6 +1357,17 @@
       }
     },
     {
+      "name": "Google Contacts refuses an account that is not a Gmail address",
+      "method": "contacts.google",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
       "name": "Microsoft 365 provider rules",
       "method": "providers.snapshot",
       "params": {},
@@ -1604,13 +1616,15 @@
   ],
   "unreleased": {
     "methods": [
-      "calendar.verify"
+      "calendar.verify",
+      "contacts.google"
     ],
     "cases": [
       "Calendar validation errors preserve safe context",
       "Calendar authentication errors preserve safe context",
       "CalDAV verification refuses a plain-http address before any request",
-      "CalDAV verification requires the password it is to check"
+      "CalDAV verification requires the password it is to check",
+      "Google Contacts refuses an account that is not a Gmail address"
     ]
   }
 }

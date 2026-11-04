@@ -123,6 +123,9 @@ Item {
     // budget (CALL_BUDGET in src/providers/imap/mod.rs) instead of killing
     // the process while the server is still answering.
     if (operation.indexOf("imap.") === 0) return 180000
+    // Google Contacts pages two People API listings within the backend's own
+    // 60 s (DEADLINE in src/contacts/google.rs), after a token refresh.
+    if (operation === "contacts.google") return 75000
     // A Microsoft 365 message body is up to 24 MiB and is given a minute on the wire.
     // Everything else, including a header listing, keeps the 30 second wait.
     var account = params ? String(params.accountId || "") : ""

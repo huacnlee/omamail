@@ -86,6 +86,7 @@ pub const ALL: &[&str] = &[
     "cache.calendarRead",
     "cache.calendarPut",
     "contacts.suggest",
+    "contacts.google",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
