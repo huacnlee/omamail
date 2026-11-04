@@ -29,6 +29,14 @@ var SCOPES = [
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
 ]
 
+// Asked for but not required: recipient suggestions from the account's saved
+// contacts and "Other contacts". Unticking them on the consent screen only
+// leaves suggestions to the local sources, so a grant without them is kept.
+var OPTIONAL_SCOPES = [
+  "https://www.googleapis.com/auth/contacts.readonly",
+  "https://www.googleapis.com/auth/contacts.other.readonly"
+]
+
 function normalizedPort(value) {
   var port = Math.floor(Number(value))
   return port >= 1024 && port <= 65535 ? port : DEFAULT_PORT

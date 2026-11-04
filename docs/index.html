@@ -741,9 +741,16 @@ footer p:last-child { margin-bottom: 0; }
   .install-tabs button { flex: 1 1 0; padding: 8px 12px; }
 }
 
+.sponsor-button { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; flex: none; background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.sponsor-button:hover { background: color-mix(in oklab, var(--accent), white 14%); color: var(--accent-ink); }
+.sponsor { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin: 24px 0 48px; padding: 16px 20px; border: 1px solid var(--accent); }
+.sponsor p { margin: 0; color: var(--accent); font-weight: 600; }
+.sponsor .sponsor-button { height: 36px; padding: 0 16px; font-size: 14px; }
+
 /* Narrow enough that the bar would wrap: the name alone carries it. */
 @media (max-width: 520px) {
   .topbar-id .desc { display: none; }
+  .topbar .sponsor-button { display: none; }
 }
 
 @media (max-width: 640px) {
@@ -804,6 +811,7 @@ footer p:last-child { margin-bottom: 0; }
   <div class="wrap">
     <span class="topbar-id"><b>Omamail</b> <span class="desc" data-zh="给 <a href='https://omarchy.org'>Omarchy</a> 写的邮件插件">an <a href="https://omarchy.org">Omarchy</a> plugin</span></span>
     <div class="switches">
+      <a class="sponsor-button" href="https://github.com/sponsors/huacnlee" target="_blank" rel="noopener" data-zh="赞助作者">Sponsor me</a>
       <button type="button" class="theme-toggle" aria-label="Switch to the light theme">
         <svg class="icon icon-sun" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0m0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13m8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5M3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8m10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0m-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0m9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707M4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708"/></svg>
         <svg class="icon icon-moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 .278a.77.77 0 0 1 .08.858 7.2 7.2 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277q.792-.001 1.533-.16a.79.79 0 0 1 .81.316.73.73 0 0 1-.031.893A8.35 8.35 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.75.75 0 0 1 6 .278"/></svg>
@@ -1040,6 +1048,8 @@ footer p:last-child { margin-bottom: 0; }
   </div>
 </section>
 
+<div class="wrap"><aside class="sponsor"><p data-zh="如果这个项目帮到了你，请赞助我。">If this helps you, please sponsor me.</p><a class="sponsor-button" href="https://github.com/sponsors/huacnlee" target="_blank" rel="noopener" data-zh="在 GitHub 上赞助">Sponsor on GitHub</a></aside></div>
+
 </main>
 
 <footer>
@@ -1047,8 +1057,11 @@ footer p:last-child { margin-bottom: 0; }
     <p data-zh="Omamail 是一个独立项目，与 Google、Microsoft 和 37signals 均无关联。Gmail 是 Google LLC 的商标；Outlook 是 Microsoft Corporation 的商标；HEY 是 37signals, LLC 的商标。">Omamail is an independent project and is not affiliated with Google, Microsoft or 37signals. Gmail is a trademark of Google LLC; Outlook is a trademark of Microsoft Corporation; HEY is a trademark of 37signals, LLC.</p>
     <p><span data-zh="作者">By</span> <a href="https://github.com/huacnlee">Jason Lee</a> · <a href="https://github.com/huacnlee/omamail/blob/main/LICENSE">MIT</a> · <a href="privacy.html"><span data-zh="隐私权政策">Privacy Policy</span></a> · <a href="terms.html"><span data-zh="服务条款">Terms of Service</span></a> · <a href="https://github.com/huacnlee/omamail">github.com/huacnlee/omamail</a> · <a href="https://omarchy.org">omarchy.org</a></p>
     <div class="related-projects">
-      <p><span data-zh="更多 Omarchy 项目">More Omarchy projects</span></p>
-      <p><a href="https://github.com/huacnlee/omasend">Omasend</a> — <span data-zh="Omarchy 原生 LocalSend 客户端。通过局域网分享文件、文件夹和文字，使用 GPUI Kit 构建，支持 Linux、macOS 和 Windows。">A native LocalSend client for Omarchy. Share files, folders, and text over your local network. Built with GPUI Kit for Linux, macOS, and Windows.</span></p>
+      <p><span data-zh="更多项目">More projects</span></p>
+      <p><a href="https://huacnlee.github.io/disktree/">Disktree</a> — <span data-zh="macOS 与 Linux 上的原生磁盘空间浏览器。用嵌套 treemap 看清磁盘被什么占满，删除前逐条核对路径。">A native disk-space explorer for macOS and Linux. See what fills your disk as a nested treemap, and review every path before removing anything.</span></p>
+      <p><a href="https://huacnlee.github.io/omasend/">Omasend</a> — <span data-zh="原生 LocalSend 客户端。通过局域网分享文件、文件夹、截图和文字，无需账号，也不上传云端。">A native LocalSend client. Share files, folders, screenshots, and text over your local network, with no account or cloud upload.</span></p>
+      <p><a href="https://huacnlee.github.io/noop/">Noop</a> — <span data-zh="你自己的 AI 团队。Claude Code 和 Codex 智能体在你自己的电脑上处理日常工作，只在真正需要你时才来询问。">Your own AI team. Claude Code and Codex agents on your own computers do the daily work and only ask when something really needs you.</span></p>
+      <p><a href="https://huacnlee.github.io/cargo/">huacnlee/cargo</a> — <span data-zh="可直接替换的 Cargo 分支：同一项目的所有 git worktree 共享一个构建目录，并自动控制在大小上限内。">A drop-in Cargo fork: every git worktree of a project shares one build directory, which stays under a size limit on its own.</span></p>
       <p><a href="https://github.com/huacnlee/omarchy-mihoro">omarchy-mihoro</a> — <span data-zh="Mihoro 的 Omarchy 顶栏面板。监控代理、切换规则、全局和直连模式，并管理订阅。">An Omarchy bar panel for Mihoro. Monitor your proxy, switch between Rule, Global, and Direct modes, and manage subscriptions.</span></p>
       <p><a href="https://github.com/huacnlee/omarchy-which-key">omarchy-which-key</a> — <span data-zh="桌面端快捷键指南。按住 Super，即可查看当前 Omarchy 与 Hyprland 快捷键。">Which Key for the desktop. Hold Super to see a shortcut guide drawn from your active Omarchy and Hyprland keybindings.</span></p>
     </div>

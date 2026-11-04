@@ -470,7 +470,7 @@ pub(super) fn refresh(store: &Store, id: &str) -> Result<Value> {
 }
 struct HeadIndex {
     path: std::path::PathBuf,
-    revision: [u64; 6],
+    revision: ([u64; 6], Vec<String>),
     jobs: Vec<Value>,
 }
 static HEADS: std::sync::Mutex<Option<HeadIndex>> = std::sync::Mutex::new(None);
@@ -1215,8 +1215,13 @@ pub fn projection(params: &Value) -> Result<Value> {
 mod tests {
     use super::*;
 
+    /// Tests that measure or depend on the process-wide HEADS index take this,
+    /// so another test's list cannot replace the index between their calls.
+    static HEADS_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn history_poll_reads_only_heads_and_invalidates_after_creation_or_removal() {
+        let _heads = HEADS_TEST.lock().unwrap_or_else(|e| e.into_inner());
         struct Temp(std::path::PathBuf);
         impl Drop for Temp {
             fn drop(&mut self) {
@@ -1276,6 +1281,48 @@ mod tests {
             .write_json(&head, "job.json", &json!({"id":"forged"}))
             .unwrap();
         assert!(refresh_page(&store, list(&store).unwrap()).is_err());
+    }
+    #[test]
+    fn a_turn_created_in_the_timestamp_tick_of_the_last_root_change_is_listed() {
+        // The root's stamps record its last change. With coarse timestamps a
+        // turn created in the same tick as the change the index already
+        // reflects leaves them as they were.
+        let _heads = HEADS_TEST.lock().unwrap_or_else(|e| e.into_inner());
+        struct Temp(std::path::PathBuf);
+        impl Drop for Temp {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let temp = Temp(std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "omamail-same-tick-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )));
+        std::fs::create_dir(&temp.0).unwrap();
+        let store = Store::open_at(&temp.0).unwrap();
+        store.same_tick.set(true);
+        assert!(list(&store).unwrap().is_empty());
+
+        let id = format!("{:032x}", 10);
+        store.create(&id).unwrap();
+        let job = json!({"id":id,"conversationId":id,"accountId":"synthetic",
+            "subject":"Mail","messageId":"m","messageIds":["m"],"draftKey":"","draftFingerprint":"",
+            "kind":"message","state":"done","created":now(),"updated":now(),"createdOrder":10,"resultReady":false});
+        store.write_json(&id, "job.json", &job).unwrap();
+        let jobs = list(&store).unwrap();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "a turn created in the tick of the last root change was not listed"
+        );
+        assert_eq!(jobs[0]["id"], id);
+
+        store.remove(&id).unwrap();
+        assert!(list(&store).unwrap().is_empty());
     }
     #[test]
     fn context_rejects_overrides_controls_and_injected_ids() {

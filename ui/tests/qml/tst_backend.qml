@@ -64,6 +64,18 @@ Item {
       verify(pending[3].deadline >= before + 30000 && pending[3].deadline < before + 31000)
     }
 
+    function test_google_contacts_outwait_the_backend_deadline() {
+      var backend = makeBackend()
+      makeReady(backend)
+      var before = Date.now()
+      backend.call("contacts.google", {accountId: "ada@example.org"}, function() {})
+      backend.call("contacts.suggest", {}, function() {})
+      var pending = Object.keys(backend.pending).map(function(id) { return backend.pending[id] })
+      compare(pending.length, 2)
+      verify(pending[0].deadline >= before + 75000, "the backend answers contacts_timeout first")
+      verify(pending[1].deadline >= before + 30000 && pending[1].deadline < before + 31000)
+    }
+
     function test_cancelled_upload_discards_staged_data_without_domain_dispatch() {
       var backend = makeBackend()
       var process = makeReady(backend)
