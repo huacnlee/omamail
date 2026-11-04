@@ -51,7 +51,13 @@ async fn search_pages_survive_process_exit_and_deletion_of_the_cursor_message() 
                     data.push_str("\r\n");
                 } else if let Some(rest) = cmd.strip_prefix("O1 UID FETCH ") {
                     let (set, fields) = rest.split_once(' ').unwrap();
-                    let wanted: Vec<u32> = set.split(',').map(|s| s.parse().unwrap()).collect();
+                    let wanted: Vec<u32> = set
+                        .split(',')
+                        .flat_map(|part| {
+                            let (first, last) = part.split_once(':').unwrap_or((part, part));
+                            first.parse::<u32>().unwrap()..=last.parse().unwrap()
+                        })
+                        .collect();
                     if fields == "(UID)\r\n" {
                         for (uid, _) in &rows {
                             if wanted.contains(uid) {

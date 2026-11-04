@@ -127,6 +127,37 @@ var FACTS = {
     },
     "webHomeUrl": ""
   },
+  "m365": {
+    "addressSearch": false,
+    "capabilities": {
+      "archive": true,
+      "batch": true,
+      "conversations": false,
+      "labels": false,
+      "manageLabels": false,
+      "move": false,
+      "search": true,
+      "send": true,
+      "spam": false,
+      "star": true,
+      "threads": false,
+      "web": false,
+      "webBox": false
+    },
+    "inheritedDefault": "in:inbox",
+    "nativeSync": true,
+    "queries": {
+      "archive": "role:archive",
+      "drafts": "role:drafts",
+      "inbox": "role:inbox",
+      "sent": "role:sent",
+      "spam": "role:junk",
+      "starred": "role:inbox flagged",
+      "trash": "role:trash",
+      "unread": "role:inbox unseen"
+    },
+    "webHomeUrl": ""
+  },
   "outlook": {
     "addressSearch": false,
     "capabilities": {

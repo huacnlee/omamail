@@ -13,6 +13,7 @@ pub mod hey_access;
 pub mod hey_actions;
 pub mod imap;
 pub mod jmap;
+pub mod m365;
 pub mod outlook;
 
 const CAPABILITIES: &[&str] = &[
@@ -76,6 +77,13 @@ const PROVIDERS: &[Provider] = &[
         summary: "Outlook.com and Hotmail, signed in securely with Microsoft.",
         auth: "oauth",
         capabilities: IMAP_CAPABILITIES,
+    },
+    Provider {
+        id: "m365",
+        name: "Microsoft 365",
+        summary: "Work or school Microsoft 365 mail and calendar over Microsoft Graph, with one sign-in code.",
+        auth: "oauth",
+        capabilities: &["archive", "star", "batch", "search", "send"],
     },
     Provider {
         id: "hey",
@@ -176,6 +184,14 @@ mod tests {
             assert!(can(provider, "move", &Value::Null));
         }
         assert!(!can("jmap", "move", &Value::Null));
+        // Microsoft 365 has Graph's well-known archive folder, but no labels, folders to move into,
+        // spam report or conversations.
+        for operation in ["archive", "star", "batch", "search", "send"] {
+            assert!(can("m365", operation, &Value::Null), "{operation}");
+        }
+        for operation in ["move", "labels", "manageLabels", "threads", "spam", "web"] {
+            assert!(!can("m365", operation, &Value::Null), "{operation}");
+        }
         assert!(!can("unknown", "send", &Value::Null));
         assert!(!can("gmail", "unknown", &Value::Null));
         assert!(can(" GMAIL ", "send", &Value::Null));
@@ -204,7 +220,7 @@ mod tests {
                 .iter()
                 .map(|p| p["id"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            ["gmail", "outlook", "hey", "jmap", "imap"]
+            ["gmail", "outlook", "m365", "hey", "jmap", "imap"]
         );
         for provider in providers {
             assert_eq!(
@@ -219,6 +235,7 @@ mod tests {
             }
         }
         assert_eq!(providers[0]["capabilities"]["conversations"], false);
-        assert_eq!(providers[2]["capabilities"]["conversations"], true);
+        assert_eq!(providers[3]["capabilities"]["conversations"], true);
+        assert_eq!(providers[2]["name"], "Microsoft 365");
     }
 }

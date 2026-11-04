@@ -771,7 +771,7 @@ Item {
       if (warning !== "" && service && typeof service.note === "function")
         service.note(warning)
       draftSavedTimer.restart()
-      if (service.mailboxKey === "drafts") service.refresh()
+      if (currentView === "reader" && service.selectedId === "") backToList()
     })
   }
 
@@ -1006,8 +1006,7 @@ Item {
     if (id === "backToList") return backToList()
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
-    if (id === "archive") return actOnCursor("archive")
-    if (id === "trash") return actOnCursor("trash")
+    if (id === "archive" || id === "trash") return actOnCursor(list.keyActions[id])
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     //
@@ -1049,6 +1048,9 @@ Item {
     if (id === "calendarPreviousPeriod") return calendarView.movePeriod(-1)
     if (id === "calendarNextPeriod") return calendarView.movePeriod(1)
     if (id === "calendarToday") return calendarView.goToday()
+    if (id === "calendarZoomIn") return calendarView.zoomHours(1)
+    if (id === "calendarZoomOut") return calendarView.zoomHours(-1)
+    if (id === "calendarZoomReset") return calendarView.zoomHours(0)
     if (id === "calendarWeek") return calendarView.setView("week")
     if (id === "calendarDay") return calendarView.setView("day")
     if (id === "calendarAgenda") return calendarView.setView("agenda")
@@ -1176,95 +1178,18 @@ Item {
     // before the service has finished making the row.
   }
 
-  // The setup pages. Built by the Loader above, one at a time, so the ones not
-  // in use hold no half-typed fields and no state to go stale.
-  Component {
-    id: providerPickerPage
-
-    ProviderPicker {
-      textColor: root.foreground
-      dimColor: root.dim
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      // Back is shown wherever there is something to go back to — which on
-      // first run, where the chooser is the root, there is not.
-      onChosen: function(providerId) { root.chooseProvider(providerId) }
-    }
-  }
-
-  Component {
-    id: gmailSetupPage
-
-    SetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: heySetupPage
-
-    HeySetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: outlookSetupPage
-
-    OutlookSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: jmapSetupPage
-
-    JmapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
-  }
-
-  Component {
-    id: imapSetupPage
-
-    ImapSetupPage {
-      service: root.service
-      textColor: root.foreground
-      dimColor: root.dim
-      dangerColor: root.danger
-      accentColor: root.accent
-      panelFontFamily: root.fontFamily
-      accountCount: root.service ? root.service.accountCount : 1
-      onRemoveRequested: root.removeCurrentAccountFromEditor()
-    }
+  // The setup pages live in SetupPages, one map. A new mailbox is added
+  // there, so this file does not grow.
+  SetupPages {
+    id: setupPages
+    service: root.service
+    textColor: root.foreground
+    dimColor: root.dim
+    dangerColor: root.danger
+    accentColor: root.accent
+    panelFontFamily: root.fontFamily
+    onChosen: function(providerId) { root.chooseProvider(providerId) }
+    onRemoveRequested: root.removeCurrentAccountFromEditor()
   }
 
   // Every mailbox at once. The rail it lands on has to be one they all have,
@@ -1345,12 +1270,26 @@ Item {
     if (!service) return
     var index = Accounts.confirmRemoval({ accounts: service.accountSummaries || [] }, request)
     if (index < 0) return
-    service.removeAccountAt(index)
-    // The editor's page is gone with its account. Settings is where the rest
-    // of them are, over a fresh root: the list underneath may have changed
-    // mailbox with the removal.
-    navUntouched = false
-    nav = Nav.push(Nav.resetTo(nav, rootKind()), Nav.entry("settings"))
+    // Keep the account until its saved sign-in is confirmed gone. The backend
+    // may be starting or the keyring locked; a destroyed delegate cannot retry.
+    var host = service.accountAt(index)
+    var entry = service.accountList.accounts[index]
+    var removalNav = nav
+    if (!host) return
+    host.forgetStoredCredentials(function(forgotten) {
+      if (!root || !root.service || !forgotten) return
+      var current = Accounts.confirmRemoval({ accounts: root.service.accountSummaries || [] }, request)
+      // An edit or model rebuild while cleanup was pending is a newer account.
+      if (current < 0 || root.service.accountAt(current) !== host
+          || root.service.accountList.accounts[current] !== entry) return
+      // A newer page or composer belongs to the user, not this delayed reply.
+      var stillOnRemovalPage = root.nav === removalNav
+      root.service.removeAccountAt(current)
+      if (stillOnRemovalPage) {
+        root.navUntouched = false
+        root.nav = Nav.push(Nav.resetTo(root.nav, root.rootKind()), Nav.entry("settings"))
+      }
+    })
   }
 
   // Confirm the named event or series before deleting it.
@@ -1482,6 +1421,13 @@ Item {
       anchors.fill: parent
       focus: true
 
+      MouseBack {
+        canGoBack: Nav.depth(root.nav) > 1 || root.assistantOpen
+          || root.selectionActive || searchBar.fieldFocused
+          || (!!root.service && root.service.searchQuery !== "")
+        onActivated: root.goBack()
+      }
+
       // Where the window is, and the only thing that says what a key means.
       // A page is a form before it is anything else, a draft beats reading, a
       // query being typed beats the list underneath it.
@@ -1513,6 +1459,7 @@ Item {
         composing: root.composing,
         eventComposing: eventComposer.opened,
         guestSuggestions: eventComposer.guestSuggestionsOpen,
+        eventDescriptionFocused: eventComposer.descriptionFocused,
         searchFocused: searchBar.fieldFocused,
         calendarVisible: root.calendarVisible,
         currentView: root.currentView,
@@ -1532,7 +1479,7 @@ Item {
           if (composeAgent.opened && !composeAgent.activeFocus) composeAgent.takeFocus()
           else if (agentPrompt.opened && !agentPrompt.activeFocus) agentPrompt.takeFocus()
         }
-        else if (keyContext === "eventCompose" || keyContext === "eventGuests") {
+        else if (keyContext === "eventCompose" || keyContext === "eventGuests" || keyContext === "eventDescription") {
           if (!focusWithin(eventComposer)) eventComposer.takeFocus()
         }
         else if (keyContext === "compose") {
@@ -1947,6 +1894,7 @@ Item {
               panelFontFamily: root.fontFamily
               cursorId: root.cursorId
               checkedIds: root.checkedIds
+              selectionActive: root.selectionActive
               ctrlHeld: focusScope.ctrlHeld
               urgentColor: root.urgent
               onMessageActivated: function(id) { root.openMessage(id) }
@@ -1954,9 +1902,9 @@ Item {
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
-              onMenuRequested: function(id, sceneX, sceneY) {
+              onMenuRequested: function(id, sceneX, sceneY, ids) {
                 root.cursorId = id
-                rowMenu.openAt(id, sceneX, sceneY)
+                rowMenu.openAt(id, sceneX, sceneY, ids)
               }
             }
           }
@@ -2034,6 +1982,8 @@ Item {
           bodyMode: root.bodyMode
           alwaysRenderHeavyMessages: !!root.service && root.service.alwaysRenderHeavyMessages
           contentDirection: root.service ? root.service.contentDirection : ""
+          actions: list.readerActions
+          keyActions: list.keyActions
           onBodyModeRequested: function(mode) {
             if (root.service) root.service.setBodyMode(mode)
           }
@@ -2081,9 +2031,7 @@ Item {
                 root.service.toggleStar(root.service.selectedId)
               return
             }
-            if (((root.service.conversationProjection || ({})).memberIds || []).indexOf(root.service.selectedId) < 0
-                || root.cursorId === "")
-              root.cursorId = root.service.selectedId
+            root.cursorId = Model.readerTarget(root.service.conversationProjection, root.service.selectedId, root.cursorId)
             if (action === "moveToLabel") return root.openLabelPicker(outside)
             root.actOnCursor(action, outside)
           }
@@ -2128,6 +2076,7 @@ Item {
 
         CalendarEventComposer {
           id: eventComposer
+          onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
           anchors.fill: parent
           z: 20
           visible: opened && !root.showPage
@@ -2174,7 +2123,12 @@ Item {
             // follows it.
             onDetailOpenChanged: {
               if (detailOpen) { if (root.page !== "calendarDetail") root.pushEntry("calendarDetail", {}) }
-              else if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+              else {
+                if (root.page === "calendarDetail") { root.navUntouched = false; root.nav = Nav.pop(root.nav) }
+                // Closing a preview keeps the calendar context, so restore its
+                // focus explicitly rather than leaving hidden text selected.
+                if (focusScope.focusWithin(calendarView)) Qt.callLater(focusScope.applyContextFocus)
+              }
             }
             onCreateAt: function(startMs) { eventComposer.beginAt(startMs) }
             onCopyRequested: function(text) { root.copyText(text) }
@@ -2243,7 +2197,7 @@ Item {
           // Setups that share nothing but their place on screen: a chooser for
           // a mailbox whose kind is not settled yet, then whichever page that
           // kind needs — a Cloud walkthrough, a program and a button, or a
-          // server and a password. A Loader rather than four visibilities, so
+          // server and a password. A Loader rather than a visibility each, so
           // the pages not in use hold no fields and no state.
           Loader {
             id: setup
@@ -2255,12 +2209,7 @@ Item {
             // The provider is on the entry, so a service that briefly reports
             // Gmail while it rebuilds an account host cannot swap the page.
             readonly property string kind: root.editingProvider !== "" ? root.editingProvider : "gmail"
-            sourceComponent: root.showPicker
-              ? providerPickerPage
-              : (setup.kind === "imap" ? imapSetupPage
-                : (setup.kind === "jmap" ? jmapSetupPage
-                : (setup.kind === "outlook" ? outlookSetupPage
-                  : (setup.kind === "hey" ? heySetupPage : gmailSetupPage))))
+            sourceComponent: setupPages.pageFor(kind, root.showPicker)
           }
           }
         }
@@ -2660,7 +2609,7 @@ Item {
           panelFontFamily: root.fontFamily
           hints: Keymap.hintsFor(focusScope.keyContext,
             root.service ? root.service.unavailableActions : [],
-            root.cursorId !== "")
+            root.cursorId !== "", list.keyActions)
         }
       }
 
@@ -2766,7 +2715,11 @@ Item {
               proposalComposer: compose
               onApplyProposalRequested: function(envelope, parentId) {
                 compose.beginProposal(envelope, parentId)
-                Qt.callLater(function() { root.composeAgent.open() })
+                // Keep the conversation alongside the draft, with typing in the editor.
+                Qt.callLater(function() {
+                  focusScope.applyContextFocus()
+                  root.composeAgent.open(false)
+                })
               }
               onOpenedChanged: if (opened) root.composeAgent.close()
               objectName: "agent-prompt"
@@ -2911,6 +2864,9 @@ Item {
         panelFontFamily: root.fontFamily
         labels: root.service ? root.service.labels : []
         currentLabelId: root.service ? String(root.service.rawLabelId || "") : ""
+        folders: root.service
+          ? !Provider.can(root.service.providerId, "labels") && Provider.can(root.service.providerId, "move")
+          : false
         onLabelChosen: function(labelId) {
           root.actOnCursor("label:" + labelId, root.labelPickerOnlyCursor)
         }
@@ -2981,8 +2937,6 @@ Item {
           var outside = root.checkedIds.indexOf(id) < 0
           root.cursorId = id
           if (action === "moveToLabel") return root.openLabelPicker(outside)
-          if ((action === "star" || action === "unstar") && root.selectionActive && !outside)
-            return root.actOnChecked(Model.starActionFor(Model.summariesById(root.service.messages, root.checkedIds)))
           root.actOnCursor(action, outside)
         }
         // From a stop on the rail. A member is not a row, so the cursor stays

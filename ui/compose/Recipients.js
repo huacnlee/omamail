@@ -1,4 +1,5 @@
 .pragma library
+.import "../message/Message.js" as Mail
 
 // A follow-up to our own message addresses its To list, not its author.
 // Only the draft owner's identities count as self; another mailbox on a
@@ -109,13 +110,14 @@ function suggest(values, text, limit) {
   return out
 }
 
+// A contact as To text. The name is often a stranger's, harvested from mail
+// that arrived, and the backend writes this text into the header, so a name
+// holding a special is quoted here or it stops being one name there.
 function address(contact) {
   var value = cleanContact(contact)
   if (!value) return ""
-  if (value.name === "") return value.email
-  var name = value.name.replace(/([\\"])/g, "\\$1")
-  if (/[,<>]/.test(name)) name = "\"" + name + "\""
-  return name + " <" + value.email + ">"
+  var name = Mail.quotedPhrase(value.name, false)
+  return name === "" ? value.email : name + " <" + value.email + ">"
 }
 
 function accept(text, contact) {

@@ -1,20 +1,28 @@
+export PATH := $(HOME)/.cargo/bin:$(PATH)
 QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml ui/compose/PendingCompose.qml \
 	ui/tests/compatibility/tst_published_agent.qml \
 	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
-	ui/tests/qml/tst_reader_subject_menu.qml \
+	ui/tests/qml/tst_reader_subject_menu.qml ui/tests/qml/tst_drafts_refresh.qml ui/tests/qml/tst_account_hosts.qml \
+	ui/tests/qml/tst_credential_store_retry.qml \
+	ui/tests/qml/tst_google_sign_in_errors.qml \
+	ui/tests/qml/tst_invitation_calendar.qml \
+	ui/tests/qml/tst_calendar_today.qml \
+	ui/tests/qml/tst_calendar_description_detail.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
-	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
+	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/DraftList.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml ui/account/ContactBook.qml \
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
 	ui/providers/OutlookAuth.qml \
+	ui/providers/M365Auth.qml ui/providers/M365Client.qml \
 	ui/providers/ImapAuth.qml ui/providers/ImapClient.qml \
 	ui/providers/HeyAuth.qml ui/providers/HeyClient.qml \
 	ui/providers/JmapAuth.qml ui/providers/JmapClient.qml ui/providers/JmapPush.qml \
 	ui/components/ImapSetupPage.qml \
 	ui/components/OutlookSetupPage.qml \
+	ui/components/M365SetupPage.qml \
 	ui/components/JmapSetupPage.qml \
 	ui/components/HeySetupPage.qml \
 	ui/components/ProviderPicker.qml \
@@ -66,6 +74,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/AccountRemovalDialog.qml \
 	ui/components/ComposeExitDialog.qml \
 	ui/components/BackBar.qml \
+	ui/components/MouseBack.qml \
 	ui/components/SettingsPage.qml ui/components/AiSettings.qml \
 	ui/components/SettingsSidebar.qml \
 	ui/components/CalendarSettings.qml \
@@ -74,6 +83,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/CalendarPalette.qml \
 	ui/components/ConfirmDeleteDialog.qml \
 	ui/components/SetupPage.qml \
+	ui/components/SetupPages.qml \
 	ui/components/ShortcutHelp.qml \
 	ui/calendar/CalendarController.qml ui/calendar/CalendarCache.qml ui/calendar/CalendarReminders.qml ui/calendar/CalendarReminderInbox.qml \
 	ui/components/CalendarView.qml \
@@ -121,6 +131,7 @@ test-js:
 	node app/tests/test_shell_theme.js
 	node ui/tests/test_bar_bridge.js
 	node ui/tests/test_backend_wire.js
+	node ui/tests/test_backend_plain.js
 	node ui/tests/test_backend_queue.js
 	node ui/tests/test_backend_compatibility.js
 	node ui/tests/test_backend_runtime.js
@@ -128,7 +139,6 @@ test-js:
 	node tests/test_imap_backend.js
 	node tests/test_hey_backend.js
 	node tests/test_gmail_backend.js
-	node ui/tests/test_compose_recovery.js
 	node ui/tests/test_agent.js
 	node ui/tests/test_agent_options.js
 	node ui/tests/test_chat_text.js
@@ -147,20 +157,19 @@ test-js:
 	node ui/tests/test_calendar_cache.js
 	node ui/tests/test_calendar_feed.js
 	node ui/tests/test_calendar_sources.js
+	node ui/tests/test_calendar_invitations.js
 	node ui/tests/test_calendar_reminders.js
 	node ui/tests/test_calendar_palette.js
 	node ui/tests/test_bar_preview.js
 	node ui/tests/test_unsubscribe.js
 	node ui/tests/test_mailto.js
 	node ui/tests/test_html.js
+	node ui/tests/test_html_tables.js
 	node ui/tests/test_direction.js
 	node ui/tests/test_appearance.js
-	node ui/tests/test_cache.js
-	node ui/tests/test_render_cache.js
 	node ui/tests/test_model.js
 	node ui/tests/test_icons.js
 	node ui/tests/test_navigation.js
-	node ui/tests/test_conversation.js
 	node tests/test_reader_pipeline.js
 	node ui/tests/test_keymap.js
 	node ui/tests/test_accounts.js
@@ -168,6 +177,7 @@ test-js:
 	node ui/tests/test_aliases.js
 	node ui/tests/test_menu.js
 	node ui/tests/test_provider.js
+	node ui/tests/test_m365.js
 	node ui/tests/test_imap.js
 	node ui/tests/test_jmap.js
 	node ui/tests/test_jmap_threads.js
@@ -256,6 +266,7 @@ test-qml:
 	python3 tests/run_qml_native.py "$(QMLTESTRUNNER)" -input ui/tests/qml
 	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
 	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
+	python3 tests/test_tooltip_text.py "$(QMLTESTRUNNER)"
 	QMLTESTRUNNER="$(QMLTESTRUNNER)" cargo test --locked --lib message::html::tests::native_output_cannot_trigger_qt_resource_requests -- --ignored
 
 test-app-qml:

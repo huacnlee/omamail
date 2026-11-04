@@ -258,9 +258,19 @@ async fn close(connection: zbus::Connection) {
     let _ = tokio::time::timeout(CLOSE_DEADLINE, connection.close()).await;
 }
 
+async fn default_collection_locked(service: &SecretService<'_>) -> bool {
+    if let Ok(default) = service.get_default_collection().await {
+        if default.is_locked().await.unwrap_or(false) {
+            return true;
+        }
+    }
+    false
+}
+
 async fn find<'a>(
     service: &'a SecretService<'a>,
     attrs: &HashMap<String, String>,
+    operation: Operation<'_>,
 ) -> Result<Option<::secret_service::Item<'a>>, Fault> {
     let result = service
         .search_items(
@@ -281,7 +291,13 @@ async fn find<'a>(
             .map_err(|_| Fault::Answer(Error::Unavailable))?;
         return Ok(Some(item));
     }
-    Ok(result.unlocked.into_iter().next())
+    if let Some(item) = result.unlocked.into_iter().next() {
+        return Ok(Some(item));
+    }
+    if matches!(operation, Operation::Get) && default_collection_locked(service).await {
+        return Err(Fault::Answer(Error::Unavailable));
+    }
+    Ok(None)
 }
 
 async fn execute(
@@ -294,7 +310,7 @@ async fn execute(
         .map_err(Fault::Answer)?
         .into_iter()
         .collect();
-    let item = find(service, &attrs).await?;
+    let item = find(service, &attrs, operation).await?;
     match operation {
         Operation::Get => {
             let item = item.ok_or(Fault::Answer(Error::Missing))?;

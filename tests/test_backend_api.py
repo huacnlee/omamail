@@ -51,6 +51,7 @@ const whole = JSON.parse(fs.readFileSync(process.env.CONTRACT_ROOT + '/backend-a
 // built from this checkout for all of it.
 const released = process.env.CONTRACT_RELEASED === '1';
 const standalone = process.env.CONTRACT_STANDALONE === '1';
+const shippedGoogleClient = process.env.CONTRACT_SHIPPED_GOOGLE_CLIENT === '1';
 const unreleased = whole.unreleased || {methods: [], cases: []};
 const selected = released ? {
   apiVersion: whole.releasedApiVersion, protocolVersion: whole.protocolVersion,
@@ -206,7 +207,8 @@ function storageSnapshot(directory = process.env.HOME) {
 
   await call('message.parse', {raw:17}, -32602);
   const providers = await call('providers.snapshot');
-  for (const id of ['gmail','outlook','hey','jmap','imap']) {
+  // The pinned release has no m365 provider; its rules are unreleased.
+  for (const id of ['gmail','outlook','hey','jmap','imap'].concat(released ? [] : ['m365'])) {
     assert.ok(providers[id] && providers[id].queries && providers[id].capabilities);
     assert.equal(typeof providers[id].nativeSync, 'boolean');
   }
@@ -251,6 +253,15 @@ function storageSnapshot(directory = process.env.HOME) {
   assert.equal((await call('cache.bodyRead', {accountId,id:'chunked'})).text, large);
   assert.equal((await call('cache.bodyClear', {accountId})).cleared, true);
   assert.equal(await call('cache.bodyRead', {accountId,id:'chunked'}), null);
+  if (shippedGoogleClient) {
+    // A release must ship the Google client it was built with. The values are
+    // checked, never printed: a missing or mangled CI secret fails the release
+    // instead of publishing a build that silently asks users for their own.
+    const shipped = await call('auth.builtinClient', {});
+    assert.ok(/^[0-9]+-[A-Za-z0-9_]+\.apps\.googleusercontent\.com$/.test(shipped.clientId),
+      'release backend ships a valid Google client id');
+    assert.ok(shipped.clientSecret.length > 0, 'release backend ships the Google client secret');
+  }
   console.log(`Backend API ${api}${released ? ' (released view)' : ''} contract PASS: ${tested.size} methods, ${contract.methods.length} advertised methods; binary ${info.version}`);
   finished = true;
   child.stdin.end();
@@ -265,6 +276,8 @@ def main():
     parser.add_argument('--expected-version')
     parser.add_argument('--released', action='store_true',
                         help='check only the released API, as the pinned published binary speaks it')
+    parser.add_argument('--shipped-google-client', action='store_true',
+                        help='require the Google OAuth client a release build compiles in')
     parser.add_argument('--standalone', action='store_true',
                         help='check standalone capabilities, including native agents on Linux/macOS')
     args = parser.parse_args()
@@ -313,7 +326,8 @@ def main():
                    CONTRACT_ROOT=str(ROOT), CONTRACT_BINARY=str(binary),
                    CONTRACT_VERSION=args.expected_version or '',
                    CONTRACT_RELEASED='1' if args.released else '',
-                   CONTRACT_STANDALONE='1' if args.standalone else '')
+                   CONTRACT_STANDALONE='1' if args.standalone else '',
+                   CONTRACT_SHIPPED_GOOGLE_CLIENT='1' if args.shipped_google_client else '')
         runtime_root.mkdir(parents=True, mode=0o700)
         registry.parent.mkdir(parents=True)
         if os.name != 'nt':
@@ -327,7 +341,9 @@ def main():
             {'provider': 'imap', 'email': 'named@example.org', 'senderName': 'Jane Example',
              'imap': {'username': 'named@example.org'}},
             {'provider': 'hey', 'email': 'sender@example.org'},
-            {'provider': 'outlook', 'email': 'sender@example.org'}]
+            {'provider': 'outlook', 'email': 'sender@example.org'},
+            {'provider': 'm365', 'email': 'sender@example.org',
+             'clientId': '00000000-1111-2222-3333-444444444444'}]
         registry.write_text(json.dumps({'version': 1, 'activeId': 'contract@example.org',
                                         'accounts': accounts}))
         registry.chmod(0o600)

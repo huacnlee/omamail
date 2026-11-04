@@ -527,19 +527,27 @@ async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
     // UID order is not arrival order (notably during Proton Bridge imports).
     // No UID window is a settled newest prefix: collect dates before paging.
     let scan = async {
-        // Keep the compact, response-limited UID snapshot. Explicit UID batches
-        // bound the larger date responses without walking gaps in sparse UIDs
-        // or relying on sequence numbers that move when mail is expunged.
+        // Keep the compact, response-limited UID snapshot. Batches of snapshot
+        // UIDs bound the larger date responses without walking gaps in sparse
+        // UIDs or relying on sequence numbers that move when mail is expunged.
         let mut snapshot: Vec<_> = fetched_dates(&command(w, "UID FETCH 1:* (UID)").await?)?
             .into_keys()
             .collect();
         let mut dates = BTreeMap::new();
         for window in snapshot.chunks(4096) {
-            let set = window
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(",");
+            // Name the batch by its first and last UID, never as a list: 1795
+            // four-digit UIDs make a 9 KB argument, which Stalwart refuses with
+            // `BAD [PARSE] Argument exceeds maximum length of 4096 bytes` and
+            // other servers answer by closing the connection. The range adds
+            // no message: the batch is a contiguous slice of the sorted
+            // snapshot and new mail only ever gets a higher UID, so any other
+            // UID it spans was expunged or never assigned.
+            let (first, last) = (window[0], window[window.len() - 1]);
+            let set = if first == last {
+                first.to_string()
+            } else {
+                format!("{first}:{last}")
+            };
             let fetched =
                 fetched_dates(&command(w, &format!("UID FETCH {set} (UID INTERNALDATE)")).await?)?;
             // Ignore unsolicited updates outside this batch (including arrivals

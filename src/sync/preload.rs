@@ -84,14 +84,25 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<Value, &'static str>>,
 {
+    // A size of 0 means the listing did not report one (Graph rows carry none), so the read
+    // could be arbitrarily large; an explicit reader may still open it.
     if size > MAX_AUTOMATIC_BYTES
-        || (size == 0 && (account.starts_with("imap:") || account.starts_with("outlook:")))
+        || (size == 0
+            && (account.starts_with("imap:")
+                || account.starts_with("outlook:")
+                || account.starts_with("m365:")))
     {
         return Ok(None);
     }
     let resource = match read().await {
         Ok(resource) => resource,
-        Err("message_too_large" | "imap_response_too_large" | "gmail_response_too_large") => {
+        Err(
+            "message_too_large"
+            | "imap_response_too_large"
+            | "gmail_response_too_large"
+            | "m365_message_too_large"
+            | "m365_response_too_large",
+        ) => {
             return Ok(None);
         }
         Err(error) => return Err(error),
@@ -120,6 +131,8 @@ fn inbox(account: &str) -> &'static str {
         "imap"
     } else if account.starts_with("outlook:") {
         "outlook"
+    } else if account.starts_with("m365:") {
+        "m365"
     } else {
         "gmail"
     };
@@ -153,6 +166,8 @@ impl Provider {
                 crate::providers::hey::call(method, &checked).await
             } else if account.starts_with("imap:") || account.starts_with("outlook:") {
                 crate::providers::imap::call(method, &params).await
+            } else if account.starts_with("m365:") {
+                Box::pin(crate::providers::m365::call(method, &params)).await
             } else {
                 self.gmail.call(method, &params).await
             }
@@ -184,6 +199,23 @@ impl Provider {
                 return Err("preload_incomplete");
             }
             Ok(result["page"].clone())
+        } else if account.starts_with("m365:") {
+            let result = self
+                .request(
+                    account,
+                    "m365.list",
+                    json!({"accountId":account,"query":query,"limit":limit,"pageToken":""}),
+                    live,
+                )
+                .await?;
+            // The rows are the header-only resources of the page's ids: they travel on as held
+            // previews (the `messages` key) and the warm job reads nothing per message for them.
+            let mut page = result["page"].clone();
+            if !page.is_object() {
+                return Err("preload_invalid_page");
+            }
+            page["messages"] = result["rows"].clone();
+            Ok(page)
         } else {
             self.request(
                 account,
@@ -229,6 +261,31 @@ impl Provider {
             result["messages"]
                 .as_array()
                 .and_then(|m| m.first())
+                .cloned()
+                .ok_or("preload_message_missing")
+        } else if account.starts_with("m365:") {
+            if full {
+                return self
+                    .request(
+                        account,
+                        "m365.read",
+                        json!({"accountId":account,"id":id,"full":true}),
+                        live,
+                    )
+                    .await;
+            }
+            // `m365.read` answers complete messages only; header-only rows come from `m365.messages`.
+            let result = self
+                .request(
+                    account,
+                    "m365.messages",
+                    json!({"accountId":account,"ids":[id],"full":false}),
+                    live,
+                )
+                .await?;
+            result["messages"]
+                .as_array()
+                .and_then(|m| m.iter().find(|m| m["id"] == id))
                 .cloned()
                 .ok_or("preload_message_missing")
         } else {

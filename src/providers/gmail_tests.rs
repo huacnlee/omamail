@@ -282,6 +282,96 @@ async fn concurrent_requests_coalesce_refresh_for_one_account() {
     assert_eq!(refreshes.get(), 1);
 }
 
+// A grant from `grant` lives 3600 s, cached for 3540 s after the margin.
+async fn token_at(
+    session: &AccountSession,
+    refreshes: &Cell<u32>,
+    clock: (Instant, SystemTime),
+) -> String {
+    let token = session
+        .token_with_clock(
+            || async {
+                refreshes.set(refreshes.get() + 1);
+                grant(&format!("grant-{}", refreshes.get()))
+            },
+            || clock,
+        )
+        .await
+        .unwrap();
+    token.value.clone()
+}
+
+#[tokio::test]
+async fn cached_token_expires_on_wall_time_slept_through_suspend() {
+    let session = &AccountSession::new();
+    let refreshes = &Cell::new(0);
+    let (monotonic, wall) = (Instant::now(), SystemTime::now());
+    assert_eq!(
+        token_at(session, refreshes, (monotonic, wall)).await,
+        "grant-1"
+    );
+    // Ten awake seconds, two hours of suspend: the monotonic clock alone
+    // still calls the grant fresh, but Google expired it an hour ago.
+    let resumed = (
+        monotonic + Duration::from_secs(10),
+        wall + Duration::from_secs(2 * 3600),
+    );
+    assert_eq!(token_at(session, refreshes, resumed).await, "grant-2");
+    assert_eq!(refreshes.get(), 2);
+}
+
+#[tokio::test]
+async fn cached_token_stays_bounded_by_monotonic_time_when_wall_clock_moves_back() {
+    let session = &AccountSession::new();
+    let refreshes = &Cell::new(0);
+    let (monotonic, wall) = (Instant::now(), SystemTime::now());
+    assert_eq!(
+        token_at(session, refreshes, (monotonic, wall)).await,
+        "grant-1"
+    );
+    let corrected = (
+        monotonic + Duration::from_secs(3540),
+        wall - Duration::from_secs(3600),
+    );
+    assert_eq!(token_at(session, refreshes, corrected).await, "grant-2");
+}
+
+#[tokio::test]
+async fn cached_token_is_reused_while_both_clocks_are_inside_its_lifetime() {
+    let session = &AccountSession::new();
+    let refreshes = &Cell::new(0);
+    let (monotonic, wall) = (Instant::now(), SystemTime::now());
+    assert_eq!(
+        token_at(session, refreshes, (monotonic, wall)).await,
+        "grant-1"
+    );
+    let later = Duration::from_secs(3539);
+    assert_eq!(
+        token_at(session, refreshes, (monotonic + later, wall + later)).await,
+        "grant-1"
+    );
+    assert_eq!(refreshes.get(), 1);
+}
+
+#[tokio::test]
+async fn cached_token_survives_a_short_suspend_until_its_wall_deadline() {
+    let session = &AccountSession::new();
+    let refreshes = &Cell::new(0);
+    let (monotonic, wall) = (Instant::now(), SystemTime::now());
+    assert_eq!(
+        token_at(session, refreshes, (monotonic, wall)).await,
+        "grant-1"
+    );
+    let awake = Duration::from_secs(10);
+    // A ten-minute nap leaves most of the lifetime, so no needless refresh.
+    let napped = (monotonic + awake, wall + Duration::from_secs(600));
+    assert_eq!(token_at(session, refreshes, napped).await, "grant-1");
+    let last_second = (monotonic + awake, wall + Duration::from_secs(3539));
+    assert_eq!(token_at(session, refreshes, last_second).await, "grant-1");
+    let deadline = (monotonic + awake, wall + Duration::from_secs(3540));
+    assert_eq!(token_at(session, refreshes, deadline).await, "grant-2");
+}
+
 #[tokio::test]
 async fn invalidate_is_idempotent_without_config_or_keyring() {
     let session = &Session::default();

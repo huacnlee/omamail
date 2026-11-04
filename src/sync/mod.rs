@@ -143,7 +143,8 @@ where
     }
 }
 
-/// IMAP and Outlook idle on INBOX; every other provider only polls here.
+/// IMAP and Outlook idle on INBOX; every other provider only polls here (Graph change notifications
+/// need a public endpoint, so Microsoft 365 is poll-only too).
 fn provider_push(account: String, trigger: Arc<Notify>) -> Option<BoxFuture<'static, ()>> {
     (account.starts_with("imap:") || account.starts_with("outlook:")).then(|| {
         Box::pin(crate::providers::imap::idle::watch(account, trigger)) as BoxFuture<'static, ()>
@@ -163,6 +164,10 @@ impl Sync {
             Box::pin(async move {
                 if account.starts_with("jmap:") {
                     return jmap.check(&account).await;
+                }
+                // Without this arm a Microsoft 365 id would fall through to Gmail.
+                if account.starts_with("m365:") {
+                    return crate::providers::m365::check(&account).await;
                 }
                 if account.starts_with("imap:") || account.starts_with("outlook:") {
                     let oauth = account.starts_with("outlook:");
@@ -1011,7 +1016,12 @@ mod tests {
         for account in ["imap:a@example.org", "outlook:a@example.org"] {
             assert!(provider_push(account.into(), Arc::new(Notify::new())).is_some());
         }
-        for account in ["a@example.org", "jmap:a@example.org", "hey:a@example.org"] {
+        for account in [
+            "a@example.org",
+            "jmap:a@example.org",
+            "hey:a@example.org",
+            "m365:a@example.org",
+        ] {
             assert!(provider_push(account.into(), Arc::new(Notify::new())).is_none());
         }
     }

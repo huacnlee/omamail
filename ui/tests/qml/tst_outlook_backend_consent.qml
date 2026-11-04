@@ -161,6 +161,36 @@ Item {
       compare(fixture.writes[0].clientId, auth.clientId)
       compare(fixture.deletes.length, 0)
     }
+    function test_device_sign_in_goes_to_the_saved_tenant_data() {
+      return [
+        {tag: "directory id", saved: "12345678-1234-4abc-9def-1234567890ab",
+          authority: "12345678-1234-4abc-9def-1234567890ab"},
+        {tag: "tenant domain", saved: "contoso.onmicrosoft.com", authority: "contoso.onmicrosoft.com"},
+        {tag: "multitenant", saved: "organizations", authority: "organizations"},
+        {tag: "personal", saved: "", authority: "consumers"}
+      ]
+    }
+    function test_device_sign_in_goes_to_the_saved_tenant(data) {
+      var auth = fresh()
+      auth.entrySettings = ({ tenant: data.saved })
+      auth.loggedIn = false
+      fixture.calls = []
+      auth.beginLogin()
+      compare(auth.devicePurpose, "mail")
+      var forms = fixture.calls.filter(function(call) { return call.method === "auth.form" })
+      compare(forms.length, 1)
+      compare(forms[0].params.endpoint, "device")
+      compare(forms[0].params.tenant, data.authority,
+        "the device code is asked for at the authority the account was saved with")
+      verify(forms[0].params.url === undefined, "the UI names a tenant, never a destination")
+      auth.pollDeviceCode()
+      forms = fixture.calls.filter(function(call) { return call.method === "auth.form" })
+      compare(forms.length, 2)
+      compare(forms[1].params.endpoint, "token")
+      compare(forms[1].params.tenant, data.authority,
+        "the code is redeemed at the same authority that issued it")
+      auth.cancelLogin()
+    }
     function test_graph_device_grant_uses_the_serialized_backend_store() {
       var auth = fresh()
       auth.acceptGraphSignIn({accessToken: "graph-token", refreshToken: "device-graph-refresh",

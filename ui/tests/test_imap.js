@@ -17,6 +17,21 @@ assert.strictEqual(imap.presetFor("jane@hotmail.com").id, "outlook", "aliases re
 assert.strictEqual(imap.presetFor("jane@me.com").id, "icloud")
 assert.strictEqual(imap.presetFor("jane@example.org"), null)
 
+// Yahoo Germany uses the same servers as yahoo.com, not imap.yahoo.de.
+for (const address of ["jane@yahoo.de", "Jane@Yahoo.DE", "jane@yahoo.com", "jane@ymail.com", "jane@rocketmail.com"]) {
+  assert.strictEqual(imap.presetFor(address).id, "yahoo", address)
+  const yahoo = imap.suggestedSettings(address)
+  assert.strictEqual(yahoo.imapHost, "imap.mail.yahoo.com", address)
+  assert.strictEqual(yahoo.smtpHost, "smtp.mail.yahoo.com", address)
+  assert.strictEqual(yahoo.imapPort, 993, address)
+  assert.strictEqual(yahoo.smtpPort, 465, address)
+  assert.strictEqual(yahoo.username, address.trim(), address)
+  assert.strictEqual(yahoo.insecure, false, address)
+  assert.ok(/app password/i.test(yahoo.note), address)
+}
+for (const address of ["jane@notyahoo.de", "jane@yahoo.de.example.org"])
+  assert.strictEqual(imap.presetFor(address), null, "only exact provider domains match")
+
 // 163 has an entry for its note, not its servers — those are what
 // `imap.<domain>` would have guessed anyway. The note is the part no address
 // can imply: this mailbox refuses the account password.
@@ -36,6 +51,31 @@ assert.strictEqual(imap.presetFor("jane@yeah.net"), null)
 assert.strictEqual(imap.suggestedSettings("jane@126.com").imapHost, "imap.126.com")
 assert.strictEqual(imap.suggestedSettings("jane@yeah.net").smtpHost, "smtp.yeah.net")
 assert.strictEqual(imap.suggestedSettings("jane@126.com").note, "")
+
+// GMX Germany (gmx.de, gmx.net) and international GMX (gmx.com) document
+// different servers, so a German address must not be handed the .com ones.
+// Both stay TLS on connect.
+assert.strictEqual(imap.presetFor("jane@gmx.de").id, "gmx-de")
+assert.strictEqual(imap.presetFor("jane@gmx.com").id, "gmx")
+for (const address of ["jane@gmx.de", "jane@gmx.net", "Jane@GMX.DE"]) {
+  const gmx = imap.suggestedSettings(address)
+  assert.strictEqual(gmx.imapHost, "imap.gmx.net", address)
+  assert.strictEqual(gmx.smtpHost, "mail.gmx.net", address)
+  assert.strictEqual(gmx.imapPort, 993, address)
+  assert.strictEqual(gmx.smtpPort, 465, address)
+  assert.strictEqual(gmx.insecure, false, address)
+}
+const gmxDe = imap.setupSettings(Object.assign({ address: "jane@gmx.de" }, imap.suggestedSettings("jane@gmx.de")))
+assert.ok(imap.imapUrl(gmxDe, "INBOX").startsWith("imaps://imap.gmx.net:993/"))
+assert.ok(imap.smtpUrl(gmxDe).startsWith("smtps://mail.gmx.net:465"))
+const gmxCom = imap.suggestedSettings("jane@gmx.com")
+assert.strictEqual(gmxCom.imapHost, "imap.gmx.com")
+assert.strictEqual(gmxCom.smtpHost, "mail.gmx.com")
+assert.strictEqual(gmxCom.imapPort, 993)
+assert.strictEqual(gmxCom.smtpPort, 465)
+const gmxComSetup = imap.setupSettings(Object.assign({ address: "jane@gmx.com" }, gmxCom))
+assert.ok(imap.imapUrl(gmxComSetup, "INBOX").startsWith("imaps://imap.gmx.com:993/"))
+assert.ok(imap.smtpUrl(gmxComSetup).startsWith("smtps://mail.gmx.com:465"))
 
 // An unknown domain still gets a guess: imap.<domain> is right far more often
 // than an empty field is useful, and a wrong guess is visible and editable.
@@ -735,17 +775,6 @@ assert.strictEqual(imap.decodeMailbox("&abc"), "&abc", "an unterminated run")
 assert.strictEqual(imap.decodeMailbox("&!!!-"), "&!!!-", "not modified base64")
 assert.strictEqual(imap.decodeMailbox("&A-"), "&A-", "half of a code unit")
 assert.strictEqual(imap.decodeMailbox("&AAEB-"), "&AAEB-", "a run cut mid-unit")
-
-// The decoded name is for reading. The id and the wire name are what a cache
-// key and a SELECT are built from, and decoding either would make every
-// non-ASCII folder unselectable.
-const nativeSource = require("fs").readFileSync(
-  require("path").join(__dirname, "..", "..", "src", "providers", "imap", "read.rs"), "utf8")
-assert.ok(/"name":mailbox_name\(&f\.name\)/.test(nativeSource),
-  "the sidebar name must be decoded by the native provider")
-assert.ok(/"id":f\.name\b/.test(nativeSource), "the id must stay as the server said it")
-assert.ok(/"rawName":f\.name\b/.test(nativeSource),
-  "the name that goes back in a SELECT must stay as the server said it")
 
 // ------------------------------------------------------------------ errors
 

@@ -212,6 +212,16 @@ Item {
       deepEqualIds(mailService.monitoredLabelIds, ["Jobs/2026"])
     }
 
+    // The ids a rename leaves reach the entry through `monitoredMigrated`, a
+    // `var` signal argument, which Qt 6.12 hands over as a sequence rather
+    // than an array. They are the watched list all the same: none is lost.
+    function test_watched_ids_cross_the_migration_signal_whole() {
+      seed([entry(ada, ["Work/2026", "Receipts"])], adaId)
+      mailService.accountAt(0).monitoredMigrated(["Jobs/2026", "Receipts"])
+      deepEqualIds(Accounts.find(mailService.accountList, adaId).monitored, ["Jobs/2026", "Receipts"])
+      deepEqualIds(mailService.monitoredLabelIds, ["Jobs/2026", "Receipts"])
+    }
+
     // A name the list already has is refused before it reaches the server.
     function test_a_name_already_taken_is_refused() {
       seed([entry(ada)], adaId)

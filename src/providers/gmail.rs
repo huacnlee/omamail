@@ -8,7 +8,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 #[path = "gmail_queue.rs"]
@@ -23,6 +23,21 @@ mod writes;
 struct Token {
     value: String,
     expires: Instant,
+    wall_expires: SystemTime,
+}
+
+impl Token {
+    // Linux's monotonic clock stops during suspend, so a token that expired
+    // while the machine slept still looks fresh to `Instant` alone. Wall time
+    // catches sleep; the monotonic deadline still bounds reuse if the wall
+    // clock moves backwards.
+    fn fresh_at(&self, monotonic: Instant, wall: SystemTime) -> bool {
+        self.expires > monotonic && self.wall_expires > wall
+    }
+
+    fn fresh(&self) -> bool {
+        self.fresh_at(Instant::now(), SystemTime::now())
+    }
 }
 
 // Gmail meters each user at 250 quota units per second, a moving average
@@ -102,10 +117,21 @@ impl AccountSession {
         &self,
         refresh: impl FnOnce() -> F,
     ) -> Result<Arc<Token>, &'static str> {
+        self.token_with_clock(refresh, || (Instant::now(), SystemTime::now()))
+            .await
+    }
+
+    /// `token_with` on a supplied clock, so tests can sleep the machine.
+    async fn token_with_clock<F: Future<Output = Result<Value, &'static str>>>(
+        &self,
+        refresh: impl FnOnce() -> F,
+        clock: impl Fn() -> (Instant, SystemTime),
+    ) -> Result<Arc<Token>, &'static str> {
         // Refresh coalesces per account. Invalidation never waits on this lock.
         let mut cached = self.token.lock().await;
         self.check()?;
-        if let Some(token) = cached.as_ref().filter(|t| t.expires > Instant::now()) {
+        let (monotonic, wall) = clock();
+        if let Some(token) = cached.as_ref().filter(|t| t.fresh_at(monotonic, wall)) {
             return Ok(Arc::clone(token));
         }
         let answer = refresh().await;
@@ -121,9 +147,12 @@ impl AccountSession {
             .unwrap_or(3600)
             .min(86400)
             .saturating_sub(60);
+        let lifetime = Duration::from_secs(lifetime);
+        let (monotonic, wall) = clock();
         let token = Arc::new(Token {
             value,
-            expires: Instant::now() + Duration::from_secs(lifetime),
+            expires: monotonic + lifetime,
+            wall_expires: wall + lifetime,
         });
         *cached = Some(Arc::clone(&token));
         Ok(token)
@@ -296,9 +325,7 @@ impl Session {
             accounts.retain(|_, session| {
                 Arc::strong_count(session) > 1
                     || session.token.try_lock().map_or(true, |token| {
-                        token
-                            .as_ref()
-                            .is_some_and(|token| token.expires > Instant::now())
+                        token.as_ref().is_some_and(|token| token.fresh())
                     })
             });
         }

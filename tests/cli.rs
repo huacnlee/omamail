@@ -138,6 +138,10 @@ impl Drop for MailListFixture {
     }
 }
 
+/// A well-formed Microsoft 365 message id (lower-case base32 of a Graph id). No such message exists
+/// anywhere: these tests stop before any network.
+const M365_ID: &str = "ifau222bi5etembqgayucqkbhu";
+
 fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture {
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "omamail-cli-mail-list-{}-{}",
@@ -162,7 +166,8 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
                 {"provider":"gmail","email":"gmail@example.org"},
                 {"provider":"imap","email":"imap@example.org","imap":{"username":"imap@example.org","imapHost":"127.0.0.1","imapPort":imap_port,"insecure":true,"testPlaintext":true}},
                 {"provider":"jmap","email":"jmap@example.org","jmap":{"sessionUrl":"https://localhost:9/session","username":"jmap@example.org"}},
-                {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}}
+                {"provider":"outlook","email":"outlook@example.org","clientId":"synthetic-client","imap":{"tenant":"consumers"}},
+                {"provider":"m365","email":"m365@example.org","clientId":"00000000-1111-2222-3333-444444444444"}
             ]
         })
         .to_string(),
@@ -172,17 +177,6 @@ fn mail_list_fixture(imap_port: u16, keyring_succeeds: bool) -> MailListFixture 
     set_mode(&config.join("accounts.json"), 0o600);
     let bin = root.join("bin");
     fs::create_dir_all(&bin).unwrap();
-    let secret_tool = bin.join("secret-tool");
-    fs::write(
-        &secret_tool,
-        if keyring_succeeds {
-            "#!/bin/sh\nprintf 'synthetic\\n'\n"
-        } else {
-            "#!/bin/sh\nexit 1\n"
-        },
-    )
-    .unwrap();
-    set_mode(&secret_tool, 0o700);
     fs::write(
         root.join("integration-credential"),
         if keyring_succeeds {
@@ -389,12 +383,6 @@ fn malformed_provider_action_previews_refuse_without_credentials_or_writes() {
         .unwrap()
         .push(serde_json::json!({"provider":"hey","email":"hey@example.org"}));
     fs::write(registry, accounts.to_string()).unwrap();
-    let touched = fixture.0.join("credential-touched");
-    fs::write(
-        fixture.0.join("bin/secret-tool"),
-        format!("#!/bin/sh\n: > '{}'\nexit 1\n", touched.display()),
-    )
-    .unwrap();
     let before = fixture_snapshot(&fixture.0);
     for (account, bad) in [
         ("hey:hey@example.org", "1:INBOX"),
@@ -403,6 +391,12 @@ fn malformed_provider_action_previews_refuse_without_credentials_or_writes() {
         ("imap:imap@example.org", "0:INBOX"),
         ("outlook:outlook@example.org", "4294967296:INBOX"),
         ("outlook:outlook@example.org", "1:"),
+        // Microsoft 365 ids are canonical lower-case base32 of a Graph id of 8..=156 bytes.
+        ("m365:m365@example.org", "1:INBOX"),
+        ("m365:m365@example.org", "IFAU222BI5ETEMBQGAYUCQKBHU"),
+        ("m365:m365@example.org", "ifau222bi5etembqgayucqkbhu="),
+        ("m365:m365@example.org", "ifau222bi5etembqgayucqkbhv"),
+        ("m365:m365@example.org", "AAMkAGI20001AAA="),
     ] {
         for operation in ["read", "trash"] {
             let output = root_mail(
@@ -522,6 +516,7 @@ fn configured_list_failures_do_not_repair_registry_metadata() {
         ("imap:imap@example.org", Some("auth_signed_out")),
         ("jmap:jmap@example.org", Some("auth_signed_out")),
         ("outlook:outlook@example.org", Some("auth_signed_out")),
+        ("m365:m365@example.org", Some("m365_signed_out")),
     ] {
         let output = call_mail_list(&fixture.0, account);
         assert!(!output.status.success(), "{account}: {output:?}");
@@ -567,6 +562,7 @@ fn configured_read_failures_do_not_repair_registry_metadata() {
             "7:INBOX",
             Some("auth_signed_out"),
         ),
+        ("m365:m365@example.org", M365_ID, Some("m365_signed_out")),
     ] {
         let output = call_mail_read(&fixture.0, account, id);
         assert!(!output.status.success(), "{account}: {output:?}");
@@ -590,7 +586,7 @@ fn configured_read_failures_do_not_repair_registry_metadata() {
 }
 
 #[test]
-fn imap_and_outlook_destination_previews_require_readonly_credentials() {
+fn imap_outlook_and_m365_destination_previews_require_readonly_credentials() {
     let fixture = mail_list_fixture(9, false);
     let directory = config_root(&fixture.0).join("omamail");
     let registry = directory.join("accounts.json");
@@ -599,19 +595,20 @@ fn imap_and_outlook_destination_previews_require_readonly_credentials() {
         metadata(&registry),
         fs::read(&registry).unwrap(),
     );
-    for account in ["imap:imap@example.org", "outlook:outlook@example.org"] {
+    for (account, id, expected) in [
+        ("imap:imap@example.org", "7:INBOX", "auth_signed_out"),
+        ("outlook:outlook@example.org", "7:INBOX", "auth_signed_out"),
+        ("m365:m365@example.org", M365_ID, "m365_signed_out"),
+    ] {
         for operation in ["archive", "trash"] {
             let output = root_mail(
                 &fixture.0,
-                &[operation, "7:INBOX", "--account", account, "--json"],
+                &[operation, id, "--account", account, "--json"],
                 b"",
             );
             assert_eq!(output.status.code(), Some(1));
             let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(
-                value["error"]["code"], "auth_signed_out",
-                "{account}: {operation}"
-            );
+            assert_eq!(value["error"]["code"], expected, "{account}: {operation}");
             assert_eq!(
                 (
                     metadata(&directory),
@@ -694,6 +691,32 @@ fn jmap_planning_helpers_are_not_public_methods() {
         let value: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["error"]["code"], "method_not_found", "{method}");
     }
+}
+
+#[test]
+fn an_address_registered_under_another_provider_is_not_an_m365_account() {
+    let fixture = mail_list_fixture(9, true);
+    let touched = fixture.0.join("credential-touched");
+    for account in [
+        "m365:imap@example.org",
+        "m365:outlook@example.org",
+        "imap:m365@example.org",
+        "outlook:m365@example.org",
+        "jmap:m365@example.org",
+        "m365:m365@example.org.invalid",
+    ] {
+        let output = call_mail_list(&fixture.0, account);
+        assert_eq!(output.status.code(), Some(1), "{account}: {output:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+            "mail_account_unknown",
+            "{account}"
+        );
+    }
+    assert!(
+        !touched.exists(),
+        "an unknown account must not reach the keyring"
+    );
 }
 
 #[test]
@@ -800,6 +823,7 @@ fn default_output_is_a_table_and_json_is_global() {
     assert!(providers.status.success());
     let text = String::from_utf8(providers.stdout).unwrap();
     assert!(text.contains("Gmail") && text.contains("|"));
+    assert!(text.contains("Microsoft 365"), "{text}");
 }
 
 #[test]
@@ -925,11 +949,6 @@ fn root_mutations_preview_exact_intent_and_never_touch_storage_or_credentials() 
     let config = config_root(&fixture.0).join("omamail/accounts.json");
     let before = (metadata(&config), fs::read(&config).unwrap());
     let sentinel = fixture.0.join("credential-touched");
-    fs::write(
-        fixture.0.join("bin/secret-tool"),
-        format!("#!/bin/sh\n: > '{}'\nexit 1\n", sentinel.display()),
-    )
-    .unwrap();
     for operation in [
         "read", "unread", "star", "unstar", "archive", "trash", "spam",
     ] {
@@ -1069,11 +1088,6 @@ fn invalid_send_inputs_never_reach_credentials_or_outbox_even_with_execute() {
     let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
     assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
     let sentinel = fixture.0.join("credential-touched");
-    fs::write(
-        fixture.0.join("bin/secret-tool"),
-        format!("#!/bin/sh\n: > '{}'\nexit 1\n", sentinel.display()),
-    )
-    .unwrap();
     for extra in [
         vec!["--subject", "secret\r"],
         vec!["--subject", "secret\n"],

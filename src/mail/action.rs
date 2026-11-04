@@ -86,6 +86,7 @@ pub(crate) fn validate_message_id(provider: Provider, id: &str) -> Result<(), &'
         Provider::Jmap => crate::providers::jmap::validate_action_id(id),
         Provider::Hey => crate::providers::hey_actions::message_id(id).map(|_| ()),
         Provider::Imap | Provider::Outlook => crate::providers::imap::message_id(id).map(|_| ()),
+        Provider::M365 => crate::providers::m365::validate_message_id(id),
     }
     .map_err(|_| "invalid_params")
 }

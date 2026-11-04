@@ -104,23 +104,48 @@ fn read_file(file: File, account: &str) -> Result<Client, &'static str> {
     }
     parse_client(&bytes, account)
 }
-fn read_at(config: &Path, account: &str) -> Result<Client, &'static str> {
-    let dir = crate::platform::private_fs::directories_readonly(
+/// The desktop client a release was built with. CI passes both values only to
+/// the release compilation, so they stay out of the source tree and out of
+/// development builds, which ship none. Google documents an installed app's
+/// secret as not confidential; this keeps it out of the repository, not out of
+/// the binary.
+pub fn builtin() -> Option<Client> {
+    builtin_from(
+        option_env!("OMAMAIL_GOOGLE_CLIENT_ID"),
+        option_env!("OMAMAIL_GOOGLE_CLIENT_SECRET"),
+    )
+}
+fn builtin_from(id: Option<&str>, secret: Option<&str>) -> Option<Client> {
+    client(&serde_json::json!({"client_id": id?, "client_secret": secret.unwrap_or("")}))
+}
+fn read_at(config: &Path, account: &str, builtin: Option<Client>) -> Result<Client, &'static str> {
+    // Only an absent file, or one naming no usable client, falls back to the
+    // shipped client, exactly as the UI resolves it. An unsafe, oversized or
+    // malformed file stays an error rather than silently changing clients.
+    let missing = |builtin: Option<Client>| builtin.ok_or("gmail_client_unreadable");
+    let Some(dir) = crate::platform::private_fs::directories_readonly(
         config,
         &[crate::platform::dirs::APP_DIRECTORY],
     )
     .map_err(storage_error)?
-    .ok_or("gmail_client_unreadable")?;
-    let file = crate::platform::private_fs::regular_readonly(&dir, "credentials.json")
+    else {
+        return missing(builtin);
+    };
+    let Some(file) = crate::platform::private_fs::regular_readonly(&dir, "credentials.json")
         .map_err(storage_error)?
-        .ok_or("gmail_client_unreadable")?;
-    read_file(file, account)
+    else {
+        return missing(builtin);
+    };
+    match read_file(file, account) {
+        Err("gmail_client_missing") => builtin.ok_or("gmail_client_missing"),
+        result => result,
+    }
 }
 pub fn read_for_account(account: &str) -> Result<Client, &'static str> {
     let config = crate::platform::dirs::AppDirs::discover()
         .map_err(|_| "config_home_invalid")?
         .config;
-    read_at(&config, account)
+    read_at(&config, account, builtin())
 }
 pub(super) fn lookup_with(
     client: &Client,
@@ -301,13 +326,13 @@ mod tests {
         let alias = fixture.root.join("second-name");
         std::fs::hard_link(fixture.path(), &alias).unwrap();
         assert!(matches!(
-            read_at(&fixture.config, "one@example.org"),
+            read_at(&fixture.config, "one@example.org", None),
             Err("gmail_client_permissions")
         ));
         std::fs::remove_file(alias).unwrap();
         fixture.write(&vec![b'x'; MAX_CLIENT_BYTES as usize + 1]);
         assert!(matches!(
-            read_at(&fixture.config, "one@example.org"),
+            read_at(&fixture.config, "one@example.org", None),
             Err("gmail_client_too_large")
         ));
     }
@@ -319,7 +344,7 @@ mod tests {
         fixture.write(b"not json");
         std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(matches!(
-            read_at(&fixture.config, "one@example.org"),
+            read_at(&fixture.config, "one@example.org", None),
             Err("gmail_client_permissions")
         ));
         std::fs::remove_file(fixture.path()).unwrap();
@@ -327,8 +352,68 @@ mod tests {
         std::fs::write(&target, b"not json").unwrap();
         symlink(&target, fixture.path()).unwrap();
         assert!(matches!(
-            read_at(&fixture.config, "one@example.org"),
+            read_at(&fixture.config, "one@example.org", None),
             Err("gmail_client_permissions")
+        ));
+    }
+    const SHIPPED: &str = "999-shipped.apps.googleusercontent.com";
+    fn shipped() -> Option<Client> {
+        builtin_from(Some(SHIPPED), Some("GOCSPX-shipped"))
+    }
+    #[test]
+    fn shipped_client_must_be_a_valid_desktop_client() {
+        let client = shipped().expect("valid shipped client");
+        assert_eq!(client.client_id, SHIPPED);
+        assert_eq!(client.client_secret, "GOCSPX-shipped");
+        assert_eq!(builtin_from(Some(SHIPPED), None).unwrap().client_secret, "");
+        for (id, secret) in [
+            (None, Some("GOCSPX-shipped")),
+            (Some(""), Some("GOCSPX-shipped")),
+            (Some("not-a-client"), Some("GOCSPX-shipped")),
+            (Some("999-shipped.apps.googleusercontent.com\n"), Some("x")),
+            (Some(SHIPPED), Some("GOCSPX-shipped\n")),
+            (Some(SHIPPED), Some("GOCSPX\0shipped")),
+        ] {
+            assert!(builtin_from(id, secret).is_none(), "{id:?} {secret:?}");
+        }
+    }
+    #[test]
+    fn shipped_client_backs_only_an_absent_or_empty_client_file() {
+        let fixture = Fixture::new();
+        assert!(matches!(
+            read_at(&fixture.config, "one@example.org", None),
+            Err("gmail_client_unreadable")
+        ));
+        assert_eq!(
+            read_at(&fixture.config, "one@example.org", shipped())
+                .unwrap()
+                .client_id,
+            SHIPPED
+        );
+        fixture.write(br#"{"version":2,"accounts":[]}"#);
+        assert!(matches!(
+            read_at(&fixture.config, "one@example.org", None),
+            Err("gmail_client_missing")
+        ));
+        assert_eq!(
+            read_at(&fixture.config, "one@example.org", shipped())
+                .unwrap()
+                .client_id,
+            SHIPPED
+        );
+        // The user's own client always wins over the shipped one.
+        fixture.write(SINGLE);
+        assert_eq!(
+            read_at(&fixture.config, "one@example.org", shipped())
+                .unwrap()
+                .client_id,
+            "123-abc.apps.googleusercontent.com"
+        );
+        // A broken file is reported, never papered over with another client.
+        fixture.write(b"not json");
+        assert!(matches!(
+            read_at(&fixture.config, "one@example.org", shipped()),
+            Err("gmail_client_invalid")
         ));
     }
     #[test]

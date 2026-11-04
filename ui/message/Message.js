@@ -315,18 +315,24 @@ function parseAddress(value) {
   return { name: name, email: email, display: name || email }
 }
 
-function parseAddressList(value) {
+// The entries of an address list. A comma inside a quoted name or an angle
+// address is not a separator, and inside quotes a backslash escapes the next
+// character: `"O\"Neil, Pat"` is one name, not a quote that ends early.
+function splitAddressList(value) {
   var raw = String(value || "")
   var entries = []
   var current = ""
   var inQuotes = false
   var inAngle = false
+  var escaped = false
   for (var i = 0; i < raw.length; i++) {
     var character = raw.charAt(i)
-    if (character === "\"") inQuotes = !inQuotes
+    if (escaped) escaped = false
+    else if (character === "\\" && inQuotes) escaped = true
+    else if (character === "\"") inQuotes = !inQuotes
     else if (character === "<") inAngle = true
     else if (character === ">") inAngle = false
-    if (character === "," && !inQuotes && !inAngle) {
+    else if (character === "," && !inQuotes && !inAngle) {
       entries.push(current)
       current = ""
       continue
@@ -334,6 +340,11 @@ function parseAddressList(value) {
     current += character
   }
   entries.push(current)
+  return entries
+}
+
+function parseAddressList(value) {
+  var entries = splitAddressList(value)
   var result = []
   for (var j = 0; j < entries.length; j++) {
     if (!entries[j].trim()) continue
@@ -952,23 +963,50 @@ function headerSafe(value) {
   return String(value === undefined || value === null ? "" : value).replace(/[\r\n]+/g, " ")
 }
 
-// A display name is a phrase, not a header value: an encoded word may not sit
-// inside quotes, and an ASCII name carrying a comma or a dot is only legal
-// quoted. `foldHeader` cannot do this, because it encodes the whole value as
-// one word — `=?UTF-8?B?...?=` wrapped around `"Name" <a@b>` is not an address.
-function encodedPhrase(text) {
-  var value = headerSafe(text).trim()
-  if (value === "") return ""
-  if (!/^[\x20-\x7e]*$/.test(value))
-    return "=?UTF-8?B?" + encodeBase64(value) + "?="
+// A display name is a phrase, not a header value. Bare, a name holding one of
+// RFC 5322's specials stops being one name: a comma ends it, a colon opens a
+// group, a parenthesis a comment, so `Team: eve@example.net;` in front of an
+// address adds a recipient. Control characters, line breaks among them, become
+// spaces first, so no name reaches a header with one.
+var NAME_SPECIALS = /[()<>\[\]:;@\\,."]/
+
+function nameText(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim()
+}
+
+// A name as a quoted-string, `"` and `\` escaped: `always` in a header, and in
+// text a person edits, like the To field, only when the name holds a special,
+// so `Jane Doe <jane@example.org>` reads as it did.
+function quotedPhrase(text, always) {
+  var value = nameText(text)
+  if (value === "" || (!always && !NAME_SPECIALS.test(value))) return value
   return '"' + value.replace(/([\\"])/g, "\\$1") + '"'
 }
 
-// Written by hand rather than through `foldHeader` for the reason above. The
-// address still loses its line breaks, so a display name cannot smuggle a
-// second header in either.
-// One address as a header *value*: `"Name" <a@b.com>`, or the bare address when
-// there is no name to put in front of it.
+// A name in a header: one encoded word when it is not ASCII, or when it holds
+// `=?`, which readers decode even inside quotes; otherwise quoted. An encoded
+// word may not sit inside quotes, and `foldHeader` cannot do this, because it
+// encodes the whole value as one word — `=?UTF-8?B?...?=` wrapped around
+// `"Name" <a@b>` is not an address.
+function encodedPhrase(text) {
+  var value = nameText(text)
+  if (/[^\x20-\x7e]/.test(value) || value.indexOf("=?") >= 0)
+    return "=?UTF-8?B?" + encodeBase64(value) + "?="
+  return quotedPhrase(value, true)
+}
+
+// An address that is one without angle brackets: a dot-atom on both sides of
+// the `@`. Anything else keeps its brackets, so `<a@example.org,b@example.org>`
+// stays one odd address rather than becoming two.
+var ATOM = "[A-Za-z0-9!#$%&'*+\\-/=?^_\\x60{|}~]+"
+var PLAIN_ADDRESS = new RegExp("^" + ATOM + "(\\." + ATOM + ")*@" + ATOM + "(\\." + ATOM + ")*$")
+var PRINTABLE = /^[\x20-\x7e]*$/
+var ANGLED = /^([\s\S]*)<([^>]*)>$/
+
+// One address as a header *value*: `"Name" <a@b.com>`, the bare address when
+// there is no name and it is plain, or `<address>` when it is not. The address
+// loses its line breaks, so it cannot smuggle a second header in either.
 //
 // Split out from `fromHeader` because a provider composing a message rather
 // than parsing one needs the value without a field name — HEY's client builds a
@@ -978,11 +1016,51 @@ function encodedPhrase(text) {
 function addressHeader(email, displayName) {
   var address = headerSafe(email).trim()
   var phrase = encodedPhrase(displayName)
-  return phrase === "" ? address : phrase + " <" + address + ">"
+  if (phrase !== "") return phrase + " <" + address + ">"
+  return address === "" || PLAIN_ADDRESS.test(address) ? address : "<" + address + ">"
 }
 
 function fromHeader(email, displayName) {
   return "From: " + addressHeader(email, displayName)
+}
+
+// An address list as a header line, or null when it cannot be written. ASCII
+// goes out as typed, comments and unquoted commas included, the way
+// `message.compose` writes it. A list ASCII cannot carry, or holding `=?`, is
+// written again entry by entry, split the way `parseAddressList` reads it: each
+// name through `encodedPhrase`, each address through `addressHeader`. There is
+// no RFC 5322 parser here to check the result against, so the rewrite takes
+// only entries whose reading it cannot change, and refuses the list otherwise:
+// a name that is quoted whole or holds no special (no comment, no group), an
+// address of printable ASCII with no quote, comment, `<` or `=?`, and a bare
+// entry only when it is a plain addr-spec. `foldHeader` once turned such a
+// list into an encoded word that names nobody.
+function addressListHeader(name, value) {
+  var text = headerSafe(value)
+  var entries = splitAddressList(text)
+  var words = false
+  for (var i = 0; i < entries.length; i++) {
+    var named = entries[i].trim().match(ANGLED)
+    if ((named ? named[1] : entries[i]).indexOf("=?") >= 0) words = true
+  }
+  if (PRINTABLE.test(text) && !words) return name + ": " + text
+  var out = []
+  for (var j = 0; j < entries.length; j++) {
+    var entry = entries[j].trim()
+    if (entry === "") continue
+    var parts = entry.match(ANGLED)
+    if (!parts) {
+      if (!PLAIN_ADDRESS.test(entry) || entry.indexOf("=?") >= 0) return null
+      out.push(entry)
+      continue
+    }
+    var phrase = parts[1].trim()
+    var address = parts[2].trim()
+    if (/[()<>\[\]:;@\\,"]/.test(phrase) && !/^"(\\[\s\S]|[^"\\])*"$/.test(phrase)) return null
+    if (!/^[\x21-\x7e]+$/.test(address) || /["()\\<]|=\?/.test(address)) return null
+    out.push(addressHeader(address, unquote(phrase)))
+  }
+  return name + ": " + out.join(", ")
 }
 
 function foldHeader(name, value) {
@@ -1300,13 +1378,21 @@ function buildRawMessage(fields) {
   // millisecond apart from the id that names it.
   var now = Date.now()
   var lines = []
-  if (values.from) lines.push(fromHeader(values.from, values.fromName))
-  lines.push(foldHeader("To", values.to || ""))
-  if (values.cc) lines.push(foldHeader("Cc", values.cc))
-  if (values.bcc) lines.push(foldHeader("Bcc", values.bcc))
-  // Where answers should go when that is not the sender: one header, folded
-  // like the rest, so a line break typed into it cannot start a second one.
-  if (values.replyTo) lines.push(foldHeader("Reply-To", values.replyTo))
+  if (values.from) {
+    if (!PRINTABLE.test(headerSafe(values.from))) return null
+    lines.push(fromHeader(values.from, values.fromName))
+  }
+  // Where answers should go when that is not the sender is one more list,
+  // written like the rest, so a line break typed into it cannot start a second
+  // header. A list that cannot be written refuses the whole message.
+  var lists = [["To", values.to || ""], ["Cc", values.cc], ["Bcc", values.bcc],
+    ["Reply-To", values.replyTo]]
+  for (var listIndex = 0; listIndex < lists.length; listIndex++) {
+    if (listIndex > 0 && !lists[listIndex][1]) continue
+    var line = addressListHeader(lists[listIndex][0], lists[listIndex][1])
+    if (line === null) return null
+    lines.push(line)
+  }
   lines.push(foldHeader("Subject", values.subject || ""))
   var inReplyTo = referenceValue(values.inReplyTo)
   if (inReplyTo) {
@@ -1389,8 +1475,11 @@ function buildRawMessage(fields) {
   return lines.join("\r\n") + "\r\n"
 }
 
+// Null when `buildRawMessage` refuses the message.
 function buildSendPayload(fields) {
-  var payload = { raw: encodeBase64Url(buildRawMessage(fields)) }
+  var raw = buildRawMessage(fields)
+  if (raw === null) return null
+  var payload = { raw: encodeBase64Url(raw) }
   if (fields && fields.threadId) payload.threadId = String(fields.threadId)
   // The draft this message replaces, so a provider that can destroy it in the
   // same request as the send or the save does not leave the old copy behind.

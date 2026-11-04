@@ -47,6 +47,21 @@ Item {
         diagnostics.record("agent.jobsList", {code:-32000,message:"agent_invalid_state"})
       compare(diagnostics.queue.length, 1)
     }
+    function test_calendar_context_is_versioned_sanitized_and_not_deduplicated_across_phases() {
+      var diagnostics = createTemporaryObject(factory, parent)
+      var error = {code:-32000,message:"calendar_request_failed",data:{provider:"google",operation:"import",stage:"request",httpStatus:400,reason:"badRequest",message:"SECRET"}}
+      diagnostics.backendApiVersion = 9
+      diagnostics.record("calendar.saveInvitation", error)
+      compare(diagnostics.queue[0].error.data, undefined)
+      diagnostics.backendApiVersion = 10
+      diagnostics.record("calendar.saveInvitation", error)
+      error.data.operation = "lookup"
+      diagnostics.record("calendar.saveInvitation", error)
+      compare(diagnostics.queue.length, 3)
+      compare(diagnostics.queue[1].error.data.operation, "import")
+      compare(diagnostics.queue[2].error.data.operation, "lookup")
+      verify(JSON.stringify(diagnostics.queue).indexOf("SECRET") < 0)
+    }
     function test_failed_write_does_not_open_stale_report() {
       var diagnostics = createTemporaryObject(factory, parent)
       var worker = findChild(diagnostics, "diagnostics-helper")

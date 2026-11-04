@@ -7,24 +7,27 @@
 
 var CLIENT_ID_PATTERN = /^[0-9]+-[A-Za-z0-9_]+\.apps\.googleusercontent\.com$/
 
-// A client shipped with the plugin, so most people never see the setup at all.
-// Empty until the project completes Google's OAuth verification: gmail.modify
-// and gmail.send are RESTRICTED scopes, and an unverified project is stuck in
-// "Testing", where Google issues refresh tokens that expire after seven days.
-// Shipping a client under those terms would sign every user out weekly, which
-// is worse than asking them to make their own.
+// A client shipped with a release, so most people never see the setup at all.
+// The release backend carries it, compiled in from CI secrets so the values
+// stay out of the source tree; AuthManager asks the backend for it and passes
+// it to these functions as `shipped`. Development builds ship none, and every
+// function below treats an absent or malformed value as no client at all.
 //
-// A desktop client's secret is explicitly not confidential to Google, so both
-// values may live in this file once verification lands. Filling these in is the
-// only change needed — everything downstream already prefers them.
-var BUILTIN = { clientId: "", clientSecret: "", projectId: "" }
-
-function builtin() {
-  return { clientId: BUILTIN.clientId, clientSecret: BUILTIN.clientSecret, projectId: BUILTIN.projectId }
+// A desktop client's secret is explicitly not confidential to Google, which is
+// why it may travel to the UI with the id.
+function builtin(shipped) {
+  var value = shipped && typeof shipped === "object" ? shipped : {}
+  var rawId = String(value.clientId === undefined || value.clientId === null ? "" : value.clientId)
+  var rawSecret = String(value.clientSecret === undefined || value.clientSecret === null ? "" : value.clientSecret)
+  if (/[\u0000-\u001f\u007f]/.test(rawId + rawSecret)) return empty()
+  var clientId = trimmed(rawId)
+  var clientSecret = trimmed(rawSecret)
+  if (!isValidClientId(clientId)) return empty()
+  return { clientId: clientId, clientSecret: clientSecret, projectId: "" }
 }
 
-function hasBuiltin() {
-  return isValidClientId(BUILTIN.clientId)
+function hasBuiltin(shipped) {
+  return isValidClientId(builtin(shipped).clientId)
 }
 
 function empty() {
@@ -299,20 +302,20 @@ function sharedClient(store) {
 
 // The user's own client always wins: someone who went to the trouble of making
 // one wants their own quota and their own consent screen, not the shipped one.
-function effective(fileText, accountId) {
+function effective(fileText, accountId, shipped) {
   var store = loadStore(fileText)
   var own = forAccount(store, accountId)
   if (isConfigured(own)) return own
   var shared = sharedClient(store)
   if (isConfigured(shared)) return shared
-  return builtin()
+  return builtin(shipped)
 }
 
-function usingBuiltin(fileText, accountId) {
+function usingBuiltin(fileText, accountId, shipped) {
   var store = loadStore(fileText)
   if (isConfigured(forAccount(store, accountId))) return false
   if (isConfigured(sharedClient(store))) return false
-  return hasBuiltin()
+  return hasBuiltin(shipped)
 }
 
 function path(home) {

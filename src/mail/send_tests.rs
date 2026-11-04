@@ -92,6 +92,24 @@ fn encoded_header_words_cannot_change_the_previewed_envelope() {
 }
 
 #[test]
+fn preview_quotes_names_with_the_composers_rule() {
+    let mut request = request();
+    request.to = vec![
+        "\"Dr. Jane\" <jane@example.org>, \"Team: eve@example.net;\" <dave@example.org>, Ann Lee <ann@example.org>"
+            .into(),
+    ];
+    let preview = send::prepare(&request, &identities()).unwrap().preview();
+    assert_eq!(
+        preview["to"],
+        json!([
+            "\"Dr. Jane\" <jane@example.org>",
+            "\"Team: eve@example.net;\" <dave@example.org>",
+            "Ann Lee <ann@example.org>"
+        ])
+    );
+}
+
+#[test]
 fn actual_composed_sender_and_recipients_must_match_the_authorized_plan() {
     let fields = json!({"from":"alias@example.org","to":"to@example.org","cc":"cc@example.org","bcc":"bcc@example.org"});
     let good = b"From: alias@example.org\r\nTo: to@example.org\r\nCc: cc@example.org\r\nBcc: bcc@example.org\r\n\r\nbody";

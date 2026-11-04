@@ -18,6 +18,7 @@ TestCase {
   QtObject {
     id: owner
     property var backend: null
+    property var platform: null
     property bool ready: true
     property bool rsvpSending: false
     property bool canRespondToInvite: true
@@ -117,6 +118,17 @@ TestCase {
     compare(owner.selectedInvite.attendees.length, 0)
     backend.apiVersion = 6
     verify(!action.fallbackAvailable)
+  }
+
+  function test_reply_email_to_an_unwritable_organizer_address_is_refused() {
+    backend.apiVersion = 5
+    owner.selectedInvite = {uid:"meeting",summary:"Synthetic meeting",
+      organizer:{email:"organizer\u0085@example.test"},attendees:[]}
+    action.run("accepted", true)
+    compare(owner.sent.length, 0, "no message is sent with that address in a header")
+    verify(!owner.rsvpSending)
+    verify(owner.failure !== "")
+    compare(owner.notice, "")
   }
 
   function test_success_is_cached_only_after_readback_confirmation() {

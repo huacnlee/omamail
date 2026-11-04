@@ -3,6 +3,7 @@
 .import "../../../providers/NativeDomain.js" as NativeDomain
 .import "Gmail.js" as Gmail
 .import "Outlook.js" as Outlook
+.import "M365.js" as M365
 .import "Imap.js" as Imap
 .import "Hey.js" as Hey
 .import "Jmap.js" as Jmap
@@ -157,7 +158,7 @@ function define(source) {
 // speaks both is better read over JMAP — threads, a junk verb, and one round
 // trip for a batch — so somebody who has one should meet it before they settle
 // for the catch-all.
-var ALL = [define(Gmail), define(Outlook), define(Hey), define(Jmap), define(Imap)]
+var ALL = [define(Gmail), define(Outlook), define(M365), define(Hey), define(Jmap), define(Imap)]
 
 var DEFAULT_ID = "gmail"
 

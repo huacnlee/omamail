@@ -550,10 +550,29 @@ function graphResponseError(status, responseText) {
   return detail !== "" ? "Microsoft Graph answered: " + detail : "Microsoft Graph answered " + status
 }
 
+var M365_SIGN_IN_AGAIN = ["auth_signed_out", "calendar_auth_refused", "auth_client_missing",
+  "auth_client_invalid", "auth_refresh_failed", "auth_secret_invalid"]
+
+var M365_CONSENT = "Microsoft calendar request failed. An administrator has to approve this app for your "
+  + "organization. Then sign in to this mailbox again"
+
 // Keep native backend diagnostics private while giving each provider an
 // actionable recovery path. This deliberately does not depend on backend
 // error-message semantics, so it remains compatible with the pinned API.
-function nativeRequestError(kind) {
+function nativeRequestError(kind, accountId, error) {
+  // A Microsoft 365 mailbox has one sign-in for mail and calendar: nothing to
+  // check in Settings, and no second permission to grant. A sign-in that is
+  // missing, refused, unreadable or made for an app ID that is gone is one to
+  // sign in again for, as on the mail side; this API knows its codes. Consent is
+  // an administrator's to give, in words of the calendar's own: the mail side's
+  // advice about the page a code is entered on is no use to a refresh.
+  if (kind === "microsoft" && String(accountId || "").indexOf("m365:") === 0) {
+    var code = error && typeof error === "object" ? String(error.message || "") : ""
+    if (code === "auth_consent_required") return M365_CONSENT
+    return M365_SIGN_IN_AGAIN.indexOf(code) >= 0
+      ? "Microsoft calendar request failed. Sign in to this mailbox again"
+      : "Microsoft calendar request failed. Try again in a moment"
+  }
   if (kind === "microsoft")
     return "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again"
   if (kind === "google")
@@ -615,16 +634,17 @@ function recurrenceIntervalUnit(frequency, interval) {
   return Number(interval) === 1 ? unit : unit + "s"
 }
 
+function editorDateTime(dateText, timeText) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)) return null
+  var value = new Date(dateText + "T" + timeText + ":00")
+  if (!isFinite(value.getTime()) || isoDate(value) !== dateText
+      || two(value.getHours()) + ":" + two(value.getMinutes()) !== timeText) return null
+  return value
+}
+
 function editorDateRange(firstDate, firstTime, lastDate, lastTime, allDay) {
-  function parse(dateText, timeText) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)) return null
-    var value = new Date(dateText + "T" + timeText + ":00")
-    if (!isFinite(value.getTime()) || isoDate(value) !== dateText
-        || two(value.getHours()) + ":" + two(value.getMinutes()) !== timeText) return null
-    return value
-  }
-  var start = parse(String(firstDate), allDay ? "00:00" : String(firstTime))
-  var end = parse(String(lastDate), allDay ? "00:00" : String(lastTime))
+  var start = editorDateTime(String(firstDate), allDay ? "00:00" : String(firstTime))
+  var end = editorDateTime(String(lastDate), allDay ? "00:00" : String(lastTime))
   if (!start || !end) return {ok:false,error:allDay ? "Enter valid dates (YYYY-MM-DD)" : "Enter valid dates (YYYY-MM-DD) and times (HH:mm)"}
   if (allDay) end.setDate(end.getDate() + 1)
   if (end.getTime() <= start.getTime()) return {ok:false,error:allDay
@@ -1209,6 +1229,44 @@ function dayMinutes(timeMs, day) {
     + local.getSeconds() / 60 + local.getMilliseconds() / 60000
 }
 
+// How tall one hour is in the day and week views. By default a window shows a
+// waking day, without hours growing past their usual height or shrinking past
+// what a short event can be read at. The zoom keys save a height of their own
+// in unscaled pixels, which can go on down until the whole day fits, for someone
+// whose day has no quiet hours; 0, or anything unusable, means automatic.
+var HOUR_HEIGHT_AUTOMATIC = 0
+var HOUR_HEIGHT_USUAL = 60
+var HOUR_HEIGHT_READABLE = 25
+var HOUR_HEIGHT_MIN = 10
+var HOUR_HEIGHT_MAX = 120
+var HOUR_HEIGHT_STEP = 5
+var HOURS_TO_SHOW = 16
+
+function automaticHourHeight(viewport, usual, readable) {
+  return Math.max(readable, Math.min(usual, Number(viewport) / HOURS_TO_SHOW || 0))
+}
+
+function normalizeHourHeight(value) {
+  var usable = typeof value === "number" || (typeof value === "string" && value.trim() !== "")
+  var height = usable ? Math.floor(Number(value)) : NaN
+  if (!isFinite(height) || height <= 0) return HOUR_HEIGHT_AUTOMATIC
+  return Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, height))
+}
+
+// One press of a zoom key: +1 or -1 steps from the height on screen, 0 returns
+// to automatic. `filled` is the height the timeline already stretches to in this
+// window. A press that could not show changes nothing, so it saves nothing.
+function zoomedHourHeight(saved, shown, direction, filled) {
+  if (!direction) return HOUR_HEIGHT_AUTOMATIC
+  var fill = Number(filled) || 0
+  var from = Math.max(Number(shown) || HOUR_HEIGHT_USUAL, fill)
+  var limit = direction < 0 ? Math.max(HOUR_HEIGHT_MIN, fill) : HOUR_HEIGHT_MAX
+  if (direction < 0 ? from <= limit : from >= limit) return normalizeHourHeight(saved)
+  var next = Math.max(HOUR_HEIGHT_MIN, Math.min(HOUR_HEIGHT_MAX, Math.round(from) + direction * HOUR_HEIGHT_STEP))
+  // Rounded down, so that the window takes over and the whole day fits exactly.
+  return next < fill ? Math.max(HOUR_HEIGHT_MIN, Math.floor(fill)) : next
+}
+
 function eventTop(event, day, firstHour, hourHeight) {
   if (!event || !event.start || event.start.allDay) return 0
   var start = Math.max(Number(event.start.ms), Number(day.startMs))
@@ -1227,8 +1285,7 @@ function eventHeight(event, day, hourHeight) {
 // Where "now" sits in a day column, or -1 when it does not belong on the grid:
 // another day, or an hour outside the range the week view drew. The caller
 // draws nothing on -1 rather than clamping to an edge, because a line pinned to
-// the top of the grid states a time that is not the time — and the range here
-// is elastic, since weekHourRange widens it to whatever the week's events need.
+// the top of the grid states a time that is not the time.
 function nowOffset(day, firstHour, lastHour, hourHeight, nowMs) {
   if (!day) return -1
   var now = Number(nowMs)
@@ -1270,6 +1327,81 @@ function weekNowOffset(days, firstHour, lastHour, hourHeight, nowMs) {
     if (offset >= 0) return offset
   }
   return -1
+}
+
+// Side-by-side lanes for one day's timed events. Events that overlap, even
+// through a third one, form a cluster; each event takes the leftmost lane
+// free at its start, and every event in a cluster is drawn at the width of
+// the cluster's lane count - so three meetings at nine sit in three thirds
+// instead of on top of each other, and a lone meeting keeps the whole
+// column. An event then stretches over the lanes to its right that stay free
+// for its whole length, which is what keeps a short clash from narrowing a
+// long meeting beside it for the rest of the day.
+//
+// Answers [{event, lane, lanes, span}] in the order the events came; a caller
+// places an event at lane / lanes of the column, span / lanes wide.
+function dayLanes(events, day, hourHeight) {
+  var height = Math.max(1, Number(hourHeight) || 60)
+  var values = Array.isArray(events) ? events : []
+  var items = []
+  for (var i = 0; i < values.length; i++) {
+    var event = values[i]
+    if (!event || !event.start || displayInAllDayLane(event)) continue
+    // Use the actual grid scale: even a zero-length event occupies the
+    // two-pixel minimum, and repeated local hours share drawn coordinates.
+    var start = eventTop(event, day, 0, height)
+    var end = start + eventHeight(event, day, height)
+    items.push({ event: event, index: i, start: start, end: end, lane: 0, lanes: 1, span: 1 })
+  }
+  items.sort(function(a, b) { return a.start - b.start || b.end - a.end || a.index - b.index })
+  var out = []
+  var cluster = []
+  var laneEnds = []
+  var clusterEnd = -Infinity
+  function close() {
+    // Each lane is sorted and non-overlapping. Find the first interval ending
+    // after this block starts instead of rescanning the entire cluster.
+    var laneItems = []
+    for (var l = 0; l < laneEnds.length; l++) laneItems.push([])
+    for (var n = 0; n < cluster.length; n++) laneItems[cluster[n].lane].push(cluster[n])
+    for (var c = 0; c < cluster.length; c++) {
+      var item = cluster[c]
+      item.lanes = laneEnds.length
+      var span = 1
+      for (var next = item.lane + 1; next < laneEnds.length; next++) {
+        var candidates = laneItems[next]
+        var low = 0
+        var high = candidates.length
+        while (low < high) {
+          var middle = Math.floor((low + high) / 2)
+          if (candidates[middle].end <= item.start) low = middle + 1
+          else high = middle
+        }
+        if (low < candidates.length && candidates[low].start < item.end) break
+        span++
+      }
+      item.span = span
+      out.push(item)
+    }
+    cluster = []
+    laneEnds = []
+    clusterEnd = -Infinity
+  }
+  for (var k = 0; k < items.length; k++) {
+    var current = items[k]
+    if (current.start >= clusterEnd) close()
+    var lane = 0
+    while (lane < laneEnds.length && laneEnds[lane] > current.start) lane++
+    current.lane = lane
+    laneEnds[lane] = current.end
+    cluster.push(current)
+    clusterEnd = Math.max(clusterEnd, current.end)
+  }
+  close()
+  out.sort(function(a, b) { return a.index - b.index })
+  return out.map(function(item) {
+    return { event: item.event, lane: item.lane, lanes: item.lanes, span: item.span }
+  })
 }
 
 function eventsOnDay(events, day) {
@@ -1314,12 +1446,13 @@ function maxAllDayEvents(events, days) {
   return maximum
 }
 
-function weekHourRange(events, days, defaultFirst, defaultLast) {
-  var first = Math.max(0, Math.min(23, Math.floor(Number(defaultFirst) || 0)))
-  var last = Math.max(first + 1, Math.min(24, Math.ceil(Number(defaultLast) || 24)))
+// The hour to open these days at: their first timed event's, or `usual` when
+// they have none.
+function weekOpeningHour(events, days, usual) {
+  var first = 24
   var values = Array.isArray(events) ? events : []
   var week = Array.isArray(days) ? days : []
-  if (week.length === 0) return { first: first, last: last }
+  if (week.length === 0) return usual
   var rangeStart = Number(week[0].startMs)
   var rangeEnd = Number(week[week.length - 1].endMs)
   for (var i = 0; i < values.length; i++) {
@@ -1333,13 +1466,10 @@ function weekHourRange(events, days, defaultFirst, defaultLast) {
       var segmentStart = Math.max(startMs, Number(day.startMs))
       var segmentEnd = Math.min(endMs, Number(day.endMs))
       if (segmentEnd <= segmentStart) continue
-      var startMinutes = dayMinutes(segmentStart, day)
-      var endMinutes = dayMinutes(segmentEnd, day)
-      first = Math.min(first, Math.floor(startMinutes / 60))
-      last = Math.max(last, Math.min(24, Math.ceil(endMinutes / 60)))
+      first = Math.min(first, Math.floor(dayMinutes(segmentStart, day) / 60))
     }
   }
-  return { first: first, last: last }
+  return first < 24 ? first : usual
 }
 
 function slotStart(day, y, firstHour, hourHeight, minuteStep) {

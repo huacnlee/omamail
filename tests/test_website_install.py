@@ -45,3 +45,22 @@ assert README.count(WINDOWS_INSTALL) == 1, "README must show the canonical Power
 assert "raw/refs/heads" not in README and "raw.githubusercontent.com" not in README, "README still points at the raw repository"
 
 print("Website standalone installation instructions PASS")
+
+# Google's OAuth verification checks these addresses: the policy pages must be
+# published on the verified site, linked from its home page, and redeployed
+# whenever they change.
+for page in ("privacy.html", "terms.html", "legal.css"):
+    assert (ROOT / "docs" / page).is_file(), f"website is missing {page}"
+    assert f"      - docs/{page}\n" in PAGES_WORKFLOW, f"a change to {page} does not redeploy the site"
+assert "cp docs/privacy.html docs/terms.html docs/legal.css _site/" in PAGES_WORKFLOW, "the site does not publish the policy pages"
+for page in ("privacy.html", "terms.html"):
+    assert f'href="{page}"' in PAGE, f"the home page does not link to {page}"
+assert '<meta name="google-site-verification" content="JGwE15Dikx-5fcwxClYH9JwIY7nfYAicq3gDjvICTrk">' in PAGE, "Google site verification is missing"
+PRIVACY = (ROOT / "docs/privacy.html").read_text(encoding="utf-8")
+assert "including the Limited Use requirements" in PRIVACY, "privacy policy lacks the Google Limited Use disclosure"
+import re
+OAUTH = (ROOT / "ui/providers/OAuth.js").read_text(encoding="utf-8")
+SCOPES = re.findall(r'"(https://www\.googleapis\.com/auth/[^"]+)"', OAUTH.split("var SCOPES = [", 1)[1].split("]", 1)[0])
+assert SCOPES, "could not read OAuth.SCOPES"
+for scope in SCOPES:
+    assert f"<code>{scope}</code>" in PRIVACY, f"privacy policy does not explain the Google scope {scope}"

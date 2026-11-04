@@ -14,6 +14,9 @@ assert.strictEqual(reminders.candidates([{...event,attendees:[{self:true,respons
 assert.strictEqual(reminders.candidates([event,{...event,sourceId:"shared"}],
   {sources:[source,{...source,id:"shared",accountId:"another"}]}).length,1)
 assert.strictEqual(reminders.candidates([{...event,status:"CANCELLED"}],{sources:[source]}).length,0)
+const instant = reminders.candidates([{...event,end:{ms:2000000}}],{sources:[source]})
+assert.strictEqual(instant.length,1,"an event that ends where it starts still reminds")
+assert.ok(instant[0].end > instant[0].start,"and the backend gets an end after its start")
 console.log("calendar reminder eligibility tests passed")
 for (const kind of ["microsoft", "icloud", "caldav", "hey"]) {
   assert.strictEqual(reminders.candidates([event], {sources:[{...source,kind,reminderMinutes:10}]}).length,0,

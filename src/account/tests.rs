@@ -22,6 +22,18 @@ fn registry_identity_repair_and_secret_projection() {
 }
 
 #[test]
+fn a_microsoft_365_mailbox_is_listed_by_its_own_id_without_its_application_id() {
+    let source = json!({"version":1,"activeId":"m365:a@example.org","accounts":[
+        {"provider":"m365","email":"A@Example.org","label":"Work","clientId":"00000000-1111-2222-3333-444444444444"}
+    ]});
+    let result = summarize(source.to_string().as_bytes()).unwrap();
+    assert_eq!(result["accounts"][0]["id"], "m365:a@example.org");
+    assert_eq!(result["accounts"][0]["provider"], "m365");
+    assert_eq!(result["activeId"], "m365:a@example.org");
+    assert!(!result.to_string().contains("00000000"));
+}
+
+#[test]
 fn corrupt_registry_is_an_error_not_empty_success() {
     assert_eq!(summarize(b"secret"), Err("accounts_invalid"));
     assert_eq!(

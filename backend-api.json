@@ -1,6 +1,6 @@
 {
-  "apiVersion": 7,
-  "releasedApiVersion": 7,
+  "apiVersion": 10,
+  "releasedApiVersion": 9,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -89,6 +89,7 @@
     "cache.calendarRead",
     "cache.calendarPut",
     "contacts.suggest",
+    "contacts.google",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -97,7 +98,9 @@
     "calendar.request",
     "calendar.discover",
     "calendar.attendance",
+    "calendar.saveInvitation",
     "calendar.reminders",
+    "calendar.verify",
     "auth.form",
     "auth.begin",
     "auth.poll",
@@ -106,6 +109,7 @@
     "auth.token",
     "auth.store",
     "auth.clear",
+    "auth.builtinClient",
     "outlook.graphSend",
     "outlook.connectionCheck",
     "hey.probe",
@@ -183,7 +187,24 @@
     "jmap.request",
     "jmap.stream.open",
     "jmap.stream.poll",
-    "jmap.stream.close"
+    "jmap.stream.close",
+    "m365.signInBegin",
+    "m365.signInPoll",
+    "m365.signOut",
+    "m365.verify",
+    "m365.list",
+    "m365.messages",
+    "m365.read",
+    "m365.attachment",
+    "m365.modify",
+    "m365.trash",
+    "m365.untrash",
+    "m365.send",
+    "m365.saveDraft",
+    "m365.deleteDraft",
+    "m365.sendAs",
+    "m365.invalidate",
+    "m365.cancel"
   ],
   "contractCases": [
     {
@@ -336,6 +357,53 @@
         "notifications.0.key": "string",
         "notifications.1.key": "string"
       }
+    },
+    {
+      "name": "Built-in Google client is reported as strings",
+      "method": "auth.builtinClient",
+      "params": {},
+      "types": {
+        "clientId": "string",
+        "clientSecret": "string"
+      }
+    },
+    {
+      "name": "Built-in Google client takes no parameters",
+      "method": "auth.builtinClient",
+      "params": {
+        "clientId": "123-other.apps.googleusercontent.com"
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "Invitation import rejects non-Google destinations before authentication",
+      "method": "calendar.saveInvitation",
+      "params": {
+        "source": {
+          "kind": "caldav",
+          "url": "https://attacker.example/calendar"
+        },
+        "mailbox": "imap:owner@example.org",
+        "uid": "meeting",
+        "organizer": "host@example.org",
+        "response": "cancelled",
+        "sequence": 0
+      },
+      "errorCode": -32602
+    },
+    {
+      "name": "Google import validates destination before authentication",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "google",
+          "accountId": "missing@example.org",
+          "calendarId": ".."
+        },
+        "operation": "import",
+        "body": "{}"
+      },
+      "errorCode": -32000
     },
     {
       "name": "Google attendance rejects unsupported answers before authentication",
@@ -1287,10 +1355,276 @@
       "types": {
         "ticket": "string"
       }
+    },
+    {
+      "name": "Google Contacts refuses an account that is not a Gmail address",
+      "method": "contacts.google",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 provider rules",
+      "method": "providers.snapshot",
+      "params": {},
+      "equals": {
+        "m365.nativeSync": true,
+        "m365.capabilities.archive": true,
+        "m365.capabilities.spam": false,
+        "m365.capabilities.labels": false,
+        "m365.queries.archive": "role:archive",
+        "m365.queries.starred": "role:inbox flagged"
+      }
+    },
+    {
+      "name": "Microsoft 365 text search is a text query",
+      "method": "providers.resolve",
+      "params": {
+        "provider": "m365",
+        "operation": "query",
+        "search": "invoice"
+      },
+      "equals": {
+        "value": "text:invoice"
+      }
+    },
+    {
+      "name": "Microsoft 365 answers one sender identity without a request",
+      "method": "m365.sendAs",
+      "params": {
+        "accountId": "m365:sender@example.org"
+      },
+      "equals": {
+        "0.email": "sender@example.org",
+        "0.isDefault": true
+      }
+    },
+    {
+      "name": "Microsoft 365 verify names a mailbox that is not saved",
+      "method": "m365.verify",
+      "params": {
+        "accountId": "m365:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Microsoft 365 list refuses a forged page token",
+      "method": "m365.list",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "query": "role:inbox",
+        "limit": 5,
+        "pageToken": "forged"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 messages refuse an id that is not its own",
+      "method": "m365.messages",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "ids": [
+          "1:INBOX"
+        ],
+        "full": false
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 send refuses a body that is not canonical base64url",
+      "method": "m365.send",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "raw": "not base64url!"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 sign-in needs an application id",
+      "method": "m365.signInBegin",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "address": "sender@example.org"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "mail action rejects malformed Microsoft 365 IDs before preview",
+      "method": "mail.act",
+      "params": {
+        "account": "m365:sender@example.org",
+        "operation": "read",
+        "ids": [
+          "1:INBOX"
+        ]
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 saves a draft only from canonical base64url",
+      "method": "m365.saveDraft",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "raw": "not base64url!"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 deletes a draft only by an id of its own",
+      "method": "m365.deleteDraft",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "id": "1:Drafts"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Microsoft 365 calendar discovery asks the mailbox's own sign-in",
+      "method": "calendar.discover",
+      "params": {
+        "accountId": "m365:absent@example.org"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
+      }
+    },
+    {
+      "name": "Calendar validation errors preserve safe context",
+      "method": "calendar.saveInvitation",
+      "params": {
+        "source": {
+          "kind": "google",
+          "accountId": "synthetic@example.org"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_input",
+        "data": {
+          "provider": "google",
+          "operation": "saveInvitation",
+          "stage": "validation"
+        }
+      }
+    },
+    {
+      "name": "Calendar authentication errors preserve safe context",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "google"
+        },
+        "operation": "lookup",
+        "uid": "synthetic"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params",
+        "data": {
+          "provider": "google",
+          "operation": "lookup",
+          "stage": "authentication"
+        }
+      }
+    },
+    {
+      "name": "CalDAV verification refuses a plain-http address before any request",
+      "method": "calendar.verify",
+      "params": {
+        "source": {
+          "kind": "caldav",
+          "url": "http://calendar.example.invalid/dav/",
+          "username": "synthetic"
+        },
+        "password": "synthetic-secret"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_url",
+        "data": {
+          "provider": "caldav",
+          "operation": "verify",
+          "stage": "validation"
+        }
+      }
+    },
+    {
+      "name": "CalDAV verification requires the password it is to check",
+      "method": "calendar.verify",
+      "params": {
+        "source": {
+          "kind": "caldav",
+          "url": "https://calendar.example.invalid/dav/",
+          "username": "synthetic"
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_input",
+        "data": {
+          "provider": "caldav",
+          "operation": "verify",
+          "stage": "validation"
+        }
+      }
+    },
+    {
+      "name": "outbox accepts the Microsoft 365 provider",
+      "method": "outbox.enqueue",
+      "params": {
+        "accountId": "m365:sender@example.org",
+        "provider": "m365",
+        "payload": {
+          "raw": "eA",
+          "unexpected": true
+        }
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "outbox_invalid_payload"
+      }
     }
   ],
   "unreleased": {
-    "methods": [],
-    "cases": []
+    "methods": [
+      "calendar.verify",
+      "contacts.google"
+    ],
+    "cases": [
+      "Calendar validation errors preserve safe context",
+      "Calendar authentication errors preserve safe context",
+      "CalDAV verification refuses a plain-http address before any request",
+      "CalDAV verification requires the password it is to check",
+      "Google Contacts refuses an account that is not a Gmail address"
+    ]
   }
 }

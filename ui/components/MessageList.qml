@@ -37,7 +37,55 @@ Column {
   // A row's own star, archive and trash buttons. Routed up rather than
   // straight to the service so a ticked row's button means the selection.
   signal rowActionRequested(string id, string action)
-  signal menuRequested(string id, real sceneX, real sceneY)
+
+  // `ids` are the rows a menu opened here will act on (`reachedIds`).
+  signal menuRequested(string id, real sceneX, real sceneY, var ids)
+
+  // App's own answer to whether an action reaches the ticked rows
+  // (`App.selectionActive`: rows are ticked and the list is on screen). The
+  // list draws what App will do and does not decide it again.
+  property bool selectionActive: false
+
+  // What the archive and trash slots ask for, by binding id, decided over the
+  // rows the action will reach and nothing else (`Model.keyActionFor`), so a
+  // control says what will happen to them. The rows are the ones App's
+  // handler for that control sends the action to: the ticked rows when the
+  // selection is active and the control is about one of them (or is `e`/`d`),
+  // else the cursor's row for the keys, the row itself for a row's own
+  // controls, and for the reader the row it was opened from.
+  readonly property var selectionActions: actionsFor(Model.summariesById(
+    root.service ? root.service.messages : [], root.checkedIds))
+  // With no cursor yet, the next `j` lands on one of this listing's rows, so
+  // the keys are described by all of them: in the Trash `d` restores before a
+  // row is chosen (the hint row and the empty reader say so).
+  readonly property var keyActions: root.selectionActive ? selectionActions
+    : actionsFor(root.cursorId !== "" ? rowsOf(root.cursorId) : (root.service ? root.service.messages : []))
+  // `keys` says whether `e` and `d` reach the same rows as the reader's
+  // buttons and ask the same of them, so its tooltips name a key only then.
+  // An open message that is not a listed row (one a notification opened) is
+  // judged by its own labels: the listing says nothing about where it is.
+  readonly property var readerActions: {
+    var open = root.service ? String(root.service.selectedId || "") : ""
+    if (reaches(open)) return ({ archive: selectionActions.archive, trash: selectionActions.trash, keys: true })
+    var target = Model.readerTarget(root.service ? root.service.conversationProjection : null, open, root.cursorId)
+    var rows = rowsOf(target)
+    var actions = rows.length > 0 ? actionsFor(rows)
+      : actionsFor(root.service && root.service.selectedMessage ? [root.service.selectedMessage] : [],
+          Model.unlistedView(root.service))
+    return ({ archive: actions.archive, trash: actions.trash,
+      keys: !root.selectionActive && target === root.cursorId
+        && actions.archive === keyActions.archive && actions.trash === keyActions.trash })
+  }
+
+  // Whether an action on `id` means the selection: App's `outside` test.
+  function reaches(id) { return root.selectionActive && root.checkedIds.indexOf(id) >= 0 }
+  function reachedIds(id) { return reaches(id) ? root.checkedIds.slice() : [id] }
+  function rowsOf(id) { return Model.summariesById(root.service ? root.service.messages : [], [id]) }
+  function actionsFor(rows, view) {
+    var on = view || root.service
+    return ({ archive: Model.keyActionFor("archive", rows, on),
+      trash: Model.keyActionFor("trash", rows, on) })
+  }
 
   width: parent ? parent.width : 0
   spacing: Style.space(2)
@@ -86,6 +134,14 @@ Column {
       selectionActive: root.checkedIds.length > 0
       ctrlHeld: root.ctrlHeld
       canArchive: root.service.canArchive
+      // A ticked row's buttons and middle-click mean the selection.
+      readonly property var slotActions: root.reaches(modelData.id)
+        ? root.selectionActions : root.actionsFor([modelData])
+      archiveAction: slotActions.archive
+      trashAction: slotActions.trash
+      // Hovering does not move the cursor, so `e` and `d` reach this row only
+      // when it is the cursor's, or ticked while the selection is active.
+      namesKeys: root.selectionActive ? root.reaches(modelData.id) : root.cursorId === modelData.id
       conversations: Unified.rowIsConversation(modelData)
       contentDirection: root.service.contentDirection
       onActivated: root.messageActivated(modelData.id)
@@ -93,10 +149,10 @@ Column {
       onCheckRangeRequested: root.checkRangeRequested(modelData.id)
       onAgentRequested: function(sceneX, sceneY) { root.agentRequested(modelData.id, sceneX, sceneY) }
       onStarToggled: root.rowActionRequested(modelData.id, "star")
-      onArchiveRequested: root.rowActionRequested(modelData.id, "archive")
-      onTrashRequested: root.rowActionRequested(modelData.id, "trash")
+      onArchiveRequested: root.rowActionRequested(modelData.id, archiveAction)
+      onTrashRequested: root.rowActionRequested(modelData.id, trashAction)
       onMenuRequested: function(sceneX, sceneY) {
-        root.menuRequested(modelData.id, sceneX, sceneY)
+        root.menuRequested(modelData.id, sceneX, sceneY, root.reachedIds(modelData.id))
       }
     }
   }

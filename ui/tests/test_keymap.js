@@ -52,6 +52,14 @@ function byId(id) {
 })
 
 const undoSend = byId("undoSend")
+assert.strictEqual(keymap.contextFor({eventComposing:true,eventDescriptionFocused:true}), "eventDescription")
+assert.strictEqual(keymap.contextFor({eventComposing:true,eventDescriptionFocused:false}), "eventCompose")
+for (const key of ["Return", "Enter"]) {
+  assert.ok(!keymap.sequencesFor("eventDescription").some(entry => entry.sequence === key))
+  assert.strictEqual(keymap.sequencesFor("eventDescription").find(entry => entry.sequence === "Ctrl+" + key).id, "saveEvent")
+  assert.strictEqual(keymap.sequencesFor("eventCompose").find(entry => entry.sequence === key).id, "saveEvent")
+}
+assert.strictEqual(keymap.hintsFor("eventDescription").find(hint => hint.label === "save").key, "Ctrl+Enter")
 assert.strictEqual(keymap.contextFor({ assistantEditing: true, composing: true }), "assistant")
 assert.strictEqual(keymap.contextFor({ assistantEditing: true, assistantCommands: true, composing: true }), "assistantCommands")
 assert.strictEqual(keymap.contextFor({ assistantEditing: false, composing: true }), "compose")
@@ -142,6 +150,10 @@ keymap.CONTEXTS.forEach(function (context) {
   assert.strictEqual(live, true, "Ctrl+R must check for mail from " + context)
 })
 
+// The zoom keys size the message in the reader and the hours in the calendar.
+assert.strictEqual(keymap.isEnabled(byId("calendarZoomIn"), "calendar", false), true)
+assert.strictEqual(keymap.isEnabled(byId("calendarZoomIn"), "reader", false), false)
+assert.strictEqual(keymap.isEnabled(byId("zoomIn"), "calendar", false), false)
 const zoomIn = byId("zoomIn")
 assert.strictEqual(keymap.isEnabled(zoomIn, "reader", false), true)
 assert.strictEqual(keymap.isEnabled(zoomIn, "page", false), false,
@@ -278,6 +290,20 @@ deepEqual(selectedListHints.map(function (h) { return h.key + " " + h.label }),
 assert.ok(!keymap.hintsFor("list", ["move"], true).some(function (h) {
   return h.key === "v"
 }), "a provider without move does not offer the move hint")
+// Where `e` or `d` is the way back, its hint says so rather than naming a verb
+// the key will not perform (`Model.keyActionFor` decides which).
+deepEqual(keymap.hintsFor("list", [], true, { archive: "archive", trash: "untrash" }).map(function (h) { return h.key + " " + h.label }),
+  ["j / k move", "e archive", "d restore", "v move to", "Space select", "c compose"],
+  "in the trash, d restores")
+deepEqual(keymap.hintsFor("reader", [], true, { archive: "unarchive", trash: "trash" }).filter(function (h) {
+  return h.key === "e" || h.key === "d" }).map(function (h) { return h.key + " " + h.label }),
+  ["e move to inbox", "d trash"], "in Archive, e is the way back")
+deepEqual(keymap.hintsFor("list", ["archive", "star", "move"], true, { archive: "unarchive", trash: "untrash" }).map(function (h) { return h.key }),
+  ["j / k", "d", "Space", "c"], "a provider with no archive still drops e, whatever it would ask for")
+deepEqual(keymap.hintsFor("list", [], true, { archive: "archive", trash: "trash" }), selectedListHints,
+  "the keys' own verbs change nothing")
+deepEqual(keymap.hintsFor("list", [], true, { archive: "untrash", trash: "unarchive" }), selectedListHints,
+  "a key's hint changes only for its own way back")
 const composeHints = keymap.hintsFor("compose")
 deepEqual(composeHints.map(function (h) { return h.label }),
   ["send", "close"],

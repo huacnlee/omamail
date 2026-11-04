@@ -1,5 +1,7 @@
 .pragma library
 
+.import "../backend/Plain.js" as Plain
+
 function suggestsClear(text) {
   var value = String(text || "")
   return !/[\r\n]/.test(value) && /^\s*\/[a-z]*$/.test(value)
@@ -145,7 +147,10 @@ function finishedNote(job) {
   // A look for events was not asked for by name: it says something only
   // when it found something, and nothing at all when it found nothing.
   if (isEventsJob(job)) {
-    var found = glyph === "done" && Array.isArray(job.events) ? job.events.length : 0
+    // The job comes through the runner's `jobFinished` signal, which on Qt
+    // 6.12 hands `events` over as a sequence: made plain, it is a list again.
+    var events = Plain.plain(job.events)
+    var found = glyph === "done" && Array.isArray(events) ? events.length : 0
     return found > 0 ? "The agent found " + (found === 1 ? "an event" : found + " events") + " in " + about : ""
   }
   if (glyph === "question") return "The agent has a question about " + about

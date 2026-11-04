@@ -59,7 +59,7 @@ Item {
     pluginDir: root.pluginDir
     bundledExecutable: root.standalone ? String(root.platform.backendPath || "") : ""
     bundledVersion: root.standalone ? root.version : ""
-    bundledApiVersion: root.standalone ? 6 : 0
+    bundledApiVersion: root.standalone ? 9 : 0
     bundledMode: root.standalone
     developmentExecutable: root.standalone ? "" : (Quickshell.env("OMAMAIL_BIN") || "")
     onValidated: Qt.callLater(rustBackend.reconcileProcess)
@@ -76,6 +76,7 @@ Item {
       Diagnostics {
         objectName: "diagnostics"
         pluginDir: root.pluginDir
+        backendApiVersion: rustBackend.apiVersion
         onFailed: function(message) { if (root.current) root.current.fail(message) }
       }
     }
@@ -96,14 +97,15 @@ Item {
     }
   }
 
-  // Overall update status is diagnostic, not a feature requirement: its
-  // target moves whenever the checkout grows another API revision.
+  // Features gate on fixed API revisions.
   readonly property bool backendNeedsUpdate: backend.needsUpdate
   // Event suggestions require API 2 regardless of when that API is released.
   readonly property bool backendCanSuggestEvents: backend.ready && backend.apiVersion >= 2
+  readonly property bool backendCanSuggestGoogleContacts: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
+  readonly property bool backendCanSaveInvitations: backend.ready && backend.apiVersion >= 9
   // Older backends send the bare address.
   readonly property bool backendCanNameSender: backend.ready && backend.apiVersion >= 7
   readonly property bool calendarRemindersEnabled: !settings || settings.calendarRemindersEnabled !== false
@@ -440,20 +442,11 @@ Item {
   // be what takes the icon away.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
-  // Thunderbird and Betterbird keep both explicit and learned addresses in
-  // their local profile. The helper reads those databases without modifying
-  // them. Nothing is copied into Omamail's settings or cache.
-  property var recipientContacts: []
-  property bool contactsLoading: false
-
-  function refreshRecipientContacts() {
-    if (contactsLoading || !backend || !backend.ready) return
-    contactsLoading = true
-    backend.call("contacts.suggest", {}, function(result, error) {
-      root.contactsLoading = false
-      if (!error && Array.isArray(result)) root.recipientContacts = result
-    })
-  }
+  // Local address books and Google Contacts; see account/ContactBook.qml.
+  ContactBook { id: contactBook; service: root }
+  readonly property var recipientContacts: contactBook.contacts
+  readonly property bool contactsLoading: contactBook.loading
+  function refreshRecipientContacts() { contactBook.refresh() }
 
   function registerMailtoHandler() {
     if (!hasMailto || pluginDir === "" || mailtoInstaller.running) return
@@ -1382,9 +1375,8 @@ Item {
   // to send the whole window back to the beginning.
   property bool anyAccountReady: false
 
-  // Instantiator.objectAt is not a property. sendIdentities has to watch
-  // something recount() updates, or From is computed once with no hosts
-  // and never lists the other signed-in mailboxes.
+  // Instantiator.objectAt is not a property, so accountSummaries and
+  // senderSources read this. It moves when a host is built and in recount().
   property int hostsEpoch: 0
 
   function recount() {
@@ -1441,6 +1433,7 @@ Item {
   }
 
   readonly property var accountSummaries: {
+    var _epoch = hostsEpoch
     var out = []
     var accounts = accountList ? accountList.accounts : []
     for (var i = 0; i < accounts.length; i++) {
@@ -1989,6 +1982,9 @@ Item {
   readonly property bool canRespondToInvite: !!reading && reading.canRespondToInvite
   readonly property bool rsvpSending: !!reading && reading.rsvpSending
   readonly property bool rsvpFallbackAvailable: !!reading && reading.rsvpFallbackAvailable === true
+  readonly property var invitationCalendarState: reading ? reading.invitationCalendarState : null
+  signal invitationCalendarSaved()
+  function saveInvitationCalendar() { if (reading) reading.saveInvitationCalendar() }
   readonly property string rsvpCalendarUrl: reading ? Provider.calendarAttendanceUrl(reading.providerId, reading.accountId) : ""
   // Empty when this message offers no way off a list, which is the answer for
   // everything that is not a newsletter.
@@ -2634,14 +2630,11 @@ Item {
     onTriggered: root.refreshCalendarPreview()
   }
 
-  // The model is a COUNT, not the array. An Instantiator rebuilds every
-  // delegate when its model changes identity, and this list is reassigned
-  // whole on every save — so modelling the array tore down all the accounts
-  // whenever one of them learned its own address, dropping their loaded state
-  // and landing in-flight callbacks on half-destroyed objects.
+  // Count-based delegates survive account metadata saves and in-flight callbacks.
   Instantiator {
     id: accountHosts
     model: root.accountCount
+    onObjectAdded: root.hostsEpoch++
 
     delegate: MailAccount {
       platform: root
@@ -2888,7 +2881,7 @@ Item {
         else root.restoreAccountRegistry()
         root.refreshRecipientContacts()
       }
-      else root.contactsLoading = false
+      else contactBook.loading = false
     }
   }
 

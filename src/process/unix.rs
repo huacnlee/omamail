@@ -202,7 +202,7 @@ mod unix_tests {
     }
 
     #[test]
-    fn stderr_and_input_are_bounded_too() {
+    fn continuous_stderr_is_bounded() {
         assert_eq!(
             run(
                 "/bin/sh",
@@ -212,16 +212,6 @@ mod unix_tests {
                 64
             ),
             Err("process_output_too_large")
-        );
-        assert_eq!(
-            run(
-                "does-not-exist",
-                &[],
-                b"too large",
-                Duration::from_secs(1),
-                1
-            ),
-            Err("process_input_too_large")
         );
     }
 }

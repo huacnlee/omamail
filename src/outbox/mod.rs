@@ -370,7 +370,7 @@ impl Inner {
         match method {
             "outbox.enqueue" => {
                 let provider = text(params, "provider")?;
-                if !["gmail", "outlook", "imap", "jmap", "hey"].contains(&provider) {
+                if !["gmail", "outlook", "imap", "jmap", "hey", "m365"].contains(&provider) {
                     return Err("outbox_invalid_provider");
                 }
                 let payload = params
@@ -610,6 +610,11 @@ fn definitely_refused(error: &str) -> bool {
             | "gmail_invalid_params"
             | "gmail_send_rejected"
             | "jmap_send_rejected"
+            // Microsoft 365: its explicit refusal, a failure before the request that could create
+            // the message was written, and an oversize message refused before any I/O.
+            | "m365_send_rejected"
+            | "m365_send_not_attempted"
+            | "m365_message_too_large"
             | "smtp_recipient_refused"
     )
 }

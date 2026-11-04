@@ -4,6 +4,8 @@ use crate::credentials::{
     self as store, CredentialKey, CredentialKind, Error as StoreError, Secret,
 };
 
+pub(crate) mod m365;
+
 pub fn settings(provider: &str, account: &str) -> Result<Value, &'static str> {
     settings_with(provider, account, crate::account::raw_registry()?)
 }
@@ -13,7 +15,7 @@ pub fn settings_readonly(provider: &str, account: &str) -> Result<Value, &'stati
 }
 
 fn settings_with(provider: &str, account: &str, raw: Value) -> Result<Value, &'static str> {
-    if !["gmail", "outlook", "imap", "jmap"].contains(&provider)
+    if !["gmail", "outlook", "imap", "jmap", "m365"].contains(&provider)
         || account.is_empty()
         || account.len() > 1024
         || account.chars().any(char::is_control)
@@ -181,6 +183,9 @@ async fn access_token_with(
     resource: &str,
     read_only: bool,
 ) -> Result<String, &'static str> {
+    if provider == "m365" {
+        return m365::access_token(account, read_only).await;
+    }
     if provider != "outlook" {
         return Err("auth_provider_invalid");
     }
@@ -453,9 +458,24 @@ pub(super) async fn change_outlook(params: &Value, clear: bool) -> Result<Value,
     .await
 }
 
+/// The provider whose sign-in holds the Graph token of a calendar or Microsoft 365 account id.
+fn graph_provider(account: &str) -> &'static str {
+    if account.starts_with("m365:") {
+        "m365"
+    } else {
+        "outlook"
+    }
+}
+
+/// The Graph token of a mailbox for the calendar: an Outlook mailbox asks its Graph resource of its
+/// own refresh token, a Microsoft 365 one has the one sign-in that covers mail and calendar.
+pub async fn graph_token(account: &str) -> Result<String, &'static str> {
+    access_token(graph_provider(account), account, "graph").await
+}
+
 /// Discard cached credentials without opening a second refresh lane.
 pub async fn invalidate(account: &str) -> Result<(), &'static str> {
-    valid_account("outlook", account)?;
+    valid_account(graph_provider(account), account)?;
     if let Some(accounts) = TOKENS.get() {
         let prefix = format!("{}:", account.to_lowercase());
         let locks: Vec<_> = accounts
@@ -1100,6 +1120,26 @@ mod tests {
             url,
             "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
         );
+    }
+
+    /// A single-tenant registration's directory id or verified domain, as
+    /// the setup page saves it, is the authority every refresh goes to.
+    #[test]
+    fn a_single_tenant_accounts_stored_tenant_builds_its_own_token_url() {
+        for tenant in [
+            "12345678-1234-4abc-9def-1234567890ab",
+            "contoso.onmicrosoft.com",
+        ] {
+            let entry = json!({"imap":{"tenant":tenant}});
+            assert_eq!(stored_tenant(&entry), tenant);
+            assert_eq!(
+                destination(
+                    &json!({"provider":"outlook","endpoint":"token","tenant":stored_tenant(&entry)}),
+                )
+                .unwrap(),
+                format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token")
+            );
+        }
     }
 
     fn expiry_at(

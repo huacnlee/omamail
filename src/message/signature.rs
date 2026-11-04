@@ -329,6 +329,21 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
+        for method in [
+            "rasterKind",
+            "importImage",
+            "importHtml",
+            "inlineParts",
+            "importNote",
+        ] {
+            assert!(
+                rows.as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["name"] == method),
+                "oracle captured no {method} calls"
+            );
+        }
         for row in rows.as_array().unwrap() {
             let args = &row["args"];
             let first = args[0].as_str().unwrap_or("");

@@ -39,8 +39,7 @@ QtObject {
         account.fail("Sign in before account.unsubscribing")
         return
       }
-      account.unsubscribing = true
-      account.api.sendMessage(Mail.buildSendPayload({
+      var payload = Mail.buildSendPayload({
         // The address the newsletter was sent to. A list that only ever knew
         // an alias has no reason to act on a request from anywhere else.
         from: account.receivedAsAddress,
@@ -49,7 +48,14 @@ QtObject {
         to: info.mail.to,
         subject: info.mail.subject,
         body: info.mail.body
-      }), function(payload, error) {
+      })
+      // Null when an address in it cannot be written into a header.
+      if (!payload) {
+        account.fail("An address in this request cannot be written into a message")
+        return
+      }
+      account.unsubscribing = true
+      account.api.sendMessage(payload, function(sent, error) {
         account.unsubscribing = false
         if (error) {
           account.fail(error)

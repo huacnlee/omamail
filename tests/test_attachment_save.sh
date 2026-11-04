@@ -52,16 +52,17 @@ check "and it is private" "$(stat -c '%a' "$saved")" "600"
 
 # ------------------------------------------------------- never overwriting
 
-second=$(save "$downloads" 'statement.pdf' "$work/bytes")
+printf 'a different invoice\n' > "$work/second-bytes"
+second=$(save "$downloads" 'statement.pdf' "$work/second-bytes")
 check "the same name again is numbered" "$second" "$downloads/statement (2).pdf"
 third=$(save "$downloads" 'statement.pdf' "$work/bytes")
 check "and again" "$third" "$downloads/statement (3).pdf"
 # Two messages carrying one name are two files, and the first must still be
 # the first: this is the loss nobody notices until they need the file.
-if [ -f "$downloads/statement.pdf" ]; then
-  printf '  ok   the original is still there\n'
+if cmp -s "$work/bytes" "$downloads/statement.pdf" && cmp -s "$work/second-bytes" "$second"; then
+  printf '  ok   both attachments keep their own bytes\n'
 else
-  printf '  FAIL the original was overwritten\n'
+  printf '  FAIL saving another attachment changed or lost its bytes\n'
   failures=$(( failures + 1 ))
 fi
 # The number goes on the stem, not after the extension, or the file stops

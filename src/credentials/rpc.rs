@@ -211,6 +211,10 @@ mod tests {
             json!({"kind":"calendar-password","accountId":"source\0id"}),
             json!({"kind":"google-refresh-token","accountId":"a@example.org"}),
             json!({"kind":"google-refresh-token","accountId":"a@example.org","clientId":"client","nativeAttributes":[]}),
+            // A Microsoft 365 refresh token never crosses this interface: the provider reads and
+            // writes it in Rust, and QML has no kind to name it by.
+            json!({"kind":"m365-refresh-token","accountId":"m365:a@example.org","clientId":"client"}),
+            json!({"kind":"m365-refresh-token","accountId":"m365:a@example.org"}),
         ] {
             assert!(matches!(
                 parse("credentials.get", &params),

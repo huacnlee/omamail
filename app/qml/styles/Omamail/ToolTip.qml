@@ -46,6 +46,7 @@ T.ToolTip {
   contentItem: Text {
     objectName: "omamail-tooltip-label"
     text: control.text
+    textFormat: Text.PlainText
     color: Commons.Color.popups.text
     font.family: Style.font.family
     font.pixelSize: Style.font.caption

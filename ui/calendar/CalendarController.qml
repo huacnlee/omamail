@@ -4,7 +4,9 @@ import Quickshell.Io
 import qs.Commons
 import "Calendar.js" as Calendar
 import "Sources.js" as Sources
+import "Invitations.js" as Invitations
 import "../providers/MicrosoftOAuth.js" as Microsoft
+import "../backend/Plain.js" as Plain
 
 Item {
   id: root
@@ -45,8 +47,15 @@ Item {
   property bool savingPassword: false
   property string sourceWritePayload: ""
   property string sourceSecret: ""
+  // What a successful save still has to say, e.g. that the password was not checked.
+  property string sourceSaveNote: ""
   property var sourceBeingSaved: null
   property bool savingSource: false
+  // A password check still waiting on the backend. The serial names the check
+  // whose answer is still wanted; cancelling moves it on, so the answer to a
+  // cancelled check is dropped and writes nothing.
+  property int sourceCheckSerial: 0
+  property bool sourceCheckPending: false
   property bool discoveringCalendars: false
   property string discoveringAccountId: ""
   property string discoveryError: ""
@@ -77,10 +86,30 @@ Item {
   // Every account's calendars, not just this mailbox's: the entry hides only
   // when no account has one and nothing was added in Settings.
   readonly property bool noCalendars: Sources.hasNone(sourcesLoaded, availableSources)
+  // The view follows a zoom at once. The save waits for the keys to rest, because
+  // each one rewrites the shell's whole config and a held key repeats.
+  property int unsavedHourHeight: -1
+  readonly property int hourHeight: unsavedHourHeight >= 0 ? unsavedHourHeight
+    : Calendar.normalizeHourHeight(service && service.settings ? service.settings.calendarHourHeight : undefined)
+  function zoomHours(direction, shown, filled) {
+    if (!service) return
+    var next = Calendar.zoomedHourHeight(hourHeight, shown, direction, filled)
+    if (next === hourHeight) return
+    unsavedHourHeight = next
+    hourHeightSave.restart()
+  }
+  function saveHourHeight() {
+    if (unsavedHourHeight < 0 || !service) return
+    service.persistSetting("calendarHourHeight", unsavedHourHeight)
+    unsavedHourHeight = -1
+  }
+  Timer { id: hourHeightSave; interval: 300; onTriggered: root.saveHourHeight() }
+  Component.onDestruction: saveHourHeight()
   readonly property bool unifiedCalendarView: !!service
     && service.unifiedCalendarView === true
   readonly property var contextSources: unifiedCalendarView
-    ? availableSources : Sources.forAccount(availableSources, accountId)
+    ? availableSources : Sources.forAccount(availableSources, accountId,
+      (Invitations.destination(service ? service.settings : null, accountId) || {}).id)
   // One name for every mailbox, because the unified view is one view.
   //
   // A controller with no account is already showing every source — the bar
@@ -119,6 +148,11 @@ Item {
     return root.sourceIncluded(source)
   }).map(function(source) { return String(source.id || "") }).join("\n")
   onEnabledSourceKeyChanged: reloadVisibleRange()
+  Connections {
+    target: root.service
+    ignoreUnknownSignals: true
+    function onInvitationCalendarSaved() { root.reloadVisibleRange() }
+  }
 
   // No `eventCache.loaded` guard, and it is not missing. `refresh` refuses on
   // an unloaded cache and `eventCache.onRestored` runs one as soon as it is
@@ -230,7 +264,7 @@ Item {
     // JSON-RPC codes are numeric; the backend's stable reason is its message.
     // Match only known reasons and never display the raw diagnostic.
     var code = String(error && error.message || error || "")
-    if (code === "auth_signed_out" || code === "calendar_auth_refused")
+    if (code === "auth_signed_out" || code === "gmail_signed_out" || code === "calendar_auth_refused")
       return "Sign in to this mailbox again"
     if (code === "calendar_provider_unsupported")
       return "This mailbox does not support calendar discovery"
@@ -451,7 +485,10 @@ Item {
   }
 
   // What the delete confirmation asks: named, with a button per consequence.
-  function deleteRequest(sourceId, event) {
+  // The event comes through the views' `deleteRequested` signal, and on Qt
+  // 6.12 its recurrence arrives as a sequence that reads as no series.
+  function deleteRequest(sourceId, crossed) {
+    var event = Plain.plain(crossed)
     var request = Calendar.deleteRequest(event, findSource(String(sourceId || "")),
       service.backendCanGoogleCalendars === true)
     request.sourceId = String(sourceId || "")
@@ -598,7 +635,7 @@ Item {
       if (error) {
         reason = notifyConsent(error) ? Microsoft.graphConsentMessage()
           : error.message === "calendar_conflict" ? "This event changed elsewhere. Refresh and try again."
-          : Calendar.nativeRequestError(String(source && source.kind || ""))
+          : Calendar.nativeRequestError(String(source && source.kind || ""), source && source.accountId, error)
       }
       callback(result, reason)
     })
@@ -724,9 +761,87 @@ Item {
     }
     sourceBeingSaved = checked.source
     sourceSecret = String(secret)
-    sourceWritePayload = Sources.serialize(Sources.add(sourceList, checked.source))
     savingSource = true
-    writeSources()
+    verifyCalDavPassword(checked.source, sourceSecret, function(error, note) {
+      if (error !== "") { root.sourceWriteFailed(error); return }
+      root.sourceSaveNote = note
+      root.sourceWritePayload = Sources.serialize(Sources.add(root.sourceList, root.sourceBeingSaved))
+      root.writeSources()
+    })
+  }
+
+  // A CalDAV password is tried against its calendar before anything keeps it.
+  // Saving first and finding out later left a refused credential in the
+  // keyring, reported weeks on as a fetch failure that named nothing — and
+  // nothing else in this app stores a password it has not just used. The
+  // request is the backend's; QML makes none of its own. `callback` gets ""
+  // for a password the server accepted and otherwise the sentence to show.
+  //
+  // The gate is the fixed API revision that introduced `calendar.verify`,
+  // asked at the moment of the request rather than bound, and kept here
+  // rather than beside Service's other gates only because that file is at
+  // its size ceiling.
+  function backendCanVerifyCalendars() {
+    return !!service && !!service.backend && service.backend.ready === true
+      && Number(service.backend.apiVersion) >= 10
+  }
+  // `callback(error, note)`: an empty error means save; a note goes with the
+  // success message. The plugin pins its backend, so until the one that
+  // checks passwords is released an older backend keeps the earlier
+  // behavior rather than losing the feature — and says what it did not do.
+  readonly property string uncheckedNote: "The password was not checked: this backend cannot check CalDAV passwords yet"
+  function verifyCalDavPassword(source, secret, callback) {
+    if (!service || !service.backend || !service.backend.ready) {
+      callback("Calendar backend is unavailable", "")
+      return
+    }
+    if (!backendCanVerifyCalendars()) {
+      callback("", uncheckedNote)
+      return
+    }
+    var serial = ++sourceCheckSerial
+    sourceCheckPending = true
+    service.backend.call("calendar.verify", {
+      source: { kind: "caldav", url: String(source.url || ""), username: String(source.username || "") },
+      password: secret
+    }, function(result, error) {
+      // The editor cancelled while the backend held this; whatever the
+      // server said, the user withdrew the password.
+      if (serial !== root.sourceCheckSerial) return
+      root.sourceCheckPending = false
+      if (error || !result || result.verified !== true) {
+        callback(root.verificationFailure(error), "")
+        return
+      }
+      callback("", "")
+    })
+  }
+
+  // The editor's Cancel while a check is still out. Returns whether there was
+  // one to cancel: once the server has accepted the password the settings
+  // write is under way and finishes, and Cancel is not offered. Nothing is
+  // reported through calendarSaved; the editor that cancelled knows.
+  function cancelSourceSave() {
+    if (!sourceCheckPending) return false
+    sourceCheckSerial++
+    sourceCheckPending = false
+    savingSource = false
+    sourceSecret = ""
+    sourceSaveNote = ""
+    sourceBeingSaved = null
+    return true
+  }
+
+  // Known backend reasons only; the raw diagnostic is never displayed.
+  function verificationFailure(error) {
+    var code = String(error && error.message || error || "")
+    if (code === "calendar_auth_refused") return "The calendar server rejected that username or password"
+    if (code === "calendar_not_found") return "No calendar was found at that address"
+    if (code === "calendar_redirected") return "The calendar server redirects that address. Use the address it points to"
+    if (code === "calendar_invalid_url") return "Use an HTTPS CalDAV calendar address"
+    if (code === "calendar_timeout" || code === "calendar_network_failed")
+      return "The calendar server could not be reached"
+    return "The calendar password could not be checked"
   }
 
   function removeCalendar(sourceId) {
@@ -833,7 +948,11 @@ Item {
     sourceBeingSaved = source
     sourceSecret = String(secret)
     savingSource = true
-    storeSourcePassword(true)
+    verifyCalDavPassword(source, sourceSecret, function(error, note) {
+      if (error !== "") { root.sourceWriteFailed(error); return }
+      root.sourceSaveNote = note
+      root.storeSourcePassword(true)
+    })
   }
 
   function storeNextPassword() {
@@ -870,6 +989,7 @@ Item {
   function sourceWriteFailed(error) {
     savingSource = false
     sourceSecret = ""
+    sourceSaveNote = ""
     sourceBeingSaved = null
     refreshAfterSourceWrite = false
     calendarSaved(false, String(error || "Could not save the calendar"))
@@ -915,14 +1035,16 @@ Item {
     var sourceId = sourceBeingSaved ? String(sourceBeingSaved.id || "") : ""
     var secret = sourceSecret
     service.credentialPut("calendar-password", sourceId, "", secret, function(ok, error) {
+      var note = root.sourceSaveNote
       root.sourceSecret = ""
+      root.sourceSaveNote = ""
       root.sourceBeingSaved = null
       root.savingSource = false
       if (!ok) {
         root.calendarSaved(false, String(error || "Could not save the password"))
         return
       }
-      root.calendarSaved(true, "")
+      root.calendarSaved(true, note)
       if (refreshAfter && root.rangeStart && root.rangeEnd)
         root.refresh(root.rangeStart, root.rangeEnd)
     })

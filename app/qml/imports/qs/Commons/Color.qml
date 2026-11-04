@@ -57,10 +57,14 @@ QtObject {
     if (role === "transparent") return Qt.rgba(0, 0, 0, 0)
     return token.charAt(0) === "#" ? token : fallback
   }
+  // shellColor answers a shell.toml colour with the "#rrggbb" string the file
+  // wrote, and a string has no .r: Qt.rgba over one is black, which drew every
+  // dialog, menu and tooltip black under a light theme's dark text.
+  // Qt.alpha reads a colour or its name, as the shell's own Util.alpha does.
   function withAlpha(value, alpha) {
     var amount = Number(alpha)
     if (!isFinite(amount)) amount = 1
-    return Qt.rgba(value.r, value.g, value.b, Math.max(0, Math.min(1, amount)))
+    return Qt.alpha(value, Math.max(0, Math.min(1, amount)))
   }
   // A menu is a piece of the window, not a raised card: without a shell.toml
   // saying otherwise it sits on the window's own background, and only its

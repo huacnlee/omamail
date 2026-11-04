@@ -1,6 +1,7 @@
 .pragma library
 
 .import "Palette.js" as Palette
+.import "../account/Accounts.js" as Accounts
 
 var VERSION = 1
 var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
@@ -210,7 +211,7 @@ function withMicrosoftAccounts(list, accountSummaries) {
   var accounts = Array.isArray(accountSummaries) ? accountSummaries : []
   for (var i = 0; i < accounts.length; i++) {
     var account = accounts[i] || {}
-    if (account.provider !== "outlook" || account.signedIn !== true) continue
+    if (Accounts.calendarProvider(account) !== "microsoft" || account.signedIn !== true) continue
     var accountId = trimmed(account.id || account.email)
     if (accountId === "") continue
     var saved = null
@@ -350,7 +351,7 @@ function applyDiscovery(list, result) {
   return next
 }
 
-function forAccount(list, accountId) {
+function forAccount(list, accountId, invitationCalendarId) {
   var source = list || emptyList()
   var wanted = trimmed(accountId)
   if (wanted === "") return copyList(source)
@@ -358,7 +359,8 @@ function forAccount(list, accountId) {
   var values = Array.isArray(source.sources) ? source.sources : []
   for (var i = 0; i < values.length; i++) {
     if (!values[i]) continue
-    if (!comesWithAccount(values[i]) || trimmed(values[i].accountId) === wanted)
+    if (!comesWithAccount(values[i]) || trimmed(values[i].accountId) === wanted
+        || (invitationCalendarId && values[i].id === invitationCalendarId))
       next = add(next, values[i])
   }
   return next

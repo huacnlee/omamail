@@ -146,6 +146,14 @@ assert.strictEqual(recipients.length, 3)
 assert.strictEqual(recipients[0].display, "Doe, Jane")
 assert.strictEqual(recipients[2].email, "carl@z.com")
 assert.strictEqual(message.parseAddressList("").length, 0)
+// Inside quotes a backslash escapes the next character, so an escaped quote
+// does not end the name and let its comma split the list.
+{
+  const escaped = message.parseAddressList('"O\\"Neil, Pat" <pat@example.org>, ada@example.org')
+  assert.strictEqual(escaped.length, 2)
+  assert.strictEqual(escaped[0].name, 'O"Neil, Pat')
+  assert.strictEqual(escaped[1].email, "ada@example.org")
+}
 
 assert.strictEqual(message.formatAddressList(recipients, 2), "Doe, Jane, bob, +1")
 assert.strictEqual(message.formatAddressList(recipients, 5), "Doe, Jane, bob, Carl")
@@ -867,6 +875,99 @@ assert.strictEqual(message.extractHtml({
   // altogether rather than emitting an empty one.
   assert.ok(message.buildRawMessage({ to: "a@b.com", inReplyTo: "\r\n", body: "x" })
     .indexOf("In-Reply-To") < 0)
+}
+
+// ---------------------------------------------------------- display names
+//
+// A name holding one of RFC 5322's specials is one name only quoted: bare, a
+// comma ends it, a colon opens a group, a parenthesis a comment. Every name
+// reaches a header through `encodedPhrase`, in From, To, Cc, Bcc and Reply-To.
+const NAME_CASES = "()<>[]:;@\\,.\"".split("").map((c) => ["Ada " + c + " Lovelace"])
+  .concat([
+    ["Doe, Jane"], ['Say "hi" \\ bye'], ["ends with \\"], ['"'],
+    ["()<>[]:;@\\,.\""], ["Team: eve@example.net;"], ["eve@example.net"],
+    ["Müller, Jörg"], ["工, Lee <eve@example.net>"],
+    // Readers decode `=?` even inside quotes, so it leaves as an encoded word.
+    ["=?UTF-8?B?PGV2ZUBleGFtcGxlLm5ldD4=?="],
+    ["Ada\rBcc: eve@example.net", "Ada Bcc: eve@example.net"],
+    ["Ada\nLovelace", "Ada Lovelace"], ["Ada\r\nLovelace", "Ada Lovelace"],
+    ["Ada\u0000Lovelace", "Ada Lovelace"], ["Ada\u0085Lovelace", "Ada Lovelace"]
+  ])
+{
+  const headers = (raw) => raw.split("\r\n\r\n")[0].split("\r\n")
+  for (const [name, expected = name] of NAME_CASES) {
+    // The To text as the composer's field holds it; the RSVP and unsubscribe
+    // senders hand `buildRawMessage` the same kind of text.
+    const typed = (email) => message.quotedPhrase(name, false) + " <" + email + ">"
+    const raw = message.buildRawMessage({
+      from: "me@example.org", fromName: name, to: typed("to@example.org") + ", ada@example.org",
+      cc: typed("cc@example.org"), bcc: typed("bcc@example.org"),
+      replyTo: typed("reply@example.org"), body: "x"
+    })
+    const lines = headers(raw)
+    assert.ok(lines.every((line) => /^[\x20-\x7e]+$/.test(line)), JSON.stringify(name))
+    assert.deepStrictEqual(lines.slice(0, 5).map((line) => line.split(":")[0]),
+      ["From", "To", "Cc", "Bcc", "Reply-To"], JSON.stringify(name))
+    const summary = message.summarize({ payload: message.parseRfc822(raw) }, new Date(0))
+    for (const [address, email] of [[summary.from, "me@example.org"],
+      [summary.replyTo, "reply@example.org"]]) {
+      assert.strictEqual(address.email, email, JSON.stringify(name))
+      assert.strictEqual(address.name, expected, JSON.stringify(name))
+    }
+    for (const [list, email] of [[summary.to, "to@example.org"], [summary.cc, "cc@example.org"],
+      [summary.bcc, "bcc@example.org"]]) {
+      assert.strictEqual(list.length, email === "to@example.org" ? 2 : 1, JSON.stringify(name))
+      assert.strictEqual(list[0].email, email, JSON.stringify(name))
+      assert.strictEqual(list[0].name, expected, JSON.stringify(name))
+    }
+  }
+  assert.strictEqual(message.fromHeader("me@example.org", "Doe, Jane"),
+    'From: "Doe, Jane" <me@example.org>')
+  assert.strictEqual(message.encodedPhrase('Say "hi" \\ bye'), '"Say \\"hi\\" \\\\ bye"')
+  assert.strictEqual(message.encodedPhrase("=?x?="), "=?UTF-8?B?" + Buffer.from("=?x?=").toString("base64") + "?=")
+  assert.strictEqual(message.encodedPhrase("Ada\u0000Lovelace"), '"Ada Lovelace"')
+  assert.strictEqual(message.encodedPhrase(" \r\n "), "")
+  assert.strictEqual(message.addressHeader("me@example.org", "\u0000"), "me@example.org",
+    "a name that is only control characters is no name")
+  // An ASCII list goes out as typed, the way `message.compose` writes it:
+  // groups, comments, unquoted commas and odd bracketed addresses included.
+  const toLine = (to) => {
+    const raw = message.buildRawMessage({ to: to, body: "x" })
+    return raw === null ? null : raw.split("\r\n").find((line) => line.startsWith("To:"))
+  }
+  const asTyped = "ada@example.org, Team: eve@example.net; <dave@example.org>, Smith (Sales) <s@example.org>, "
+    + "<a@example.org,eve@example.net>, Doe, Jane <x@example.org>"
+  assert.strictEqual(toLine(asTyped), "To: " + asTyped)
+  // A list ASCII cannot carry is written again entry by entry. A non-ASCII name
+  // no longer turns the whole list into one encoded word; a nameless address
+  // keeps its brackets unless it is a plain addr-spec, so it stays one address.
+  assert.strictEqual(toLine('"Müller, Jörg" <j@example.org>, <a@example.org,eve@example.net>, '
+    + "<team:eve@example.net;>, <c@example.org>, d@example.org"),
+    "To: =?UTF-8?B?" + Buffer.from("Müller, Jörg").toString("base64") + "?= <j@example.org>, "
+    + "<a@example.org,eve@example.net>, <team:eve@example.net;>, c@example.org, d@example.org")
+  assert.strictEqual(toLine('"=?x?=" <a@example.org>'), "To: =?UTF-8?B?"
+    + Buffer.from("=?x?=").toString("base64") + "?= <a@example.org>", "a name holding =? is rewritten too")
+  // What that rewrite could change the reading of is refused, and the whole
+  // message with it: a group, a comment, an address holding `=?` or a stray
+  // `<`, and an address part that is not printable ASCII.
+  for (const to of ["Jörg <j@example.org>, Team: eve@example.net; <dave@example.org>",
+    "Équipe: a@example.org, b@example.org;", "Jörg <j@example.org>, undisclosed-recipients:;",
+    "=?x?=: a@example.org;", "Jorg (CEO, Sälès) <j@example.org>",
+    "=?utf-8?q?a?=b@example.org, Jörg <c@example.org>", "Jörg <)<a@example.org>",
+    "Jörg <=?utf-8?q?a?=b@example.org>",
+    "\"Müller, Jörg\" <b@example.org]=?x?= <a@example.org>", "x <a\u0000@example.org>", "x <a\u0085@example.org>",
+    "x <jörg@example.org>", "jörg@example.org", "a@example.org\u0000", "x <a@example.org>\u0000"]) {
+    assert.strictEqual(message.buildRawMessage({ to: to, body: "x" }), null, JSON.stringify(to))
+    assert.strictEqual(message.buildSendPayload({ to: to, body: "x" }), null, JSON.stringify(to))
+  }
+  assert.strictEqual(message.buildRawMessage({ from: "me\u0085@example.org", to: "a@example.org", body: "x" }), null)
+  assert.strictEqual(message.addressHeader("a@example.org,eve@example.net", ""), "<a@example.org,eve@example.net>")
+  assert.strictEqual(message.addressHeader("a.b+c@example.org", ""), "a.b+c@example.org")
+  // Text the composer quoted only where a name needs it: a plain name stays as
+  // it reads.
+  assert.strictEqual(message.quotedPhrase("Jane Doe", false), "Jane Doe")
+  assert.strictEqual(message.quotedPhrase("Jörg Müller", false), "Jörg Müller")
+  assert.strictEqual(message.quotedPhrase("Doe, Jane", false), '"Doe, Jane"')
 }
 
 // ------------------------------------------------------------- Message-ID

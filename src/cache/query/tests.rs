@@ -14,6 +14,18 @@ fn conservative_search_terms_and_provider_scope() {
     assert_eq!(query_key("  in:inbox  ", 25), "in:inbox|25");
 }
 #[test]
+fn m365_pages_answer_search_like_jmap_roles_and_never_from_trash_or_junk() {
+    let mut store = store::empty();
+    store["queries"] = json!({
+        "role:inbox|25":{"at":3,"summaries":[row("in","needle",10,json!(["INBOX"]))]},
+        "role:trash|25":{"at":2,"summaries":[row("gone","needle",20,json!(["TRASH"]))]},
+        "role:junk|25":{"at":1,"summaries":[row("spam","needle",30,json!(["SPAM"]))]}
+    });
+    let found = search(&store, "needle", "m365");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["id"], "in");
+}
+#[test]
 fn newest_copy_owns_scope_and_older_copy_can_supply_search_fields() {
     let mut store = store::empty();
     store["queries"] = json!({"in:trash|25":{"at":20,"summaries":[row("id","",20,json!(["TRASH"]))]},"in:inbox|25":{"at":10,"summaries":[row("id","needle",10,json!([]))]}});
@@ -27,6 +39,34 @@ fn newest_copy_owns_scope_and_older_copy_can_supply_search_fields() {
     let found = search(&store, "needle", "gmail");
     assert_eq!(found.len(), 1);
     assert_eq!(found[0]["dateMs"], 20);
+}
+
+#[test]
+fn cached_search_matches_all_words_across_fields_and_keeps_newest_flags() {
+    let store = json!({"queries":{
+        "in:inbox|25":{"at":1,"summaries":[
+            {"id":"older","dateMs":10,"subject":"Quarterly invoice","from":{"display":"Jane Doe"},"to":[{"email":"buyer@example.org"}],"unread":true},
+            {"id":"newer","dateMs":20,"subject":"Invoice approved","snippet":"Jane signed it"}
+        ]},
+        "is:unread|25":{"at":2,"summaries":[
+            {"id":"older","dateMs":10,"subject":"Quarterly invoice","from":{"display":"Jane Doe"},"unread":false}
+        ]}
+    }});
+    let found = search(&store, "jane invoice", "gmail");
+    assert_eq!(
+        found
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["newer", "older"]
+    );
+    assert_eq!(found[1]["unread"], false);
+    for query in ["buyer@example.org", "\"quarterly invoice\""] {
+        let found = search(&store, query, "gmail");
+        assert_eq!(found.len(), 1, "{query}");
+        assert_eq!(found[0]["id"], "older");
+    }
+    assert!(search(&store, "", "gmail").is_empty());
 }
 #[test]
 fn page_caps_close_pagination_and_prunes_old_queries() {

@@ -54,12 +54,29 @@ Column {
     return ""
   }
 
+  readonly property string tenantError: "That is not a Microsoft Entra Directory (tenant) ID or domain"
+
+  function validatedTenant() {
+    if (!workSwitch.checked) return ""
+    var tenant = Microsoft.workTenant(tenantField.text)
+    if (tenant !== "") return tenant
+    errorText.text = root.tenantError
+    return ""
+  }
+
+  // The refusal is about the field as it was; editing it or switching the
+  // account type away from it answers that, and leaves other errors alone.
+  function clearTenantError() {
+    if (errorText.text === root.tenantError) errorText.text = ""
+  }
+
   function accountValues() {
     var address = validatedAddress()
     if (address === "") return null
     var clientId = validatedClientId()
     if (clientId === "") return null
-    var tenant = workSwitch.checked ? "organizations" : ""
+    var tenant = validatedTenant()
+    if (workSwitch.checked && tenant === "") return null
     var send = workSwitch.checked && graphSwitch.checked ? "graph" : ""
     var imap = Outlook.settings(address, tenant, send)
     imap.tenant = tenant
@@ -118,7 +135,9 @@ Column {
     addressField.text = String(service.accountAddress || "")
     if (auth && auth.configuredClientId)
       clientIdField.text = String(auth.configuredClientId)
-    workSwitch.checked = !!auth && Microsoft.isWorkTenant(auth.tenant)
+    var tenant = auth ? Microsoft.normalizeTenant(auth.tenant) : "consumers"
+    workSwitch.checked = tenant !== "consumers"
+    tenantField.text = tenant !== "consumers" && tenant !== "organizations" ? tenant : ""
     graphSwitch.checked = !!auth && String(auth.configuredSend || "") === "graph"
   }
 
@@ -217,7 +236,7 @@ Column {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       placeholderText: "Microsoft Application (client) ID"
-      onAccepted: root.signIn()
+      onAccepted: if (workSwitch.checked) tenantField.forceActiveFocus(); else root.signIn()
     }
 
     // A work or school mailbox lives in its own tenant rather than the
@@ -234,6 +253,7 @@ Column {
         foreground: root.textColor
         accent: root.accentColor
         onToggled: checked = !checked
+        onCheckedChanged: root.clearTenantError()
       }
 
       Text {
@@ -252,6 +272,19 @@ Column {
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
       }
+    }
+
+    TextField {
+      id: tenantField
+      objectName: "outlook-tenant-field"
+      width: parent.width
+      visible: workSwitch.checked
+      foreground: root.textColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.bodySmall
+      placeholderText: "Directory (tenant) ID or domain — blank for multitenant"
+      onTextChanged: root.clearTenantError()
+      onAccepted: root.signIn()
     }
 
     Row {
@@ -356,8 +389,11 @@ Column {
     }
 
     Text {
+      objectName: "outlook-app-setup-help"
       width: parent.width
-      text: "1. Register an app for personal Microsoft accounts. 2. Under Authentication, enable public client flows. 3. Copy its Application (client) ID above. Omamail requests only IMAP, SMTP and offline access when you sign in."
+      text: workSwitch.checked
+        ? "1. Register the app in this Microsoft Entra tenant, or as multitenant. 2. Under Authentication, enable public client flows. 3. For a single-tenant app, copy its Directory (tenant) ID above; leave it blank for a multitenant app. 4. Copy its Application (client) ID above. Omamail requests only IMAP, SMTP and offline access when you sign in."
+        : "1. Register an app for personal Microsoft accounts. 2. Under Authentication, enable public client flows. 3. Copy its Application (client) ID above. Omamail requests only IMAP, SMTP and offline access when you sign in."
       color: root.dimColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.caption

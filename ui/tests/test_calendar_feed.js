@@ -103,22 +103,24 @@ assert.strictEqual(feed.eventHeight(timed, week[1], 64), 96)
 assert.strictEqual(feed.eventTop({ start: { ms: week[1].startMs, allDay: true } },
   week[1], 7, 64), 0)
 
-const quietRange = feed.weekHourRange([], week, 7, 19)
-assert.deepStrictEqual(JSON.parse(JSON.stringify(quietRange)), { first: 7, last: 19 })
-const earlyLateRange = feed.weekHourRange([
+assert.strictEqual(feed.weekOpeningHour([], week, 7), 7)
+assert.strictEqual(feed.weekOpeningHour([
+  { start: { ms: new Date(2026, 7, 17, 10, 30).getTime(), allDay: false },
+    end: { ms: new Date(2026, 7, 17, 11, 15).getTime() } },
+  { start: { ms: week[2].startMs, allDay: true }, end: { ms: week[2].endMs } }
+], week, 7), 10, "a quiet morning opens at the first event, past the usual hour")
+assert.strictEqual(feed.weekOpeningHour([
   { start: { ms: new Date(2026, 7, 17, 5, 30).getTime(), allDay: false },
     end: { ms: new Date(2026, 7, 17, 6, 15).getTime() } },
   { start: { ms: new Date(2026, 7, 18, 20, 0).getTime(), allDay: false },
-    end: { ms: new Date(2026, 7, 18, 22, 30).getTime() } },
-  { start: { ms: week[2].startMs, allDay: true }, end: { ms: week[2].endMs } }
-], week, 7, 19)
-assert.deepStrictEqual(JSON.parse(JSON.stringify(earlyLateRange)), { first: 5, last: 23 })
-const overnightRange = feed.weekHourRange([{
+    end: { ms: new Date(2026, 7, 18, 22, 30).getTime() } }
+], week, 7), 5)
+assert.strictEqual(feed.weekOpeningHour([{
   start: { ms: new Date(2026, 7, 17, 22, 0).getTime(), allDay: false },
   end: { ms: new Date(2026, 7, 18, 2, 0).getTime() }
-}], week, 7, 19)
-assert.deepStrictEqual(JSON.parse(JSON.stringify(overnightRange)), { first: 0, last: 24 },
-  "an overnight event remains visible on both days")
+}], week, 7), 0, "an overnight event remains visible on both days")
+assert.strictEqual(feed.weekOpeningHour([{ start: { ms: week[2].startMs, allDay: true }, end: { ms: week[2].endMs } }],
+  week, 7), 7, "an all-day event sits above the hours")
 
 const allDayEvents = [
   { uid: "a", start: { ms: week[0].startMs, allDay: true }, end: { ms: week[1].endMs } },
@@ -149,7 +151,7 @@ assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
 assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64, NaN), -1)
 assert.strictEqual(feed.nowOffset(null, 7, 19, 64, halfNine), -1)
 
-// A day whose range weekHourRange widened to the whole day still places it.
+// A day whose first event opens it at midnight still places it.
 assert.strictEqual(feed.nowOffset(week[1], 0, 24, 64,
   new Date(2026, 7, 18, 0, 30).getTime()), 32)
 
@@ -188,10 +190,8 @@ assert.strictEqual(feed.eventHeight(springEvent, springDay, 60), 60,
   "event height follows the labeled wall-clock interval")
 assert.strictEqual(feed.slotStart(springDay, 210, 0, 60, 30), springHalfThree,
   "clicking the 03:30 row creates an event at 03:30")
-const springRange = feed.weekHourRange([springEvent], [springDay], 7, 19)
-assert.strictEqual(springRange.first, 3,
-  "a DST-day event widens the labeled hours it occupies")
-assert.strictEqual(springRange.last, 19)
+assert.strictEqual(feed.weekOpeningHour([springEvent], [springDay], 7), 3,
+  "a DST-day event opens at the labeled hour it occupies")
 const autumnDay = feed.weekDays(new Date(2026, 10, 1, 12).getTime(), 0)[0]
 assert.strictEqual(feed.nowOffset(autumnDay, 0, 24, 60,
   new Date(2026, 10, 1, 3, 30).getTime()), 210,
@@ -413,6 +413,8 @@ assert.strictEqual(feed.displayInAllDayLane(holiday), true)
 const travelDay = feed.weekDays(new Date(2026,8,2).getTime(),1)[2]
 assert.strictEqual(feed.allDayEventsOnDay([holiday,dailyTwo],travelDay)[0],holiday)
 assert.strictEqual(feed.timedLayout([holiday,dailyTwo],travelDay).length,1)
+assert.strictEqual(feed.dayLanes([holiday,dailyTwo],travelDay).length,1,
+  "multi-day events stay in the all-day lane after integrating timed lanes")
 assert.strictEqual(holiday.start.allDay,false,"display promotion must not mutate timed events")
 const originalTZ = process.env.TZ
 process.env.TZ = "Europe/Berlin"
@@ -712,6 +714,42 @@ assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
 assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
 assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
 
+// An hour's automatic height shows 16 hours, between what is readable and the usual height.
+assert.strictEqual(feed.automaticHourHeight(420, 60, 25), 26.25)
+assert.strictEqual(feed.automaticHourHeight(1600, 60, 25), 60, "a tall window keeps the usual height")
+assert.strictEqual(feed.automaticHourHeight(200, 60, 25), 25, "a short window stays readable")
+assert.strictEqual(feed.automaticHourHeight(0, 60, 25), 25)
+assert.strictEqual(feed.automaticHourHeight(420, 60, 70), 70, "a large font outranks the usual height")
+
+// A height saved by the zoom keys, with 0 for automatic.
+assert.strictEqual(feed.normalizeHourHeight(40), 40)
+assert.strictEqual(feed.normalizeHourHeight("35"), 35)
+assert.strictEqual(feed.normalizeHourHeight(26.9), 26)
+assert.strictEqual(feed.normalizeHourHeight(5), 10)
+assert.strictEqual(feed.normalizeHourHeight(500), 120)
+for (const unusable of [undefined, null, "", " ", "tall", true, [40], 0, -10, NaN, Infinity])
+  assert.strictEqual(feed.normalizeHourHeight(unusable), 0, String(unusable))
+
+// One press of a zoom key starts from what is on screen and stops at each end of the range.
+assert.strictEqual(feed.zoomedHourHeight(60, 60, -1), 55)
+assert.strictEqual(feed.zoomedHourHeight(60, 60, 1), 65)
+assert.strictEqual(feed.zoomedHourHeight(0, 26.25, 1), 31, "from automatic")
+assert.strictEqual(feed.zoomedHourHeight(0, 25, -1), 20, "below what automatic goes to")
+assert.strictEqual(feed.zoomedHourHeight(10, 10, -1), 10)
+assert.strictEqual(feed.zoomedHourHeight(0, 10, -1), 0, "a press with no effect stays automatic")
+assert.strictEqual(feed.zoomedHourHeight(120, 120, 1), 120)
+assert.strictEqual(feed.zoomedHourHeight(40, 40, 0), 0, "reset returns to automatic")
+// A window tall enough to stretch hours to 37.5: no invisible presses.
+assert.strictEqual(feed.zoomedHourHeight(40, 40, -1, 37.5), 37, "stops where the window takes over")
+assert.strictEqual(feed.zoomedHourHeight(37, 37.5, -1, 37.5), 37)
+assert.strictEqual(feed.zoomedHourHeight(38, 38, -1, 37.5), 37, "half a pixel above the fit still scrolls")
+assert.strictEqual(feed.zoomedHourHeight(25, 25, -1, 24.17), 24, "a step landing just above the fit is not the end")
+assert.strictEqual(feed.zoomedHourHeight(25, 37.5, -1, 37.5), 25, "nothing to shrink, nothing saved")
+assert.strictEqual(feed.zoomedHourHeight(25, 37.5, 1, 37.5), 43, "growing starts from what is on screen")
+// A window stretching hours past the largest height: growing would not show.
+assert.strictEqual(feed.zoomedHourHeight(0, 122.5, 1, 122.5), 0)
+assert.strictEqual(feed.zoomedHourHeight(0, 122.5, -1, 122.5), 0)
+
 console.log("test_calendar_feed.js ok")
 
 // -------------------------------------------------------------- Microsoft
@@ -770,6 +808,12 @@ console.log("test_calendar_feed.js ok")
   assert.strictEqual(feed.graphResponseError(500, "not json"), "Microsoft Graph answered 500")
   assert.strictEqual(feed.nativeRequestError("microsoft"),
     "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again")
+  // A Microsoft 365 calendar refused for consent says what the administrator does and what follows,
+  // and nothing about the sign-in page, which a calendar refresh never shows.
+  const consent = feed.nativeRequestError("microsoft", "m365:ada@example.org", { message: "auth_consent_required" })
+  assert.strictEqual(consent, "Microsoft calendar request failed. An administrator has to approve this app "
+    + "for your organization. Then sign in to this mailbox again")
+  assert.ok(!/private window|page|browser/.test(consent), consent)
   assert.strictEqual(feed.nativeRequestError("caldav"),
     "CalDAV calendar request failed. Check its server address and password in Settings")
   assert.strictEqual(feed.nativeRequestError("icloud"),
@@ -780,4 +824,55 @@ console.log("test_calendar_feed.js ok")
   const made = feed.createEvent({ title: "Plan", startMs: Date.UTC(2026, 8, 9, 9), endMs: Date.UTC(2026, 8, 9, 10) }, 1000)
   assert.strictEqual(made.graph.subject, "Plan")
   assert.strictEqual(made.recurring, false)
+}
+
+// Overlapping timed events share a day column in lanes.
+{
+  const day = { startMs: new Date(2026, 8, 28).getTime(), endMs: new Date(2026, 8, 29).getTime() }
+  const at = (h, m) => new Date(2026, 8, 28, h, m || 0).getTime()
+  const ev = (id, from, to) => ({ uid: id, start: { ms: from, allDay: false }, end: { ms: to, allDay: false } })
+  const lanes = (events) => JSON.parse(JSON.stringify(feed.dayLanes(events, day)))
+    .map(l => [l.event.uid, l.lane, l.lanes, l.span])
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10))]), [["a", 0, 1, 1]], "a lone event keeps the column")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(9), at(10)), ev("c", at(9, 30), at(11))]),
+    [["a", 0, 3, 1], ["b", 1, 3, 1], ["c", 2, 3, 1]], "three at once are three lanes")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(12)), ev("b", at(9), at(10)), ev("c", at(10), at(11))]),
+    [["a", 0, 2, 1], ["b", 1, 2, 1], ["c", 1, 2, 1]], "a lane is reused once its event has ended")
+  assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(13), at(14))]),
+    [["a", 0, 1, 1], ["b", 0, 1, 1]], "events apart are separate clusters, each whole width")
+  assert.deepStrictEqual(lanes([ev("long", at(9), at(17)), ev("x", at(9), at(10)), ev("y", at(9), at(10)), ev("z", at(12), at(13))]),
+    [["long", 0, 3, 1], ["x", 1, 3, 1], ["y", 2, 3, 1], ["z", 1, 3, 2]],
+    "a later event stretches over the lanes left free beside it")
+  const shortEvents = [ev("p", at(9), at(9, 5)), ev("q", at(9, 15), at(9, 20))]
+  assert.deepStrictEqual(lanes(shortEvents), [["p", 0, 1, 1], ["q", 0, 1, 1]],
+    "preserve main's duration-scaled short blocks")
+  assert.strictEqual(feed.eventHeight(shortEvents[0], day, 60), 5)
+  const tiny = [ev("p", at(9), at(9)), ev("q", at(9, 1), at(9, 1))]
+  assert.strictEqual(feed.dayLanes(tiny, day, 60)[0].lanes, 2)
+  assert.strictEqual(feed.dayLanes(tiny, day, 240)[0].lanes, 1,
+    "minimum-height collisions use the view's actual pixels per hour")
+  assert.deepStrictEqual(lanes([ev("zero", at(9), at(9))]), [["zero", 0, 1, 1]], "a zero-length event still takes a slot")
+  assert.deepStrictEqual(lanes([ev("p", at(9), at(9)), ev("q", at(9, 1), at(9, 1))]),
+    [["p", 0, 2, 1], ["q", 1, 2, 1]], "events that overlap as drawn share lanes, not only by the clock")
+}
+
+// Repeated local hours are distinct instants but occupy the same grid pixels.
+{
+  const previousTZ = process.env.TZ
+  process.env.TZ = 'Europe/Berlin'
+  try {
+    const day = { startMs: new Date('2026-10-25T00:00:00+02:00').getTime(),
+      endMs: new Date('2026-10-26T00:00:00+01:00').getTime() }
+    const events = ['+02:00', '+01:00'].map(offset => ({
+      start: { ms: new Date('2026-10-25T02:10:00' + offset).getTime() },
+      end: { ms: new Date('2026-10-25T02:40:00' + offset).getTime() }
+    }))
+    assert.strictEqual(feed.eventTop(events[0], day, 0, 60), feed.eventTop(events[1], day, 0, 60))
+    const layout = feed.dayLanes(events, day)
+    assert.strictEqual(layout[0].lanes, 2)
+    assert.notStrictEqual(layout[0].lane, layout[1].lane)
+  } finally {
+    if (previousTZ === undefined) delete process.env.TZ
+    else process.env.TZ = previousTZ
+  }
 }

@@ -42,15 +42,27 @@ Item {
     && (height - centeredColumn.height) / 2
        >= versionLabel.implicitHeight + Style.space(12) + Style.space(12)
 
-  readonly property var keys: [
-    { key: "j / k", action: "Move through the list" },
-    { key: "Enter or o", action: "Open the selected message" },
-    { key: "e", action: "Archive" },
-    { key: "d", action: "Move to trash" },
-    { key: Keymap.hintKeyFor(Keymap.byId("toggleCheck")), action: "Select or deselect a message" },
-    { key: "r", action: "Reply" },
-    { key: "c", action: "Compose" }
-  ]
+  // What `e` and `d` will ask for here, the decision the hint row reads
+  // (`MessageList.keyActions`): Restore in the trash, Move to Inbox in
+  // Archive. `e` is left out where the mailbox has no archive, as the hint
+  // row leaves it out (`unavailableActions`).
+  property var keyActions: null
+  readonly property var keys: {
+    var acts = root.keyActions || ({ archive: "archive", trash: "trash" })
+    var missing = root.service && Array.isArray(root.service.unavailableActions)
+      ? root.service.unavailableActions : []
+    var out = [
+      { key: "j / k", action: "Move through the list" },
+      { key: "Enter or o", action: "Open the selected message" }
+    ]
+    if (missing.indexOf("archive") < 0) out.push({ key: "e", action: Model.actionName(acts.archive) })
+    out.push({ key: "d", action: Model.actionName(acts.trash) })
+    return out.concat([
+      { key: Keymap.hintKeyFor(Keymap.byId("toggleCheck")), action: "Select or deselect a message" },
+      { key: "r", action: "Reply" },
+      { key: "c", action: "Compose" }
+    ])
+  }
 
   Column {
     id: centeredColumn

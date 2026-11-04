@@ -184,6 +184,85 @@ Item {
       compare(Object.keys(account.remoteImageData).length, 0)
     }
 
+    function imageSetup(count) {
+      account.selectedId = "message-one"
+      account.readerSourceKey = "native-key"
+      account.remoteImagesAllowed = true
+      var sources = []
+      for (var i = 0; i < count; i++) sources.push("https://example.org/" + i)
+      account.selectedRemoteImageSources = sources
+      account.prepareRemoteImages()
+    }
+
+    readonly property string png: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="
+
+    function ofMethod(method) {
+      return backend.requests.filter(function(call) { return call.method === method })
+    }
+
+    // Complete the next outstanding fetch and wait for the repaint it schedules.
+    function completeAndAwaitRepaint(index, renders) {
+      ofMethod("public.image")[index].callback({data: png}, null)
+      tryVerify(function() { return ofMethod("reader.render").length === renders }, 4000)
+    }
+
+    function test_first_image_repaints_after_a_short_wait() {
+      imageSetup(3)
+      ofMethod("public.image")[0].callback({data: png}, null)
+      compare(ofMethod("reader.render").length, 0, "the repaint waits so close completions can share it")
+      tryVerify(function() { return ofMethod("reader.render").length === 1 }, 400,
+        "the first picture appears quickly, not after the long wait")
+    }
+
+    function test_repaint_wait_doubles_up_to_the_cap() {
+      imageSetup(8)
+      var expected = [100, 200, 400, 800, 1600, 3000, 3000]
+      for (var i = 0; i < expected.length; i++) {
+        compare(account.imagePaintWait, expected[i], "wait before repaint " + (i + 1))
+        completeAndAwaitRepaint(i, i + 1)
+      }
+    }
+
+    function test_new_arrivals_join_the_batch_without_restarting_the_timer() {
+      imageSetup(4)
+      ofMethod("public.image")[0].callback({data: png}, null)
+      wait(60)
+      ofMethod("public.image")[1].callback({data: png}, null)
+      tryVerify(function() { return ofMethod("reader.render").length === 1 }, 120,
+        "the second image did not push the repaint back")
+      var shown = ofMethod("reader.render")[0].params.options.remoteImageData
+      compare(Object.keys(shown).sort(), ["https://example.org/0", "https://example.org/1"])
+      compare(account.remoteImagesLoading, true, "later fetches are still outstanding")
+    }
+
+    function test_remaining_images_show_immediately_when_the_queue_finishes() {
+      imageSetup(3)
+      completeAndAwaitRepaint(0, 1)
+      ofMethod("public.image")[1].callback({data: png}, null)
+      ofMethod("public.image")[2].callback({data: png}, null)
+      compare(ofMethod("reader.render").length, 2, "the last picture paints without waiting for the timer")
+    }
+
+    function test_failed_downloads_do_not_hold_back_the_final_paint() {
+      imageSetup(3)
+      ofMethod("public.image")[0].callback({data: png}, null)
+      ofMethod("public.image")[1].callback(null, "unreachable")
+      ofMethod("public.image")[2].callback(null, "unreachable")
+      compare(ofMethod("reader.render").length, 1, "the finished queue flushes what did arrive")
+    }
+
+    function test_opening_another_message_resets_the_wait() {
+      imageSetup(4)
+      completeAndAwaitRepaint(0, 1)
+      completeAndAwaitRepaint(1, 2)
+      compare(account.imagePaintWait, 400)
+      account.clearSelection()
+      compare(account.imagePaintWait, 100)
+      backend.requests = []
+      imageSetup(2)
+      compare(account.imagePaintWait, 100)
+    }
+
     function test_image_policy_change_only_rerenders_the_opaque_native_source() {
       account.selectedId = "message-one"
       account.renderSource("native-key")

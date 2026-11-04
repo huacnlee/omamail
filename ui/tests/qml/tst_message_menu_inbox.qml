@@ -23,6 +23,9 @@ Item {
     property bool canOpenOnWeb: false
     property bool hasLabels: true
     property string rawLabelId: ""
+    property string mailboxKey: "inbox"
+    property string searchQuery: ""
+    property string rawQuery: ""
     property var messages: []
     property var hosts: null
     function hostForId(id) { return hosts ? hosts[id] || null : fakeService }
@@ -74,6 +77,17 @@ Item {
       menu.close()
       fakeService.hosts = null
       fakeService.canReportSpam = true
+      fakeService.canArchive = true
+      fakeService.mailboxKey = "inbox"
+      fakeService.searchQuery = ""
+    }
+
+    // A row by what it says, among those drawn: the rows added for the trash
+    // must not be found by a position that moves when a row is added.
+    function shown(text) {
+      for (var i = 0; i < menu.menuRows.length; i++)
+        if (menu.menuRows[i].visible && menu.menuRows[i].text === text) return menu.menuRows[i]
+      return null
     }
 
     function archivedMessage() {
@@ -193,6 +207,116 @@ Item {
       show(summary)
       compare(menu.archived, false)
       compare(unarchiveRow().visible, false)
+    }
+
+    // ------------------------------------------------- out of the trash
+    //
+    // Untrash is the verb every client has, so Restore needs no capability: it
+    // is offered where there is no archive and no move, and "Move to trash" is
+    // never offered for a message already there.
+
+    function trashedMessage() {
+      var summary = archivedMessage()
+      summary.inTrash = true
+      summary.labelIds = ["TRASH"]
+      return summary
+    }
+
+    function test_a_message_in_the_trash_offers_restore_and_not_trash() {
+      show(trashedMessage())
+      verify(shown("Move to trash") === null, "a message in the trash is not moved to it again")
+      verify(shown("Move to Inbox") === null, "adding INBOX would leave TRASH on it")
+      var restore = shown("Restore")
+      verify(restore !== null)
+      restore.activated()
+      compare(actionSpy.count, 1)
+      compare(actionSpy.signalArguments[0][0], "untrash")
+      compare(actionSpy.signalArguments[0][1], "m1")
+    }
+
+    // HEY: no archive, no move, and a posting that carries no TRASH label.
+    // The plain Trash listing is where it is, and nothing else here gets it out.
+    function test_without_archive_or_a_trash_label_the_trash_listing_offers_it() {
+      fakeService.canArchive = false
+      fakeService.mailboxKey = "trash"
+      var summary = archivedMessage()
+      summary.labelIds = []
+      show(summary)
+      verify(shown("Move to trash") === null)
+      verify(shown("Archive") === null)
+      var restore = shown("Restore")
+      verify(restore !== null)
+      restore.activated()
+      compare(actionSpy.signalArguments[0][0], "untrash")
+    }
+
+    // A search reaches the whole account, whatever mailbox the rail still has.
+    function test_a_search_from_the_trash_is_not_the_trash() {
+      fakeService.mailboxKey = "trash"
+      fakeService.searchQuery = "invoice"
+      var summary = archivedMessage()
+      summary.inInbox = true
+      summary.labelIds = ["INBOX"]
+      show(summary)
+      verify(shown("Restore") === null)
+      verify(shown("Move to trash") !== null)
+    }
+
+    function test_elsewhere_it_is_move_to_trash() {
+      var summary = archivedMessage()
+      summary.inInbox = true
+      show(summary)
+      verify(shown("Restore") === null)
+      var trash = shown("Move to trash")
+      verify(trash !== null)
+      trash.activated()
+      compare(actionSpy.signalArguments[0][0], "trash")
+    }
+
+    function test_the_keyboard_can_reach_restore_in_the_trash() {
+      show(trashedMessage())
+      var steps = 0
+      while (steps < menu.menuRows.length
+        && (menu.cursorIndex < 0 || menu.menuRows[menu.cursorIndex].text !== "Restore")) {
+        menu.moveCursor(1)
+        steps++
+      }
+      compare(menu.menuRows[menu.cursorIndex].text, "Restore", "j steps onto the row rather than over it")
+      menu.runCursor()
+      compare(actionSpy.signalArguments[0][0], "untrash")
+    }
+
+    // Opened on a ticked row, a choice reaches every ticked row, so each verb
+    // is decided over all of them: Restore only when every one is in the
+    // trash, Unstar only when every one is starred.
+    function test_a_ticked_row_decides_over_the_selection() {
+      var inbox = archivedMessage()
+      inbox.id = "m2"
+      inbox.inInbox = true
+      inbox.labelIds = ["INBOX"]
+      var trashed = trashedMessage()
+      trashed.starred = true
+      fakeService.messages = [trashed, inbox]
+      actionSpy.clear()
+      menu.openAt("m1", 100, 100, ["m1", "m2"])
+      wait(20)
+      verify(shown("Restore") === null, "one of them is not in the trash")
+      verify(shown("Unstar") === null, "one of them is not starred")
+      verify(shown("Star") !== null)
+      var trash = shown("Move to trash")
+      verify(trash !== null)
+      trash.activated()
+      compare(actionSpy.signalArguments[0][0], "trash")
+
+      var other = trashedMessage()
+      other.id = "m3"
+      other.starred = true
+      fakeService.messages = [trashed, other]
+      menu.openAt("m1", 100, 100, ["m1", "m3"])
+      wait(20)
+      verify(shown("Restore") !== null, "every one is in the trash")
+      verify(shown("Unstar") !== null, "every one is starred")
+      menu.close()
     }
 
     // ------------------------------------------------------- what it says

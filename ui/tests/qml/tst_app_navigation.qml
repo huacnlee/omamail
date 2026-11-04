@@ -211,6 +211,7 @@ Item {
     service: mailService
     shell: fakeShell
   }
+  TextEdit { id: clipboard; visible: false; textFormat: TextEdit.PlainText }
 
   TestCase {
     name: "AppNavigation"
@@ -288,6 +289,72 @@ Item {
               { tag: "reader", context: "reader" },
               { tag: "compose-subject", context: "compose", field: "compose-subject-field" },
               { tag: "compose-body", context: "compose", field: "compose-body-editor" }]
+    }
+
+    function test_event_description_context_keeps_focus_and_multiline_typing() {
+      app.runShortcut("createEvent", "")
+      var scope = having(app, function(item) { return item.keyContext !== undefined })
+      tryCompare(scope, "keyContext", "eventCompose")
+      wait(0)
+      var notes = named(app, "event-description-field")
+      notes.forceActiveFocus()
+      tryCompare(scope, "keyContext", "eventDescription")
+      wait(0)
+      verify(notes.activeFocus, "the new context must not send focus back to the title")
+      keyClick(Qt.Key_A)
+      keyClick(Qt.Key_Return)
+      keyClick(Qt.Key_B)
+      compare(notes.text, "a\nb")
+      keyClick(Qt.Key_Tab)
+      tryCompare(scope, "keyContext", "eventCompose")
+      verify(!notes.activeFocus)
+      notes.forceActiveFocus()
+      keyClick(Qt.Key_Escape)
+      tryCompare(scope, "keyContext", "list")
+      compare(kinds(), "list")
+    }
+
+    function test_event_preview_mouse_copy_and_close_restore_calendar_navigation_data() {
+      return [{tag:"escape"}, {tag:"back-button"}]
+    }
+
+    function test_event_preview_mouse_copy_and_close_restore_calendar_navigation(data) {
+      app.runShortcut("calendarView", "")
+      var view = having(app, function(item) { return typeof item.activateEvent === "function" })
+      verify(view !== null)
+      view.activateEvent({sourceId:"shared",uid:"preview",summary:"Shared planning session",
+        description:"Read-only notes",start:{ms:Date.now()},end:{ms:Date.now()+3600000}}, true)
+      tryCompare(app, "page", "calendarDetail")
+      wait(0)
+      var title = named(view, "event-title-text")
+      mouseDrag(title, 1, 1, title.width - 3, title.height - 3, Qt.LeftButton)
+      compare(title.selectedText, "Shared planning session")
+      keyClick(Qt.Key_C, Qt.ControlModifier)
+      clipboard.text = ""
+      clipboard.paste()
+      compare(clipboard.text, "Shared planning session")
+      compare(app.composing, false)
+      if (data.tag === "escape") keyClick(Qt.Key_Escape)
+      else {
+        var back = having(view, function(item) { return item.label === "Calendar" && typeof item.activated === "function" })
+        mouseClick(back, back.width / 2, back.height / 2)
+      }
+      tryCompare(view, "detailOpen", false)
+      wait(0)
+      keyClick(Qt.Key_A, Qt.ControlModifier)
+      keyClick(Qt.Key_C, Qt.ControlModifier)
+      clipboard.text = ""
+      clipboard.paste()
+      compare(clipboard.text, "Shared planning session", "closed preview text must not receive selection keys")
+      compare(title.activeFocus, false)
+      keyClick(Qt.Key_C)
+      tryCompare(app, "overlay", "eventComposer")
+      var input = named(app, "event-title-field")
+      tryCompare(input, "activeFocus", true)
+      keyClick(Qt.Key_X)
+      compare(input.text, "x")
+      keyClick(Qt.Key_Escape)
+      tryCompare(app, "composing", false)
     }
 
     function test_control_comma_opens_settings(data) {
@@ -645,6 +712,26 @@ Item {
       app.runShortcut("calendarDay")
       compare(selector.currentText, "Day (d)")
     }
+    function test_zoom_keys_reach_the_hours_only_in_the_day_and_week_views() {
+      var directions = []
+      mailService.calendarController = Qt.createQmlObject(
+        'import QtQuick; QtObject { property var events: []; property int hourHeight: 60; signal zoomed(int direction); function zoomHours(direction) { zoomed(direction) } function refresh(startMs, endMs) {} }',
+        app)
+      mailService.calendarController.zoomed.connect(function(direction) { directions.push(direction) })
+      app.showCalendar()
+      waitForRendering(app)
+      app.runShortcut("calendarMonth")
+      app.runShortcut("calendarZoomOut")
+      compare(directions, [])
+      app.runShortcut("calendarWeek")
+      app.runShortcut("calendarZoomOut")
+      app.runShortcut("calendarDay")
+      app.runShortcut("calendarZoomIn")
+      app.runShortcut("calendarZoomReset")
+      compare(directions, [-1, 1, 0])
+      app.runShortcut("mailView")
+      mailService.calendarController = null
+    }
     function test_status_error_opens_external_diagnosis_once() {
       mailService.lastError = "Could not confirm AI started. Check the conversation before retrying."
       mailService.actionStatus = ""
@@ -722,6 +809,85 @@ Item {
       mailService.searchQuery = ""
       app.goBack()
       compare(fakeShell.hidden.length, 1)
+    }
+
+    // The mouse's back button carries the same intent Escape carries, and the
+    // reader is where it is reached for most: below `compact` the list is not
+    // beside the message but replaced by it.
+    function test_the_mouse_back_button_leaves_the_message() {
+      var area = named(app, "mouse-back")
+      verify(area, "the window carries a back-button area")
+
+      app.openMessage("message-1")
+      compare(kinds(), "list,reader")
+
+      mouseClick(area, 40, 40, Qt.BackButton)
+      compare(kinds(), "list", "the mouse's back button leaves the message")
+      compare(fakeShell.hidden.length, 0, "and does not close the window doing it")
+    }
+
+    // A button under the hand has no affordance saying the next press shuts
+    // the mailbox, so the one branch of `back()` that ends the window is the
+    // one it must not reach. Escape, which somebody pressed on purpose, still
+    // does — `test_the_calendar_is_the_other_root_and_back_on_a_root_closes`
+    // is that half.
+    function test_the_mouse_back_button_does_not_close_the_window() {
+      var area = named(app, "mouse-back")
+      verify(area, "the window carries a back-button area")
+      compare(kinds(), "list", "the root is where this starts")
+
+      mouseClick(area, 40, 40, Qt.BackButton)
+      compare(kinds(), "list", "the root is not popped")
+      compare(fakeShell.hidden.length, 0, "and the window is not closed")
+    }
+
+    // It is `goBack()` and not `back()`: with rows ticked, the nearer thing to
+    // leave is the selection. Routed to `back()` this press would pop the
+    // history out from under a selection nobody had dropped — and on the root,
+    // close the window instead.
+    function test_the_mouse_back_button_drops_a_selection_before_the_page() {
+      var area = named(app, "mouse-back")
+      app.checkedIds = ["message-1"]
+      verify(app.selectionActive, "the selection is live")
+
+      mouseClick(area, 40, 40, Qt.BackButton)
+      compare(app.checkedIds.length, 0, "the selection is what the press left")
+      compare(kinds(), "list", "and the page stayed")
+      compare(fakeShell.hidden.length, 0, "and the window stayed")
+    }
+
+    // Qt's overlay dismisses a non-modal popup on a press outside it and then
+    // delivers that same press to what lies beneath. Acted on twice, one press
+    // would close the menu and take the page under it back together, which is
+    // a gesture spent twice and the only place in the app where that happens.
+    function test_the_mouse_back_button_only_closes_an_open_menu() {
+      var area = named(app, "mouse-back")
+      var menu = named(app, "app-menu")
+      verify(menu, "the window carries the app menu")
+
+      app.openMessage("message-1")
+      compare(kinds(), "list,reader")
+
+      menu.openAt(20, 20)
+      tryCompare(menu, "opened", true)
+
+      mouseClick(area, 300, 300, Qt.BackButton)
+      tryCompare(menu, "opened", false)
+      compare(kinds(), "list,reader", "the press closed the menu and nothing else")
+    }
+
+    // Only the back button. The area lies under the whole window, so a left
+    // click that reached it would be a click taken from whatever the pointer
+    // was actually on.
+    function test_the_mouse_back_area_takes_no_other_button() {
+      var area = named(app, "mouse-back")
+      app.openMessage("message-1")
+      compare(kinds(), "list,reader")
+
+      mouseClick(area, 40, 40, Qt.LeftButton)
+      compare(kinds(), "list,reader", "a left click is not a step back")
+      mouseClick(area, 40, 40, Qt.MiddleButton)
+      compare(kinds(), "list,reader", "and neither is a middle click")
     }
 
     function test_first_run_stacks_follow_what_the_service_knows() {

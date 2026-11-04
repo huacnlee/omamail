@@ -124,10 +124,16 @@ async fn peer(socket: TcpStream, state: Arc<Mutex<State>>) {
                     }
                 } else {
                     assert_eq!(fields, "(UID INTERNALDATE)\r\n");
-                    let wanted: Vec<u32> = set.split(',').map(|s| s.parse().unwrap()).collect();
-                    assert!(wanted.len() <= BATCH);
-                    for (uid, day) in &state.folders[&folder] {
-                        if wanted.contains(uid) && !state.missing.contains(uid) {
+                    // A range between sparse UIDs spans far more numbers than
+                    // messages; like a server, answer only the messages it names.
+                    let ranges = super::ranges(set);
+                    let named: Vec<_> = state.folders[&folder]
+                        .iter()
+                        .filter(|(uid, _)| ranges.iter().any(|range| range.contains(uid)))
+                        .collect();
+                    assert!(named.len() <= BATCH);
+                    for (uid, day) in named {
+                        if !state.missing.contains(uid) {
                             data.push_str(&format!("* 1 FETCH (UID {uid} INTERNALDATE \"{day:02}-Sep-2026 12:00:00 +0000\")\r\n"));
                         }
                     }
