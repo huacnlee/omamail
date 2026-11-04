@@ -4,6 +4,8 @@ Omamail is a native email and calendar app with multiple accounts and keyboard n
 
 <img width="800" alt="Omamail — reading mail with AI assistance" src="docs/images/full-mail.webp" />
 
+**If this helps you, please [sponsor me](https://github.com/sponsors/huacnlee).**
+
 ## Install
 
 ### Omarchy plugin
