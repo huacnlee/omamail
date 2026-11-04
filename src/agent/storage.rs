@@ -197,7 +197,8 @@ impl Store {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    /// Creating/removing a turn invalidates the in-process conversation index.
+    /// Creating/removing a turn invalidates the in-process conversation index,
+    /// unless it lands in the same timestamp tick as the previous change.
     pub(super) fn revision(&self) -> Result<[u64; 6]> {
         let m = self.root.metadata().map_err(|_| ioerror())?;
         Ok([

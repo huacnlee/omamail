@@ -471,6 +471,7 @@ pub(super) fn refresh(store: &Store, id: &str) -> Result<Value> {
 struct HeadIndex {
     path: std::path::PathBuf,
     revision: [u64; 6],
+    settled: bool,
     jobs: Vec<Value>,
 }
 static HEADS: std::sync::Mutex<Option<HeadIndex>> = std::sync::Mutex::new(None);
@@ -481,13 +482,16 @@ fn list(store: &Store) -> Result<Vec<Value>> {
     // Active heads are refreshed each poll, terminal displays only when paged.
     let revision = store.revision()?;
     let mut cached = HEADS.lock().map_err(|_| "agent_storage_unavailable")?;
-    if cached
-        .as_ref()
-        .is_none_or(|index| index.path != store.path() || index.revision != revision)
-    {
+    if cached.as_ref().is_none_or(|index| {
+        index.path != store.path() || index.revision != revision || !index.settled
+    }) {
+        // Read the clock before scanning: a turn created after this instant
+        // has to move the revision of a settled index.
+        let settled = revision_settled(&revision, now());
         *cached = Some(HeadIndex {
             path: store.path().to_owned(),
             revision,
+            settled,
             jobs: scan_heads(store)?,
         });
     }
@@ -498,6 +502,14 @@ fn list(store: &Store) -> Result<Vec<Value>> {
         }
     }
     Ok(index.jobs.clone())
+}
+
+/// Directory timestamps only advance with the kernel's clock tick (a few ms on
+/// Linux before multigrain timestamps, a second on some filesystems), so a turn
+/// created in the same tick as the previous change leaves the revision equal.
+/// Trust an unchanged revision only once its timestamps are safely in the past.
+fn revision_settled(revision: &[u64; 6], now: u64) -> bool {
+    now > revision[2].max(revision[4]).saturating_add(2)
 }
 
 fn scan_heads(store: &Store) -> Result<Vec<Value>> {
@@ -1252,6 +1264,12 @@ mod tests {
             }
         }
         assert_eq!(list(&store).unwrap().len(), 1);
+        // A scan this close to the last change cannot trust an equal revision.
+        store.reads.set(0);
+        assert_eq!(list(&store).unwrap().len(), 1);
+        assert!(store.reads.get() >= 320, "recent scan was reused");
+        std::thread::sleep(Duration::from_millis(3100));
+        assert_eq!(list(&store).unwrap().len(), 1);
         store.reads.set(0);
         let page = refresh_page(&store, list(&store).unwrap()).unwrap();
         assert_eq!(page[0]["id"], format!("{:032x}", 319));
@@ -1261,6 +1279,15 @@ mod tests {
             store.reads.get()
         );
 
+        // Cached metadata never bypasses validation of the displayed page.
+        let head = format!("{:032x}", 319);
+        let saved = store.read_json(&head, "job.json", 4096).unwrap().unwrap();
+        store
+            .write_json(&head, "job.json", &json!({"id":"forged"}))
+            .unwrap();
+        assert!(refresh_page(&store, list(&store).unwrap()).is_err());
+        store.write_json(&head, "job.json", &saved).unwrap();
+
         let independent = format!("{:032x}", 1000);
         let mut job = make(&independent, &independent, 1000, "queued");
         assert_eq!(list(&store).unwrap().len(), 2);
@@ -1269,13 +1296,17 @@ mod tests {
         assert_eq!(list(&store).unwrap()[0]["state"], "done");
         store.remove(&independent).unwrap();
         assert_eq!(list(&store).unwrap().len(), 1);
-
-        // Cached metadata never bypasses validation of the displayed page.
-        let head = format!("{:032x}", 319);
-        store
-            .write_json(&head, "job.json", &json!({"id":"forged"}))
-            .unwrap();
-        assert!(refresh_page(&store, list(&store).unwrap()).is_err());
+    }
+    #[test]
+    fn head_index_waits_for_directory_timestamps_to_settle() {
+        let changed = 1_000;
+        let revision = [1, 2, changed, 0, changed, 0];
+        for now in [changed - 1, changed, changed + 1, changed + 2] {
+            assert!(!revision_settled(&revision, now), "{now}");
+        }
+        assert!(revision_settled(&revision, changed + 3));
+        // A ctime newer than the mtime is the later change.
+        assert!(!revision_settled(&[1, 2, 1, 0, changed, 0], changed + 2));
     }
     #[test]
     fn context_rejects_overrides_controls_and_injected_ids() {
