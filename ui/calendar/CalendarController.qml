@@ -264,7 +264,7 @@ Item {
     // JSON-RPC codes are numeric; the backend's stable reason is its message.
     // Match only known reasons and never display the raw diagnostic.
     var code = String(error && error.message || error || "")
-    if (code === "auth_signed_out" || code === "calendar_auth_refused")
+    if (code === "auth_signed_out" || code === "gmail_signed_out" || code === "calendar_auth_refused")
       return "Sign in to this mailbox again"
     if (code === "calendar_provider_unsupported")
       return "This mailbox does not support calendar discovery"
