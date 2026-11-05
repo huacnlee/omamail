@@ -50,6 +50,11 @@ const QUOTA_BURST: f64 = 200.0;
 // A call whose turn would come after the IPC deadline fails now, as rate
 // limited, instead of timing out as a mutation of unknown outcome.
 const QUOTA_MAX_WAIT: Duration = Duration::from_secs(15);
+// Google also refuses too many simultaneous requests for one user as rate
+// limited, however few quota units they cost. Opening a mailbox reads every
+// message on the page at once, so reads for one account take turns here, and
+// a refused read gives its turn back while it waits to try again.
+pub(crate) const MAX_READS_IN_FLIGHT: usize = 8;
 
 struct Quota {
     units: f64,
@@ -60,6 +65,7 @@ struct AccountSession {
     valid: AtomicBool,
     token: tokio::sync::Mutex<Option<Arc<Token>>>,
     quota: tokio::sync::Mutex<Quota>,
+    reads: tokio::sync::Semaphore,
 }
 
 impl AccountSession {
@@ -71,6 +77,7 @@ impl AccountSession {
                 units: QUOTA_BURST,
                 refilled: Instant::now(),
             }),
+            reads: tokio::sync::Semaphore::new(MAX_READS_IN_FLIGHT),
         }
     }
 
@@ -291,13 +298,13 @@ impl Session {
         }) {
             return Err("gmail_account_unknown");
         }
-        self.account(account)?.pace(10).await?;
         let answer = self
-            .get_with(
+            .read(
                 account,
+                10,
                 || refresh_grant(account.to_owned()),
                 |token| async move {
-                    gmail_http::get(
+                    gmail_http::get_once(
                         &["threads", id],
                         &[("format".into(), "full".into())],
                         &token,
@@ -337,6 +344,46 @@ impl Session {
         Ok(session)
     }
 
+    /// One read for an account: each attempt takes a turn and pays its quota
+    /// when it is sent, and a rate-limited attempt waits without its turn.
+    async fn read<R, G>(
+        &self,
+        account: &str,
+        cost: u32,
+        refresh: impl Fn() -> R,
+        get: impl Fn(String) -> G,
+    ) -> Result<Value, &'static str>
+    where
+        R: Future<Output = Result<Value, &'static str>>,
+        G: Future<Output = Result<Value, &'static str>>,
+    {
+        let session = self.account(account)?;
+        let started = std::time::Instant::now();
+        for retry in 0..=gmail_http::RATE_LIMIT_RETRIES {
+            let answer = {
+                let _turn = session.reads.acquire().await.map_err(|_| "session_failed")?;
+                // A session retired during the backoff never refreshes for a retry.
+                session.check()?;
+                // Retries included, the read stays inside one request deadline.
+                let remaining = gmail_http::DEADLINE.saturating_sub(started.elapsed());
+                tokio::time::timeout(remaining, async {
+                    session.pace(cost).await?;
+                    Self::get_from(&session, &refresh, &get).await
+                })
+                .await
+                .unwrap_or(Err("gmail_timeout"))
+            };
+            if answer != Err("gmail_rate_limited") {
+                return answer;
+            }
+            let Some(wait) = gmail_http::backoff_wait(retry, started) else {
+                return answer;
+            };
+            tokio::time::sleep(wait).await;
+        }
+        unreachable!()
+    }
+
     async fn get_with<R, G>(
         &self,
         account: &str,
@@ -348,6 +395,18 @@ impl Session {
         G: Future<Output = Result<Value, &'static str>>,
     {
         let session = self.account(account)?;
+        Self::get_from(&session, refresh, get).await
+    }
+
+    async fn get_from<R, G>(
+        session: &AccountSession,
+        refresh: impl Fn() -> R,
+        get: impl Fn(String) -> G,
+    ) -> Result<Value, &'static str>
+    where
+        R: Future<Output = Result<Value, &'static str>>,
+        G: Future<Output = Result<Value, &'static str>>,
+    {
         let token = session.token_with(&refresh).await?;
         session.check()?;
         let answer = get(token.value.clone()).await;
@@ -502,15 +561,15 @@ impl Session {
         }) {
             return Err("gmail_account_unknown");
         }
-        self.account(&account)?.pace(quota_cost(method)).await?;
         let answer = self
-            .get_with(
+            .read(
                 &account,
+                quota_cost(method),
                 || refresh_grant(account.clone()),
                 |token| {
                     let path = &path;
                     let query = &query;
-                    async move { gmail_http::get(path, query, &token).await }
+                    async move { gmail_http::get_once(path, query, &token).await }
                 },
             )
             .await?;
