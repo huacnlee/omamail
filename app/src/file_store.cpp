@@ -28,7 +28,8 @@ const QSet<QString> &allowedSettings()
         QStringLiteral("unifiedCalendarView"), QStringLiteral("calendarHourHeight"),
         QStringLiteral("openOnClick"),
         QStringLiteral("showBarIcon"), QStringLiteral("suggestEvents"),
-        QStringLiteral("unifiedMailboxes"), QStringLiteral("appearance"),
+        QStringLiteral("unifiedMailboxes"), QStringLiteral("spellingEnabled"),
+        QStringLiteral("spellingLanguage"), QStringLiteral("appearance"),
         QStringLiteral("calendarRemindersEnabled"), QStringLiteral("calendarSnoozeMinutes"),
         QStringLiteral("invitationCalendars"), QStringLiteral("aiAgent"),
         QStringLiteral("aiModel"), QStringLiteral("aiChatResetAt")};
