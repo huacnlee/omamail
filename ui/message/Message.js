@@ -1080,11 +1080,35 @@ function referenceValue(value) {
   return headerSafe(value).replace(/[^\x20-\x7e]+/g, "").substring(0, 512).trim()
 }
 
+// The sender of a quoted message, named and addressed. The address goes with
+// the name when there is one: a display name alone cannot identify a sender in
+// a forwarded message — it is text the sender chose.
+function senderLabel(from) {
+  var display = String((from && from.display) || "")
+  var email = String((from && from.email) || "")
+  if (display === "") return email
+  if (email === "") return display
+  return display + " <" + email + ">"
+}
+
+// The quoted original is whatever the reader held, and a sender's client is
+// free to have put anything there: the image references it left behind in the
+// text (`cid:` markers from a signature), or a whole HTML document sent as
+// text. None of that is the message — it would only travel as quoted noise in
+// a forward or a reply — so the quote takes it out before marking the lines.
+function quoteSource(body) {
+  var out = String(body || "")
+    .replace(/\[\s*cid:[^\]]*\]/gi, "")
+    .replace(/\bcid:[^\s]+/gi, "")
+  if (looksLikeHtml(out)) return htmlToText(out)
+  return out
+}
+
 function quoteBody(summary, body) {
   var header = summary && summary.from
-    ? "On " + (summary.fullTime || "") + ", " + summary.from.display + " wrote:"
+    ? "On " + (summary.fullTime || "") + ", " + senderLabel(summary.from) + " wrote:"
     : ""
-  var lines = String(body || "").split("\n")
+  var lines = quoteSource(body).split("\n")
   var quoted = []
   for (var i = 0; i < lines.length; i++) quoted.push("> " + lines[i])
   return (header ? header + "\n" : "") + quoted.join("\n")
