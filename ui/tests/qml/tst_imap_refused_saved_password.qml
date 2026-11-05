@@ -46,6 +46,16 @@ Item {
     }
   }
 
+  // A keyring that can be read but not written, so a sign-in writes nothing.
+  QtObject {
+    id: readOnlyKeyring
+    property bool backendCanStoreCredentials: true
+    function credentialGet(kind, accountId, clientId, callback) {
+      callback("old-password", "")
+      return true
+    }
+  }
+
   Component {
     id: imapFactory
     Providers.ImapAuth {
@@ -174,6 +184,20 @@ Item {
       verify(auth.loginBusy, "and the next sign-in is still a first one")
     }
 
+    function test_after_the_next_sign_in_a_reconnect_restores_again() {
+      var auth = restored()
+      auth.backend = backend
+      verify(auth.refuseSavedPassword(auth.passwordRevision))
+      verify(auth.signIn("new-app-password"))
+      auth.completeSignIn(true, "")
+      verify(auth.loggedIn)
+      verify(!auth.savedPasswordRefused)
+      credentials.reads = 0
+      backend.ready = false
+      backend.ready = true
+      compare(credentials.reads, 1, "the new password is the saved one now")
+    }
+
     function test_the_next_sign_in_is_a_first_one_and_overwrites_the_saved_password() {
       var auth = restored()
       verify(auth.refuseSavedPassword(auth.passwordRevision))
@@ -191,6 +215,9 @@ Item {
     function test_a_refusal_of_an_older_password_signs_nobody_out_data() {
       return [
         {tag: "replaced", change: function(auth) {
+          verify(auth.signIn("new-app-password")); auth.completeSignIn(true, "") }},
+        {tag: "replaced, nothing written", change: function(auth) {
+          auth.platform = readOnlyKeyring
           verify(auth.signIn("new-app-password")); auth.completeSignIn(true, "") }},
         {tag: "signed out and in again", change: function(auth) {
           auth.logout(); verify(auth.signIn("new-app-password")); auth.completeSignIn(true, "") }},
