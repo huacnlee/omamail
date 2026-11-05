@@ -7,6 +7,7 @@ import "../message/Html.js" as Html
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
 import "../account/Model.js" as Model
+import "../message/Otp.js" as Otp
 
 // The right column. The body goes through Qt's own rich text engine — a real
 // HTML renderer, not a browser — after Html.sanitize has removed what Qt would
@@ -147,9 +148,61 @@ Item {
   // is what the list and the compose view already hand back.
   readonly property string selectedId: service ? String(service.selectedId || "") : ""
 
+  // The one-time code in a sign-in message, read only once the body is the
+  // open message's own: before that the subject alone could name a code the
+  // body then contradicts. Never for a draft, which is the owner's own words.
+  readonly property var otp: !root.summary || root.isDraft || !root.service
+    || !root.service.detailPainted ? null
+    : Otp.detect(root.summary.subject,
+      root.service.selectedBody ? root.service.selectedBody.text : "")
+  readonly property string otpKey: root.otp ? root.selectedId + "\n" + root.otp.code : ""
+  // Which message and code reached the clipboard from here, so the card says
+  // "Copied" for that one only. Cleared on leaving the message: coming back
+  // later, something else may have been copied since.
+  property string otpCopiedKey: ""
+  // Every code copied without being asked, so neither a re-render nor coming
+  // back to the message copies it a second time over whatever came after.
+  property var otpAutoCopied: ({})
+  readonly property bool otpCopied: root.otpKey !== "" && root.otpCopiedKey === root.otpKey
+  onOtpKeyChanged: Qt.callLater(root.autoCopyCode)
+
+  // A code reached the clipboard, for the window to say so where it says
+  // everything else — the status line — whichever way the copy was asked for.
+  signal codeCopied()
+
+  // Starts the copy and answers whether it started. "Copied" waits for the
+  // clipboard to confirm it, and is about the message it was copied from.
+  function copyCode() {
+    if (!root.otp || !Otp.copyable(root.otp.code)) return false
+    if (!root.service || typeof root.service.copySecretText !== "function") return false
+    var key = root.otpKey
+    return !!root.service.copySecretText(root.otp.code, function(ok) {
+      if (!ok || !root) return
+      root.otpCopiedKey = key
+      if (root.otpKey === key) root.codeCopied()
+    })
+  }
+
+  // The code goes on the clipboard by itself when a fresh sign-in message is
+  // opened, the way it is waited for: the code is asked for, the mail arrives,
+  // the mail is opened. Only a message on screen, never on arrival — arriving
+  // mail must not replace what somebody copied in another window — and never
+  // from Spam, where a stranger could aim it at the clipboard of whoever looks.
+  function autoCopyCode() {
+    var key = root.otpKey
+    if (key === "" || root.otpAutoCopied[key] === true) return
+    if (!root.visible || (root.Window.window && !root.Window.window.visible)) return
+    if (!root.summary || root.summary.inSpam === true) return
+    if (!Otp.fresh(root.summary.date, Date.now())) return
+    var copied = root.otpAutoCopied
+    copied[key] = true
+    root.otpAutoCopied = copied
+    root.copyCode()
+  }
+
   readonly property var attachments: service ? service.selectedAttachments || [] : []
   property bool attachmentsExpanded: false
-  onSelectedIdChanged: resetAttachments()
+  onSelectedIdChanged: { resetAttachments(); otpCopiedKey = "" }
   onServiceChanged: resetAttachments()
   onAttachmentsChanged: if (attachments.length === 0) resetAttachments()
 
@@ -640,6 +693,23 @@ Item {
     // rather than pinned above it: a recurring invitation with a dozen guests
     // is taller than the panel, and a card that cannot scroll would leave the
     // message itself with nowhere to be.
+    // The sign-in code, first of everything: it is what the message was
+    // opened for, and it is read in a glance or not at all.
+    OtpCard {
+      id: otpCard
+      objectName: "otpCard"
+      x: root.bodyInset
+      y: Style.space(24)
+      width: root.bodyWidth
+      otp: root.otp
+      copied: root.otpCopied
+      textColor: root.textColor
+      accentColor: root.accentColor
+      dimColor: root.dimColor
+      panelFontFamily: root.panelFontFamily
+      onCopyRequested: root.copyCode()
+    }
+
     InviteCard {
       id: inviteCard
       objectName: "eventCard"
@@ -647,7 +717,7 @@ Item {
       // the sender's HTML. Reader mode narrows the mail below it, while this
       // card keeps the panel's full content width in every mode.
       x: root.bodyInset
-      y: Style.space(24)
+      y: otpCard.visible ? otpCard.y + otpCard.height + Style.space(14) : Style.space(24)
       width: root.bodyWidth
       invite: root.service ? root.service.selectedInvite : null
       response: root.service ? root.service.selectedResponse : ""
@@ -677,7 +747,8 @@ Item {
       id: suggestionCard
       objectName: "eventSuggestions"
       x: root.bodyInset
-      y: inviteCard.visible ? inviteCard.y + inviteCard.height + Style.space(14) : Style.space(24)
+      y: inviteCard.visible ? inviteCard.y + inviteCard.height + Style.space(14)
+        : (otpCard.visible ? otpCard.y + otpCard.height + Style.space(14) : Style.space(24))
       width: root.bodyWidth
       suggestions: root.service && root.service.eventSuggestions ? root.service.eventSuggestions : []
       textColor: root.textColor
@@ -696,7 +767,9 @@ Item {
         ? suggestionCard.y + suggestionCard.height + Style.space(14)
         : (inviteCard.visible
           ? inviteCard.y + inviteCard.height + Style.space(14)
-          : Style.space(24))
+          : (otpCard.visible
+            ? otpCard.y + otpCard.height + Style.space(14)
+            : Style.space(24)))
       width: root.preferredBodyWidth
       readOnly: true
       selectByMouse: true

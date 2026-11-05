@@ -123,6 +123,7 @@ used to exist, and they had.
 | `trash` | `d` | mail | Move to trash (in the trash: restore) |
 | `star` | `s` | mail | Star or unstar |
 | `moveToLabel` | `v` | mail | Move to |
+| `copyCode` | `y` | reader | Copy the verification code |
 | `markRead` | `Shift+I` | mail | Mark read |
 | `markUnread` | `Shift+U` | mail | Mark unread |
 | `toggleCheck` | `x`, `Space` | mail | Select or deselect the message |

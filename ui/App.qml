@@ -1007,6 +1007,7 @@ Item {
     if (id === "nextMember") return stepMember(1)
     if (id === "previousMember") return stepMember(-1)
     if (id === "archive" || id === "trash") return actOnCursor(list.keyActions[id])
+    if (id === "copyCode") return reader.copyCode()
     // Through the same guard actOnCursor applies rather than around it:
     // starring with nothing selected used to call through with an empty id.
     //
@@ -1989,6 +1990,7 @@ Item {
           }
           onZoomRequested: function(step) { root.zoomBy(step) }
           onZoomResetRequested: if (root.service) root.service.setBodyZoom(1.0)
+          onCodeCopied: root.notice = "Copied the verification code"
           onBackRequested: root.back()
           onMemberRequested: function(id) { root.openMember(id) }
           onMemberMenuRequested: function(id, sceneX, sceneY) {

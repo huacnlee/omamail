@@ -498,6 +498,8 @@ Item {
     if (text.indexOf("\0") >= 0) return false
     return Quickshell.execDetached(["wl-copy", "--", text])
   }
+  function copySecretText(text, done) { return clipboard.copy(text, done, platform) }
+  ClipboardWriter { id: clipboard }
 
   function configPath(name) {
     if (platform && typeof platform.configPath === "function")

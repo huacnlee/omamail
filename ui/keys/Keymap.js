@@ -95,6 +95,10 @@ var BINDINGS = [
     group: "Acting", label: "Move to",
     hint: { list: "move to", reader: "move to" },
     hintNeedsSelection: true, hintUnavailableId: "move" },
+  // `y` for yank, the copy key of the editors this keymap already borrows
+  // `j` and `k` from. Only the reader: the code is on the open message.
+  { id: "copyCode", keys: ["y"], contexts: ["reader"],
+    group: "Acting", label: "Copy the verification code" },
   { id: "markRead", keys: ["Shift+I"], contexts: MAIL,
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
