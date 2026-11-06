@@ -274,11 +274,12 @@ function recurrenceStarts(event, rangeStart, rangeEnd) {
     }
     var occurrenceMs = cursor.getTime()
     if (zoned) {
-      occurrenceMs = Ics.timeInZone({
+      var placed = Ics.timeInZone({
         year: cursor.getUTCFullYear(), month: cursor.getUTCMonth() + 1,
         day: cursor.getUTCDate(), hour: cursor.getUTCHours(),
         minute: cursor.getUTCMinutes(), second: cursor.getUTCSeconds()
-      }, tzid, source.timezones).ms
+      }, tzid, source.timezones)
+      occurrenceMs = placed.resolved ? placed.ms : wallClockAsLocal(placed.ms)
     }
     if (matches && occurrenceMs >= Number(event.start.ms)) {
       count++
@@ -358,12 +359,40 @@ function expandRecurringEvents(events, startMs, endMs) {
   return out
 }
 
+// An unresolved zoned time arrives as its wall clock read as UTC: a stable
+// placeholder, not an instant. Placed as one, it lands the local UTC offset
+// away from the time the invitation states — 17:00 Berlin showed at 18:00 in
+// Madrid. The calendar places it at that wall clock in the local zone instead;
+// the event keeps `resolved: false` and its TZID, and every label for it says
+// which clock the time is on, so it is never presented as converted.
+function wallClockAsLocal(ms) {
+  var placeholder = new Date(Number(ms))
+  return new Date(placeholder.getUTCFullYear(), placeholder.getUTCMonth(),
+    placeholder.getUTCDate(), placeholder.getUTCHours(), placeholder.getUTCMinutes(),
+    placeholder.getUTCSeconds()).getTime()
+}
+
+function placeUnresolved(event) {
+  if (!event.start || event.start.resolved !== false || !event.start.tzid) return
+  event.start.ms = wallClockAsLocal(event.start.ms)
+  if (event.end && event.end.resolved === false) event.end.ms = wallClockAsLocal(event.end.ms)
+  if (event.recurrenceIdMs) event.recurrenceIdMs = wallClockAsLocal(event.recurrenceIdMs)
+  event.excludedMs = (event.excludedMs || []).map(wallClockAsLocal)
+}
+
+// " (Europe/Berlin)" after a time this could not convert, "" otherwise.
+function unresolvedZoneSuffix(event) {
+  return event && event.start && event.start.resolved === false && event.start.tzid
+    ? " (" + event.start.tzid + ")" : ""
+}
+
 function eventsFromCaldav(xml, sourceId, rangeStart, rangeEnd) {
   var responses = caldavResponses(xml)
   var out = []
   for (var i = 0; i < responses.length; i++) {
     var events = Ics.eventsFrom(responses[i].data)
     for (var j = 0; j < events.length; j++) {
+      placeUnresolved(events[j])
       events[j].sourceId = String(sourceId || "")
       events[j].href = responses[i].href
       // A CalDAV update replaces this entire resource. Keep the source so the
