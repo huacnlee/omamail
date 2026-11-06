@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "omamail",
+  "keepLoaded": true,
   "name": "Omamail",
   "version": "0.11.3",
   "author": "huacnlee",
