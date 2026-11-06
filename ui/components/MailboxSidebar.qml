@@ -30,6 +30,7 @@ Item {
   // A right-click on a label row: the label's id ("" for an ancestor no label
   // names), its path, and where the menu goes.
   signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
+  signal labelCreateRequested()
   signal calendarRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
@@ -152,6 +153,16 @@ Item {
           }
           onFoldRequested: root.folderToggled(modelData.path)
         }
+      }
+
+      // The way to the first label, or one at the top level, without a
+      // label to right-click. Only where the account may change its labels.
+      Entry {
+        objectName: "new-label-entry"
+        visible: !!root.service && root.service.canManageLabels === true
+        label: "New label..."
+        icon: "plus"
+        onActivated: root.labelCreateRequested()
       }
     }
   }
@@ -281,6 +292,7 @@ Item {
     }
 
     Text {
+      id: nameText
       visible: !root.collapsed
       anchors.left: glyph.right
       anchors.leftMargin: Style.space(9)
@@ -345,10 +357,12 @@ Item {
     }
 
     // The tooltip is how the rail stays usable while collapsed, and it carries
-    // the count too, which the dot can only hint at.
+    // the count too, which the dot can only hint at. Expanded, it appears only
+    // when it adds something: a clipped name or a nested label's full path.
     PanelToolTip {
       objectName: "label-tooltip"
-      visible: hover.hovered
+      visible: hover.hovered && (root.collapsed || nameText.truncated
+        || (entry.fullPath !== "" && entry.fullPath !== entry.label))
       text: (entry.fullPath !== "" ? entry.fullPath : entry.label)
         + (entry.count > 0 ? " · " + entry.count : "")
       fontFamily: root.panelFontFamily

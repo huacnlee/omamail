@@ -35,6 +35,7 @@ Item {
 
   SignalSpy { id: folded; target: sidebar; signalName: "folderToggled" }
   SignalSpy { id: opened; target: sidebar; signalName: "labelSelected" }
+  SignalSpy { id: created; target: sidebar; signalName: "labelCreateRequested" }
   SignalSpy { id: mailbox; target: sidebar; signalName: "mailboxSelected" }
 
   TestCase {
@@ -60,7 +61,7 @@ Item {
 
     function init() {
       sidebar.service = fake
-      folded.clear(); opened.clear(); mailbox.clear()
+      folded.clear(); opened.clear(); mailbox.clear(); created.clear()
       sidebar.numbersVisible = false
       sidebar.collapsed = false
     }
@@ -84,6 +85,17 @@ Item {
       var hidden = textItem(sidebar, "Calendar")
       verify(hidden === null || !hidden.visible, "hidden with nothing connected")
       sidebar.calendarAvailable = true
+    }
+
+    function test_new_label_row_shows_only_where_labels_can_change() {
+      compare(named(sidebar, "new-label-entry", []).length, 0, "hidden when the account cannot change labels")
+      sidebar.service = Object.assign({}, fake, { canManageLabels: true })
+      var rows = named(sidebar, "new-label-entry", [])
+      compare(rows.length, 1, "shown when it can")
+      waitForRendering(sidebar)
+      mouseClick(rows[0], 20, rows[0].height / 2)
+      compare(created.count, 1, "asks for a new label")
+      compare(opened.count, 0)
     }
 
     function test_the_chevron_folds_without_opening() {
