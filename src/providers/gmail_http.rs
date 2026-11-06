@@ -82,7 +82,7 @@ pub async fn get(
 }
 
 /// `get` without the rate-limit retries, for a caller that backs off itself.
-pub async fn get_once(
+pub(crate) async fn get_once(
     path: &[&str],
     query: &[(String, String)],
     token: &str,
@@ -126,7 +126,7 @@ async fn execute_with_backoff(
         if answer != Err("gmail_rate_limited") {
             return answer;
         }
-        let Some(wait) = rate_limit_wait(retry, started, deadline, backoff) else {
+        let Some(wait) = rate_limit_wait(retry, started.elapsed(), deadline, backoff) else {
             return answer;
         };
         tokio::time::sleep(wait).await;
@@ -134,15 +134,16 @@ async fn execute_with_backoff(
     unreachable!()
 }
 
-/// The pause before resending a request refused `retry + 1` times since
-/// `started`, or `None` when the retries or the deadline are used up.
-pub(crate) fn backoff_wait(retry: usize, started: std::time::Instant) -> Option<Duration> {
-    rate_limit_wait(retry, started, DEADLINE, RATE_LIMIT_BACKOFF)
+/// The pause before resending a request refused `retry + 1` times in the
+/// `elapsed` time since it was first sent, or `None` when the retries or the
+/// deadline are used up.
+pub(crate) fn backoff_wait(retry: usize, elapsed: Duration) -> Option<Duration> {
+    rate_limit_wait(retry, elapsed, DEADLINE, RATE_LIMIT_BACKOFF)
 }
 
 fn rate_limit_wait(
     retry: usize,
-    started: std::time::Instant,
+    elapsed: Duration,
     deadline: Duration,
     backoff: Duration,
 ) -> Option<Duration> {
@@ -156,11 +157,11 @@ fn rate_limit_wait(
         (std::time::SystemTime::UNIX_EPOCH
             .elapsed()
             .map_or(0, |t| t.subsec_nanos() as u64)
-            ^ started.elapsed().subsec_nanos() as u64)
+            ^ elapsed.subsec_nanos() as u64)
             % jitter.max(1),
     );
     let wait = backoff.saturating_mul(1 << retry) + jitter;
-    (started.elapsed() + wait < deadline).then_some(wait)
+    (elapsed + wait < deadline).then_some(wait)
 }
 
 async fn execute_once(

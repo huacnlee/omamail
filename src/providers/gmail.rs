@@ -358,32 +358,44 @@ impl Session {
         G: Future<Output = Result<Value, &'static str>>,
     {
         let session = self.account(account)?;
-        let started = std::time::Instant::now();
-        for retry in 0..=gmail_http::RATE_LIMIT_RETRIES {
-            let answer = {
-                let _turn = session.reads.acquire().await.map_err(|_| "session_failed")?;
-                // A session retired during the backoff never refreshes for a retry.
-                session.check()?;
-                // Retries included, the read stays inside one request deadline.
-                let remaining = gmail_http::DEADLINE.saturating_sub(started.elapsed());
-                tokio::time::timeout(remaining, async {
-                    session.pace(cost).await?;
-                    Self::get_from(&session, &refresh, &get).await
-                })
-                .await
-                .unwrap_or(Err("gmail_timeout"))
-            };
-            if answer != Err("gmail_rate_limited") {
-                return answer;
+        // One deadline covers the whole read: waiting for a turn, pacing,
+        // every attempt and the pauses between them.
+        let started = tokio::time::Instant::now();
+        let deadline = started + gmail_http::DEADLINE;
+        let attempts = async {
+            for retry in 0..=gmail_http::RATE_LIMIT_RETRIES {
+                let answer = {
+                    let _turn = session
+                        .reads
+                        .acquire()
+                        .await
+                        .map_err(|_| "session_failed")?;
+                    // A session retired during the backoff never refreshes for a retry.
+                    session.check()?;
+                    // A quota wait that would outlast the deadline is refused
+                    // before it spends units on a request that never runs.
+                    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    session.pace_within(cost, QUOTA_MAX_WAIT.min(left)).await?;
+                    Self::get_from(&session, &refresh, &get, Some(deadline)).await
+                };
+                if answer != Err("gmail_rate_limited") {
+                    return answer;
+                }
+                let Some(wait) = gmail_http::backoff_wait(retry, started.elapsed()) else {
+                    return answer;
+                };
+                tokio::time::sleep(wait).await;
             }
-            let Some(wait) = gmail_http::backoff_wait(retry, started) else {
-                return answer;
-            };
-            tokio::time::sleep(wait).await;
-        }
-        unreachable!()
+            unreachable!()
+        };
+        tokio::time::timeout_at(deadline, attempts)
+            .await
+            .unwrap_or(Err("gmail_timeout"))
     }
 
+    /// `get_from` by account, without turns, pacing or retries: the token and
+    /// re-authentication behavior on its own, for the tests that pin it down.
+    #[cfg(test)]
     async fn get_with<R, G>(
         &self,
         account: &str,
@@ -395,20 +407,29 @@ impl Session {
         G: Future<Output = Result<Value, &'static str>>,
     {
         let session = self.account(account)?;
-        Self::get_from(&session, refresh, get).await
+        Self::get_from(&session, refresh, get, None).await
     }
 
     async fn get_from<R, G>(
         session: &AccountSession,
         refresh: impl Fn() -> R,
         get: impl Fn(String) -> G,
+        deadline: Option<tokio::time::Instant>,
     ) -> Result<Value, &'static str>
     where
         R: Future<Output = Result<Value, &'static str>>,
         G: Future<Output = Result<Value, &'static str>>,
     {
+        // A wait for a turn, quota or a token can end as the deadline passes,
+        // and the read resumes before its timer is checked. No request starts
+        // after the deadline, even one that would be answered at once.
+        let started = || match deadline {
+            Some(deadline) if tokio::time::Instant::now() >= deadline => Err("gmail_timeout"),
+            _ => Ok(()),
+        };
         let token = session.token_with(&refresh).await?;
         session.check()?;
+        started()?;
         let answer = get(token.value.clone()).await;
         session.check()?;
         if answer != Err("gmail_unauthorized") {
@@ -417,6 +438,7 @@ impl Session {
         session.reject(&token).await?;
         let replacement = session.token_with(refresh).await?;
         session.check()?;
+        started()?;
         let answer = get(replacement.value.clone()).await;
         session.check()?;
         if answer == Err("gmail_unauthorized") {

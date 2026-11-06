@@ -542,7 +542,8 @@ async fn burst_peer(
     Server,
 ) {
     use serde_json::json;
-    let fixture = crate::mail::tests::account_fixture(json!({"version":1,"activeId":"burst@example.org",
+    let fixture =
+        crate::mail::tests::account_fixture(json!({"version":1,"activeId":"burst@example.org",
         "accounts":[{"provider":"gmail","email":"burst@example.org"}]}));
     let credentials = crate::platform::private_fs::directories(
         &fixture.config,
@@ -598,7 +599,10 @@ async fn read_page(peer: &Server, count: usize) -> Vec<Result<Value, &'static st
 }
 
 fn message() -> Vec<u8> {
-    response("200 OK", r#"{"id":"m","threadId":"t","labelIds":["INBOX"]}"#)
+    response(
+        "200 OK",
+        r#"{"id":"m","threadId":"t","labelIds":["INBOX"]}"#,
+    )
 }
 
 // Opening a mailbox reads every message on the page at once, from the UI and
@@ -672,21 +676,18 @@ async fn a_read_waiting_to_retry_stops_when_its_session_is_invalidated() {
     let account = serde_json::json!({"accountId":"burst@example.org"});
     let params = serde_json::json!({"accountId":"burst@example.org","id":"m0","full":false});
     let (read, invalidated) = with_test_transport(transport, origin, async {
-        tokio::join!(
-            session.gmail.call("gmail.read", &params),
-            async {
-                // The refresh and the refused read have both been answered.
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    while peer.requests.lock().unwrap().len() < 2 {
-                        tokio::time::sleep(Duration::from_millis(5)).await;
-                    }
-                })
-                .await
-                .unwrap();
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                session.gmail.call("gmail.invalidate", &account).await
-            }
-        )
+        tokio::join!(session.gmail.call("gmail.read", &params), async {
+            // The refresh and the refused read have both been answered.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while peer.requests.lock().unwrap().len() < 2 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            session.gmail.call("gmail.invalidate", &account).await
+        })
     })
     .await;
     assert_eq!(invalidated, Ok(serde_json::json!({"invalidated":true})));
