@@ -566,6 +566,9 @@ TestCase {
     var composition = createTemporaryObject(backgroundComponent, testCase)
     verify(composition)
     host.requestOpen(mailtoPayload())
+    wait(20)
+    verify(!composition.app.composing, "the link waits for recovery to be read")
+    composition.app.composeRecoveryLoaded = true
     verifyDraft(composition)
     tryVerify(function() { return composition.visible })
   }
@@ -575,11 +578,13 @@ TestCase {
     verify(composition)
     tryVerify(function() { return composition.visible })
     verify(!composition.app.composing)
+    composition.app.composeRecoveryLoaded = true
     host.requestOpen(mailtoPayload())
     verifyDraft(composition)
   }
 
   function editedDraft(composition) {
+    composition.app.composeRecoveryLoaded = true
     host.requestOpen(mailtoPayload())
     verifyDraft(composition)
     var field = findChild(composition, "compose-subject-field")

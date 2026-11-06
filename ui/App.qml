@@ -693,6 +693,7 @@ Item {
   // already open when this runs — summon delivers the payload to open().
   function openDraft(draft) { composeRecoveryController.openDraft(draft) }
   property var heldDraft: null
+  property var draftAwaitingRecovery: null
 
   function resumeHeldCompose() { pendingCompose.resume() }
 
