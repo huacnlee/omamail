@@ -31,7 +31,7 @@ Item {
   // names), its path, and where the menu goes.
   signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
   // Messages dropped on a label row.
-  property bool dropEnabled: false
+  property bool dropEnabled: true
   // Asked per row while dragging: would a drop here change anything?
   property var dropAllowed: function(kind, key) { return true }
   signal labelDropped(string labelId)

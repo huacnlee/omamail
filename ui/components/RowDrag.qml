@@ -22,8 +22,8 @@ Item {
   property string rowId: ""
   readonly property bool active: ids.length > 0
 
-  // Run `action` on the dragged row, or on the ticked rows it belongs to.
-  signal actRequested(string id, string action)
+  // Runs a verb on the dragged row, or on the ticked rows it belongs to.
+  property var act: function(id, action) {}
 
   function start(id, sceneX, sceneY) {
     if (!service || service.unified || !enabled) return
@@ -55,13 +55,13 @@ Item {
 
   function dropOnMailbox(key) {
     var verb = service ? Drop.verbFor(key, service) : ""
-    if (rowId !== "" && verb !== "" && wouldAct("mailbox", key)) actRequested(rowId, verb)
+    if (rowId !== "" && verb !== "" && wouldAct("mailbox", key)) act(rowId, verb)
   }
 
   function dropOnLabel(labelId) {
     if (rowId === "" || !wouldAct("label", labelId)) return
     if (service.refuseUnavailableAction("label:destination", rowId)) return
-    actRequested(rowId, "label:" + labelId)
+    act(rowId, "label:" + labelId)
   }
 
   Rectangle {

@@ -1780,10 +1780,9 @@ Item {
             root.backToList()
           }
           onFolderToggled: function(path) { root.service.toggleFolder(path) }
-          dropEnabled: rowDrag.active
-          dropAllowed: rowDrag.wouldAct
-          onLabelDropped: rowDrag.dropOnLabel
-          onMailboxDropped: rowDrag.dropOnMailbox
+          dropAllowed: function(k, id) { return rowDrag.wouldAct(k, id) }
+          onLabelDropped: function(id) { rowDrag.dropOnLabel(id) }
+          onMailboxDropped: function(k) { rowDrag.dropOnMailbox(k) }
           onLabelMenuRequested: function(labelId, path, sceneX, sceneY) {
             root.openLabelMenu(labelId, path, sceneX, sceneY)
           }
@@ -1904,9 +1903,9 @@ Item {
               onMessageActivated: function(id) { root.openMessage(id) }
               onAgentRequested: function(id, sceneX, sceneY) { root.openAgentFromRow(id, sceneX, sceneY) }
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
-              onRowDragStarted: rowDrag.start
-              onRowDragMoved: rowDrag.move
-              onRowDragEnded: rowDrag.end
+              onRowDragStarted: function(id, x, y) { rowDrag.start(id, x, y) }
+              onRowDragMoved: function(x, y) { rowDrag.move(x, y) }
+              onRowDragEnded: rowDrag.end()
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
               onMenuRequested: function(id, sceneX, sceneY, ids) {
@@ -2834,12 +2833,11 @@ Item {
         id: rowDrag
         service: root.service
         checkedIds: root.checkedIds
-        enabled: sidebar.visible
         textColor: root.foreground
         accentColor: root.accent
         popupBackgroundColor: root.popupBackground
         panelFontFamily: root.fontFamily
-        onActRequested: function(id, action) { root.actFromRow(id, action) }
+        act: root.actFromRow
       }
 
       LabelMovePicker {
