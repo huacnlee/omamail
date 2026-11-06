@@ -361,7 +361,7 @@ Item {
     // when it adds something: a clipped name or a nested label's full path.
     PanelToolTip {
       objectName: "label-tooltip"
-      visible: hover.hovered && (root.collapsed || nameText.truncated
+      visible: hover.hovered && (root.collapsed || nameText.truncated || entry.count > 999
         || (entry.fullPath !== "" && entry.fullPath !== entry.label))
       text: (entry.fullPath !== "" ? entry.fullPath : entry.label)
         + (entry.count > 0 ? " · " + entry.count : "")
