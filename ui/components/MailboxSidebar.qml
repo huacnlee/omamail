@@ -156,10 +156,12 @@ Item {
       }
 
       // The way to the first label, or one at the top level, without a
-      // label to right-click. Only where the account may change its labels.
+      // label to right-click. Only where the account may change its labels,
+      // and never in the combined view, where no one account is named.
       Entry {
         objectName: "new-label-entry"
         visible: !!root.service && root.service.canManageLabels === true
+          && root.service.unified !== true
         label: "New label..."
         icon: "plus"
         onActivated: root.labelCreateRequested()

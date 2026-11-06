@@ -98,6 +98,14 @@ Item {
       compare(opened.count, 0)
     }
 
+    function test_new_label_row_is_hidden_in_the_combined_view() {
+      sidebar.service = Object.assign({}, fake, { canManageLabels: true, unified: true })
+      compare(named(sidebar, "new-label-entry", []).length, 0, "no account is named, so no label can start here")
+      sidebar.service = Object.assign({}, fake, { canManageLabels: true, unified: false })
+      compare(named(sidebar, "new-label-entry", []).length, 1, "one account selected allows it")
+      sidebar.service = fake
+    }
+
     function test_the_chevron_folds_without_opening() {
       var folds = named(sidebar, "fold", [])
       compare(folds.length, 1, "only the parent carries a chevron")
