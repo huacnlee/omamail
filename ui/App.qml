@@ -1783,6 +1783,12 @@ Item {
           onLabelMenuRequested: function(labelId, path, sceneX, sceneY) {
             root.openLabelMenu(labelId, path, sceneX, sceneY)
           }
+          onLabelCreateRequested: {
+            if (!root.service) return
+            root.askLabelName("create", "", "New label", "",
+              "Its name at the top level. Use the label menu for a sub-label.",
+              root.service.activeAccountId)
+          }
         }
 
         // Narrow windows lose the sidebar; the same mailboxes come back as a
