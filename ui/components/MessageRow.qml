@@ -63,6 +63,10 @@ Rectangle {
   signal archiveRequested()
   signal trashRequested()
   signal menuRequested(real sceneX, real sceneY)
+  // A mouse drag of the row, for dropping it on a label in the sidebar.
+  signal dragStarted(real sceneX, real sceneY)
+  signal dragMoved(real sceneX, real sceneY)
+  signal dragEnded()
 
   // Hovered by a handler rather than by the MouseArea's `containsMouse`: a
   // button on the row has a MouseArea of its own, and the pointer moving onto
@@ -116,6 +120,18 @@ Rectangle {
     // during a system drag.
     hoverEnabled: false
     acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+    // Mouse and pen only: a finger dragging a row is scrolling the list.
+    DragHandler {
+      id: dragger
+      target: null
+      acceptedButtons: Qt.LeftButton
+      acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.Stylus
+      onActiveChanged: {
+        if (active) root.dragStarted(centroid.scenePosition.x, centroid.scenePosition.y)
+        else root.dragEnded()
+      }
+      onCentroidChanged: if (active) root.dragMoved(centroid.scenePosition.x, centroid.scenePosition.y)
+    }
     onWheel: function(wheel) { wheel.accepted = false }
     onClicked: function(event) {
       if (event.button === Qt.RightButton) {
