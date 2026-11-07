@@ -13,6 +13,8 @@ struct Server {
     url: String,
     requests: Arc<Mutex<Vec<String>>>,
     connections: Arc<AtomicUsize>,
+    // The most requests the peer was answering at one moment.
+    busiest: Arc<AtomicUsize>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Server {
@@ -34,6 +36,9 @@ async fn server_sequence(responses: Vec<Vec<u8>>, delay: Duration) -> Server {
     let seen = requests.clone();
     let accepted = connections.clone();
     let served = Arc::new(AtomicUsize::new(0));
+    let busiest = Arc::new(AtomicUsize::new(0));
+    let peak = busiest.clone();
+    let active = Arc::new(AtomicUsize::new(0));
     let task = tokio::spawn(async move {
         let mut handlers = tokio::task::JoinSet::new();
         loop {
@@ -42,6 +47,8 @@ async fn server_sequence(responses: Vec<Vec<u8>>, delay: Duration) -> Server {
             let seen = seen.clone();
             let responses = responses.clone();
             let served = served.clone();
+            let peak = peak.clone();
+            let active = active.clone();
             handlers.spawn(async move {
                 loop {
                     let mut request = Vec::new();
@@ -70,11 +77,14 @@ async fn server_sequence(responses: Vec<Vec<u8>>, delay: Duration) -> Server {
                     seen.lock()
                         .unwrap()
                         .push(String::from_utf8(request).unwrap());
+                    peak.fetch_max(active.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
                     tokio::time::sleep(delay).await;
                     let index = served
                         .fetch_add(1, Ordering::SeqCst)
                         .min(responses.len() - 1);
-                    if stream.write_all(&responses[index]).await.is_err() {
+                    let written = stream.write_all(&responses[index]).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    if written.is_err() {
                         return;
                     }
                 }
@@ -85,6 +95,7 @@ async fn server_sequence(responses: Vec<Vec<u8>>, delay: Duration) -> Server {
         url,
         requests,
         connections,
+        busiest,
         task,
     }
 }
@@ -513,6 +524,181 @@ async fn queued_mutation_settles_by_notification_and_in_process() {
     );
 }
 
+fn response(status: &str, body: &str) -> Vec<u8> {
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+// A registered Gmail account with a stored grant, and a peer that answers its
+// token refresh and then `answers`, holding each response for 50ms.
+async fn burst_peer(
+    answers: Vec<Vec<u8>>,
+) -> (
+    crate::mail::tests::AccountFixture,
+    crate::credentials::tests::StoreOverride,
+    Server,
+) {
+    use serde_json::json;
+    let fixture =
+        crate::mail::tests::account_fixture(json!({"version":1,"activeId":"burst@example.org",
+        "accounts":[{"provider":"gmail","email":"burst@example.org"}]}));
+    let credentials = crate::platform::private_fs::directories(
+        &fixture.config,
+        &[crate::platform::dirs::APP_DIRECTORY],
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    crate::platform::private_fs::atomic_replace(
+        &credentials,
+        "credentials.json",
+        json!({"installed":{
+        "client_id":"123-burst.apps.googleusercontent.com",
+        "client_secret":"synthetic-client-secret"}})
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
+    let credential =
+        crate::credentials::tests::isolated_store(crate::credentials::tests::SingleCredential {
+            key: crate::credentials::CredentialKey {
+                provider: "gmail".into(),
+                account_id: "burst@example.org".into(),
+                kind: crate::credentials::CredentialKind::GoogleRefreshToken {
+                    client_id: "123-burst.apps.googleusercontent.com".into(),
+                },
+            },
+            secret: crate::credentials::Secret::new(b"synthetic-refresh-token".to_vec()).unwrap(),
+        });
+    let grant = json!({"access_token":"synthetic-access-token","expires_in":3600}).to_string();
+    let mut responses = vec![response("200 OK", &grant)];
+    responses.extend(answers);
+    let peer = server_sequence(responses, Duration::from_millis(50)).await;
+    (fixture, credential, peer)
+}
+
+// Reads `count` messages for the burst account at once through the real dispatcher.
+async fn read_page(peer: &Server, count: usize) -> Vec<Result<Value, &'static str>> {
+    let transport = client_builder().https_only(false).build().unwrap();
+    let origin = peer.url.strip_suffix("/messages/abc").unwrap().to_owned();
+    let session = crate::backend::Session::default();
+    with_test_transport(transport, origin, async {
+        futures_util::future::join_all((0..count).map(|i| {
+            let session = &session;
+            async move {
+                let params = serde_json::json!({"accountId":"burst@example.org","id":format!("m{i}"),"full":false});
+                session.gmail.call("gmail.read", &params).await
+            }
+        }))
+        .await
+    })
+    .await
+}
+
+fn message() -> Vec<u8> {
+    response(
+        "200 OK",
+        r#"{"id":"m","threadId":"t","labelIds":["INBOX"]}"#,
+    )
+}
+
+// Opening a mailbox reads every message on the page at once, from the UI and
+// from the backend's own list. Google refuses a burst of simultaneous requests
+// for one user as rate limited, and every refused read was resent, so a full
+// page kept tripping the limit. Reads for one account now take turns.
+#[tokio::test]
+async fn a_page_of_reads_keeps_few_requests_in_flight_per_account() {
+    if crate::mail::tests::isolated() {
+        return;
+    }
+    let (_fixture, _credential, peer) = burst_peer(vec![message()]).await;
+    // 24 metadata reads cost 120 quota units, inside the per-second budget,
+    // so only the in-flight limit can hold any of them back.
+    let reads = read_page(&peer, 24).await;
+    assert!(reads.iter().all(Result::is_ok), "{reads:?}");
+    assert_eq!(
+        peer.requests.lock().unwrap().len(),
+        25,
+        "one refresh and one request per read"
+    );
+    let busiest = peer.busiest.load(Ordering::SeqCst);
+    assert!(
+        busiest <= crate::providers::gmail::MAX_READS_IN_FLIGHT,
+        "{busiest} reads in flight at once"
+    );
+    assert!(busiest > 1, "reads still overlap");
+}
+
+// A read Google refused waits a second or more before trying again. Holding
+// its turn through that wait would stall every other read on the account.
+#[tokio::test]
+async fn a_refused_read_gives_its_turn_back_while_it_waits() {
+    if crate::mail::tests::isolated() {
+        return;
+    }
+    let limited = response("429 Too Many Requests", "{}");
+    let mut answers = vec![limited; crate::providers::gmail::MAX_READS_IN_FLIGHT];
+    answers.push(message());
+    let (_fixture, _credential, peer) = burst_peer(answers).await;
+    let reads = read_page(&peer, 24).await;
+    assert!(reads.iter().all(Result::is_ok), "{reads:?}");
+    let requests = peer.requests.lock().unwrap();
+    let ids: Vec<&str> = requests[1..]
+        .iter()
+        .map(|r| r.split(' ').nth(1).unwrap().rsplit('/').next().unwrap())
+        .map(|path| path.split('?').next().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 24 + crate::providers::gmail::MAX_READS_IN_FLIGHT);
+    // Every waiting read went out before the first refused one was resent.
+    let first_retry = ids
+        .iter()
+        .enumerate()
+        .position(|(at, id)| ids[..at].contains(id))
+        .unwrap();
+    assert_eq!(first_retry, 24, "request order: {ids:?}");
+}
+
+// Signing out retires the account's session while a refused read waits to try
+// again. The retry must not refresh the grant and resend under a new session.
+#[tokio::test]
+async fn a_read_waiting_to_retry_stops_when_its_session_is_invalidated() {
+    if crate::mail::tests::isolated() {
+        return;
+    }
+    let (_fixture, _credential, peer) =
+        burst_peer(vec![response("429 Too Many Requests", "{}")]).await;
+    let transport = client_builder().https_only(false).build().unwrap();
+    let origin = peer.url.strip_suffix("/messages/abc").unwrap().to_owned();
+    let session = crate::backend::Session::default();
+    let account = serde_json::json!({"accountId":"burst@example.org"});
+    let params = serde_json::json!({"accountId":"burst@example.org","id":"m0","full":false});
+    let (read, invalidated) = with_test_transport(transport, origin, async {
+        tokio::join!(session.gmail.call("gmail.read", &params), async {
+            // The refresh and the refused read have both been answered.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while peer.requests.lock().unwrap().len() < 2 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            session.gmail.call("gmail.invalidate", &account).await
+        })
+    })
+    .await;
+    assert_eq!(invalidated, Ok(serde_json::json!({"invalidated":true})));
+    assert_eq!(read, Err("gmail_session_invalidated"));
+    assert_eq!(
+        peer.requests.lock().unwrap().len(),
+        2,
+        "no second refresh or resend after invalidation"
+    );
+}
+
 // A rate-limited request was rejected before it ran, so resending it — even
 // a mutation — cannot duplicate anything. Google asks for exponential backoff
 // starting at a second; the retry budget stays inside the request deadline.
@@ -843,6 +1029,7 @@ async fn strict_empty_post_server() -> Server {
         url,
         requests,
         connections,
+        busiest: Arc::default(),
         task,
     }
 }
