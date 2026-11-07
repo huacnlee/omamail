@@ -53,6 +53,9 @@ Item {
   signal shutdownComplete(var error)
   signal notification(string method, var params)
   signal requestFailed(string method, var error)
+  // Frontend owners share account watches. A retired owner's delayed unwatch
+  // may stop a replacement owner's watch after it has already registered.
+  signal mailWatchStopped(string accountId)
 
   function parseMessage(raw, callback) {
     return Upload.parse(raw, function(method, params, done) {
@@ -78,7 +81,11 @@ Item {
 
   function request(method, params, callback, internal) {
     var operation = method === "request.upload" && params ? params.method : method
+    var unwatchedAccount = method === "mail.unwatch" && params
+      && typeof params.accountId === "string" ? params.accountId : ""
     var done = function(result, error) {
+      if (!error && result && result.unwatched === true && unwatchedAccount !== "")
+        root.mailWatchStopped(unwatchedAccount)
       if (error) root.requestFailed(operation, error)
       if (typeof callback === "function") callback(result, error)
     }

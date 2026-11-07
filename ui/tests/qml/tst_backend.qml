@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../../backend" as BackendModule
+import "../../account" as Accounts
 
 Item {
   Component {
@@ -12,9 +13,164 @@ Item {
     }
   }
 
+  Component {
+    id: syncFactory
+    Accounts.BackendSync { query: "is:unread" }
+  }
+
   TestCase {
     name: "BackendLifecycle"
     SignalSpy { id: errors; signalName: "requestFailed" }
+    SignalSpy { id: watchStops; signalName: "mailWatchStopped" }
+    SignalSpy { id: watchUpdates; signalName: "updated" }
+
+    function test_retired_owner_unwatch_restores_surviving_watch_data() {
+      return [
+        {tag:"disabled-ready", destroyOwner:false, pendingReplacement:false},
+        {tag:"destroyed-ready", destroyOwner:true, pendingReplacement:false},
+        {tag:"disabled-pending", destroyOwner:false, pendingReplacement:true},
+        {tag:"destroyed-pending", destroyOwner:true, pendingReplacement:true}
+      ]
+    }
+
+    function test_retired_owner_unwatch_restores_surviving_watch(data) {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var old = createTemporaryObject(syncFactory, this, {backend:backend, accountId:"b@example.org", enabled:true})
+      verify(old !== null)
+      tryCompare(backend, "sequence", 2)
+      var oldWatch = requests(process)[1]
+      compare(oldWatch.method, "mail.watch")
+      if (data.destroyOwner) { old.destroy(); wait(0) }
+      else { old.enabled = false; old.reconcile() }
+      compare(requests(process).length, 2, "retired owner defers its unwatch")
+
+      var survivor = createTemporaryObject(syncFactory, this, {backend:backend, accountId:"b@example.org", enabled:true})
+      verify(survivor !== null)
+      watchUpdates.target = survivor
+      watchUpdates.clear()
+      tryCompare(backend, "sequence", 3)
+      var replacement = requests(process)[2]
+      // The native watch is account-keyed: both registrations share B, and
+      // either owner's unwatch removes it. Track that independently of replies.
+      var watched = {"b@example.org":true}
+      if (!data.pendingReplacement)
+        reply(process, replacement, {accountId:"b@example.org",sequence:1})
+
+      reply(process, oldWatch, {accountId:"b@example.org",sequence:1})
+      var stop = requests(process)[3]
+      compare(stop.method, "mail.unwatch")
+      compare(stop.params.accountId, "b@example.org")
+      delete watched[stop.params.accountId]
+      reply(process, stop, {unwatched:true})
+      verify(!survivor.registered)
+      var accepted = watchUpdates.count
+      if (data.pendingReplacement) {
+        wait(20)
+        compare(requests(process).length, 4, "do not overlap a pending replacement")
+        reply(process, replacement, {accountId:"b@example.org",sequence:99})
+        compare(watchUpdates.count, accepted, "the stopped watch's late snapshot is stale")
+        compare(survivor.sequence, 0)
+      }
+
+      // No refresh/check or manual reconcile: the transport acknowledgement
+      // must recover the surviving owner even while the mailbox is idle.
+      tryCompare(backend, "sequence", 5, 1000)
+      var recovery = requests(process)[4]
+      compare(recovery.method, "mail.watch")
+      compare(recovery.params.accountId, "b@example.org")
+      watched[recovery.params.accountId] = true
+      reply(process, recovery, {accountId:"b@example.org",sequence:3})
+      verify(survivor.registered)
+      if (!data.destroyOwner) verify(!old.registered)
+      if (watched["b@example.org"])
+        backend.notification("mail.updated", {accountId:"b@example.org",sequence:4,estimate:2,messages:[],error:""})
+      compare(survivor.sequence, 4)
+      wait(20)
+      compare(requests(process).length, 5, "recovery sends exactly one watch and no polling check")
+      watchUpdates.target = null
+    }
+
+    function test_watch_stop_requires_a_confirmed_direct_unwatch_data() {
+      return [
+        {tag:"success", method:"mail.unwatch", result:{unwatched:true}, count:1},
+        {tag:"failure", method:"mail.unwatch", error:{code:-32000,message:"temporary"}, count:0},
+        {tag:"unconfirmed", method:"mail.unwatch", result:{unwatched:false}, count:0},
+        {tag:"missing-result", method:"mail.unwatch", result:null, count:0},
+        {tag:"wrong-method", method:"mail.check", result:{unwatched:true}, count:0},
+        {tag:"uploaded-method", method:"request.upload", result:{unwatched:true}, count:0}
+      ]
+    }
+
+    function test_watch_stop_requires_a_confirmed_direct_unwatch(data) {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      watchStops.target = backend
+      watchStops.clear()
+      backend.call(data.method, {accountId:"b@example.org",method:"mail.unwatch"}, function() {})
+      var request = requests(process)[1]
+      reply(process, request, data.result, data.error)
+      compare(watchStops.count, data.count)
+      reply(process, request, {unwatched:true})
+      compare(watchStops.count, data.count, "a duplicate response cannot stop a watch twice")
+      if (data.count) compare(watchStops.signalArguments[0][0], "b@example.org")
+      watchStops.target = null
+    }
+
+    function test_queued_unwatch_keeps_account_and_notifies_before_callback() {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      watchStops.target = backend
+      watchStops.clear()
+      for (var i = 0; i < 64; i++) backend.call("providers.list", {}, function() {})
+      var params = {accountId:"b@example.org"}
+      backend.call("mail.unwatch", params, function() {
+        compare(watchStops.count, 1)
+        throw new Error("retired receiver")
+      })
+      params.accountId = "c@example.org"
+      reply(process, requests(process)[1], {})
+      var request = requests(process)[65]
+      compare(request.params.accountId, "b@example.org")
+      var threw = false
+      try { backend.receive(JSON.stringify({jsonrpc:"2.0",id:request.id,result:{unwatched:true}})) }
+      catch (error) { threw = true; compare(error.message, "retired receiver") }
+      verify(threw)
+      compare(watchStops.count, 1)
+      compare(watchStops.signalArguments[0][0], "b@example.org")
+      watchStops.target = null
+    }
+
+    function test_watch_stop_does_not_revive_unrelated_owners_data() {
+      return [
+        {tag:"disabled"}, {tag:"destroyed"}, {tag:"different-account"},
+        {tag:"different-backend"}, {tag:"changed-account"}
+      ]
+    }
+
+    function test_watch_stop_does_not_revive_unrelated_owners(data) {
+      var backend = makeBackend()
+      var process = makeReady(backend)
+      var ownerBackend = data.tag === "different-backend" ? makeBackend() : backend
+      var ownerProcess = ownerBackend === backend ? process : makeReady(ownerBackend)
+      var account = data.tag === "different-account" ? "c@example.org" : "b@example.org"
+      var survivor = createTemporaryObject(syncFactory, this, {backend:ownerBackend, accountId:account, enabled:true})
+      tryCompare(ownerBackend, "sequence", 2)
+      reply(ownerProcess, requests(ownerProcess)[1], {accountId:account,sequence:1})
+      backend.call("mail.unwatch", {accountId:"b@example.org"}, function() {})
+      var stop = requests(process)[requests(process).length - 1]
+      if (data.tag === "disabled") survivor.enabled = false
+      if (data.tag === "changed-account") survivor.accountId = "c@example.org"
+      var epoch = survivor.epoch
+      if (data.tag === "destroyed") { survivor.destroy(); wait(0) }
+      reply(process, stop, {unwatched:true})
+      if (data.tag !== "destroyed") compare(survivor.epoch, epoch, "unrelated acknowledgement is ignored")
+      wait(20)
+      var all = requests(ownerProcess)
+      var watches = 0
+      for (var i = 0; i < all.length; i++) if (all[i].method === "mail.watch") watches++
+      compare(watches, 1, "do not revive a retired or unrelated owner")
+    }
 
     function test_failed_request_reports_operation_without_payload() {
       var backend = makeBackend()
