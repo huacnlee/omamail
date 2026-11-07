@@ -50,6 +50,7 @@
       "calendarSnoozeMinutes": 5,
       "openOnClick": "Window",
       "showBarIcon": true,
+      "markReadOnOpen": true,
       "suggestEvents": false,
       "aiAgent": "System default",
       "aiModel": ""
@@ -61,6 +62,13 @@
         "label": "Show the icon in the bar",
         "defaultValue": true,
         "description": "Turn this off to run Omamail with no envelope in the bar. Mail is still checked and still notifies; only the icon goes. With it off the window opens from a keybinding or a terminal and nowhere else, so bind a key first: o.bind(\"SUPER + SHIFT + G\", \"Omamail\", \"omarchy shell shell toggle omamail '{}'\")"
+      },
+      {
+        "key": "markReadOnOpen",
+        "type": "boolean",
+        "label": "Mark messages read when opened",
+        "defaultValue": true,
+        "description": "Turn this off to keep an opened message unread until you mark it read yourself (Shift+I, or Mark as read in the message menu)."
       },
       {
         "key": "refreshIntervalSec",

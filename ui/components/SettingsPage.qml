@@ -609,6 +609,56 @@ Column {
     }
   }
 
+  Rectangle {
+    width: parent.width
+    implicitHeight: Math.max(markReadText.implicitHeight, markReadSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: markReadText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: markReadSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Mark messages read when opened"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Off, an opened message stays unread until you mark it read "
+          + "with Shift+I or the message menu"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    ToggleSwitch {
+      id: markReadSwitch
+      objectName: "markReadOnOpenSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !root.service || !root.service.settings || root.service.settings.markReadOnOpen !== false
+      foreground: root.textColor
+      accent: root.accentColor
+      // Flips the stored answer: off when it is on or unset, on when off.
+      onToggled: if (root.service) root.service.persistSetting("markReadOnOpen",
+        !!root.service.settings && root.service.settings.markReadOnOpen === false)
+    }
+  }
+
   // Showing a message as the cursor reaches it, and the dwell that keeps that
   // from reading a mailbox by holding an arrow key down.
   Rectangle {
