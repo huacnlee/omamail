@@ -59,7 +59,9 @@ Item {
   Connections {
     target: root.service
     ignoreUnknownSignals: true
-    function onActiveAccountIdChanged() { if (root.stale) root.cancel() }
+    function onActiveAccountIdChanged() {
+      if (root.active && String(root.service.activeAccountId || "") !== root.accountId) root.cancel()
+    }
   }
 
   // False where a drop would change nothing, so the rail does not offer it.
