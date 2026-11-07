@@ -20,7 +20,10 @@ Item {
   required property string panelFontFamily
   property var ids: []
   property string rowId: ""
+  // The account the drag began in; a drop is refused once the shell has moved off it.
+  property string accountId: ""
   readonly property bool active: ids.length > 0
+  readonly property bool stale: active && !!service && String(service.activeAccountId || "") !== accountId
 
   // Runs a verb on the dragged row, or on the ticked rows it belongs to.
   property var act: function(id, action) {}
@@ -29,6 +32,7 @@ Item {
     if (!service || service.unified || !enabled) return
     if (!Provider.can(service.providerId, "labels") && !Provider.can(service.providerId, "move")) return
     rowId = id
+    accountId = String(service.activeAccountId || "")
     ids = checkedIds.indexOf(id) >= 0 ? checkedIds.slice() : [id]
     move(sceneX, sceneY)
   }
@@ -40,16 +44,27 @@ Item {
     tag.y = at.y - tag.height / 2
   }
 
-  function end() {
-    if (!active) return
-    tag.Drag.drop()
+  function cancel() {
     ids = []
     rowId = ""
+    accountId = ""
+  }
+
+  function end() {
+    if (!active) return
+    if (!stale) tag.Drag.drop()
+    cancel()
+  }
+
+  Connections {
+    target: root.service
+    ignoreUnknownSignals: true
+    function onActiveAccountIdChanged() { if (root.stale) root.cancel() }
   }
 
   // False where a drop would change nothing, so the rail does not offer it.
   function wouldAct(kind, key) {
-    if (!service || !active) return false
+    if (!service || !active || stale) return false
     return Drop.wouldAct(kind, key, service, Model.summariesById(service.messages, ids))
   }
 
