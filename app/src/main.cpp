@@ -2,6 +2,7 @@
 #include "application_host.h"
 #include "notifications.h"
 #include "resource_check.h"
+#include "single_instance.h"
 #include "window.h"
 
 #include <QCoreApplication>
@@ -24,17 +25,22 @@ int reportResourceCheck(const ResourcePaths &paths)
     for (const QString &error : result.errors) stream << error << Qt::endl;
     return 1;
 }
+
 }
 
 int main(int argc, char *argv[])
 {
     bool checkOnly = false;
     QString readyFile;
+    QString mailto;
+    bool background = false;
     for (int i = 1; i < argc; ++i) {
         const QString argument = QString::fromLocal8Bit(argv[i]);
         if (argument == QStringLiteral("--check-resources")) checkOnly = true;
         else if (argument == QStringLiteral("--smoke-test") && i + 1 < argc)
             readyFile = QString::fromLocal8Bit(argv[++i]);
+        else if (argument == QStringLiteral("--background")) background = true;
+        else if (argument.startsWith(QStringLiteral("mailto:"), Qt::CaseInsensitive)) mailto = argument;
     }
 
     QCoreApplication::setOrganizationName(QStringLiteral("Omamail"));
@@ -76,6 +82,18 @@ int main(int argc, char *argv[])
         return 1;
     }
     if (const int status = reportResourceCheck(paths); status != 0) return status;
+    // Settled before QML or the backend load, so two launches at once cannot
+    // both start one.
+    SingleInstance instance(SingleInstance::sessionName());
+    switch (instance.claimOrForward(SingleInstance::openPayload(mailto, background))) {
+    case SingleInstance::Launch::Forwarded:
+        return 0;
+    case SingleInstance::Launch::Failed:
+        QTextStream(stderr) << "Another Omamail is starting and did not answer" << Qt::endl;
+        return 1;
+    case SingleInstance::Launch::Owner:
+        break;
+    }
     initializeNotificationActivation();
 
     // Native platform styles can draw a light system scrollbar over a dark
@@ -99,11 +117,17 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty()) return 1;
     auto *host = engine.singletonInstance<ApplicationHost *>(
         QStringLiteral("Omamail.Native"), QStringLiteral("NativeHost"));
+    if (host && !mailto.isEmpty()) host->requestOpen(SingleInstance::openPayload(mailto));
     for (QObject *object : engine.rootObjects()) {
         if (auto *window = qobject_cast<QWindow *>(object)) {
             prepareNativeWindow(window);
             if (host) watchNativeCloseChord(window, [host] { host->requestClose(); });
         }
     }
+    QObject::connect(&instance, &SingleInstance::openRequested, &instance, [host](const QString &payload) {
+        if (host) host->requestOpen(payload);
+    });
+    if (!instance.listen())
+        QTextStream(stderr) << "Omamail could not listen for later launches" << Qt::endl;
     return application.exec();
 }

@@ -638,6 +638,102 @@ Item {
       compare(app.composeRecovery.draft.body,"New local edit")
       compare(recoveryBackend.requests.length,3)
     }
+    function test_a_cold_mailto_link_waits_for_recovery_data() {
+      return [{tag:"backend still starting", ready:false}, {tag:"read in flight", ready:true}]
+    }
+    function test_a_cold_mailto_link_waits_for_recovery(data) {
+      var compose = composeView()
+      app.open("{}")
+      wait(20)
+      app.composeRecoveryLoaded = false
+      app.composeStorageRevision = ""
+      app.composeWritePayload = ""
+      app.composeWriteQueued = false
+      recoveryBackend.ready = data.ready
+      app.openDraft({to:["ada@example.com"],subject:"From the link"})
+      verify(!compose.opened, "no draft opens over a recovery nobody has read")
+      recoveryBackend.ready = true
+      tryVerify(function() { return lastNativeRequest("compose.recoveryRead") !== null })
+      lastNativeRequest("compose.recoveryRead").done({record:{version:1,active:true,returnView:"list",
+        draft:{userModified:true,subject:"Last session words",body:""},parked:[]},revision:"last"}, null)
+      var dialog = named(app, "compose-exit-dialog")
+      tryCompare(dialog, "opened", true)
+      compare(named(compose, "compose-subject-field").text, "Last session words")
+      compare(lastNativeRequest("compose.recoverySave"), null, "the old draft is not written over")
+      dialog.cancel()
+      tryCompare(dialog, "opened", false)
+      wait(0)
+      compare(app.heldDraft, null)
+      compare(app.draftAwaitingRecovery, null)
+      compare(named(compose, "compose-subject-field").text, "Last session words")
+      compose.finish()
+    }
+
+    function test_a_cold_mailto_link_outlives_a_failed_recovery_read() {
+      var compose = composeView()
+      app.open("{}")
+      wait(20)
+      app.composeRecoveryLoaded = false
+      app.composeWritePayload = ""
+      app.composeWriteQueued = false
+      recoveryBackend.ready = true
+      tryVerify(function() { return lastNativeRequest("compose.recoveryRead") !== null })
+      app.openDraft({to:["ada@example.com"],subject:"From the link"})
+      lastNativeRequest("compose.recoveryRead").done(null, {code:-32000,message:"down"})
+      verify(!compose.opened)
+      verify(app.draftAwaitingRecovery !== null, "the link waits")
+      verify(app.composeRecoveryNotice !== "", "and says what it waits for")
+      recoveryBackend.ready = false
+      recoveryBackend.ready = true
+      tryVerify(function() { return recoveryBackend.requests.length === 2 })
+      recoveryBackend.requests[1].done({record:{active:false},revision:"empty"}, null)
+      tryVerify(function() { return compose.opened }, 2000, "the link opens once recovery is read")
+      compare(app.draftAwaitingRecovery, null)
+      compare(app.composeRecoveryNotice, "")
+      compose.finish()
+    }
+
+    function test_a_mailto_link_asks_before_replacing_a_draft_in_recovery() {
+      var compose = composeView()
+      app.open("{}")
+      wait(20)
+      app.composeRecoveryLoaded = true
+      app.composeRecovery = {version:1,active:true,returnView:"",parked:[],
+        draft:{userModified:true,subject:"Last session words",body:""}}
+      app.open(JSON.stringify({mailto:"mailto:eve@example.com?subject=Second"}))
+      var dialog = named(app, "compose-exit-dialog")
+      tryCompare(dialog, "opened", true)
+      compare(named(compose, "compose-subject-field").text, "Last session words")
+      dialog.cancel()
+      tryVerify(function() { return app.heldDraft === null })
+      compare(named(compose, "compose-subject-field").text, "Last session words")
+      compose.finish()
+    }
+
+    function test_a_mailto_link_waits_for_the_edited_draft_to_be_saved() {
+      var compose = composeView()
+      app.open("{}")
+      wait(20)
+      mailService.deferDraftSave = true
+      mailService.draftSaveCallbacks = []
+      app.startCompose("new")
+      var subject = named(compose, "compose-subject-field")
+      subject.text = "My own words"
+      compose.userModified = true
+      app.open(JSON.stringify({mailto:"mailto:eve@example.com?subject=Second"}))
+      var dialog = named(app, "compose-exit-dialog")
+      tryCompare(dialog, "opened", true)
+      compare(subject.text, "My own words")
+      dialog.save()
+      tryVerify(function() { return named(compose, "compose-to-field").text === "eve@example.com" })
+      compare(subject.text, "Second")
+      compare(mailService.lastSavedDraft.subject, "My own words")
+      compare(mailService.draftSaveCallbacks.length, 1)
+      mailService.finishDraftSave(0, "")
+      mailService.deferDraftSave = false
+      compose.finish()
+    }
+
     function test_native_recovery_failure_notice_clears_once_a_save_lands() {
       beginNativeRecovery()
       app.saveComposeRecovery({body:"Keep local draft",accountId:"one@example.org"})
