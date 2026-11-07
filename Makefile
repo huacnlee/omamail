@@ -127,6 +127,7 @@ backend:
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
+	node ui/tests/test_manifest.js
 	node app/tests/test_theme.js
 	node app/tests/test_shell_theme.js
 	node ui/tests/test_bar_bridge.js
