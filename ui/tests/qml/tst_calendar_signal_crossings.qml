@@ -67,6 +67,12 @@ Item {
 
     function init() {
       view.closeDetail()
+      // The views take their month and week from the machine clock, while this meeting is dated around the
+      // stand-in controller's clock. Put both on that clock, or the meeting falls outside the visible range
+      // and no row is ever built for it.
+      var now = new Date(viewController.nowMs)
+      view.visibleMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      view.visibleWeek = now
       view.setView("week")
     }
 
