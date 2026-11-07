@@ -517,6 +517,15 @@ TestCase {
     compare(host.quitCalled, true)
   }
 
+  function test_text_follows_the_omarchy_font_only_on_omarchy() {
+    verify(Style.font.family !== "monospace", "the platform UI font without an Omarchy theme")
+    installOmarchyTheme(omarchyThemes()[1])
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    tryVerify(function() { return Commons.Color.hasOmarchyTheme })
+    compare(Style.font.family, "monospace")
+  }
+
   function test_window_size_restores_and_is_saved_after_resize() {
     var path = "/fixture/config/omamail/window-size.json"
     host.files = ({})
