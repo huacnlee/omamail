@@ -169,6 +169,24 @@ assert.strictEqual(namedZone.start.tzid, "Europe/Stockholm")
 assert.strictEqual(namedZone.start.ms, Date.UTC(2026, 7, 21, 9, 0, 0))
 assert.ok(calendar.formatWhen(namedZone).indexOf("09:00 (Europe/Stockholm)") > 0)
 
+// The invitation from #461: Exchange's VTIMEZONE is named "W. Europe Standard
+// Time" while the event says TZID=Europe/Berlin. A definition by another name
+// is not assumed to be the same zone, and the card says which clock it is on.
+const mismatchedZone = calendar.invitationFrom([
+  "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:Microsoft Exchange Server 2010",
+  "BEGIN:VTIMEZONE", "TZID:W. Europe Standard Time",
+  "BEGIN:STANDARD", "DTSTART:16010101T030000", "TZOFFSETFROM:+0200", "TZOFFSETTO:+0100",
+  "RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10", "END:STANDARD",
+  "BEGIN:DAYLIGHT", "DTSTART:16010101T020000", "TZOFFSETFROM:+0100", "TZOFFSETTO:+0200",
+  "RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3", "END:DAYLIGHT",
+  "END:VTIMEZONE", "BEGIN:VEVENT", "UID:screening", "SUMMARY:Technical screening",
+  "DTSTART;TZID=Europe/Berlin:20261105T170000", "DTEND;TZID=Europe/Berlin:20261105T174500",
+  "END:VEVENT", "END:VCALENDAR"].join("\r\n"))
+assert.strictEqual(mismatchedZone.start.resolved, false)
+assert.strictEqual(mismatchedZone.start.tzid, "Europe/Berlin")
+assert.ok(calendar.formatWhen(mismatchedZone).indexOf("17:00 – 17:45 (Europe/Berlin)") > 0,
+  calendar.formatWhen(mismatchedZone))
+
 // A private zone name cannot be converted. Its fallback is UTC rather than
 // the parser machine's local zone, so separate machines agree on the instant.
 const unknownZone = calendar.invitationFrom([

@@ -285,12 +285,60 @@ const unresolvedRecurringXml = recurringXml
     "END:VTIMEZONE\r\n"
   ].join(""), "")
   .replace(/Test\/PlusTwo/g, "Europe/Stockholm")
+// An unresolved TZID is placed at the wall clock it states, in the local
+// zone, not at that clock read as UTC. The override, the EXDATE and every
+// occurrence move with it, so the series still lines up.
 const unresolvedRecurringEvents = feed.eventsFromCaldav(unresolvedRecurringXml, "work",
   Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
 assert.strictEqual(unresolvedRecurringEvents.length, 1)
-assert.strictEqual(unresolvedRecurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 14, 0),
-  "an unresolved TZID uses the same placeholder on every machine")
+assert.strictEqual(unresolvedRecurringEvents[0].summary, "Moved standup")
+assert.strictEqual(unresolvedRecurringEvents[0].start.ms, new Date(2026, 8, 18, 14, 0).getTime(),
+  "an unresolved TZID is shown at its own wall clock")
+assert.strictEqual(unresolvedRecurringEvents[0].end.ms, new Date(2026, 8, 18, 15, 0).getTime())
 assert.strictEqual(unresolvedRecurringEvents[0].start.resolved, false)
+assert.strictEqual(feed.unresolvedZoneSuffix(unresolvedRecurringEvents[0]), " (Europe/Stockholm)")
+const unresolvedSeries = feed.eventsFromCaldav(unresolvedRecurringXml, "work",
+  Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 6))
+assert.deepStrictEqual(Array.from(unresolvedSeries, e => e.start.ms),
+  [new Date(2026, 7, 6, 14, 0).getTime(), new Date(2026, 7, 20, 14, 0).getTime()],
+  "occurrences sit at the series' wall clock, and the EXDATE on 3 September still excludes")
+assert.strictEqual(feed.unresolvedZoneSuffix(recurringEvents[0]), "", "a converted time carries no zone")
+
+// The invitation from #461, as a CalDAV server stored it: Exchange named its
+// VTIMEZONE "W. Europe Standard Time", the event says TZID=Europe/Berlin. In
+// Madrid it read 18:00 for a 17:00 meeting.
+{
+  const madrid = process.env.TZ
+  process.env.TZ = "Europe/Madrid"
+  const mismatchedXml = [
+    '<?xml version="1.0"?>',
+    '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
+    '<d:response><d:href>/cal/screening.ics</d:href><d:propstat><d:prop>',
+    '<c:calendar-data>BEGIN:VCALENDAR\r\nVERSION:2.0\r\n',
+    'PRODID:Microsoft Exchange Server 2010\r\n',
+    'BEGIN:VTIMEZONE\r\nTZID:W. Europe Standard Time\r\n',
+    'BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\n',
+    'TZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10\r\n',
+    'END:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\n',
+    'TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n',
+    'RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\n',
+    'END:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:screening\r\n',
+    'SUMMARY:Technical screening\r\n',
+    'DTSTART;TZID=Europe/Berlin:20261105T170000\r\n',
+    'DTEND;TZID=Europe/Berlin:20261105T174500\r\n',
+    'END:VEVENT\r\nEND:VCALENDAR</c:calendar-data>',
+    '</d:prop></d:propstat></d:response></d:multistatus>'
+  ].join("")
+  const [screening] = feed.eventsFromCaldav(mismatchedXml, "work",
+    Date.UTC(2026, 10, 2), Date.UTC(2026, 10, 9))
+  const shown = new Date(screening.start.ms)
+  assert.deepStrictEqual([shown.getHours(), shown.getMinutes()], [17, 0],
+    "the mismatched-TZID invitation is not moved by the local UTC offset")
+  assert.strictEqual(screening.end.ms - screening.start.ms, 45 * 60000)
+  assert.strictEqual(screening.start.resolved, false, "the time is still not claimed as converted")
+  assert.strictEqual(feed.unresolvedZoneSuffix(screening), " (Europe/Berlin)")
+  process.env.TZ = madrid
+}
 
 const utcRecurringXml = recurringXml
   .replace(/;TZID=Test\/PlusTwo/g, "")
