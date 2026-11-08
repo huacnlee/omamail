@@ -37,6 +37,17 @@ Column {
   readonly property bool backendTooOld: backendProblem !== "" && !!service && !!service.backend
     && service.backend.ready === true
 
+  // An organization that registered one app sets its ID once in the settings
+  // (`m365ClientId`), so the person adding a mailbox types only the address.
+  // Anything that is not an ID leaves the field to be filled in as before. A
+  // mailbox saved with another ID keeps its own: the setting names the app for
+  // new mailboxes, it does not move a signed-in one to a different app.
+  readonly property string organizationClientId: service && service.settings
+    ? M365.clientId(service.settings.m365ClientId) : ""
+  property string savedClientId: ""
+  readonly property bool usesOrganizationApp: organizationClientId !== ""
+    && (savedClientId === "" || savedClientId === organizationClientId)
+
   spacing: Style.space(16)
 
   function validatedAddress() {
@@ -48,6 +59,7 @@ Column {
 
   // Saved as the backend keys the sign-in: a GUID in lower case.
   function validatedClientId() {
+    if (usesOrganizationApp) return organizationClientId
     var value = clientIdField.text.trim()
     if (M365.clientId(value) !== "") return M365.clientId(value)
     errorText.text = value === ""
@@ -71,6 +83,7 @@ Column {
     errorText.text = auth ? String(auth.lastError || "") : ""
     if (!service) return
     addressField.text = String(service.accountAddress || "")
+    savedClientId = auth && auth.clientId ? M365.clientId(String(auth.clientId)) : ""
     clientIdField.text = auth && auth.clientId ? String(auth.clientId) : ""
   }
 
@@ -145,14 +158,14 @@ Column {
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
       placeholderText: "Work email address — you@example.org"
-      onAccepted: clientIdField.forceActiveFocus()
+      onAccepted: root.usesOrganizationApp ? root.signIn() : clientIdField.forceActiveFocus()
     }
 
     TextField {
       id: clientIdField
       objectName: "m365-client-id-field"
       width: parent.width
-      visible: !root.signedIn
+      visible: !root.signedIn && !root.usesOrganizationApp
       readOnly: root.busy
       foreground: root.textColor
       font.family: root.panelFontFamily
@@ -187,10 +200,24 @@ Column {
     }
   }
 
+  Text {
+    objectName: "m365-organization-app"
+    width: parent.width
+    visible: root.usesOrganizationApp && !root.signedIn && !root.busy
+    textFormat: Text.PlainText
+    text: "Signs in with your organization's Microsoft app, " + root.organizationClientId
+      + ", set in Omamail's settings, so only your address is needed. To use another app, change or clear that setting."
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+  }
+
   Column {
     width: parent.width
-    // Not while a code is out: the code is what the person needs to see.
-    visible: !root.signedIn && !root.busy
+    // Not while a code is out: the code is what the person needs to see. Not
+    // when the organization's app is set up either: there is nothing to register.
+    visible: !root.signedIn && !root.busy && !root.usesOrganizationApp
     spacing: Style.space(6)
 
     Text {
@@ -360,7 +387,7 @@ Column {
       visible: !root.signedIn
       text: root.removing ? "Removing account" : root.busy ? "Waiting for Microsoft" : "Sign in with Microsoft..."
       enabled: !root.busy && root.backendProblem === "" && addressField.text.trim() !== ""
-        && clientIdField.text.trim() !== ""
+        && (root.usesOrganizationApp || clientIdField.text.trim() !== "")
       foreground: root.textColor
       bordered: true
       fontSize: Style.font.bodySmall

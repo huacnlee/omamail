@@ -108,7 +108,7 @@ void SettingsTest::acceptsTheSettingsServiceSends()
         {QStringLiteral("appearance"), QStringLiteral("Auto")},
         {QStringLiteral("defaultQuery"), QStringLiteral("in:inbox")},
         {QStringLiteral("notifyNewMail"), QStringLiteral("On")}, {QStringLiteral("oauthPort"), 9481},
-        {QStringLiteral("undoSendSeconds"), 10}, {QStringLiteral("unifiedCalendarView"), false},
+        {QStringLiteral("m365ClientId"), QString()}, {QStringLiteral("undoSendSeconds"), 10}, {QStringLiteral("unifiedCalendarView"), false},
         {QStringLiteral("calendarRemindersEnabled"), true},
         {QStringLiteral("calendarSnoozeMinutes"), 5}, {QStringLiteral("showBarIcon"), true},
         {QStringLiteral("unifiedMailboxes"), false}, {QStringLiteral("suggestEvents"), false},

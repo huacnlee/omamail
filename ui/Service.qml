@@ -140,6 +140,7 @@ Item {
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
     oauthPort: 9481,
+    m365ClientId: "",
     undoSendSeconds: 10,
     unifiedCalendarView: false,
     calendarRemindersEnabled: true,
