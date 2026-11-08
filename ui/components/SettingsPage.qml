@@ -4,6 +4,7 @@ import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
 import "../settings/Appearance.js" as Appearance
+import "../compose/Spelling.js" as Spelling
 import "../message/Html.js" as Html
 import "../account/Accounts.js" as Accounts
 
@@ -32,6 +33,8 @@ Column {
   signal openCalendarRequested()
   signal calendarSignInRequested(int index)
 
+  readonly property string spellingLanguage: Spelling.resolveLanguage(
+    service ? service.spellingLanguage : "", Qt.locale().name)
   readonly property var accounts: service ? service.accountSummaries : []
   // A separate list on purpose: accountSummaries carries live mailbox state and
   // is replaced on a poll, which would rebuild the field being typed in.
@@ -817,6 +820,123 @@ Column {
       foreground: root.textColor
       accent: root.accentColor
       onToggled: if (root.service) root.service.setSuggestEvents(!root.service.suggestEvents)
+    }
+  }
+
+  // ------------------------------------------------------------- spelling
+
+  Text {
+    id: spellingHeading
+    text: "SPELLING"
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Rectangle {
+    objectName: "settings-spelling"
+    width: parent.width
+    implicitHeight: Math.max(spellingText.implicitHeight, spellingSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: spellingText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: spellingState.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "Spell-check while composing"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        width: parent.width
+        text: "Underline misspelled words in the message body with corrections "
+          + "and Ignore for this session. Uses the local Hunspell engine; "
+          + "nothing is sent anywhere."
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      Text {
+        objectName: "spellingLanguagePolicy"
+        width: parent.width
+        id: spellingLanguagePolicy
+        text: root.spellingLanguage === ""
+          ? "No system language is set; choose one with the spellingLanguage setting."
+          : (root.service && root.service.spellingEnabled === true
+            ? "Checking spelling in " : "When on, checks spelling in ") + root.spellingLanguage
+          + (root.service && Spelling.decodeSettings(root.service.settings).language !== ""
+            ? " (set in settings)." : " (system language).")
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+      // Availability is a runtime fact, separate from the enabled request:
+      // a machine without Sonnet or its language dictionary still composes.
+      // Sonnet lists installed dictionaries once per process, so a dictionary
+      // installed while Omamail runs is only found after a restart.
+      Text {
+        objectName: "spellingNeedsSetup"
+        width: parent.width
+        visible: !!root.service && root.service.spellingEnabled === true
+          && !root.service.spellingAvailable && root.service.spellingStatus !== "loading"
+        text: root.service && root.service.standalone === true
+          ? "Spell-checking is not available in this build."
+          : root.service && root.service.spellingStatus === "no-module"
+          ? "Spell-checking is unavailable: install the Sonnet QML module, then restart Omamail."
+          : root.spellingLanguage === "" ? spellingLanguagePolicy.text
+          : "The " + root.spellingLanguage
+            + " dictionary is not installed. Install the matching Hunspell "
+            + "dictionary package (hunspell-<language>, for example hunspell-de), then restart Omamail."
+        color: root.accentColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+      }
+
+    }
+
+    Text {
+      id: spellingState
+      objectName: "spellingState"
+      anchors.right: spellingSwitch.left
+      anchors.rightMargin: Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
+      text: spellingSwitch.checked ? "On" : "Off"
+      color: root.dimColor
+      font.family: root.panelFontFamily
+      font.pixelSize: Style.font.caption
+    }
+
+    ToggleSwitch {
+      id: spellingSwitch
+      objectName: "spellingSwitch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.spellingEnabled === true
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service) root.service.setSpellingEnabled(!root.service.spellingEnabled)
     }
   }
 

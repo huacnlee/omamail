@@ -1,0 +1,162 @@
+import QtQuick
+import QtTest
+
+// The optional spelling adapter's contract.
+// The adapter is loaded through a Loader so this file has no mandatory
+// org.kde.sonnet import and skips where Sonnet or en_US is unavailable.
+Item {
+  id: root
+  width: 800
+  height: 200
+
+  readonly property string sample: "ok \uD83D\uDCE8 wrod and mispelled; don't TEH. A correct sentence follows here."
+
+  TextEdit {
+    id: edit
+    anchors.fill: parent
+    textFormat: TextEdit.PlainText
+    font.pixelSize: 18
+    wrapMode: TextEdit.Wrap
+    text: root.sample
+  }
+
+  Loader {
+    id: loader
+    source: "../../compose/SpellcheckAdapter.qml"
+    onLoaded: {
+      item.document = edit.textDocument
+      item.editor = edit
+      item.enabled = true
+      item.language = "en_US"
+    }
+  }
+
+  TestCase {
+    name: "SpellcheckAdapter"
+    when: windowShown
+
+    function init() { edit.text = root.sample }
+
+    function adapter() {
+      if (loader.status === Loader.Error || !loader.item) {
+        skip("org.kde.sonnet QML module unavailable (loader status " + loader.status + ")")
+        return null
+      }
+      var a = loader.item
+      if (!a.available) {
+        skip("en_US dictionary unavailable (status " + a.status + ")")
+        return null
+      }
+      return a
+    }
+
+    function test_language_changes_discard_native_verdict_cache() {
+      var a = adapter()
+      if (!a) return
+      compare(a.isMisspelled("mispelled"), true)
+      verify(a.verdictCache.size > 0)
+      a.language = "zz_ZZ"
+      compare(a.available, false)
+      compare(a.verdictCache.size, 0)
+      a.language = "en_US"
+      compare(a.available, true)
+      compare(a.verdictCache.size, 0)
+      compare(a.isMisspelled("mispelled"), true)
+    }
+
+    function test_hostile_override_never_becomes_the_native_dictionary_name() {
+      var a = adapter()
+      if (!a) return
+      try {
+        var values = ["../x", "en_US\r\n", "en_US\u0000", "éé", "x".repeat(500)]
+        for (var i = 0; i < values.length; i++) {
+          a.language = values[i]
+          verify(a.resolvedLanguage !== values[i])
+          verify(a.resolvedLanguage === Qt.locale().name || a.resolvedLanguage === "")
+        }
+      } finally { a.language = "en_US" }
+    }
+
+    function test_ready_and_status() {
+      var a = adapter()
+      if (!a) return
+      compare(a.available, true)
+      compare(a.status, "ready")
+    }
+
+    function test_inspection_skips_non_prose_and_follows_edits() {
+      var a = adapter()
+      if (!a) return
+      var chunks = ["sam@example.com", "first.last+tag@sub.example.co.uk",
+        "https://x.y/recieve?teh=wrod#shedule", "Re:http://x.y/recieve", "see:https://x.y/wrod",
+        "www.x.y/wrod", "mailto:sam", "wrod-".repeat(10000)]
+      for (var i = 0; i < chunks.length; i++) {
+        edit.text = "<" + chunks[i] + "> mispelled "
+        var at = edit.text.indexOf("@")
+        if (at < 0) at = edit.text.indexOf("wrod")
+        if (at < 0) at = 1
+        var info = a.inspect(at)
+        compare(info.misspelled, false)
+        compare(info.suggestions.length, 0)
+        compare(a.inspect(edit.text.indexOf("mispelled")).misspelled, true)
+      }
+      edit.text = "mispelled "
+      compare(a.inspect(2).misspelled, true, "non-prose does not poison later inspection")
+    }
+
+    function test_inspect_word_misspelling_and_suggestions() {
+      var a = adapter()
+      if (!a) return
+      var at = edit.text.indexOf("wrod")
+      compare(at, 6)
+      var info = a.inspect(at)
+      compare(info.word, "wrod")
+      compare(info.misspelled, true)
+      verify(info.suggestions.length > 0)
+      compare(String(info.suggestions[0]), "word")
+      // A correct word is not reported as misspelled.
+      var ok = a.inspect(edit.text.indexOf("sentence"))
+      compare(ok.misspelled, false)
+      compare(ok.suggestions.length, 0)
+      compare(a.isMisspelled("don't"), false)
+      verify(a.inspect(edit.text.indexOf("mispelled")).suggestions.length > 0)
+    }
+
+    function test_correction_is_undo_safe_and_does_not_touch_other_words() {
+      var a = adapter()
+      if (!a) return
+      var before = edit.text
+      verify(a.applyCorrection(6, "word"))
+      verify(edit.text !== before)
+      compare(edit.text.indexOf("word and"), 6)
+      edit.undo()
+      compare(edit.text, before)
+    }
+
+    function test_disable_does_not_mutate_text() {
+      var a = adapter()
+      if (!a) return
+      a.enabled = false
+      compare(a.status, "disabled")
+      a.enabled = true
+      compare(a.status, "ready")
+      compare(edit.text, root.sample)
+    }
+
+    function test_session_ignore_treats_a_word_as_correct() {
+      var a = adapter()
+      if (!a) return
+      // A word unique to this test: ignore is process-global and irreversible,
+      // so ignoring a word another test uses would make that test depend on
+      // order.
+      edit.text = "zqxjw zqxjw"
+      compare(a.inspect(0).misspelled, true)
+      a.ignoreForSession("zqxjw")
+      compare(a.inspect(0).misspelled, false)
+      // Ignoring never disables the checker for other words.
+      compare(a.available, true)
+      edit.text = root.sample
+      compare(a.inspect(edit.text.indexOf("wrod")).misspelled, true)
+    }
+  }
+}

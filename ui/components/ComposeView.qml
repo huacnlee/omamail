@@ -9,6 +9,7 @@ import "../message/Direction.js" as Direction
 import "../message/Message.js" as Mail
 import "../compose/Recipients.js" as Recipients
 import "../compose/Senders.js" as Senders
+import "../compose/Spelling.js" as Spelling
 import "../agent/Agent.js" as Agent
 
 // Composing takes over the whole content area of the one window rather than
@@ -39,6 +40,189 @@ DropArea {
   property bool opened: false
   property bool userModified: false
   property bool settingBodyText: false
+  // The spelling settings live on the service; the composer follows them when
+  // one is wired, and falls back to the defaults for the tests
+  // that instantiate it bare. A caller may still assign over the binding.
+  property bool spellingEnabled: Spelling.decodeSettings(service ? { spellingEnabled: service.spellingEnabled } : null).enabled
+  property string spellingLanguage: Spelling.resolveLanguage(
+    service ? service.spellingLanguage : "", Qt.locale().name)
+  // Bumped on every body change so a menu opened before an edit can tell that
+  // the text under its saved position moved.
+  property int bodyRevision: 0
+  // Body checking is on only when the optional Sonnet adapter loaded and
+  // reports a dictionary for the requested language.
+  readonly property bool spellingAvailable: spellcheckLoader.status === Loader.Ready
+    && spellcheckLoader.item !== null && spellcheckLoader.item.available
+  readonly property string spellingStatus: spellcheckLoader.status === Loader.Error
+    ? "no-module"
+    : (spellcheckLoader.item ? spellcheckLoader.item.status
+                             : (spellingEnabled ? "loading" : "disabled"))
+  // The live adapter, or null before it loads / when disabled. Tests and the
+  // fixtures drive spelling through this rather than reaching into the loader.
+  readonly property var spellingAdapter: spellcheckLoader.item
+  // Finished misspelled words as {start, end} UTF-16 offsets into the body text.
+  property var spellingRanges: []
+  property int spellingLayoutRevision: 0
+  // Reads the layout inputs that positionToRectangle() consumes in C++, where
+  // the binding engine cannot see them. The underline bindings read this so a
+  // resize, wrap or font change re-measures their geometry. The deferred revision
+  // re-measures after Qt relayouts, since alignment changes notify before that.
+  readonly property string spellingLayoutKey:
+    bodyEdit.width + ":" + bodyEdit.wrapMode + ":" + bodyEdit.font.pixelSize
+      + ":" + bodyEdit.font.family + ":" + bodyEdit.horizontalAlignment
+      + ":" + bodyEdit.effectiveHorizontalAlignment
+      + ":" + spellingLayoutRevision
+  // The theme's error role, drawn under misspelled words. The composer draws
+  // the underline itself because Sonnet's QML highlighter also colours the word
+  // red; see ui/compose/SpellcheckAdapter.qml.
+  required property color errorColor
+
+  signal keyPressed(var event)
+
+  property var spellingPass: null
+  property var spellingWindow: ({ start: 0, end: 0 })
+  property int spellingGeneration: 0
+  readonly property int spellingDelegateCount: spellingSegments.count
+
+  function cancelSpellingPass() {
+    spellingGeneration += 1
+    spellingPass = null
+    spellingSlice.stop()
+  }
+
+  // Keep only unchanged prefixes; native string comparisons avoid a body scan.
+  // Include the delimiter so typing at a word's end drops that word too.
+  function retainSpellingBeforeEdit(text, previous) {
+    var low = 0
+    var high = spellingRanges.length
+    while (low < high) {
+      var mid = Math.floor((low + high) / 2)
+      var end = spellingRanges[mid].end + 1
+      if (text.substring(0, end) === previous.substring(0, end)) low = mid + 1
+      else high = mid
+    }
+    spellingRanges = spellingRanges.slice(0, low)
+    var keptEnd = low > 0 ? spellingRanges[low - 1].end : 0
+    while (spellingSegments.count > 0
+        && spellingSegments.get(spellingSegments.count - 1).wordEnd > keptEnd)
+      spellingSegments.remove(spellingSegments.count - 1)
+  }
+
+  function scheduleSpellingLayout() {
+    cancelSpellingPass()
+    spellingScrollDebounce.restart()
+  }
+
+  function refreshSpellingRanges() {
+    cancelSpellingPass()
+    var adapter = spellingAdapter
+    if (!adapter || !spellingAvailable || !spellingEnabled || bodyFlick.height <= 0) {
+      spellingSegments.clear()
+      spellingRanges = []
+      return
+    }
+    var text = bodyEdit.text
+    var top = Math.max(0, bodyFlick.contentY)
+    var bottom = top + bodyFlick.height
+    var visibleStart = Math.min(bodyEdit.positionAt(0, top), bodyEdit.positionAt(bodyEdit.width, top))
+    var visibleEnd = Math.max(bodyEdit.positionAt(0, bottom), bodyEdit.positionAt(bodyEdit.width, bottom))
+    var marginTop = Math.max(0, top - bodyFlick.height)
+    var marginBottom = bottom + bodyFlick.height
+    var start = Math.min(bodyEdit.positionAt(0, marginTop), bodyEdit.positionAt(bodyEdit.width, marginTop))
+    var end = Math.max(bodyEdit.positionAt(0, marginBottom), bodyEdit.positionAt(bodyEdit.width, marginBottom))
+    spellingWindow = Spelling.wordWindow(text, start, end)
+    spellingPass = Spelling.createPass(text, spellingWindow, visibleStart, visibleEnd, bodyRevision)
+    spellingPass.generation = spellingGeneration
+    spellingPass.segments = []
+    spellingSlice.restart()
+  }
+
+  function processSpellingSlice() {
+    var pass = spellingPass
+    var adapter = spellingAdapter
+    if (!pass || !adapter || pass.revision !== bodyRevision || pass.generation !== spellingGeneration) {
+      cancelSpellingPass()
+      return
+    }
+    Spelling.advancePass(pass, function(word) { return adapter.isMisspelled(word) },
+      function() { return Date.now() }, function(range) {
+        var segments = Spelling.underlineSegments(range.start, range.end,
+          function(position) { return bodyEdit.positionToRectangle(position) },
+          bodyEdit.leftPadding, bodyEdit.width - bodyEdit.rightPadding)
+        var before = pass.segments.length
+        for (var i = 0; i < segments.length && pass.segments.length < Spelling.MAX_UNDERLINE_RANGES; i++) {
+          // Margin words warm the checker cache; only viewport geometry paints.
+          var segment = segments[i]
+          if (segment.y >= bodyFlick.contentY && segment.y < bodyFlick.contentY + bodyFlick.height)
+            pass.segments.push({ segmentX: segment.x, segmentY: segment.y,
+              segmentWidth: segment.width, wordEnd: range.end })
+        }
+        return pass.segments.length > before
+      })
+    if (pass.revision !== bodyRevision || pass.generation !== spellingGeneration) {
+      cancelSpellingPass()
+      return
+    }
+    if (!pass.done) { spellingSlice.restart(); return }
+    // Publish a complete view without an empty intermediate frame or model.
+    for (var i = 0; i < pass.segments.length; i++) spellingSegments.set(i, pass.segments[i])
+    if (spellingSegments.count > pass.segments.length)
+      spellingSegments.remove(pass.segments.length, spellingSegments.count - pass.segments.length)
+    spellingRanges = pass.ranges.slice()
+  }
+
+  onBodyRevisionChanged: cancelSpellingPass()
+  onSpellingLayoutKeyChanged: scheduleSpellingLayout()
+  onSpellingAvailableChanged: refreshSpellingRanges()
+  onSpellingEnabledChanged: refreshSpellingRanges()
+  onSpellingLanguageChanged: { cancelSpellingPass(); spellingDebounce.restart() }
+
+  ListModel { id: spellingSegments }
+  Timer { id: spellingSlice; interval: 1; onTriggered: root.processSpellingSlice() }
+  Timer { id: spellingScrollDebounce; interval: 40; onTriggered: root.refreshSpellingRanges() }
+  Timer { id: spellingDebounce; interval: 120; onTriggered: root.refreshSpellingRanges() }
+
+  // Right-click: the word under the pointer, kept for the menu's spelling
+  // section. Only the body is checked; another field clears the section.
+  function prepareSpellingMenu(editor, x, y) {
+    var adapter = spellingAdapter
+    if (!adapter || !spellingAvailable || editor !== bodyEdit
+        || Spelling.quotedAt(bodyEdit.text, editor.positionAt(x, y))) {
+      textMenu.spellingPosition = -1
+      textMenu.spellingWord = ""
+      textMenu.spellingMisspelled = false
+      textMenu.spellingSuggestions = []
+      return
+    }
+    var position = editor.positionAt(x, y)
+    var info = adapter.inspect(position)
+    textMenu.spellingPosition = position
+    textMenu.spellingRevision = root.bodyRevision
+    textMenu.spellingWord = info.word
+    textMenu.spellingMisspelled = info.misspelled
+    textMenu.spellingSuggestions = info.suggestions
+  }
+
+  // Keyboard: suggestions for the word at the caret, anchored to it. Returns
+  // false when there is nothing to offer so the key falls through.
+  function openSpellingAtCaret() {
+    var adapter = spellingAdapter
+    if (!bodyEdit.activeFocus || !spellingEnabled || !adapter || !spellingAvailable) return false
+    var position = bodyEdit.cursorPosition
+    if (Spelling.quotedAt(bodyEdit.text, position)) return false
+    var info = adapter.inspect(position)
+    if (!info.misspelled) return false
+    textMenu.spellingPosition = position
+    textMenu.spellingRevision = root.bodyRevision
+    textMenu.spellingWord = info.word
+    textMenu.spellingMisspelled = true
+    textMenu.spellingSuggestions = info.suggestions
+    var box = bodyEdit.positionToRectangle(position)
+    var scene = bodyEdit.mapToGlobal(box.x, box.y + box.height)
+    textMenu.openAt(bodyEdit, scene.x, scene.y, "")
+    return true
+  }
+
   // Drafts parked for their send's undo window, oldest first, each beside
   // the name of the send it belongs to. The timer owns them while the
   // visible composer stays free for the next message.
@@ -1876,6 +2060,8 @@ DropArea {
     anchors.topMargin: Style.space(12)
     contentWidth: width
     contentHeight: bodyEdit.height
+    onContentYChanged: root.scheduleSpellingLayout()
+    onHeightChanged: root.scheduleSpellingLayout()
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -1895,21 +2081,86 @@ DropArea {
       wrapMode: TextEdit.Wrap
       textFormat: TextEdit.PlainText
       horizontalAlignment: root.composeAlignment
+      onEffectiveHorizontalAlignmentChanged: Qt.callLater(function() { root.spellingLayoutRevision += 1 })
       color: root.textColor
       selectionColor: Style.selectionFillFor(root.textColor, root.accentColor)
       selectedTextColor: root.textColor
       font.family: root.panelFontFamily
       font.pixelSize: Style.font.bodySmall
+      property string lastPlainText: ""
       onTextChanged: {
+        // Sonnet can emit textChanged while rehighlighting an unchanged
+        // document. Only a plain-text change edits the draft or its revision.
+        if (text === lastPlainText) return
+        root.retainSpellingBeforeEdit(text, lastPlainText)
+        lastPlainText = text
         root.noteDraftChanged()
         if (!root.settingBodyText && activeFocus) {
           root.bodyWasEdited = true
           root.noteUserModified()
         }
+        root.bodyRevision += 1
+        spellingDebounce.restart()
       }
       Keys.priority: Keys.BeforeItem
-      Keys.onPressed: root.pasteKey(event)
+      Keys.onPressed: function(event) {
+        root.keyPressed(event)
+        if (!event.accepted) root.pasteKey(event)
+      }
+
+      // The spelling underline is drawn here, not by Sonnet, so the word is not
+      // also coloured red and the colour comes from the theme. It sits on the
+      // body item so it scrolls and wraps with the text.
+      Item {
+        id: spellingUnderlines
+        anchors.fill: parent
+        Repeater {
+          model: spellingSegments
+          delegate: Rectangle {
+            required property real segmentX
+            required property real segmentY
+            required property real segmentWidth
+            x: segmentX
+            y: segmentY
+            width: segmentWidth
+            objectName: "spelling-underline"
+            height: 1
+            color: root.errorColor
+          }
+        }
+      }
     }
+  }
+
+  // The spelling adapter is loaded optionally and destroyed when disabled, so
+  // a machine without org.kde.sonnet still opens the composer and a closed
+  // composer releases the highlighter. It binds to the body document and is
+  // never given a null document (Sonnet's setQuickDocument dereferences it).
+  Loader {
+    id: spellcheckLoader
+    active: root.spellingEnabled
+    source: "../compose/SpellcheckAdapter.qml"
+    onLoaded: {
+      if (!item) return
+      item.document = bodyEdit.textDocument
+      item.editor = bodyEdit
+      item.enabled = root.spellingEnabled
+      root.refreshSpellingRanges()
+    }
+  }
+
+  // The language is a binding, not a one-time assignment at load: a later
+  // Settings change must reach an already-open adapter.
+  Binding {
+    target: spellcheckLoader.item
+    property: "language"
+    value: root.spellingLanguage
+    when: spellcheckLoader.item !== null
+  }
+
+  Connections {
+    target: spellcheckLoader.item
+    function onCheckerChanged() { root.cancelSpellingPass(); spellingDebounce.restart() }
   }
 
   Rectangle {
@@ -2087,6 +2338,7 @@ DropArea {
     acceptedButtons: Qt.RightButton
     onPressed: function(mouse) {
       var scene = parent.mapToGlobal(mouse.x, mouse.y)
+      root.prepareSpellingMenu(parent, mouse.x, mouse.y)
       textMenu.openAt(parent, scene.x, scene.y, "")
     }
   }
@@ -2105,6 +2357,29 @@ DropArea {
     onPasteRequested: function(target) {
       if (target) target.forceActiveFocus()
       root.paste()
+    }
+    onSpellingCorrect: function(replacement) {
+      var adapter = root.spellingAdapter
+      if (!adapter) return
+      // The menu outlives its click: a draft can change underneath it (a reply
+      // quote arriving, an agent answer landing) while it is open. A revision
+      // that moved means the saved position no longer addresses the word the
+      // menu offered, which the word string alone cannot tell when the same
+      // misspelling appears more than once. Re-check both before editing.
+      if (textMenu.spellingRevision !== root.bodyRevision) return
+      var now = adapter.inspect(textMenu.spellingPosition)
+      if (now.word !== textMenu.spellingWord || !now.misspelled) return
+      adapter.applyCorrection(textMenu.spellingPosition, replacement)
+      // The menu owns focus while it is open, so the body's onTextChanged does
+      // not mark the edit. A correction is a user edit: dirty the draft and
+      // refresh the underlines itself.
+      root.bodyWasEdited = true
+      root.noteUserModified()
+      root.refreshSpellingRanges()
+    }
+    onSpellingIgnore: function(word) {
+      if (root.spellingAdapter) root.spellingAdapter.ignoreForSession(word)
+      root.refreshSpellingRanges()
     }
   }
 }
