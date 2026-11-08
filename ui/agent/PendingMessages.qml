@@ -8,7 +8,8 @@ QtObject {
   property var service: null
   property string currentScope: ""
   property var currentJob: null
-  property var draftFields: null
+  // The draft editor; a queued request reads it at dispatch, not when queued.
+  property var composer: null
   property string scope: ""
   property string conversationId: ""
   property string previousId: ""
@@ -78,7 +79,7 @@ QtObject {
     // from when it was queued or a different editor after navigation.
     if (scope.indexOf('["draft",') === 0 && !scopeMatches) return
     if (!job.canContinue) { paused = true; error = "Queue paused. Edit or remove pending messages to start again."; return }
-    if (!service.answerAgent(String(job.id), messages[0], scopeMatches ? draftFields : null)) {
+    if (!service.answerAgent(String(job.id), messages[0], scopeMatches && composer ? composer.currentFields() : null)) {
       paused = true; error = service.agentError || "Could not send the pending message."
       return
     }

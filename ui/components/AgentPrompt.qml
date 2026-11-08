@@ -68,9 +68,12 @@ FocusScope {
     service: root.service
     currentScope: root.queueScope
     currentJob: root.job
-    draftFields: root.composer ? root.fields : null
+    composer: root.composer
   }
-  readonly property var fields: composer ? composer.currentFields() : ({})
+  // Closed, the panel only needs the draft's identity (job lookup, queue
+  // scope); the full draft is read per keystroke only while it is open.
+  readonly property var fields: !composer ? ({})
+    : opened ? composer.currentFields(true) : composer.draftIdentity()
   readonly property bool overSelection: messageIds.length > 1
   property bool opened: false
   visible: opened
@@ -365,7 +368,7 @@ FocusScope {
       return false
     }
     var accepted = job ? service.answerAgent(String(job.id), prompt, composer ? composer.currentFields() : null)
-      : (composer ? service.askAgentDraft(fields, prompt)
+      : (composer ? service.askAgentDraft(composer.currentFields(), prompt)
         : (overSelection ? service.askAgentMany(messageIds, prompt, accountId)
           : service.askAgent(messageId, prompt, accountId)))
     if (!accepted) localError = service.agentError || "AI could not start. Check the message and try again."
@@ -383,7 +386,7 @@ FocusScope {
     if (!composer || !job || answer === "") return false
     // Re-resolve ownership immediately before editing, even if a From menu
     // or a restored draft changed under the response.
-    var matches = service.agentJobsForDraft(composer.currentFields())
+    var matches = service.agentJobsForDraft(composer.currentFields(true))
     if (!matches.some(function(candidate) { return String(candidate.id) === String(root.job.id) })) return false
     if (replace) composer.replaceBody(answer)
     else composer.insertAtCursor(answer)
