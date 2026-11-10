@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the icon writer and its exact notify-send argv, without a desktop."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -71,6 +72,48 @@ class NotificationTest(unittest.TestCase):
             self.assertEqual(args[-3:], ['--', '&lt;img&gt; &amp; event', '--action=evil'])
             self.assertEqual([arg for arg in args[:-3] if arg.startswith('--action=')],
                 ['--action=default=Open event...', '--action=snooze=Snooze', '--action=dismiss=Dismiss'])
+
+    def play_sound(self, tmp, dnd_script='echo off', installed=True, held=False):
+        """Run notify-sound.sh against a fake shell, player and sound theme; return what played."""
+        shell = tmp / 'omarchy-shell'
+        shell.write_text('#!/bin/sh\n[ "$*" = "notifications isDnd" ] || exit 9\n' + dnd_script + '\n')
+        player = tmp / 'pw-play'
+        player.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
+                          'open(os.environ["CAPTURE"],"w").write(json.dumps(sys.argv[1:]))\n')
+        shell.chmod(0o700)
+        player.chmod(0o700)
+        empty, themed = tmp / 'empty', tmp / 'themed'
+        sound = themed / 'sounds/freedesktop/stereo/message-new-instant.oga'
+        empty.mkdir()
+        if installed:
+            sound.parent.mkdir(parents=True)
+            sound.write_bytes(b'')
+        runtime = tmp / 'runtime'
+        runtime.mkdir()
+        env = dict(os.environ, PATH=str(tmp) + ':' + os.environ['PATH'], CAPTURE=str(tmp / 'argv'),
+                   XDG_DATA_DIRS=str(empty) + ':' + str(themed), XDG_RUNTIME_DIR=str(runtime))
+        with open(runtime / 'omamail-sound.lock', 'w') as lock:
+            if held:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            result = subprocess.run(['sh', str(ROOT / 'scripts/notify-sound.sh')], env=env,
+                                    capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        played = tmp / 'argv'
+        return (json.loads(played.read_text()), str(sound)) if played.exists() else (None, str(sound))
+
+    def test_sound_plays_from_the_sound_theme_when_do_not_disturb_is_off(self):
+        with tempfile.TemporaryDirectory() as directory:
+            played, sound = self.play_sound(Path(directory))
+            self.assertEqual(played, [sound])
+
+    def test_sound_stays_quiet_unless_it_can_and_may_play(self):
+        cases = {'do not disturb on': dict(dnd_script='echo on'),
+                 'shell unavailable': dict(dnd_script='exit 1'),
+                 'sound theme missing': dict(installed=False),
+                 'another sound playing': dict(held=True)}
+        for name, case in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
+                self.assertIsNone(self.play_sound(Path(directory), **case)[0])
 
 
 if __name__ == '__main__':

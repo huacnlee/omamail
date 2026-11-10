@@ -43,6 +43,7 @@
       "contentDirection": "Auto",
       "defaultQuery": "in:inbox",
       "notifyNewMail": "On",
+      "notifyNewMailSound": "Off",
       "oauthPort": 9481,
       "undoSendSeconds": 10,
       "unifiedCalendarView": false,
@@ -143,6 +144,17 @@
         ],
         "defaultValue": "On",
         "description": "Sends a desktop notification when a new unread message arrives in the inbox."
+      },
+      {
+        "key": "notifyNewMailSound",
+        "type": "enum",
+        "label": "Play a sound on new mail",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "Off",
+        "description": "Plays a sound with each new mail notification, unless Do Not Disturb is on."
       },
       {
         "key": "oauthPort",

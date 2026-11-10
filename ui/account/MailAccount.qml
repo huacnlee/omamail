@@ -72,6 +72,7 @@ Item {
     maxMessages: 50,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
+    notifyNewMailSound: "Off",
     oauthPort: 9481,
     undoSendSeconds: 10
   })
@@ -98,6 +99,7 @@ Item {
     Math.floor(Number(setting("maxMessages", 50))) || 50))
   readonly property string defaultQuery: String(setting("defaultQuery", "in:inbox")).trim()
   readonly property bool notifyNewMail: String(setting("notifyNewMail", "On")) !== "Off"
+  readonly property bool notifyNewMailSound: String(setting("notifyNewMailSound", "Off")) === "On"
   readonly property int oauthPort: OAuth.normalizedPort(setting("oauthPort", OAuth.DEFAULT_PORT))
   readonly property int undoSendSeconds: Outbox.normalizeDelay(
     setting("undoSendSeconds", Outbox.DEFAULT_DELAY_SECONDS))
@@ -2460,6 +2462,7 @@ Item {
     nativeNotifications: !!root.platform && root.platform.standalone === true
       && root.platform.hasNotifications === true
     pluginNotifications: !root.platform || root.platform.standalone !== true
+    playSound: root.notifyNewMailSound
     onActivated: function(accountId, messageId) {
       root.notificationActivated(accountId, messageId)
     }

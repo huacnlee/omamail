@@ -47,7 +47,7 @@ Item {
   property var platform: null
   property var initialSettings: null
   readonly property var capabilities: platform && platform.capabilities
-    ? platform.capabilities : ({ agent: true, tray: true, mailto: true, notifications: true })
+    ? platform.capabilities : ({ agent: true, tray: true, mailto: true, notifications: true, notificationSound: true })
   readonly property bool standalone: !!platform && platform.standalone === true
   readonly property bool smokeTest: standalone
     && Quickshell.env("OMAMAIL_SMOKE_TEST") === "1"
@@ -139,6 +139,7 @@ Item {
     appearance: Appearance.MODE_DEFAULT,
     defaultQuery: "in:inbox",
     notifyNewMail: "On",
+    notifyNewMailSound: "Off",
     oauthPort: 9481,
     undoSendSeconds: 10,
     unifiedCalendarView: false,
@@ -167,6 +168,7 @@ Item {
   readonly property bool alwaysRenderHeavyMessages: Html.alwaysRenderHeavyMessages(
     settings ? settings.heavyMessageRendering : null)
   readonly property bool notifyNewMail: String(settings ? settings.notifyNewMail : "On") !== "Off"
+  readonly property bool notifyNewMailSound: String(settings ? settings.notifyNewMailSound : "Off") === "On"
   // Capability controls visibility; resolved provider controls availability.
   readonly property bool hasAgent: capabilities.agent === true
   readonly property bool agentAvailable: hasAgent && agentRunner.providerAvailable === true
