@@ -112,4 +112,6 @@ Qt behaviours this design is shaped around.
 - All parsing, formatting, and decision logic lives in `.pragma library` JS
   files so it is testable under node without a compositor.
 - No dependency beyond what Omarchy already ships: `socat`, `secret-tool`,
-  `openssl`, `xdg-open`, `notify-send`.
+  `openssl`, `xdg-open`, `notify-send`. The optional new-mail sound also uses
+  `pw-play`, `flock` and the freedesktop sound theme, and stays quiet when the
+  theme is not installed.
