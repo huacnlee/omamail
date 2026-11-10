@@ -30,6 +30,12 @@ Item {
   // A right-click on a label row: the label's id ("" for an ancestor no label
   // names), its path, and where the menu goes.
   signal labelMenuRequested(string labelId, string path, real sceneX, real sceneY)
+  // Messages dropped on a label row.
+  property bool dropEnabled: true
+  // Asked per row while dragging: would a drop here change anything?
+  property var dropAllowed: function(kind, key) { return true }
+  signal labelDropped(string labelId)
+  signal mailboxDropped(string key)
   signal calendarRequested()
 
   // The numbered list App.qml also gives the keys, so a badge and the key that
@@ -93,6 +99,9 @@ Item {
             && root.service.mailboxKey === modelData.key
             && root.service.searchQuery === "" && root.service.rawQuery === ""
           slotNumber: Model.slotNumberOf(root.slots, "mailbox", modelData.key)
+          dropAccepted: ["inbox", "archive", "trash", "spam", "starred", "unread", "all"].indexOf(modelData.key) >= 0
+            && root.dropAllowed("mailbox", modelData.key)
+          onMessageDropped: root.mailboxDropped(modelData.key)
           onActivated: root.mailboxSelected(modelData.key)
         }
       }
@@ -135,6 +144,8 @@ Item {
           expanded: modelData.expanded
           selectable: modelData.selectable
           fullPath: modelData.path
+          dropAccepted: root.dropAllowed("label", modelData.id)
+          onMessageDropped: root.labelDropped(modelData.id)
           monitored: modelData.selectable && !!root.service
             && (root.service.monitoredLabelIds || []).indexOf(modelData.id) >= 0
           onMenuRequested: function(sceneX, sceneY) {
@@ -195,10 +206,12 @@ Item {
     property bool foldable: false
     property bool expanded: true
     property bool selectable: true
+    property bool dropAccepted: false
     property string fullPath: ""
     signal activated()
     signal foldRequested()
     signal menuRequested(real sceneX, real sceneY)
+    signal messageDropped()
     // Watched for new mail: the row keeps its count in the accent even while
     // it is not the one open, and the glyph says so.
     property bool monitored: false
@@ -211,7 +224,7 @@ Item {
     width: column.width
     implicitHeight: Style.space(28)
     radius: Style.cornerRadius
-    color: entry.selected
+    color: entry.selected || dropTarget.containsDrag
       ? Style.selectedFillFor(root.textColor, root.accentColor)
       : (hover.hovered ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent")
 
@@ -325,6 +338,24 @@ Item {
     }
 
     HoverHandler { id: hover }
+
+    // Only a label that can hold a message takes a drop; the outline keeps
+    // the target visible without leaning on the fill colour.
+    DropArea {
+      id: dropTarget
+      anchors.fill: parent
+      keys: ["omamail-message"]
+      enabled: root.dropEnabled && entry.selectable && entry.dropAccepted
+      onDropped: entry.messageDropped()
+    }
+    Rectangle {
+      anchors.fill: parent
+      radius: entry.radius
+      color: "transparent"
+      border.width: 1
+      border.color: root.accentColor
+      visible: dropTarget.containsDrag
+    }
     // The fold's handler sits inside this one and both see the same tap,
     // so the row asks where it landed before opening anything: folding a
     // parent must not also open it.

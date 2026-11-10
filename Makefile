@@ -35,6 +35,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/MessageList.qml \
 	ui/components/ListSkeleton.qml \
 	ui/components/MessageRow.qml \
+	ui/components/RowDrag.qml \
 	ui/components/MessageMenu.qml \
 	ui/components/MenuActionRow.qml ui/components/MenuSeparatorLine.qml \
 	ui/components/KeyRouter.qml \
@@ -168,6 +169,7 @@ test-js:
 	node ui/tests/test_direction.js
 	node ui/tests/test_appearance.js
 	node ui/tests/test_model.js
+	node ui/tests/test_drop.js
 	node ui/tests/test_icons.js
 	node ui/tests/test_navigation.js
 	node tests/test_reader_pipeline.js

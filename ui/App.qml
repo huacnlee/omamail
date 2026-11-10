@@ -1780,6 +1780,9 @@ Item {
             root.backToList()
           }
           onFolderToggled: function(path) { root.service.toggleFolder(path) }
+          dropAllowed: function(k, id) { return rowDrag.wouldAct(k, id) }
+          onLabelDropped: function(id) { rowDrag.dropOnLabel(id) }
+          onMailboxDropped: function(k) { rowDrag.dropOnMailbox(k) }
           onLabelMenuRequested: function(labelId, path, sceneX, sceneY) {
             root.openLabelMenu(labelId, path, sceneX, sceneY)
           }
@@ -1900,6 +1903,9 @@ Item {
               onMessageActivated: function(id) { root.openMessage(id) }
               onAgentRequested: function(id, sceneX, sceneY) { root.openAgentFromRow(id, sceneX, sceneY) }
               onRowActionRequested: function(id, action) { root.actFromRow(id, action) }
+              onRowDragStarted: function(id, x, y) { rowDrag.start(id, x, y) }
+              onRowDragMoved: function(x, y) { rowDrag.move(x, y) }
+              onRowDragEnded: rowDrag.end()
               onCheckToggled: function(id) { root.toggleCheck(id) }
               onCheckRangeRequested: function(id) { root.checkRange(id) }
               onMenuRequested: function(id, sceneX, sceneY, ids) {
@@ -2821,6 +2827,17 @@ Item {
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
         onSubmitted: function(kind, subject, text) { root.labelNamed(kind, subject, text, namePrompt.accountId) }
+      }
+
+      RowDrag {
+        id: rowDrag
+        service: root.service
+        checkedIds: root.checkedIds
+        textColor: root.foreground
+        accentColor: root.accent
+        popupBackgroundColor: root.popupBackground
+        panelFontFamily: root.fontFamily
+        act: root.actFromRow
       }
 
       LabelMovePicker {
