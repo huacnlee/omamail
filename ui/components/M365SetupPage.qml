@@ -79,12 +79,29 @@ Column {
     service.configureCurrentAccountAndSignInOAuth({ provider: "m365", email: address, clientId: clientId })
   }
 
+  function storedClientId() {
+    return auth && auth.clientId ? M365.clientId(String(auth.clientId)) : ""
+  }
+
   function syncFromStore() {
     errorText.text = auth ? String(auth.lastError || "") : ""
     if (!service) return
     addressField.text = String(service.accountAddress || "")
-    savedClientId = auth && auth.clientId ? M365.clientId(String(auth.clientId)) : ""
+    savedClientId = storedClientId()
     clientIdField.text = auth && auth.clientId ? String(auth.clientId) : ""
+  }
+
+  // Saving the entry updates the same auth object in place, so the page follows
+  // its ID too: a mailbox saved with one app keeps it if the setting changes or
+  // is cleared before the next try. The field takes the saved ID only while it
+  // still holds the previous one, so a different ID being typed is not lost.
+  function followSavedClientId() {
+    var next = storedClientId()
+    if (next === savedClientId) return
+    var typed = clientIdField.text.trim()
+    if (typed === "" || M365.clientId(typed) === savedClientId)
+      clientIdField.text = auth && auth.clientId ? String(auth.clientId) : ""
+    savedClientId = next
   }
 
   function open(url) {
@@ -102,6 +119,7 @@ Column {
     function onLastErrorChanged() {
       errorText.text = root.auth ? String(root.auth.lastError || "") : ""
     }
+    function onClientIdChanged() { root.followSavedClientId() }
     // A session that is there is no failure to report any more.
     function onLoggedInChanged() {
       if (root.auth && root.auth.loggedIn === true) errorText.text = ""
