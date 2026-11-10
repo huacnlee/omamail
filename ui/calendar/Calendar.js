@@ -782,7 +782,7 @@ function googleOptions(body, fields, source, existing) {
   return { ok: true, body: next }
 }
 
-function transferRefusal(source, destination, event) {
+function transferRefusal(source, destination, event, allowSeriesChoice) {
   if (!source || !destination || source.kind !== "google" || destination.kind !== "google")
     return "Calendar transfers are not available for this provider"
   if (source.accountId !== destination.accountId) return "Choose a calendar in the same account"
@@ -790,7 +790,7 @@ function transferRefusal(source, destination, event) {
   if (destination.readOnly) return "The destination calendar is read-only"
   if (!event || event.eventType !== "default" || !event.organizer || event.organizer.self !== true)
     return "Only ordinary events you organize can change calendars"
-  if (event.recurringEventId) return "Open the entire series before changing its calendar"
+  if (event.recurringEventId && !allowSeriesChoice) return "Open the entire series before changing its calendar"
   return ""
 }
 
@@ -879,7 +879,7 @@ function calendarChoiceRows(groups, editingSource, event) {
     for (var j = 0; j < (group.calendars || []).length; j++) {
       var source = group.calendars[j]
       if (event && (!editingSource || String(source.id) !== String(editingSource.id))
-          && transferRefusal(editingSource, source, event) !== "") continue
+          && transferRefusal(editingSource, source, event, true) !== "") continue
       rows.push({ source: source, firstInGroup: first,
         groupLabel: String(group.providerLabel || "") + " · " + String(group.accountLabel || "") })
       first = false
