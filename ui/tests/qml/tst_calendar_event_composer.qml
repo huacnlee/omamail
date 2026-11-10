@@ -23,6 +23,13 @@ Item {
     property int updateCalls: 0
     property var createdFields: null
     property var transferCallback: null
+    property var seriesCallback: null
+    property var transferredEvent: null
+    property string requestedSeries: ""
+    function nativeRequest(source, operation, fields, callback) {
+      requestedSeries = fields.eventId
+      seriesCallback = callback
+    }
     function findSource(id) {
       for (var i=0;i<writableSourceGroups.length;i++)
         for (var j=0;j<writableSourceGroups[i].calendars.length;j++)
@@ -30,6 +37,7 @@ Item {
       return null
     }
     function transferEvent(sourceId, destinationId, event, callback) {
+      transferredEvent = event
       eventWriting = true
       transferCallback = callback
       return true
@@ -108,6 +116,9 @@ Item {
       eventController.updateCalls = 0
       eventController.writableSourceGroups = JSON.parse(JSON.stringify(initialGroups))
       eventController.transferCallback = null
+      eventController.seriesCallback = null
+      eventController.transferredEvent = null
+      eventController.requestedSeries = ""
       composer.close()
       composer.writePending = false
       contacts.recipientContacts = []
@@ -413,6 +424,72 @@ Item {
       compare(composer.editingSourceId,"destination")
       compare(composer.editingEvent.etag,"new")
       compare(composer.titleText(),"Unsaved title")
+      compare(eventController.updateCalls,0)
+    }
+
+    function test_recurring_calendar_choice_confirms_series_and_recovers_from_failure() {
+      eventController.writableSourceGroups=[{providerLabel:"Google",accountLabel:"me@example.test",calendars:[
+        {id:"original",name:"Personal",kind:"google",accountId:"me@example.test"},
+        {id:"destination",name:"Family",kind:"google",accountId:"me@example.test"}]}]
+      var occurrence={googleId:"series_sunday",recurringEventId:"series",sourceId:"original",
+        summary:"Weekly meeting",eventType:"default",organizer:{self:true},etag:"instance-etag",
+        start:{ms:Date.now()},end:{ms:Date.now()+3600000}}
+      composer.beginEdit("original",occurrence)
+      wait(0)
+      var selector=findChild(composer,"event-calendar-selector")
+      compare(selector.count,2, "Family must be offered for a recurring occurrence")
+      verify(waitForRendering(selector))
+      findChild(composer,"event-title-field").text="Unsaved occurrence title"
+      mouseClick(selector,selector.width/2,selector.height/2)
+      tryCompare(selector.popup,"opened",true)
+      tryVerify(function() { return selector.popup.contentItem.itemAtIndex(1) !== null })
+      var option=selector.popup.contentItem.itemAtIndex(1)
+      mouseClick(option,option.width/2,option.height-8)
+      var dialog=findChild(composer,"event-move-series-dialog")
+      tryCompare(dialog,"opened",true)
+      compare(eventController.seriesCallback,null)
+      compare(eventController.transferredEvent,null)
+      keyClick(Qt.Key_Escape)
+      tryCompare(dialog,"opened",false)
+      compare(composer.opened,true)
+      compare(composer.selectedSourceId,"original")
+      compare(composer.titleText(),"Unsaved occurrence title")
+      compare(selector.currentIndex,0)
+      composer.chooseCalendar("destination")
+      tryCompare(dialog,"opened",true)
+      keyClick(Qt.Key_Tab)
+      keyClick(Qt.Key_Return)
+      compare(eventController.requestedSeries,"series")
+      compare(eventController.transferredEvent,null)
+      eventController.seriesCallback(null,"Could not load series")
+      compare(composer.loadingSeries,false)
+      compare(selector.currentIndex,0)
+      compare(composer.titleText(),"Unsaved occurrence title")
+      composer.chooseCalendar("destination")
+      tryCompare(dialog,"opened",true)
+      var confirm=findChild(composer,"event-move-series-confirm")
+      mouseClick(confirm,confirm.width/2,confirm.height/2)
+      var series={id:"series",summary:"Weekly meeting",eventType:"default",organizer:{self:true},etag:"series-etag",
+        recurrence:["RRULE:FREQ=WEEKLY"],start:{dateTime:"2026-11-01T12:00:00Z"},end:{dateTime:"2026-11-01T13:00:00Z"}}
+      eventController.seriesCallback({body:JSON.stringify(series)},"")
+      compare(eventController.transferredEvent.googleId,"series")
+      compare(eventController.transferredEvent.etag,"series-etag")
+      eventController.eventWriting=false
+      eventController.transferCallback(null,"Move failed")
+      compare(composer.selectedSourceId,"original")
+      compare(composer.editingEvent.googleId,"series_sunday")
+      compare(composer.titleText(),"Unsaved occurrence title")
+      composer.chooseCalendar("destination")
+      tryCompare(dialog,"opened",true)
+      mouseClick(confirm,confirm.width/2,confirm.height/2)
+      eventController.seriesCallback({body:JSON.stringify(series)},"")
+      var moved=JSON.parse(JSON.stringify(eventController.transferredEvent))
+      moved.sourceId="destination"; moved.etag="moved-etag"
+      eventController.eventWriting=false
+      eventController.transferCallback(moved,"")
+      compare(composer.editingSourceId,"destination")
+      compare(composer.editingEvent.googleId,"series")
+      compare(composer.editingEvent.etag,"moved-etag")
       compare(eventController.updateCalls,0)
     }
 

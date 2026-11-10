@@ -43,6 +43,7 @@ Item {
     id: view
     anchors.fill: parent
     controller: viewController
+    visibleMonth: new Date(2026, 9, 1)
     textColor: palette.text
     backgroundColor: palette.base
     accentColor: palette.highlight
