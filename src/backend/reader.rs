@@ -188,7 +188,7 @@ impl Session {
                     .as_array()
                     .and_then(|v| v.iter().find(|v| v["id"] == id))
                     .cloned()
-                    .ok_or("reader_message_missing")?
+                    .ok_or_else(|| missing_reason(&response["warning"]))?
             }
             "m365" => {
                 crate::providers::m365::call(
@@ -511,6 +511,28 @@ fn render_prepared(
     Ok(result)
 }
 
+/// Why an IMAP read returned no message. A folder fetch that failed is reported
+/// only as `warning`; returning that code lets diagnostics name the real failure
+/// instead of `reader_message_missing`.
+fn missing_reason(warning: &Value) -> &'static str {
+    const KNOWN: &[&str] = &[
+        "too_many_mime_parts",
+        "invalid_message",
+        "invalid_message_header",
+        "imap_response_too_complex",
+        "imap_invalid_response",
+        "imap_command_failed",
+        "mail_response_too_large",
+        "mail_network_failed",
+        "mail_connection_closed",
+        "worker_failed",
+    ];
+    warning
+        .as_str()
+        .and_then(|warning| KNOWN.iter().copied().find(|known| *known == warning))
+        .unwrap_or("reader_message_missing")
+}
+
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn projection(
@@ -538,6 +560,20 @@ pub(super) fn projection(
 mod tests {
     use super::*;
     use base64::Engine;
+
+    #[test]
+    fn a_failed_fetch_is_reported_instead_of_a_missing_message() {
+        assert_eq!(
+            missing_reason(&json!("mail_network_failed")),
+            "mail_network_failed"
+        );
+        assert_eq!(missing_reason(&json!(null)), "reader_message_missing");
+        assert_eq!(
+            missing_reason(&json!("not_an_error_id")),
+            "reader_message_missing"
+        );
+    }
+
     fn fixture() -> Value {
         let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
             "<p>Hello</p><script>EVIL_SCRIPT</script><img src=\"https://example.org/pixel\">",
