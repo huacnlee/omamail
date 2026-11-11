@@ -38,6 +38,54 @@ fn embedded_invoice_xml_can_open_as_pdf() {
     assert!(openable("INVOICE.PDF", INVOICE));
 }
 
+fn annotated_revision(rich_text: &[u8]) -> Vec<u8> {
+    let mut bytes = INVOICE.to_vec();
+    let object = bytes.len();
+    bytes.extend_from_slice(b"\n20 0 obj\n<< /Type /Annot /Subtype /FreeText /RC (");
+    bytes.extend_from_slice(rich_text);
+    bytes.extend_from_slice(b") >>\nendobj\n");
+    let xref = bytes.len();
+    bytes.extend_from_slice(format!(
+        "xref\n20 1\n{:010} 00000 n \ntrailer\n<< /Size 21 /Root 3 0 R /Prev 837 >>\nstartxref\n{xref}\n%%EOF\n",
+        object + 1
+    ).as_bytes());
+    bytes
+}
+
+#[test]
+fn incrementally_saved_pdf_annotations_can_open() {
+    let bytes = annotated_revision(
+        b"<?xml version='1.0'?><body xmlns='http://www.w3.org/1999/xhtml'><p><span>Signed here</span></p></body>",
+    );
+    assert!(openable("annotated.pdf", &bytes));
+    assert!(!openable("annotated.html", &bytes));
+    assert!(!openable("annotated.txt", &bytes));
+    assert!(!openable(
+        "annotated.pdf",
+        &replace(&bytes, b"/Prev 837", b"/Prev 123")
+    ));
+    assert!(!openable(
+        "annotated.pdf",
+        &replace(&bytes, b"/Subtype /FreeText", b"/Subtype /Widget")
+    ));
+}
+
+#[test]
+fn annotation_exception_keeps_active_content_visible() {
+    for text in [
+        b"<?xml version='1.0'?><body><script>bad</script></body>".as_slice(),
+        b"<?xml version='1.0'?><body><iframe/></body>",
+        b"<?xml version='1.0'?><body><svg/></body>",
+        b"<?xml version='1.0'?><body/><body/>",
+        b"<?xml-stylesheet href='https://invalid.example/'?><body/>",
+    ] {
+        assert!(!openable("annotated.pdf", &annotated_revision(text)));
+    }
+    let mut bytes = annotated_revision(b"<?xml version='1.0'?><body>Text</body>");
+    bytes.extend_from_slice(b"<html>not PDF</html>");
+    assert!(!openable("annotated.pdf", &bytes));
+}
+
 #[test]
 fn embedded_xml_does_not_authorize_other_file_types() {
     for name in [
@@ -231,6 +279,12 @@ fn attachment_store_refusal_writes_nothing_and_returns_no_launch_path() {
         replace_object(b"/Length 266", b"/Length 9 0 R"),
         replace_object(b"/Length 266", b"/Length 266 /Filter /FlateDecode"),
         INVOICE[..INVOICE.len() - 6].to_vec(),
+        annotated_revision(b"<?xml version='1.0'?><body><script>bad</script></body>"),
+        replace(
+            &annotated_revision(b"<?xml version='1.0'?><body>Text</body>"),
+            b"/Prev 837",
+            b"/Prev 123",
+        ),
     ] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_omamail"))
             .args(["call", "attachment.store", "--json"])

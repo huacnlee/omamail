@@ -166,8 +166,8 @@ pub fn openable(name: &str, data: &[u8]) -> bool {
     if pdf_name && sample.windows(5).any(|bytes| bytes == b"<?xml") {
         if let Some(declarations) = pdf::xml_declarations(data) {
             let mut sample = data.to_vec();
-            for at in declarations {
-                sample[at..at + 5].fill(b' ');
+            for range in declarations {
+                sample[range].fill(b' ');
             }
             // An exception buys no other exception: scan the whole container,
             // including bytes beyond the ordinary 64 KiB sniffing window.
