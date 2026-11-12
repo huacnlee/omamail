@@ -10,6 +10,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/tests/qml/tst_invitation_calendar.qml \
 	ui/tests/qml/tst_calendar_today.qml \
 	ui/tests/qml/tst_calendar_description_detail.qml \
+	ui/tests/qml_zones/tst_unresolved_zone_composer.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
 	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/DraftList.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml ui/account/ContactBook.qml \
@@ -270,6 +271,7 @@ test-qml:
 	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
 	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
 	python3 tests/test_tooltip_text.py "$(QMLTESTRUNNER)"
+	python3 tests/test_calendar_zones_qml.py "$(QMLTESTRUNNER)"
 	QMLTESTRUNNER="$(QMLTESTRUNNER)" cargo test --locked --lib message::html::tests::native_output_cannot_trigger_qt_resource_requests -- --ignored
 
 test-app-qml:

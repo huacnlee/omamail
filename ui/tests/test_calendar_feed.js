@@ -487,6 +487,66 @@ const caldavResource = (href, components) => [
   process.env.TZ = saved
 }
 
+// Los Angeles repeats 01:00-02:00 on 1 November 2026. An unresolved event is
+// shown at the wall clocks it states, so its range reads the same on the local
+// clock and the editor can save it. The editor holds HH:MM, and Qt reads a
+// repeated 01:45 back as the second one: a save that only renames still keeps
+// the lines that arrived.
+{
+  const saved = process.env.TZ
+  process.env.TZ = "America/Los_Angeles"
+  const minutes = 60000
+  const autumn = (end) => feed.eventsFromCaldav(caldavResource("/cal/fold.ics", [
+    'BEGIN:VEVENT\r\nUID:fold\r\nSUMMARY:Night review\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261101T014500\r\n'
+      + 'DTEND;TZID=Europe/Berlin:' + end + '\r\nEND:VEVENT\r\n']), "work")[0]
+  const reads = ms => { const d = new Date(ms); return d.getHours() * 100 + d.getMinutes() }
+  // What the editor sends back is its HH:MM read by Qt's Date(...), which takes
+  // the later of the two 01:45s: 09:45Z, an hour after the one shown.
+  const renameAsQt = (event, endMs) => feed.updateEvent({ title: "Night review, renamed",
+    startMs: Date.UTC(2026, 10, 1, 9, 45), endMs, location: "", description: "" }, event, 1)
+
+  const short = autumn("20261101T023000")
+  assert.deepStrictEqual([reads(short.start.ms), reads(short.end.ms)], [145, 230],
+    "01:45-02:30 reads as written across the repeated hour")
+  assert.ok(short.end.ms > short.start.ms)
+  const shortSave = renameAsQt(short, Date.UTC(2026, 10, 1, 10, 30))
+  assert.strictEqual(shortSave.ok, true, "the range stays editable")
+  assert.ok(shortSave.ics.indexOf("DTSTART;TZID=Europe/Berlin:20261101T014500") > 0)
+  assert.ok(shortSave.ics.indexOf("DTEND;TZID=Europe/Berlin:20261101T023000") > 0)
+
+  const long = autumn("20261101T030000")
+  assert.deepStrictEqual([reads(long.start.ms), reads(long.end.ms)], [145, 300],
+    "01:45-03:00 is not cut to 01:45-02:00")
+  const longSave = renameAsQt(long, Date.UTC(2026, 10, 1, 11, 0))
+  assert.strictEqual(longSave.ok, true)
+  assert.ok(longSave.ics.indexOf("DTSTART;TZID=Europe/Berlin:20261101T014500") > 0)
+  assert.ok(longSave.ics.indexOf("DTEND;TZID=Europe/Berlin:20261101T030000") > 0,
+    "a title-only save keeps both time lines, TZID and the 75 minutes")
+  assert.ok(!/DTSTART:\d{8}T\d{6}Z/.test(longSave.ics) && !/DTEND:\d{8}T\d{6}Z/.test(longSave.ics))
+  assert.ok(longSave.ics.indexOf("SUMMARY:Night review\\, renamed") > 0)
+
+  // Both ends inside the repeated hour, and a series that crosses it.
+  const inside = autumn("20261101T015500")
+  assert.deepStrictEqual([reads(inside.start.ms), reads(inside.end.ms)], [145, 155])
+  assert.strictEqual(inside.end.ms - inside.start.ms, 10 * minutes)
+  assert.strictEqual(feed.updateEvent({ title: "x", startMs: Date.UTC(2026, 10, 1, 9, 45),
+    endMs: Date.UTC(2026, 10, 1, 9, 55), location: "", description: "" }, inside, 1).ok, true)
+  const nights = feed.eventsFromCaldav(caldavResource("/cal/nights.ics", [
+    'BEGIN:VEVENT\r\nUID:nights\r\nSUMMARY:Night review\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261030T014500\r\n'
+      + 'DTEND;TZID=Europe/Berlin:20261030T030000\r\n'
+      + 'RRULE:FREQ=DAILY;COUNT=4\r\nEND:VEVENT\r\n']), "work",
+    Date.UTC(2026, 9, 29), Date.UTC(2026, 10, 5))
+  assert.strictEqual(nights.length, 4)
+  for (const night of nights) {
+    assert.deepStrictEqual([reads(night.start.ms), reads(night.end.ms)], [145, 300],
+      new Date(night.start.ms).toString())
+    assert.ok(night.end.ms > night.start.ms)
+  }
+  process.env.TZ = saved
+}
+
 const utcRecurringXml = recurringXml
   .replace(/;TZID=Test\/PlusTwo/g, "")
   .replace(/20240208T140000/g, "20240208T130000Z")

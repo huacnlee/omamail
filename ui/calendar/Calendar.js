@@ -306,7 +306,12 @@ function occurrenceOf(event, startMs) {
   var delta = Number(startMs) - Number(event.start.ms)
   copy.start = { ms: Number(startMs), allDay: event.start.allDay,
     tzid: event.start.tzid, resolved: event.start.resolved }
-  copy.end = event.end ? { ms: Number(event.end.ms) + delta, allDay: event.end.allDay,
+  // An unresolved series keeps its wall-clock length on each day, across the
+  // local clock's changes, as its first occurrence does.
+  var endMs = event.end && event.wallSpanMs !== undefined
+    ? wallEnd(startMs, event.wallSpanMs)
+    : event.end ? Number(event.end.ms) + delta : 0
+  copy.end = event.end ? { ms: endMs, allDay: event.end.allDay,
     tzid: event.end.tzid, resolved: event.end.resolved } : null
   copy.recurrenceIdMs = Number(startMs)
   return copy
@@ -386,12 +391,19 @@ function wallClockAsLocal(ms) {
   return early
 }
 
-// Only the start is placed; the end keeps the span between the two times as
-// written. Placed on their own, the endpoints can cross: a DST gap on the local
-// clock swallows an hour of a span, and an end written in UTC is an instant
-// while the start is a wall clock read locally — 17:00 Berlin to 17:45Z became
-// 17:00–09:45 in Los Angeles. The written span is the same on every machine.
-// One that runs backwards, from mixing a UTC end with a start's wall clock,
+// An unresolved event is a pair of wall clocks, and is shown as one: both ends
+// read the same on the local clock as they were written, so the times the week
+// view and the editor show are the times the invitation states. Kept as a span
+// of real time instead, the end's local reading drifts wherever the local clock
+// changes: Berlin 01:45-02:30 read 01:45-01:30 across the repeated autumn hour
+// in Los Angeles, which no editor can save. A wall clock the local clock skips
+// moves forward by the gap (see wallClockAsLocal); an end that the move would
+// put before its start keeps the written span after it instead.
+//
+// An end written on a different clock from its start - one in UTC beside a
+// TZID that did not resolve, or the other way round - gives the pair no common
+// clock, so the end is the start's wall clock plus the span between the two
+// values as written, the same on every machine. A span that runs backwards
 // shows as the hour an event with no end gets.
 //
 // Each identity is placed by its own resolution. A RECURRENCE-ID or EXDATE
@@ -402,11 +414,17 @@ function wallClockAsLocal(ms) {
 function placeUnresolved(event) {
   var start = event.start, end = event.end
   var startUnresolved = isUnresolvedTime(start)
-  if (start && (startUnresolved || isUnresolvedTime(end))) {
-    var written = end ? Number(end.ms) - Number(start.ms) : 0
-    if (startUnresolved) start.ms = wallClockAsLocal(start.ms)
-    if (end) end.ms = Number(start.ms) + (written >= 0 ? written : 3600000)
-  } else if (!start && isUnresolvedTime(end)) {
+  var endUnresolved = isUnresolvedTime(end)
+  if (start && (startUnresolved || endUnresolved)) {
+    var startWall = startUnresolved ? Number(start.ms) : localAsWall(start.ms)
+    if (end) {
+      var endWall = startUnresolved && endUnresolved ? Number(end.ms)
+        : startWall + (Number(end.ms) - Number(start.ms))
+      event.wallSpanMs = endWall >= startWall ? endWall - startWall : 3600000
+    }
+    if (startUnresolved) start.ms = wallClockAsLocal(startWall)
+    if (end) end.ms = wallEnd(start.ms, event.wallSpanMs)
+  } else if (!start && endUnresolved) {
     end.ms = wallClockAsLocal(end.ms)
   }
   if (event.recurrenceIdMs && event.recurrenceIdResolved === false)
@@ -417,6 +435,21 @@ function placeUnresolved(event) {
   event.excludedMs = (event.excludedMs || []).map(function(ms) {
     return unresolved[Number(ms)] ? wallClockAsLocal(ms) : ms
   })
+}
+
+// The local clock reading of an instant, as a UTC-keyed wall clock: the inverse
+// of wallClockAsLocal.
+function localAsWall(ms) {
+  var date = new Date(Number(ms))
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(),
+    date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds())
+}
+
+// The end that reads `wallSpan` after a placed start on the local clock.
+function wallEnd(startMs, wallSpan) {
+  var span = Number(wallSpan)
+  var end = wallClockAsLocal(localAsWall(startMs) + span)
+  return end >= Number(startMs) ? end : Number(startMs) + span
 }
 
 function isUnresolvedTime(time) {
@@ -1054,19 +1087,24 @@ function writeRefusal(source, event, operation) {
   return ""
 }
 
-// The editor shows an unresolved time as its wall clock on the local clock, and
-// the end beside one as the start plus the written span: readings for display,
-// not instants. Written back as UTC they would move the event by whatever
-// offset the editing machine has, so while the times are left as shown the
-// lines that arrived are kept, TZID and all. A time the owner changes is one
+// The editor shows an unresolved event as wall clocks on the local clock:
+// readings for display, not instants. Written back as UTC they would move the
+// event by whatever offset the editing machine has, so while the times are left
+// as shown the lines that arrived are kept, TZID and all. A time the owner changes is one
 // they typed on their local clock, and is written as such.
 function unresolvedTimesKept(checked, event, allDay) {
   var start = event && event.start
   if (!start || !(isUnresolvedTime(start) || isUnresolvedTime(event.end))) return false
   if (allDay !== !!start.allDay) return false
   var shownEnd = event.end ? Number(event.end.ms) : Number(start.ms) + 3600000
-  return Math.floor(checked.start / 60000) === Math.floor(Number(start.ms) / 60000)
-    && Math.floor(checked.end / 60000) === Math.floor(shownEnd / 60000)
+  return sameLocalMinute(checked.start, start.ms) && sameLocalMinute(checked.end, shownEnd)
+}
+
+// The editor holds a date and an HH:MM, not an instant: in the repeated autumn
+// hour the time it reads back can be the other 01:45 from the one it was shown.
+// What it shows is what has to match.
+function sameLocalMinute(first, second) {
+  return Math.floor(localAsWall(first) / 60000) === Math.floor(localAsWall(second) / 60000)
 }
 
 // An edit rewrites the event on its own identity: the UID names it, and the
