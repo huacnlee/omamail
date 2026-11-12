@@ -477,11 +477,12 @@ const caldavResource = (href, components) => [
 
   // The local reading of a wall clock does not depend on the JavaScript engine:
   // V8 and Qt's engine disagree on Date(...) inside a DST change. A time in the
-  // gap moves forward by it; one in the repeated hour is its first occurrence.
+  // gap moves forward by it; one in the repeated hour is its second occurrence,
+  // the reading Qt's Date(...) and so the editor give it.
   assert.strictEqual(feed.wallClockAsLocal(Date.UTC(2026, 2, 8, 2, 30)),
     Date.UTC(2026, 2, 8, 10, 30), "02:30 in the gap is 03:30 PDT")
   assert.strictEqual(feed.wallClockAsLocal(Date.UTC(2026, 10, 1, 1, 30)),
-    Date.UTC(2026, 10, 1, 8, 30), "the repeated 01:30 is the PDT one")
+    Date.UTC(2026, 10, 1, 9, 30), "the repeated 01:30 is the PST one")
   assert.strictEqual(feed.wallClockAsLocal(Date.UTC(2026, 10, 5, 17, 0)),
     Date.UTC(2026, 10, 6, 1, 0))
   process.env.TZ = saved
@@ -502,7 +503,7 @@ const caldavResource = (href, components) => [
       + 'DTEND;TZID=Europe/Berlin:' + end + '\r\nEND:VEVENT\r\n']), "work")[0]
   const reads = ms => { const d = new Date(ms); return d.getHours() * 100 + d.getMinutes() }
   // What the editor sends back is its HH:MM read by Qt's Date(...), which takes
-  // the later of the two 01:45s: 09:45Z, an hour after the one shown.
+  // the later of the two 01:45s: 09:45Z.
   const renameAsQt = (event, endMs) => feed.updateEvent({ title: "Night review, renamed",
     startMs: Date.UTC(2026, 10, 1, 9, 45), endMs, location: "", description: "" }, event, 1)
 
@@ -544,6 +545,135 @@ const caldavResource = (href, components) => [
       new Date(night.start.ms).toString())
     assert.ok(night.end.ms > night.start.ms)
   }
+  process.env.TZ = saved
+}
+
+// An event with only a DTSTART in the repeated hour. The week view gives it
+// half an hour and the editor an hour, both added in real time; from the
+// second 01:45 they read later on the clock, so it lays out at a usable height
+// and opens 01:45-02:45. A title-only save keeps the DTSTART that arrived and
+// invents no DTEND or DURATION.
+{
+  const saved = process.env.TZ
+  process.env.TZ = "America/Los_Angeles"
+  const [open] = feed.eventsFromCaldav(caldavResource("/cal/open.ics", [
+    'BEGIN:VEVENT\r\nUID:open\r\nSUMMARY:Open end\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261101T014500\r\nEND:VEVENT\r\n']), "work")
+  assert.strictEqual(open.end, null)
+  assert.strictEqual(open.start.ms, Date.UTC(2026, 10, 1, 9, 45), "the second 01:45, 01:45 PST")
+  const day = { startMs: new Date(2026, 10, 1).getTime(), endMs: new Date(2026, 10, 2).getTime() }
+  assert.strictEqual(feed.eventHeight(open, day, 60), 30, "half an hour at 60 pixels an hour")
+  // What the editor opens and sends back unchanged: 01:45 and 02:45.
+  const editorEnd = new Date(open.start.ms + 3600000)
+  assert.deepStrictEqual([editorEnd.getHours(), editorEnd.getMinutes()], [2, 45])
+  const renamed = feed.updateEvent({ title: "Open end, renamed", startMs: Date.UTC(2026, 10, 1, 9, 45),
+    endMs: Date.UTC(2026, 10, 1, 10, 45), location: "", description: "" }, open, 1)
+  assert.strictEqual(renamed.ok, true)
+  assert.ok(renamed.ics.indexOf("DTSTART;TZID=Europe/Berlin:20261101T014500\r\n") > 0)
+  assert.strictEqual(renamed.ics.match(/^DTSTART/gm).length, 1)
+  assert.ok(!/^(DTEND|DURATION)/m.test(renamed.ics), "no end is invented")
+  process.env.TZ = saved
+}
+
+// Every unresolved shape, at clock times either side of and inside the 2026
+// DST changes of zones that move by an hour or by half an hour. Each placed
+// range is ordered in time and on the local clock, lays out taller than the
+// two-pixel minimum, opens in the editor as a valid range whichever way the
+// engine reads a repeated time (V8 the earlier, Qt the later), and a save that
+// only renames keeps every time line that arrived and adds none.
+{
+  const saved = process.env.TZ
+  const shapes = {
+    pair: t => ["DTSTART;TZID=Europe/Berlin:" + t, "DTEND;TZID=Europe/Berlin:" + shift(t, 75)],
+    open: t => ["DTSTART;TZID=Europe/Berlin:" + t],
+    duration: t => ["DTSTART;TZID=Europe/Berlin:" + t, "DURATION:PT45M"],
+    utcEnd: t => ["DTSTART;TZID=Europe/Berlin:" + t, "DTEND:" + shift(t, 45) + "Z"],
+    utcStart: t => ["DTSTART:" + t + "Z", "DTEND;TZID=Europe/Berlin:" + shift(t, 45)]
+  }
+  function shift(t, minutes) {
+    const ms = Date.UTC(+t.slice(0, 4), +t.slice(4, 6) - 1, +t.slice(6, 8), +t.slice(9, 11), +t.slice(11, 13) + minutes)
+    return new Date(ms).toISOString().replace(/[-:]/g, "").slice(0, 15)
+  }
+  const wall = ms => { const d = new Date(ms)
+    return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) }
+  // The instants an editor field showing this time can be read back as.
+  const readings = ms => { const d = new Date(ms)
+    const first = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()).getTime()
+    return [first - 3600000, first - 1800000, first, first + 1800000, first + 3600000]
+      .filter(c => wall(c) === wall(ms)) }
+  let cases = 0
+  for (const zone of ["America/Los_Angeles", "Europe/Madrid", "Australia/Lord_Howe"]) {
+    process.env.TZ = zone
+    for (const day of ["20260308", "20260329", "20260405", "20261004", "20261025", "20261101"])
+      for (const clock of ["000000", "013000", "014500", "021500", "023000", "030000"])
+        for (const shape in shapes) {
+          const lines = shapes[shape](day + "T" + clock)
+          const [event] = feed.eventsFromCaldav(caldavResource("/cal/sweep.ics",
+            ['BEGIN:VEVENT\r\nUID:sweep\r\nSUMMARY:Sweep\r\n' + lines.join("\r\n") + '\r\nEND:VEVENT\r\n']), "work")
+          const label = zone + " " + lines.join(" ")
+          const end = event.end ? event.end.ms : event.start.ms + 3600000
+          assert.ok(end > event.start.ms && wall(end) > wall(event.start.ms), "ordered: " + label)
+          const date = new Date(event.start.ms)
+          const dayRange = { startMs: new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime(),
+            endMs: new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime() }
+          if (wall(Math.min(event.end ? event.end.ms : event.start.ms + 1800000, dayRange.endMs - 1)) > wall(event.start.ms))
+            assert.ok(feed.eventHeight(event, dayRange, 60) > 2, "lays out: " + label)
+          const starts = readings(event.start.ms), ends = readings(end)
+          for (const [startMs, endMs] of [[Math.min(...starts), Math.min(...ends)], [Math.max(...starts), Math.max(...ends)]]) {
+            assert.ok(endMs > startMs, "editable: " + label)
+            const renamed = feed.updateEvent({ title: "Renamed", startMs, endMs, location: "", description: "" }, event, 1)
+            assert.strictEqual(renamed.ok, true, label)
+            for (const name of ["DTSTART", "DTEND", "DURATION"]) {
+              const written = lines.filter(line => line.indexOf(name) === 0)
+              const saved = renamed.ics.match(new RegExp("^" + name + "[;:][^\\r]*", "gm")) || []
+              assert.deepStrictEqual(Array.from(saved), written, name + " kept as it arrived: " + label)
+            }
+          }
+          cases++
+        }
+  }
+  assert.strictEqual(cases, 3 * 6 * 6 * 5)
+  process.env.TZ = saved
+}
+
+// The calendar cache keeps what eventsFromCaldav gave it. Restored after the
+// machine changed zone, unresolved events are placed for the clock it has now,
+// exactly as a fresh read would place them — never at the old zone's reading.
+{
+  const saved = process.env.TZ
+  const cache = load("calendar/Cache.js")
+  const xml = caldavResource("/cal/mixed.ics", [
+    'BEGIN:VEVENT\r\nUID:single\r\nSUMMARY:Screening\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261105T170000\r\nDTEND;TZID=Europe/Berlin:20261105T174500\r\nEND:VEVENT\r\n',
+    'BEGIN:VEVENT\r\nUID:mixed\r\nSUMMARY:Mixed\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261105T120000\r\nDTEND:20261105T124500Z\r\nEND:VEVENT\r\n',
+    'BEGIN:VEVENT\r\nUID:open\r\nSUMMARY:Open end\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261101T014500\r\nEND:VEVENT\r\n',
+    'BEGIN:VEVENT\r\nUID:series\r\nSUMMARY:Office hours\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261030T014500\r\nDTEND;TZID=Europe/Berlin:20261030T030000\r\n'
+      + 'RRULE:FREQ=DAILY;COUNT=5\r\nEND:VEVENT\r\n',
+    'BEGIN:VEVENT\r\nUID:series\r\nSUMMARY:Office hours, moved\r\n'
+      + 'RECURRENCE-ID;TZID=Europe/Berlin:20261102T014500\r\n'
+      + 'DTSTART:20261102T190000Z\r\nDTEND:20261102T200000Z\r\nEND:VEVENT\r\n'])
+  const range = [Date.UTC(2026, 9, 28), Date.UTC(2026, 10, 8)]
+  const times = events => Array.from(events, e => [e.uid, e.summary, e.start.ms,
+    e.end ? e.end.ms : null, e.recurrenceIdMs || 0]).sort((a, b) => a[2] - b[2] || (a[0] < b[0] ? -1 : 1))
+  process.env.TZ = "Europe/Madrid"
+  const stored = cache.load(cache.serialize(cache.putRange(cache.emptyStore(), "me", ...range,
+    feed.eventsFromCaldav(xml, "work", ...range), 1)))
+  for (const zone of ["America/Los_Angeles", "Asia/Tokyo", "Europe/Madrid"]) {
+    process.env.TZ = zone
+    const restored = cache.eventsFor(stored, "me", ...range, ["work"])
+    assert.strictEqual(restored.length, 8, zone)
+    assert.deepStrictEqual(times(restored), times(feed.eventsFromCaldav(xml, "work", ...range)),
+      "restored under " + zone + " as a fresh read places them")
+  }
+  process.env.TZ = "America/Los_Angeles"
+  const [screening] = cache.eventsFor(stored, "me", ...range, ["work"]).filter(e => e.uid === "single")
+  assert.deepStrictEqual([new Date(screening.start.ms).getHours(), new Date(screening.end.ms).getMinutes()],
+    [17, 45], "17:00-17:45 on the new clock")
+  assert.ok(feed.updateEvent({ title: "Renamed", startMs: screening.start.ms, endMs: screening.end.ms,
+    location: "", description: "" }, screening, 1).ics.indexOf("DTSTART;TZID=Europe/Berlin:20261105T170000") > 0)
   process.env.TZ = saved
 }
 

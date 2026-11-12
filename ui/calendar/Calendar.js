@@ -196,7 +196,9 @@ function recurrenceUntil(value) {
     Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0)).getTime()
 }
 
-function recurrenceStarts(event, rangeStart, rangeEnd) {
+// `walls`, when given, receives the written wall clock of each occurrence whose
+// zone did not resolve, keyed by the instant it was placed at.
+function recurrenceStarts(event, rangeStart, rangeEnd, walls) {
   if (!event || !event.start || !event.recurrenceRule) return []
   var parts = recurrenceParts(event.recurrenceRule)
   var frequency = String(parts.FREQ || "").toUpperCase()
@@ -280,11 +282,15 @@ function recurrenceStarts(event, rangeStart, rangeEnd) {
         minute: cursor.getUTCMinutes(), second: cursor.getUTCSeconds()
       }, tzid, source.timezones)
       occurrenceMs = placed.resolved ? placed.ms : wallClockAsLocal(placed.ms)
+      var occurrenceWall = placed.resolved ? null : placed.ms
     }
     if (matches && occurrenceMs >= Number(event.start.ms)) {
       count++
       if (countLimit > 0 && count > countLimit) break
-      if (!until || occurrenceMs <= until) out.push(occurrenceMs)
+      if (!until || occurrenceMs <= until) {
+        out.push(occurrenceMs)
+        if (walls && zoned && occurrenceWall !== null) walls[occurrenceMs] = occurrenceWall
+      }
     }
     if (until && occurrenceMs > until) break
     if (utc) cursor.setUTCDate(cursor.getUTCDate() + 1)
@@ -300,20 +306,22 @@ function eventInRange(event, startMs, endMs) {
   return start < Number(endMs) && end > Number(startMs)
 }
 
-function occurrenceOf(event, startMs) {
+function occurrenceOf(event, startMs, startWall) {
   var copy = {}
   for (var key in event) copy[key] = event[key]
   var delta = Number(startMs) - Number(event.start.ms)
   copy.start = { ms: Number(startMs), allDay: event.start.allDay,
     tzid: event.start.tzid, resolved: event.start.resolved }
-  // An unresolved series keeps its wall-clock length on each day, across the
-  // local clock's changes, as its first occurrence does.
-  var endMs = event.end && event.wallSpanMs !== undefined
-    ? wallEnd(startMs, event.wallSpanMs)
-    : event.end ? Number(event.end.ms) + delta : 0
-  copy.end = event.end ? { ms: endMs, allDay: event.end.allDay,
+  copy.end = event.end ? { ms: Number(event.end.ms) + delta, allDay: event.end.allDay,
     tzid: event.end.tzid, resolved: event.end.resolved } : null
   copy.recurrenceIdMs = Number(startMs)
+  // An occurrence of an unresolved series is its own pair of wall clocks: the
+  // day's written start, and the series' wall-clock length after it.
+  if (event.wall) {
+    copy.wall = { start: typeof startWall === "number" ? startWall : null,
+      span: event.wall.span, end: null, recurrenceId: null, occurrence: true }
+    placeWalls(copy)
+  }
   return copy
 }
 
@@ -341,7 +349,8 @@ function expandRecurringEvents(events, startMs, endMs) {
     var excluded = {}
     var exclusions = Array.isArray(master.excludedMs) ? master.excludedMs : []
     for (var x = 0; x < exclusions.length; x++) excluded[Number(exclusions[x])] = true
-    var starts = recurrenceStarts(master, startMs, endMs)
+    var walls = {}
+    var starts = recurrenceStarts(master, startMs, endMs, walls)
     for (var o = 0; o < starts.length; o++) {
       var key = String(master.uid) + "\n" + Number(starts[o])
       var replacement = overrides[key]
@@ -350,7 +359,7 @@ function expandRecurringEvents(events, startMs, endMs) {
         if (replacement.status !== "CANCELLED" && eventInRange(replacement, startMs, endMs))
           out.push(replacement)
       } else if (!excluded[Number(starts[o])]) {
-        var occurrence = occurrenceOf(master, starts[o])
+        var occurrence = occurrenceOf(master, starts[o], walls[starts[o]])
         if (eventInRange(occurrence, startMs, endMs)) out.push(occurrence)
       }
     }
@@ -375,8 +384,14 @@ function expandRecurringEvents(events, startMs, endMs) {
 // Date constructor: around a local DST change the engines disagree on what a
 // wall clock means (Qt's moves a time in the spring gap back an hour, V8's
 // forward), and a calendar has to place the same event at the same moment on
-// every machine. A time in the gap moves forward by the gap; one in the repeated
-// autumn hour takes its first occurrence.
+// every machine. A time in the gap moves forward by the gap.
+//
+// A time in the repeated autumn hour takes its second occurrence, the one Qt's
+// Date(...) gives: the editor reads an HH:MM back through that constructor, so
+// this is the instant a time shown in it is saved as, and from it any length
+// added in real time reads later on the clock. From the first occurrence, an
+// hour later reads the same 01:45 again, and an event with no end would open
+// as 01:45-01:45 and lay out two pixels tall.
 function wallClockAsLocal(ms) {
   var wall = Number(ms)
   var before = new Date(wall - 86400000).getTimezoneOffset()
@@ -386,7 +401,7 @@ function wallClockAsLocal(ms) {
   var late = wall + after * 60000
   var earlyHolds = new Date(early).getTimezoneOffset() === before
   var lateHolds = new Date(late).getTimezoneOffset() === after
-  if (earlyHolds && lateHolds) return Math.min(early, late)
+  if (earlyHolds && lateHolds) return Math.max(early, late)
   if (lateHolds) return late
   return early
 }
@@ -415,26 +430,69 @@ function placeUnresolved(event) {
   var start = event.start, end = event.end
   var startUnresolved = isUnresolvedTime(start)
   var endUnresolved = isUnresolvedTime(end)
-  if (start && (startUnresolved || endUnresolved)) {
-    var startWall = startUnresolved ? Number(start.ms) : localAsWall(start.ms)
-    if (end) {
-      var endWall = startUnresolved && endUnresolved ? Number(end.ms)
-        : startWall + (Number(end.ms) - Number(start.ms))
-      event.wallSpanMs = endWall >= startWall ? endWall - startWall : 3600000
+  var rid = event.recurrenceIdMs && event.recurrenceIdResolved === false
+  if (startUnresolved || endUnresolved || rid) {
+    var wall = { start: null, span: null, end: null, recurrenceId: null, occurrence: false }
+    if (start && (startUnresolved || endUnresolved)) {
+      var startWall = startUnresolved ? Number(start.ms) : localAsWall(start.ms)
+      if (startUnresolved) wall.start = startWall
+      if (end) {
+        var endWall = startUnresolved && endUnresolved ? Number(end.ms)
+          : startWall + (Number(end.ms) - Number(start.ms))
+        wall.span = endWall >= startWall ? endWall - startWall : 3600000
+      }
+    } else if (!start && endUnresolved) {
+      wall.end = Number(end.ms)
     }
-    if (startUnresolved) start.ms = wallClockAsLocal(startWall)
-    if (end) end.ms = wallEnd(start.ms, event.wallSpanMs)
-  } else if (!start && endUnresolved) {
-    end.ms = wallClockAsLocal(end.ms)
+    if (rid) wall.recurrenceId = Number(event.recurrenceIdMs)
+    event.wall = wall
+    placeWalls(event)
   }
-  if (event.recurrenceIdMs && event.recurrenceIdResolved === false)
-    event.recurrenceIdMs = wallClockAsLocal(event.recurrenceIdMs)
   var unresolved = {}
   var placeholders = event.unresolvedExcludedMs || []
   for (var i = 0; i < placeholders.length; i++) unresolved[Number(placeholders[i])] = true
   event.excludedMs = (event.excludedMs || []).map(function(ms) {
     return unresolved[Number(ms)] ? wallClockAsLocal(ms) : ms
   })
+}
+
+// Places an event's times on the local clock from the wall clocks it was
+// written with (`event.wall`), in place. The calendar cache keeps those wall
+// clocks beside the placed times, so an event it restores is placed again for
+// the clock the machine has now: a placement made under another zone is never
+// shown, edited or reminded from.
+function placeWalls(event) {
+  var wall = event.wall
+  if (event.start && typeof wall.start === "number")
+    event.start.ms = wallClockAsLocal(wall.start)
+  if (event.end) {
+    if (event.start && typeof wall.span === "number")
+      event.end.ms = wallEnd(event.start.ms, wall.span)
+    else if (typeof wall.end === "number")
+      event.end.ms = wallClockAsLocal(wall.end)
+  }
+  if (wall.occurrence === true && event.start) event.recurrenceIdMs = Number(event.start.ms)
+  else if (typeof wall.recurrenceId === "number") event.recurrenceIdMs = wallClockAsLocal(wall.recurrenceId)
+}
+
+// A copy of a stored event placed for the local clock now; one with nothing
+// unresolved is returned as it is.
+function relocalized(event) {
+  if (!event || !event.wall || typeof event.wall !== "object") return event
+  var copy = {}
+  for (var key in event) copy[key] = event[key]
+  if (event.start) {
+    copy.start = {}
+    for (var startKey in event.start) copy.start[startKey] = event.start[startKey]
+  }
+  if (event.end) {
+    copy.end = {}
+    for (var endKey in event.end) copy.end[endKey] = event.end[endKey]
+  }
+  copy.wall = {}
+  for (var wallKey in event.wall) copy.wall[wallKey] = event.wall[wallKey]
+  placeWalls(copy)
+  return copy
 }
 
 // The local clock reading of an instant, as a UTC-keyed wall clock: the inverse

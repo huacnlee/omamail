@@ -75,7 +75,7 @@ Item {
         + '<c:calendar-data>BEGIN:VCALENDAR\r\nVERSION:2.0\r\n'
         + 'PRODID:Microsoft Exchange Server 2010\r\n'
         + 'BEGIN:VEVENT\r\nUID:review\r\nSUMMARY:Review\r\n'
-        + start + '\r\n' + end + '\r\nEND:VEVENT\r\nEND:VCALENDAR</c:calendar-data>'
+        + start + '\r\n' + (end ? end + '\r\n' : '') + 'END:VEVENT\r\nEND:VCALENDAR</c:calendar-data>'
         + '</d:prop></d:propstat></d:response></d:multistatus>'
     }
 
@@ -144,6 +144,26 @@ Item {
       compare([field("event-start-date-field"), field("event-start-time-field"),
         field("event-end-date-field"), field("event-end-time-field")], data.shown,
         "the editor shows the times as written")
+    }
+
+    // Only a DTSTART, in the repeated hour: the week view lays it out at half an
+    // hour and the editor opens it at an hour, both counted from the start.
+    function test_an_event_without_an_end_stays_usable_in_the_repeated_hour() {
+      var event = Calendar.eventsFromCaldav(caldav("DTSTART;TZID=Europe/Berlin:20261101T014500", ""),
+        "caldav:team")[0]
+      compare(event.end, null)
+      var day = { startMs: new Date(2026, 10, 1).getTime(), endMs: new Date(2026, 10, 2).getTime() }
+      compare(Calendar.eventHeight(event, day, 60), 30, "a half-hour block at 60 pixels an hour")
+      composer.beginEdit("caldav:team", event)
+      wait(0)
+      compare([field("event-start-date-field"), field("event-start-time-field"),
+        field("event-end-date-field"), field("event-end-time-field")],
+        ["2026-11-01", "01:45", "2026-11-01", "02:45"])
+      composer.close()
+      var body = renameAndSave(event)
+      verify(body.indexOf("DTSTART;TZID=Europe/Berlin:20261101T014500\r\n") >= 0, body)
+      compare(body.match(/^DTSTART/gm).length, 1)
+      verify(!/^(DTEND|DURATION)/m.test(body), "no end is invented: " + body)
     }
 
     function test_a_changed_time_is_written_as_typed_on_the_local_clock() {
