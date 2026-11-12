@@ -372,12 +372,24 @@ function wallClockAsLocal(ms) {
     placeholder.getUTCSeconds()).getTime()
 }
 
+// Each time is placed by its own resolution. A RECURRENCE-ID or EXDATE written
+// in an unresolved zone is a placeholder in the same key space as the series'
+// occurrences and moves with them; one written in UTC, or in a zone that did
+// resolve, is already an instant and stays. An override that starts in UTC, or
+// a cancellation with no DTSTART at all, still names its slot of the series.
 function placeUnresolved(event) {
-  if (!event.start || event.start.resolved !== false || !event.start.tzid) return
-  event.start.ms = wallClockAsLocal(event.start.ms)
-  if (event.end && event.end.resolved === false) event.end.ms = wallClockAsLocal(event.end.ms)
-  if (event.recurrenceIdMs) event.recurrenceIdMs = wallClockAsLocal(event.recurrenceIdMs)
-  event.excludedMs = (event.excludedMs || []).map(wallClockAsLocal)
+  if (event.start && event.start.resolved === false && event.start.tzid)
+    event.start.ms = wallClockAsLocal(event.start.ms)
+  if (event.end && event.end.resolved === false && event.end.tzid)
+    event.end.ms = wallClockAsLocal(event.end.ms)
+  if (event.recurrenceIdMs && event.recurrenceIdResolved === false)
+    event.recurrenceIdMs = wallClockAsLocal(event.recurrenceIdMs)
+  var unresolved = {}
+  var placeholders = event.unresolvedExcludedMs || []
+  for (var i = 0; i < placeholders.length; i++) unresolved[Number(placeholders[i])] = true
+  event.excludedMs = (event.excludedMs || []).map(function(ms) {
+    return unresolved[Number(ms)] ? wallClockAsLocal(ms) : ms
+  })
 }
 
 // " (Europe/Berlin)" after a time this could not convert, "" otherwise.
@@ -711,9 +723,11 @@ function veventLines(uid, sequence, stampMs, fields, rule, allDay) {
   return lines
 }
 
-function editableEventLines(sequence, stampMs, fields, allDay) {
+function editableEventLines(sequence, stampMs, fields, allDay, keepTimes) {
   var lines = ["DTSTAMP:" + icsUtc(stampMs), "SEQUENCE:" + sequence]
-  if (allDay === true)
+  if (keepTimes === true) {
+    // The original DTSTART, DTEND and DURATION lines stay in place.
+  } else if (allDay === true)
     lines.push("DTSTART;VALUE=DATE:" + icsDate(fields.start),
       "DTEND;VALUE=DATE:" + icsDate(fields.end))
   else
@@ -1009,6 +1023,20 @@ function writeRefusal(source, event, operation) {
   return ""
 }
 
+// The editor shows an unresolved time as its wall clock on the local clock: a
+// reading for display, not an instant. Written back as UTC it would move the
+// event by whatever offset the editing machine has, so while the times are
+// left as shown the lines that arrived are kept, TZID and all. A time the owner
+// changes is one they typed on their local clock, and is written as such.
+function unresolvedTimesKept(checked, event, allDay) {
+  var start = event && event.start
+  if (!start || start.resolved !== false || !start.tzid) return false
+  if (allDay !== !!start.allDay) return false
+  var shownEnd = event.end ? Number(event.end.ms) : Number(start.ms) + 3600000
+  return Math.floor(checked.start / 60000) === Math.floor(Number(start.ms) / 60000)
+    && Math.floor(checked.end / 60000) === Math.floor(shownEnd / 60000)
+}
+
 // An edit rewrites the event on its own identity: the UID names it, and the
 // bumped SEQUENCE tells every copy of it which write is newer. Recurrence is
 // not editable here — the Google patch omits the key so the server keeps the
@@ -1025,10 +1053,13 @@ function updateEvent(fields, existing, nowMs) {
    var allDay = fields.allDay === undefined ? !!(event.start && event.start.allDay) : fields.allDay === true
   var stampMs = Number(nowMs) || Date.now()
   var original = String(event.calendarData || "")
+  var keepTimes = original !== "" && unresolvedTimesKept(checked, event, allDay)
   var rewritten = original === "" ? "" : Ics.rewriteEvent(original, uid,
-    editableEventLines(sequence, stampMs, checked, allDay),
-    ["DTSTAMP", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY",
-      "DESCRIPTION", "LOCATION"])
+    editableEventLines(sequence, stampMs, checked, allDay, keepTimes),
+    keepTimes
+      ? ["DTSTAMP", "SEQUENCE", "SUMMARY", "DESCRIPTION", "LOCATION"]
+      : ["DTSTAMP", "SEQUENCE", "DTSTART", "DTEND", "DURATION", "SUMMARY",
+        "DESCRIPTION", "LOCATION"])
   return {
     ok: true, uid: uid,
     ics: rewritten !== "" ? rewritten

@@ -340,6 +340,80 @@ assert.strictEqual(feed.unresolvedZoneSuffix(recurringEvents[0]), "", "a convert
   process.env.TZ = madrid
 }
 
+// One CalDAV resource per call, so a series and its overrides share a file.
+const caldavResource = (href, components) => [
+  '<?xml version="1.0"?>',
+  '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
+  '<d:response><d:href>' + href + '</d:href><d:propstat><d:prop>',
+  '<c:calendar-data>BEGIN:VCALENDAR\r\nVERSION:2.0\r\n',
+  components.join(""),
+  'END:VCALENDAR</c:calendar-data>',
+  '</d:prop></d:propstat></d:response></d:multistatus>'
+].join("")
+
+// A RECURRENCE-ID names its slot of the series in the series' own clock, so it
+// is placed by its own resolution, not by the override's DTSTART: an override
+// that starts in UTC still replaces its occurrence, and a cancellation with no
+// DTSTART still removes one.
+{
+  const saved = process.env.TZ
+  process.env.TZ = "Europe/Madrid"
+  const series = 'BEGIN:VEVENT\r\nUID:office\r\nSUMMARY:Office hours\r\n'
+    + 'DTSTART;TZID=Unknown/Office:20261105T170000\r\n'
+    + 'DTEND;TZID=Unknown/Office:20261105T180000\r\n'
+    + 'RRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\n'
+  const range = [Date.UTC(2026, 10, 2), Date.UTC(2026, 10, 9)]
+  const movedToUtc = feed.eventsFromCaldav(caldavResource("/cal/office.ics", [series,
+    'BEGIN:VEVENT\r\nUID:office\r\nSUMMARY:Office hours, later\r\n'
+      + 'RECURRENCE-ID;TZID=Unknown/Office:20261106T170000\r\n'
+      + 'DTSTART:20261106T190000Z\r\nDTEND:20261106T200000Z\r\nEND:VEVENT\r\n']), "work", ...range)
+  assert.deepStrictEqual(Array.from(movedToUtc, e => e.summary),
+    ["Office hours", "Office hours, later"],
+    "an override that starts in UTC replaces exactly one occurrence")
+  assert.strictEqual(movedToUtc[1].start.ms, Date.UTC(2026, 10, 6, 19, 0),
+    "the override's own UTC start is an instant and is not moved")
+  const cancelled = feed.eventsFromCaldav(caldavResource("/cal/office.ics", [series,
+    'BEGIN:VEVENT\r\nUID:office\r\nRECURRENCE-ID;TZID=Unknown/Office:20261106T170000\r\n'
+      + 'STATUS:CANCELLED\r\nEND:VEVENT\r\n']), "work", ...range)
+  assert.deepStrictEqual(Array.from(cancelled, e => e.start.ms),
+    [new Date(2026, 10, 5, 17, 0).getTime()],
+    "a cancellation with no DTSTART still removes its occurrence")
+  process.env.TZ = saved
+}
+
+// The editor shows an unresolved time on the local clock. Saving only a new
+// title from another zone must not write that local reading back as an
+// instant: the lines that arrived stay, TZID and all.
+{
+  const saved = process.env.TZ
+  process.env.TZ = "America/Los_Angeles"
+  const [meeting] = feed.eventsFromCaldav(caldavResource("/cal/screening.ics", [
+    'BEGIN:VTIMEZONE\r\nTZID:W. Europe Standard Time\r\nBEGIN:STANDARD\r\n'
+      + 'DTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n'
+      + 'RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\n'
+      + 'END:VTIMEZONE\r\n',
+    'BEGIN:VEVENT\r\nUID:screening\r\nSUMMARY:Technical screening\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261105T170000\r\n'
+      + 'DTEND;TZID=Europe/Berlin:20261105T174500\r\nEND:VEVENT\r\n']), "work")
+  const renamed = feed.updateEvent({ title: "Screening, renamed",
+    startMs: meeting.start.ms, endMs: meeting.end.ms, location: "", description: "" }, meeting, 1)
+  assert.strictEqual(renamed.ok, true)
+  assert.ok(renamed.ics.indexOf("DTSTART;TZID=Europe/Berlin:20261105T170000") > 0,
+    "a title-only save keeps the unresolved DTSTART as it arrived")
+  assert.ok(renamed.ics.indexOf("DTEND;TZID=Europe/Berlin:20261105T174500") > 0)
+  assert.ok(!/DTSTART:\d{8}T\d{6}Z/.test(renamed.ics) && !/DTEND:\d{8}T\d{6}Z/.test(renamed.ics),
+    "no viewer-dependent UTC time is written alongside")
+  assert.ok(renamed.ics.indexOf("SUMMARY:Screening\\, renamed") > 0)
+  assert.ok(renamed.ics.indexOf("SEQUENCE:1") > 0)
+  // A time the owner changes is one they typed on their local clock.
+  const moved = feed.updateEvent({ title: "Technical screening",
+    startMs: new Date(2026, 10, 5, 18, 0).getTime(), endMs: new Date(2026, 10, 5, 18, 45).getTime(),
+    location: "", description: "" }, meeting, 1)
+  assert.ok(moved.ics.indexOf("DTSTART:20261106T020000Z") > 0)
+  assert.ok(moved.ics.indexOf("TZID=Europe/Berlin") < 0, "the replaced lines are gone")
+  process.env.TZ = saved
+}
+
 const utcRecurringXml = recurringXml
   .replace(/;TZID=Test\/PlusTwo/g, "")
   .replace(/20240208T140000/g, "20240208T130000Z")
