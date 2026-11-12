@@ -414,6 +414,79 @@ const caldavResource = (href, components) => [
   process.env.TZ = saved
 }
 
+// Only the start of an unresolved event is placed; the end keeps the span the
+// two times were written with, so a range never runs backwards and stays
+// editable. Placed on their own, a DST gap on the local clock or an end written
+// in UTC put the end before the start.
+{
+  const saved = process.env.TZ
+  process.env.TZ = "America/Los_Angeles"
+  const minutes = 60000
+  const single = (start, end) => feed.eventsFromCaldav(caldavResource("/cal/one.ics", [
+    'BEGIN:VEVENT\r\nUID:one\r\nSUMMARY:Review\r\n' + start + '\r\n' + end + '\r\nEND:VEVENT\r\n']), "work")[0]
+  const titleOnly = event => feed.updateEvent({ title: "Review, renamed",
+    startMs: event.start.ms, endMs: event.end.ms, location: "", description: "" }, event, 1)
+
+  // Los Angeles springs forward on 8 March 2026; 02:30 never happens here.
+  const acrossGap = single("DTSTART;TZID=Europe/Berlin:20260308T014500",
+    "DTEND;TZID=Europe/Berlin:20260308T023000")
+  assert.strictEqual(acrossGap.start.ms, Date.UTC(2026, 2, 8, 9, 45), "01:45 PST")
+  assert.strictEqual(acrossGap.end.ms - acrossGap.start.ms, 45 * minutes,
+    "the local gap does not eat into the written span")
+  const gapSave = titleOnly(acrossGap)
+  assert.strictEqual(gapSave.ok, true, "the range stays editable")
+  assert.ok(gapSave.ics.indexOf("DTSTART;TZID=Europe/Berlin:20260308T014500") > 0)
+  assert.ok(gapSave.ics.indexOf("DTEND;TZID=Europe/Berlin:20260308T023000") > 0)
+
+  // A start on a wall clock and an end in UTC: 17:00 Berlin to 17:45Z.
+  const mixed = single("DTSTART;TZID=Europe/Berlin:20261105T170000", "DTEND:20261105T174500Z")
+  assert.strictEqual(mixed.start.ms, Date.UTC(2026, 10, 6, 1, 0), "17:00 PST")
+  assert.strictEqual(mixed.end.ms - mixed.start.ms, 45 * minutes,
+    "the UTC end is not read as an instant beside a wall-clock start")
+  const mixedSave = titleOnly(mixed)
+  assert.strictEqual(mixedSave.ok, true)
+  assert.ok(mixedSave.ics.indexOf("DTSTART;TZID=Europe/Berlin:20261105T170000") > 0)
+  assert.ok(mixedSave.ics.indexOf("DTEND:20261105T174500Z") > 0)
+  assert.strictEqual(mixedSave.ics.match(/DTEND/g).length, 1, "the end that arrived, and only it")
+
+  // The other way round: the start is an instant, the end a wall clock.
+  const mixedEnd = single("DTSTART:20261105T160000Z", "DTEND;TZID=Europe/Berlin:20261105T174500")
+  assert.strictEqual(mixedEnd.start.ms, Date.UTC(2026, 10, 5, 16, 0), "a resolved start stays put")
+  assert.strictEqual(mixedEnd.end.ms - mixedEnd.start.ms, 105 * minutes)
+  const mixedEndSave = titleOnly(mixedEnd)
+  assert.ok(mixedEndSave.ics.indexOf("DTSTART:20261105T160000Z") > 0)
+  assert.ok(mixedEndSave.ics.indexOf("DTEND;TZID=Europe/Berlin:20261105T174500") > 0,
+    "an unresolved end is kept as it arrived too")
+
+  // A written span that runs backwards — a zone east of UTC beside a UTC end —
+  // shows as the hour an event with no end gets, not a reversed block.
+  const backwards = single("DTSTART;TZID=Unknown/East:20261105T090000", "DTEND:20261105T004500Z")
+  assert.strictEqual(backwards.end.ms - backwards.start.ms, 60 * minutes)
+  assert.strictEqual(titleOnly(backwards).ok, true)
+
+  // A series across the gap keeps every occurrence's span.
+  const series = feed.eventsFromCaldav(caldavResource("/cal/night.ics", [
+    'BEGIN:VEVENT\r\nUID:night\r\nSUMMARY:Night shift\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20260306T023000\r\n'
+      + 'DTEND;TZID=Europe/Berlin:20260306T030000\r\n'
+      + 'RRULE:FREQ=DAILY;COUNT=4\r\nEND:VEVENT\r\n']), "work",
+    Date.UTC(2026, 2, 5), Date.UTC(2026, 2, 12))
+  assert.strictEqual(series.length, 4)
+  for (const night of series)
+    assert.strictEqual(night.end.ms - night.start.ms, 30 * minutes, new Date(night.start.ms).toString())
+
+  // The local reading of a wall clock does not depend on the JavaScript engine:
+  // V8 and Qt's engine disagree on Date(...) inside a DST change. A time in the
+  // gap moves forward by it; one in the repeated hour is its first occurrence.
+  assert.strictEqual(feed.wallClockAsLocal(Date.UTC(2026, 2, 8, 2, 30)),
+    Date.UTC(2026, 2, 8, 10, 30), "02:30 in the gap is 03:30 PDT")
+  assert.strictEqual(feed.wallClockAsLocal(Date.UTC(2026, 10, 1, 1, 30)),
+    Date.UTC(2026, 10, 1, 8, 30), "the repeated 01:30 is the PDT one")
+  assert.strictEqual(feed.wallClockAsLocal(Date.UTC(2026, 10, 5, 17, 0)),
+    Date.UTC(2026, 10, 6, 1, 0))
+  process.env.TZ = saved
+}
+
 const utcRecurringXml = recurringXml
   .replace(/;TZID=Test\/PlusTwo/g, "")
   .replace(/20240208T140000/g, "20240208T130000Z")

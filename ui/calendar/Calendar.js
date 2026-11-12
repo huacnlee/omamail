@@ -365,23 +365,50 @@ function expandRecurringEvents(events, startMs, endMs) {
 // Madrid. The calendar places it at that wall clock in the local zone instead;
 // the event keeps `resolved: false` and its TZID, and every label for it says
 // which clock the time is on, so it is never presented as converted.
+//
+// The local clock is read through each instant's own offset rather than the
+// Date constructor: around a local DST change the engines disagree on what a
+// wall clock means (Qt's moves a time in the spring gap back an hour, V8's
+// forward), and a calendar has to place the same event at the same moment on
+// every machine. A time in the gap moves forward by the gap; one in the repeated
+// autumn hour takes its first occurrence.
 function wallClockAsLocal(ms) {
-  var placeholder = new Date(Number(ms))
-  return new Date(placeholder.getUTCFullYear(), placeholder.getUTCMonth(),
-    placeholder.getUTCDate(), placeholder.getUTCHours(), placeholder.getUTCMinutes(),
-    placeholder.getUTCSeconds()).getTime()
+  var wall = Number(ms)
+  var before = new Date(wall - 86400000).getTimezoneOffset()
+  var after = new Date(wall + 86400000).getTimezoneOffset()
+  var early = wall + before * 60000
+  if (before === after) return early
+  var late = wall + after * 60000
+  var earlyHolds = new Date(early).getTimezoneOffset() === before
+  var lateHolds = new Date(late).getTimezoneOffset() === after
+  if (earlyHolds && lateHolds) return Math.min(early, late)
+  if (lateHolds) return late
+  return early
 }
 
-// Each time is placed by its own resolution. A RECURRENCE-ID or EXDATE written
-// in an unresolved zone is a placeholder in the same key space as the series'
-// occurrences and moves with them; one written in UTC, or in a zone that did
-// resolve, is already an instant and stays. An override that starts in UTC, or
-// a cancellation with no DTSTART at all, still names its slot of the series.
+// Only the start is placed; the end keeps the span between the two times as
+// written. Placed on their own, the endpoints can cross: a DST gap on the local
+// clock swallows an hour of a span, and an end written in UTC is an instant
+// while the start is a wall clock read locally — 17:00 Berlin to 17:45Z became
+// 17:00–09:45 in Los Angeles. The written span is the same on every machine.
+// One that runs backwards, from mixing a UTC end with a start's wall clock,
+// shows as the hour an event with no end gets.
+//
+// Each identity is placed by its own resolution. A RECURRENCE-ID or EXDATE
+// written in an unresolved zone is a placeholder in the same key space as the
+// series' occurrences and moves with them; one written in UTC, or in a zone that
+// did resolve, is already an instant and stays. An override that starts in UTC,
+// or a cancellation with no DTSTART at all, still names its slot of the series.
 function placeUnresolved(event) {
-  if (event.start && event.start.resolved === false && event.start.tzid)
-    event.start.ms = wallClockAsLocal(event.start.ms)
-  if (event.end && event.end.resolved === false && event.end.tzid)
-    event.end.ms = wallClockAsLocal(event.end.ms)
+  var start = event.start, end = event.end
+  var startUnresolved = isUnresolvedTime(start)
+  if (start && (startUnresolved || isUnresolvedTime(end))) {
+    var written = end ? Number(end.ms) - Number(start.ms) : 0
+    if (startUnresolved) start.ms = wallClockAsLocal(start.ms)
+    if (end) end.ms = Number(start.ms) + (written >= 0 ? written : 3600000)
+  } else if (!start && isUnresolvedTime(end)) {
+    end.ms = wallClockAsLocal(end.ms)
+  }
   if (event.recurrenceIdMs && event.recurrenceIdResolved === false)
     event.recurrenceIdMs = wallClockAsLocal(event.recurrenceIdMs)
   var unresolved = {}
@@ -390,6 +417,10 @@ function placeUnresolved(event) {
   event.excludedMs = (event.excludedMs || []).map(function(ms) {
     return unresolved[Number(ms)] ? wallClockAsLocal(ms) : ms
   })
+}
+
+function isUnresolvedTime(time) {
+  return !!(time && time.resolved === false && time.tzid)
 }
 
 // " (Europe/Berlin)" after a time this could not convert, "" otherwise.
@@ -1023,14 +1054,15 @@ function writeRefusal(source, event, operation) {
   return ""
 }
 
-// The editor shows an unresolved time as its wall clock on the local clock: a
-// reading for display, not an instant. Written back as UTC it would move the
-// event by whatever offset the editing machine has, so while the times are
-// left as shown the lines that arrived are kept, TZID and all. A time the owner
-// changes is one they typed on their local clock, and is written as such.
+// The editor shows an unresolved time as its wall clock on the local clock, and
+// the end beside one as the start plus the written span: readings for display,
+// not instants. Written back as UTC they would move the event by whatever
+// offset the editing machine has, so while the times are left as shown the
+// lines that arrived are kept, TZID and all. A time the owner changes is one
+// they typed on their local clock, and is written as such.
 function unresolvedTimesKept(checked, event, allDay) {
   var start = event && event.start
-  if (!start || start.resolved !== false || !start.tzid) return false
+  if (!start || !(isUnresolvedTime(start) || isUnresolvedTime(event.end))) return false
   if (allDay !== !!start.allDay) return false
   var shownEnd = event.end ? Number(event.end.ms) : Number(start.ms) + 3600000
   return Math.floor(checked.start / 60000) === Math.floor(Number(start.ms) / 60000)
