@@ -6,12 +6,13 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
 	ui/tests/qml/tst_reader_subject_menu.qml ui/tests/qml/tst_drafts_refresh.qml ui/tests/qml/tst_account_hosts.qml \
 	ui/tests/qml/tst_credential_store_retry.qml \
+	ui/tests/qml/tst_google_sign_in_errors.qml \
 	ui/tests/qml/tst_invitation_calendar.qml \
 	ui/tests/qml/tst_calendar_today.qml \
 	ui/tests/qml/tst_calendar_description_detail.qml \
 	ui/backend/Backend.qml ui/backend/Runtime.qml ui/diagnostics/Diagnostics.qml \
 	ui/components/BackendSetup.qml ui/components/OmamailLogo.qml \
-	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/DraftList.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml \
+	ui/account/MailAccount.qml ui/account/BackendSync.qml ui/account/SendQueue.qml ui/account/DraftList.qml ui/account/Intents.qml ui/account/BatchAction.qml ui/account/UnifiedBatchAction.qml ui/account/UnifiedBatchSelection.qml ui/account/Rsvp.qml ui/account/LabelActions.qml ui/account/Unsubscribe.qml ui/account/NewMailNotification.qml ui/account/ContactBook.qml \
 	ui/cache/CacheStore.qml ui/cache/BodyCache.qml \
 	ui/providers/AuthManager.qml ui/providers/GmailApiClient.qml \
 	ui/providers/OutlookAuth.qml \
@@ -34,6 +35,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/MessageList.qml \
 	ui/components/ListSkeleton.qml \
 	ui/components/MessageRow.qml \
+	ui/components/RowDrag.qml \
 	ui/components/MessageMenu.qml \
 	ui/components/MenuActionRow.qml ui/components/MenuSeparatorLine.qml \
 	ui/components/KeyRouter.qml \
@@ -167,6 +169,7 @@ test-js:
 	node ui/tests/test_direction.js
 	node ui/tests/test_appearance.js
 	node ui/tests/test_model.js
+	node ui/tests/test_drop.js
 	node ui/tests/test_icons.js
 	node ui/tests/test_navigation.js
 	node tests/test_reader_pipeline.js
@@ -206,6 +209,7 @@ test-shell-portable:
 	python3 tests/test_qml_text_format.py
 	python3 tests/test_clipboard.py
 	bash tests/test_source.sh
+	bash tests/test_source_hash_tools.sh
 	bash tests/test_service_source.sh
 	bash tests/test_config_store.sh
 	bash tests/test_agent_job.sh

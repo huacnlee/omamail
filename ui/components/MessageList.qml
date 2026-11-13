@@ -37,6 +37,9 @@ Column {
   // A row's own star, archive and trash buttons. Routed up rather than
   // straight to the service so a ticked row's button means the selection.
   signal rowActionRequested(string id, string action)
+  signal rowDragStarted(string id, real sceneX, real sceneY)
+  signal rowDragMoved(real sceneX, real sceneY)
+  signal rowDragEnded()
 
   // `ids` are the rows a menu opened here will act on (`reachedIds`).
   signal menuRequested(string id, real sceneX, real sceneY, var ids)
@@ -151,6 +154,9 @@ Column {
       onStarToggled: root.rowActionRequested(modelData.id, "star")
       onArchiveRequested: root.rowActionRequested(modelData.id, archiveAction)
       onTrashRequested: root.rowActionRequested(modelData.id, trashAction)
+      onDragStarted: function(sceneX, sceneY) { root.rowDragStarted(modelData.id, sceneX, sceneY) }
+      onDragMoved: function(sceneX, sceneY) { root.rowDragMoved(sceneX, sceneY) }
+      onDragEnded: root.rowDragEnded()
       onMenuRequested: function(sceneX, sceneY) {
         root.menuRequested(modelData.id, sceneX, sceneY, root.reachedIds(modelData.id))
       }

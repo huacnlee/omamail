@@ -33,6 +33,7 @@ Item {
     property string lastError: ""
     property string lastErrorKind: ""
     function findSource(id) { return source }
+    function rescheduleRefusal(event) { return Calendar.writeRefusal(source, event, "reschedule") }
     function colorKeyFor(id) { return "accent" }
     function refresh(start, end) {}
     function nativeRequest(source, operation, fields, callback) {}

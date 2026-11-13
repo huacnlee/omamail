@@ -67,7 +67,10 @@ Item {
     property var fields: ({accountId:"imap:ada@example.com",draftKey:"d1",body:"Original",subject:"Plan"})
     property string applied: ""
     property string agentParentJobId: ""
-    function currentFields() { return fields }
+    property int fullReads: 0
+    property int sharedReads: 0
+    function currentFields(shared) { if (shared) sharedReads++; else fullReads++; return fields }
+    function draftIdentity() { return ({accountId:fields.accountId,draftKey:fields.draftKey,replyMessageId:fields.replyMessageId,subject:fields.subject}) }
     function insertAtCursor(text) { applied=text }
     function replaceBody(text) { applied=text }
   }
@@ -183,6 +186,20 @@ Item {
       verify(popup.submit("Use this version",true))
       compare(service.requestedDraft.body,"Manually edited")
       compare(service.requestedDraft.subject,"Updated")
+    }
+    function test_closed_panel_does_not_read_draft_per_keystroke() {
+      draft.fullReads=0; draft.sharedReads=0
+      popup.composer=draft
+      service.jobs=[{id:"chat",kind:"draft",draftKey:"d1",accountId:service.activeAccountId,state:"running"}]
+      for (var i = 0; i < 5; i++) draft.fields={accountId:service.activeAccountId,draftKey:"d1",body:"Typing " + i,subject:"Plan"}
+      compare(popup.fields.body,undefined)
+      compare(draft.fullReads + draft.sharedReads,0)
+      compare(popup.job.id,"chat")
+      popup.open()
+      draft.fields={accountId:service.activeAccountId,draftKey:"d1",body:"Open",subject:"Plan"}
+      compare(popup.fields.body,"Open")
+      compare(draft.fullReads,0)
+      verify(draft.sharedReads > 0)
     }
     function test_queued_followup_captures_draft_at_dispatch() {
       popup.composer=draft

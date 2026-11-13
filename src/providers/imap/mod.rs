@@ -145,18 +145,23 @@ async fn response_each(
     continuation: bool,
     visit: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
-    tokio::time::timeout(COMMAND_BUDGET, records(w, tag, continuation, visit))
-        .await
-        .unwrap_or(Err("request_timed_out"))
+    tokio::time::timeout(
+        COMMAND_BUDGET,
+        records(w, tag, continuation, visit, |_| "imap_command_failed"),
+    )
+    .await
+    .unwrap_or(Err("request_timed_out"))
 }
 /// Visit complete IMAP response records, keeping literals attached to their
 /// protocol record. UID inventories can retain only numbers instead of a full
-/// response and a second, much larger parsed syntax tree.
+/// response and a second, much larger parsed syntax tree. A tagged NO or BAD
+/// ends the read with the error `refusal` names for that reply.
 async fn records(
     w: &mut Wire,
     tag: &str,
     continuation: bool,
     mut visit: impl FnMut(&[u8]) -> Result<()>,
+    refusal: fn(&str) -> &'static str,
 ) -> Result<()> {
     let mut total = 0;
     loop {
@@ -171,7 +176,7 @@ async fn records(
                 .starts_with("OK ")
                 && text[tag.len() + 1..].trim() != "OK"
             {
-                return Err("imap_command_failed");
+                return Err(refusal(&text[tag.len() + 1..]));
             }
             visit(&l)?;
             return Ok(());
@@ -397,22 +402,48 @@ async fn login(w: &mut Wire, p: &Value) -> Result<()> {
         }
         let auth = STANDARD.encode(format!("user={user}\x01auth=Bearer {secret}\x01\x01"));
         write(w, format!("{auth}\r\n").as_bytes()).await?;
-        response(w, "O1", false).await.map_err(refused)?;
     } else {
-        command(w, &format!("LOGIN {} {}", quote(&user)?, quote(&secret)?))
-            .await
-            .map_err(refused)?;
+        write(
+            w,
+            format!("O1 LOGIN {} {}\r\n", quote(&user)?, quote(&secret)?).as_bytes(),
+        )
+        .await?;
     }
-    Ok(())
+    login_response(w).await
 }
 /// Only a tagged NO/BAD means the credentials were refused. A dropped
 /// connection or a BYE during the exchange is a transport failure, which
 /// callers retry sooner than they would a bad password.
-fn refused(error: &'static str) -> &'static str {
-    if error == "imap_command_failed" {
-        "mail_auth_failed"
-    } else {
-        error
+async fn login_response(w: &mut Wire) -> Result<()> {
+    tokio::time::timeout(
+        COMMAND_BUDGET,
+        records(w, "O1", false, |_| Ok(()), login_refusal),
+    )
+    .await
+    .unwrap_or(Err("request_timed_out"))
+}
+/// The error a refused sign-in reports, read from the RFC 5530 response code
+/// the server put in front of its text: `NO [EXPIRED] ...` asks for a new
+/// password where `NO [UNAVAILABLE] ...` asks only for patience. Only the
+/// bracketed code is read, and only a known code changes the answer. The
+/// server's free text never leaves the backend, so a server cannot write the
+/// sentence a user reads.
+fn login_refusal(reply: &str) -> &'static str {
+    let code = reply
+        .split_once(' ')
+        .map(|(_, text)| text.trim_start())
+        .and_then(|text| text.strip_prefix('['))
+        .and_then(|text| text.split_once(']'))
+        .map(|(code, _)| code.split_whitespace().next().unwrap_or(""))
+        .unwrap_or("");
+    match code.to_ascii_uppercase().as_str() {
+        "AUTHORIZATIONFAILED" => "mail_auth_unauthorized",
+        "EXPIRED" => "mail_auth_expired",
+        "PRIVACYREQUIRED" => "mail_auth_privacy_required",
+        "CONTACTADMIN" => "mail_auth_contact_admin",
+        "UNAVAILABLE" => "mail_auth_unavailable",
+        // AUTHENTICATIONFAILED, a code this list does not know, or no code.
+        _ => "mail_auth_failed",
     }
 }
 /// Read live LIST/SPECIAL-USE facts without touching the folder cache or

@@ -262,6 +262,22 @@ Item {
       backend.pendingStop = null
       done()
     }
+    function test_check_waits_for_a_replaced_watch_to_answer() {
+      backend.deferWatch = true
+      sync.enabled = true
+      sync.reconcile()
+      answerWatch(0)
+      sync.pageSize = 50
+      sync.reconcile()
+      compare(backend.pendingWatches.length, 2)
+      var count = backend.calls.length
+      sync.check()
+      compare(backend.calls.length, count)
+      answerWatch(1)
+      sync.check()
+      compare(backend.calls.length, count + 1)
+      compare(backend.calls[count].method, "mail.check")
+    }
     function test_failed_pending_watch_registers_again_instead_of_checking() {
       backend.deferWatch = true
       sync.enabled = true

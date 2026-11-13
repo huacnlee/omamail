@@ -971,8 +971,15 @@ fi
 # different font must update all three deliberately.
 font_provenance=app/assets/fonts/NerdFonts-PROVENANCE.md
 [ -f "../$font_provenance" ] || fail "bundled fonts must record their provenance"
+# Linux ships `sha256sum`; macOS ships `shasum`, which Arch keeps outside the
+# default PATH. Either answers the same question, in the order install.sh asks.
+hash_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else fail "sha256sum or shasum is required to check bundled asset checksums"; fi
+}
 while read -r expected file; do
-  actual=$(cd .. && shasum -a 256 "$file" | awk '{print $1}')
+  actual=$(cd .. && hash_file "$file")
   [ "$actual" = "$expected" ] || fail "$file does not match its reviewed upstream checksum"
   grep -q "$expected" "../$font_provenance" \
     || fail "$file checksum is missing from its shipped provenance"
@@ -990,7 +997,7 @@ mac_icon=app/resources/macos/omamail.icns
 [ "$(cd .. && wc -c < "$mac_icon")" -eq 111809 ] \
   || fail "$mac_icon does not match its reviewed byte size"
 mac_icon_checksum=bd29ce1e72aa9db37ed5b1cb930956d2d933dc4426e7cea7f1b8baf2edb9262d
-actual_mac_icon_checksum=$(cd .. && shasum -a 256 "$mac_icon" | awk '{print $1}')
+actual_mac_icon_checksum=$(cd .. && hash_file "$mac_icon")
 [ "$actual_mac_icon_checksum" = "$mac_icon_checksum" ] \
   || fail "$mac_icon does not match its reviewed checksum"
 grep -q "$mac_icon_checksum" "../$icon_provenance" \
@@ -999,7 +1006,7 @@ grep -q '1277a2cf247b275a15961fb20175420abb5dfc5489acb95313f4f604c09b6e78' "../$
   || fail "the macOS icon source checksum is missing from its shipped provenance"
 windows_icon=app/resources/windows/omamail.ico
 windows_icon_checksum=2562966adb272711ae0274f7eade7ef2680781bb4405182280a310658752131d
-actual_windows_icon_checksum=$(cd .. && shasum -a 256 "$windows_icon" | awk '{print $1}')
+actual_windows_icon_checksum=$(cd .. && hash_file "$windows_icon")
 [ "$actual_windows_icon_checksum" = "$windows_icon_checksum" ] \
   || fail "$windows_icon does not match its reviewed checksum"
 grep -q "$windows_icon_checksum" "../$icon_provenance" \
@@ -1285,12 +1292,14 @@ if grep -E 'secret-tool|scripts/keyring-(lookup|store|clear)\.sh' \
 fi
 
 # A Workspace admin refusing the app's mailbox access surfaces as the static
-# backend error gmail_forbidden. Naming it is the only way the login screen
-# says "allow the app in your account settings"; the generic fallback sends
-# people to sign in again forever against a refusal that never clears.
+# backend error gmail_forbidden. Naming it in the sign-in sentences is the only
+# way the login screen says "allow the app in your account settings"; the
+# generic fallback sends people to sign in again forever against a refusal that
+# never clears.
 python3 - <<'PY'
 from pathlib import Path
-text = Path("providers/AuthManager.qml").read_text()
-if '"gmail_forbidden"' not in text:
+sentences = Path("providers/OAuth.js").read_text()
+manager = Path("providers/AuthManager.qml").read_text()
+if 'gmail_forbidden' not in sentences or "OAuth.signInErrorMessage" not in manager:
     raise SystemExit("test_source.sh: a refused gmail_forbidden sign-in must not read as a transient sign-in failure")
 PY

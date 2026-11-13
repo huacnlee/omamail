@@ -53,6 +53,9 @@ Item {
   signal shutdownComplete(var error)
   signal notification(string method, var params)
   signal requestFailed(string method, var error)
+  // Frontend owners share account watches. A retired owner's delayed unwatch
+  // may stop a replacement owner's watch after it has already registered.
+  signal mailWatchStopped(string accountId)
 
   function parseMessage(raw, callback) {
     return Upload.parse(raw, function(method, params, done) {
@@ -78,7 +81,11 @@ Item {
 
   function request(method, params, callback, internal) {
     var operation = method === "request.upload" && params ? params.method : method
+    var unwatchedAccount = method === "mail.unwatch" && params
+      && typeof params.accountId === "string" ? params.accountId : ""
     var done = function(result, error) {
+      if (!error && result && result.unwatched === true && unwatchedAccount !== "")
+        root.mailWatchStopped(unwatchedAccount)
       if (error) root.requestFailed(operation, error)
       if (typeof callback === "function") callback(result, error)
     }
@@ -123,6 +130,9 @@ Item {
     // budget (CALL_BUDGET in src/providers/imap/mod.rs) instead of killing
     // the process while the server is still answering.
     if (operation.indexOf("imap.") === 0) return 180000
+    // Google Contacts pages two People API listings within the backend's own
+    // 60 s (DEADLINE in src/contacts/google.rs), after a token refresh.
+    if (operation === "contacts.google") return 75000
     // A Microsoft 365 message body is up to 24 MiB and is given a minute on the wire.
     // Everything else, including a header listing, keeps the 30 second wait.
     var account = params ? String(params.accountId || "") : ""

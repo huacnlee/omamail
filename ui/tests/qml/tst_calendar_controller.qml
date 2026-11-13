@@ -17,14 +17,22 @@ Item {
     function persistSetting(name, value) { var next = ({}); next[name] = value; settings = next; saves++ }
     property bool backendCanDiscoverCalendars: true
     property bool backendCanGoogleCalendars: false
+    property var verifyResult: ({ verified: true })
+    property bool holdVerify: false
+    property var verifyCallback: null
     property var discoveryCallback: null
     property var credentialWrites: []
     property var configWrites: []
     property var configCallback: null
-    property var backend: ({ ready: false, call: function(method, params, callback) {
+    property var backend: ({ ready: false, apiVersion: 10, call: function(method, params, callback) {
       mailService.requests.push({ method: method, params: params })
       if (method === "calendar.discover") {
         mailService.discoveryCallback = callback
+        return
+      }
+      if (method === "calendar.verify") {
+        if (mailService.holdVerify) { mailService.verifyCallback = callback; return }
+        callback(mailService.nextError ? null : mailService.verifyResult, mailService.nextError)
         return
       }
       callback(mailService.nextResult, mailService.nextError)
@@ -71,6 +79,7 @@ Item {
   TestCase {
     name: "CalendarController"
     SignalSpy { id: discoverySpy; target: controller; signalName: "discoveryFinished" }
+    SignalSpy { id: savedSpy; target: controller; signalName: "calendarSaved" }
 
     property var originalSummaries: JSON.parse(JSON.stringify(mailService.accountSummaries))
 
@@ -238,8 +247,13 @@ Item {
       mailService.nextError = null
       mailService.backendCanDiscoverCalendars = true
       mailService.backendCanGoogleCalendars = false
+      mailService.verifyResult = ({ verified: true })
+      mailService.holdVerify = false
+      mailService.verifyCallback = null
       mailService.discoveryCallback = null
       mailService.backend.ready = false
+      mailService.backend.apiVersion = 10
+      savedSpy.clear()
       mailService.accountSummaries = [
         { id: "imap:work@example.com", email: "work@example.com",
           provider: "imap", signedIn: true },
@@ -567,14 +581,205 @@ Item {
     }
 
     function test_updating_a_caldav_password_refreshes_the_visible_range() {
+      mailService.backend.ready = true
       controller.rangeStart = 1000
       controller.rangeEnd = 2000
       controller.loading = true
       controller.updateCalendarPassword(controller.sourceList.sources[0], "new-secret")
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.verify")
       compare(mailService.credentialWrites, [{kind:"calendar-password",
         accountId:"caldav:team",clientId:"",secret:"new-secret"}])
       compare(controller.pendingRangeStart, 1000)
       compare(controller.pendingRangeEnd, 2000)
+    }
+
+    readonly property var homeCalendar: ({ name: "Home",
+      url: "https://calendar.example/home/", username: "me@example.com" })
+
+    // A CalDAV password the server refuses must reach neither the keyring nor
+    // the calendar list. Saved unchecked, it surfaced weeks later as a generic
+    // fetch failure that never named the password.
+    function test_a_refused_caldav_password_is_not_saved() {
+      mailService.backend.ready = true
+      mailService.nextError = ({ code: -32000, message: "calendar_auth_refused" })
+      controller.addCalDavCalendar(homeCalendar, "wrong-secret")
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.verify")
+      compare(JSON.stringify(mailService.requests[0].params), JSON.stringify({
+        source: { kind: "caldav", url: "https://calendar.example/home/", username: "me@example.com" },
+        password: "wrong-secret" }))
+      compare(mailService.configWrites.length, 0, "the calendar list is not written")
+      compare(mailService.credentialWrites.length, 0, "the keyring is not written")
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], false)
+      compare(savedSpy.signalArguments[0][1], "The calendar server rejected that username or password")
+      compare(controller.savingSource, false)
+      compare(controller.sourceSecret, "", "the refused password is not kept around")
+      compare(controller.sourceBeingSaved, null)
+      compare(controller.sourceList.sources.length, 1)
+    }
+
+    function test_a_caldav_check_failure_uses_only_known_rpc_messages_data() {
+      return [
+        {message: "calendar_not_found", expected: "No calendar was found at that address"},
+        {message: "calendar_redirected", expected: "The calendar server redirects that address. Use the address it points to"},
+        {message: "calendar_timeout", expected: "The calendar server could not be reached"},
+        {message: "calendar_network_failed", expected: "The calendar server could not be reached"},
+        {message: "calendar_invalid_url", expected: "Use an HTTPS CalDAV calendar address"},
+        {message: "https://calendar.example/home/ answered 500 Internal Server Error",
+          expected: "The calendar password could not be checked"}
+      ]
+    }
+
+    function test_a_caldav_check_failure_uses_only_known_rpc_messages(data) {
+      mailService.backend.ready = true
+      mailService.nextError = ({ code: -32000, message: data.message })
+      controller.addCalDavCalendar(homeCalendar, "secret")
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][1], data.expected)
+      compare(mailService.configWrites.length, 0)
+      compare(mailService.credentialWrites.length, 0)
+    }
+
+    // The control: an accepted password is saved, and only after the check.
+    function test_an_accepted_caldav_password_is_saved_after_the_check() {
+      mailService.backend.ready = true
+      controller.addCalDavCalendar(homeCalendar, "right-secret")
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.verify")
+      compare(mailService.configWrites.length, 1)
+      compare(mailService.configWrites[0].name, "calendars.json")
+      var written = JSON.parse(mailService.configWrites[0].payload)
+      compare(written.sources.length, 2)
+      compare(written.sources[1].id, "caldav:calendar-example-home")
+      compare(mailService.credentialWrites.length, 0, "the password waits for the calendar list")
+      mailService.configCallback(true, "")
+      compare(mailService.credentialWrites, [{kind:"calendar-password",
+        accountId:"caldav:calendar-example-home",clientId:"",secret:"right-secret"}])
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], true)
+      compare(controller.savingSource, false)
+      compare(controller.sourceList.sources.length, 2)
+    }
+
+    function test_a_refused_replacement_caldav_password_keeps_the_saved_one() {
+      mailService.backend.ready = true
+      mailService.nextError = ({ code: -32000, message: "calendar_auth_refused" })
+      controller.updateCalendarPassword(controller.sourceList.sources[0], "wrong-secret")
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.verify")
+      compare(mailService.requests[0].params.source.url, "https://calendar.example/team/")
+      compare(mailService.credentialWrites.length, 0)
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], false)
+      compare(savedSpy.signalArguments[0][1], "The calendar server rejected that username or password")
+      compare(controller.savingSource, false)
+    }
+
+    // Cancel while the backend still holds the check. The answer arrives
+    // afterwards and must write nothing: a cancelled add that then saved
+    // would list a calendar and store a password the user withdrew.
+    function test_cancelling_a_held_check_prevents_the_add() {
+      mailService.backend.ready = true
+      mailService.holdVerify = true
+      controller.addCalDavCalendar(homeCalendar, "right-secret")
+      compare(mailService.requests.length, 1)
+      compare(mailService.requests[0].method, "calendar.verify")
+      verify(mailService.verifyCallback !== null, "the check is held")
+      compare(controller.savingSource, true)
+      compare(controller.sourceCheckPending, true)
+      compare(controller.cancelSourceSave(), true)
+      compare(controller.savingSource, false)
+      compare(controller.sourceCheckPending, false)
+      compare(controller.sourceSecret, "", "the withdrawn password is not kept around")
+      compare(controller.sourceBeingSaved, null)
+      var late = mailService.verifyCallback
+      mailService.verifyCallback = null
+      late({ verified: true }, null)
+      compare(mailService.configWrites.length, 0, "the cancelled calendar is not written")
+      compare(mailService.credentialWrites.length, 0, "the withdrawn password is not stored")
+      compare(savedSpy.count, 0, "a cancelled check reports nothing")
+      compare(controller.sourceList.sources.length, 1)
+      compare(controller.savingSource, false)
+      // The next add is its own check, not the cancelled one.
+      mailService.holdVerify = false
+      controller.addCalDavCalendar(homeCalendar, "right-secret")
+      compare(mailService.requests.length, 2)
+      compare(mailService.configWrites.length, 1)
+      mailService.configCallback(true, "")
+      compare(mailService.credentialWrites.length, 1)
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], true)
+    }
+
+    function test_cancelling_a_held_check_keeps_the_saved_replacement_password() {
+      mailService.backend.ready = true
+      mailService.holdVerify = true
+      controller.updateCalendarPassword(controller.sourceList.sources[0], "new-secret")
+      compare(mailService.requests.length, 1)
+      verify(mailService.verifyCallback !== null, "the check is held")
+      compare(controller.cancelSourceSave(), true)
+      compare(controller.savingSource, false)
+      var late = mailService.verifyCallback
+      mailService.verifyCallback = null
+      late({ verified: true }, null)
+      compare(mailService.credentialWrites.length, 0, "the saved password is not overwritten")
+      compare(mailService.configWrites.length, 0)
+      compare(savedSpy.count, 0)
+      compare(controller.savingSource, false)
+    }
+
+    // Past the check there is nothing to cancel: the server accepted the
+    // password and the settings write is under way, so it finishes and the
+    // password follows it rather than leaving a calendar with no credential.
+    function test_an_accepted_check_is_not_cancelled_mid_write() {
+      mailService.backend.ready = true
+      compare(controller.cancelSourceSave(), false, "nothing out, nothing to cancel")
+      mailService.holdVerify = true
+      controller.addCalDavCalendar(homeCalendar, "right-secret")
+      var answer = mailService.verifyCallback
+      mailService.verifyCallback = null
+      answer({ verified: true }, null)
+      compare(mailService.configWrites.length, 1, "the calendar list write has started")
+      compare(controller.sourceCheckPending, false)
+      compare(controller.cancelSourceSave(), false)
+      compare(controller.savingSource, true, "the save is still finishing")
+      mailService.configCallback(true, "")
+      compare(mailService.credentialWrites.length, 1)
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], true)
+      compare(controller.savingSource, false)
+    }
+
+    // The plugin pins its backend. Until the one that checks passwords is
+    // released, an older backend keeps the earlier behavior rather than
+    // losing the feature, asks it nothing it cannot answer, and says what it
+    // did not do.
+    function test_an_old_backend_saves_unchecked_and_says_so_data() {
+      return [{tag: "adding", add: true}, {tag: "replacing", add: false}]
+    }
+
+    function test_an_old_backend_saves_unchecked_and_says_so(data) {
+      mailService.backend.ready = true
+      mailService.backend.apiVersion = 9
+      if (data.add) {
+        controller.addCalDavCalendar(homeCalendar, "secret")
+        compare(mailService.configWrites.length, 1)
+        mailService.configCallback(true, "")
+      } else {
+        controller.updateCalendarPassword(controller.sourceList.sources[0], "secret")
+        compare(mailService.configWrites.length, 0)
+      }
+      compare(mailService.requests.length, 0)
+      compare(mailService.credentialWrites.length, 1)
+      compare(mailService.credentialWrites[0].secret, "secret")
+      compare(savedSpy.count, 1)
+      compare(savedSpy.signalArguments[0][0], true)
+      compare(savedSpy.signalArguments[0][1],
+        "The password was not checked: this backend cannot check CalDAV passwords yet")
+      compare(controller.savingSource, false)
+      compare(controller.sourceSaveNote, "")
     }
 
     // Google and Microsoft calendars arrive with their account's sign-in,

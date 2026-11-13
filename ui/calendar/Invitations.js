@@ -80,7 +80,7 @@ function failure(error, apiVersion) {
     advice = "The calendar service is limiting requests. Wait before retrying."
   else if (status >= 500)
     advice = "The calendar service is temporarily unavailable. Try again later."
-  else if (status === 401 || code === "calendar_auth_required" || code === "gmail_unauthorized" || code === "auth_signed_out")
+  else if (status === 401 || code === "calendar_auth_required" || code === "gmail_unauthorized" || code === "gmail_signed_out" || code === "auth_signed_out")
     advice = "Sign in to the destination calendar account again, then retry."
   else if (status === 403 || code === "calendar_auth_refused")
     advice = "The calendar service refused access. Check account permissions and the selected calendar."

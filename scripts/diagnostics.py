@@ -54,11 +54,13 @@ calendar_auth_refused calendar_auth_required calendar_conflict calendar_input_to
 calendar_invalid_input calendar_invalid_operation calendar_invalid_response calendar_invalid_url
 calendar_invitation_cancelled calendar_invitation_not_found calendar_invitation_series_required calendar_keyring_failed
 calendar_network_failed calendar_not_found calendar_organizer_mismatch calendar_origin_refused
-calendar_password_invalid calendar_password_missing calendar_provider_unsupported
+calendar_password_invalid calendar_password_missing calendar_provider_unsupported calendar_redirected
 calendar_reminder_not_found calendar_reminders_invalid calendar_reminders_unavailable
 calendar_request_failed calendar_response_too_large calendar_timeout calendar_too_many_calendars
 calendar_too_many_pages calendar_too_many_redirects calendar_too_many_reminders
 config_home_invalid
+contacts_auth_refused contacts_invalid_response contacts_network_failed contacts_request_failed
+contacts_response_too_large contacts_timeout
 conversation_limit
 credential_missing credential_store_unavailable
 gmail_account_unknown gmail_client_invalid gmail_client_missing gmail_client_permissions
@@ -66,7 +68,7 @@ gmail_client_too_large gmail_client_unreadable gmail_draft_missing gmail_forbidd
 gmail_http_failed gmail_invalid_input gmail_invalid_response gmail_invalid_token
 gmail_keyring_failed gmail_length_required gmail_queue_dropped gmail_queue_full
 gmail_rate_limited gmail_response_too_large gmail_session_invalidated gmail_session_limit
-gmail_timeout gmail_token_account_invalid gmail_token_invalid gmail_token_missing
+gmail_signed_out gmail_timeout gmail_token_account_invalid gmail_token_invalid gmail_token_missing
 gmail_unauthorized
 hey_account_mismatch hey_invalid_response hey_program_mismatch hey_unavailable
 home_invalid home_missing
@@ -100,7 +102,8 @@ m365_send_rejected m365_server_error m365_signed_out m365_tenant_invalid m365_th
 m365_timeout m365_tls_failed m365_wrong_account
 mail_account_invalid mail_account_unknown mail_action_destination_unavailable
 mail_action_invalid_change mail_action_invalid_target mail_action_target_limit
-mail_action_target_unknown mail_action_unavailable mail_auth_failed mail_check_timeout
+mail_action_target_unknown mail_action_unavailable mail_auth_contact_admin mail_auth_expired
+mail_auth_failed mail_auth_privacy_required mail_auth_unauthorized mail_auth_unavailable mail_check_timeout
 mail_connection_closed mail_dns_failed mail_list_incomplete mail_mailbox_unavailable
 mail_mailbox_unknown mail_mark_unknown mail_network_failed mail_provider_unknown
 mail_read_conversation_mismatch mail_read_invalid_conversation mail_read_invalid_reader
@@ -154,7 +157,7 @@ METHODS = set(json.loads((ROOT / 'backend-api.json').read_text())['methods']) | 
 
 DETAIL_FIELDS = {
     'provider': {'google', 'microsoft', 'caldav', 'icloud'},
-    'operation': {'list', 'get', 'lookup', 'instances', 'create', 'update', 'delete', 'move', 'import', 'saveInvitation', 'attendance'},
+    'operation': {'list', 'get', 'lookup', 'instances', 'create', 'update', 'delete', 'move', 'import', 'saveInvitation', 'attendance', 'verify'},
     'stage': {'validation', 'authentication', 'request', 'response'},
     'field': {'start', 'end', 'start.dateTime', 'end.dateTime', 'start.timeZone', 'end.timeZone', 'recurrence', 'iCalUID', 'calendarId', 'eventId', 'timeMin', 'timeMax'},
     'reason': set('''badRequest invalid invalidParameter required authError
@@ -167,7 +170,7 @@ DETAIL_FIELDS = {
         ErrorIrresolvableConflict TooManyRequests ErrorQuotaExceeded
         ErrorInternalServerError ErrorServiceUnavailable'''.split()),
 }
-DETAIL_METHODS = {'calendar.request', 'calendar.saveInvitation', 'calendar.attendance', 'request.upload'}
+DETAIL_METHODS = {'calendar.request', 'calendar.saveInvitation', 'calendar.attendance', 'calendar.verify', 'request.upload'}
 
 
 def clean_details(data):

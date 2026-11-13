@@ -44,6 +44,12 @@ assert README.count(UNIX_INSTALL) == 1, "README must show the canonical curl com
 assert README.count(WINDOWS_INSTALL) == 1, "README must show the canonical PowerShell command once"
 assert "raw/refs/heads" not in README and "raw.githubusercontent.com" not in README, "README still points at the raw repository"
 
+# The bar and the card after the install section both ask for sponsorship.
+SPONSOR = 'class="sponsor-button" href="https://github.com/sponsors/huacnlee" target="_blank" rel="noopener"'
+assert PAGE.count(SPONSOR) == 2, "the website should link to GitHub Sponsors from the bar and the card"
+assert PAGE.index(SPONSOR) < PAGE.index('<main'), "the first sponsor link belongs in the bar"
+assert "sponsors/huacnlee" in README, "the README should link to GitHub Sponsors"
+
 print("Website standalone installation instructions PASS")
 
 # Google's OAuth verification checks these addresses: the policy pages must be
