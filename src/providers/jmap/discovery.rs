@@ -356,33 +356,9 @@ mod runtime_tests {
     use super::*;
     #[tokio::test]
     async fn html_and_empty_challenge_never_receive_credentials_or_followup_requests() {
-        use std::io::{BufRead, BufReader};
-        struct Peer(std::process::Child);
-        impl Drop for Peer {
-            fn drop(&mut self) {
-                let _ = self.0.kill();
-                let _ = self.0.wait();
-            }
-        }
-        let mut peer = Peer(
-            std::process::Command::new("python3")
-                .arg(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/providers/jmap/discovery_tls_test.py"
-                ))
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .unwrap(),
-        );
-        let mut output = BufReader::new(peer.0.stdout.take().unwrap());
-        let mut port = String::new();
-        output.read_line(&mut port).unwrap();
-        let port: u16 = port.trim().parse().unwrap();
-        let mut certificate_path = String::new();
-        output.read_line(&mut certificate_path).unwrap();
+        let peer = crate::test_support::peers::RecordingHttpsPeer::start().await;
         let certificate =
-            reqwest::Certificate::from_pem(&std::fs::read(certificate_path.trim()).unwrap())
-                .unwrap();
+            reqwest::Certificate::from_pem(&crate::test_support::tls::ca_pem()).unwrap();
         let client = client_builder()
             .add_root_certificate(certificate)
             .build()
@@ -394,14 +370,14 @@ mod runtime_tests {
         for path in ["html", "empty"] {
             assert_eq!(
                 session
-                    .discover(format!("https://localhost:{port}/{path}"))
+                    .discover(format!("https://localhost:{}/{path}", peer.port))
                     .await,
                 Err("jmap_discovery_failed")
             );
         }
         let report: Value = serde_json::from_slice(
             &client
-                .get(format!("https://localhost:{port}/report"))
+                .get(format!("https://localhost:{}/report", peer.port))
                 .send()
                 .await
                 .unwrap()
@@ -414,6 +390,5 @@ mod runtime_tests {
             report,
             json!([{"path":"/html","authorization":false},{"path":"/empty","authorization":false}])
         );
-        assert!(peer.0.wait().unwrap().success());
     }
 }
