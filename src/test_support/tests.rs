@@ -20,6 +20,7 @@ async fn a_rejected_handshake_counts_as_a_connection() {
     peer.responses(json!([{"status": 200, "body": "ok"}]));
     let address: std::net::SocketAddr = format!("127.0.0.1:{}", peer.port).parse().unwrap();
     let client = reqwest::Client::builder()
+        .no_proxy()
         .resolve("caldav.icloud.com", address)
         .add_root_certificate(
             reqwest::Certificate::from_pem(&std::fs::read(tls::testdata("discovery.pem")).unwrap())
