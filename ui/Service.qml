@@ -39,6 +39,11 @@ Item {
   // widget rather than as a property binding.
   property var shell: null
   property var manifest: null
+  property var loadedManifest: null
+  onManifestChanged: {
+    if (loadedManifest && manifest) Qt.callLater(privateRuntime.refresh)
+    loadedManifest = manifest
+  }
   property var pluginRegistry: null
   property var barWidgetRegistry: null
   // Optional host seam. The Omarchy shell does not inject it and therefore
