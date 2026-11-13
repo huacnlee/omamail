@@ -219,6 +219,10 @@ function recurrenceStarts(event, rangeStart, rangeEnd, walls) {
     || !!(event.source && /Z\s*$/i.test(String(event.source.dtstart || "")))
   var out = []
   var count = 0
+  // The series' start as written: an unresolved one's placeholder, not the
+  // local reading it is shown at.
+  var writtenStart = event.wall && typeof event.wall.start === "number"
+    ? Number(event.wall.start) : Number(event.start.ms)
   var rangeLimit = Number(rangeEnd) || base.getTime()
   var limit = zoned ? rangeLimit + 86400000
     : Math.min(rangeLimit, until > 0 ? until + 1 : rangeLimit)
@@ -274,22 +278,31 @@ function recurrenceStarts(event, rangeStart, rangeEnd, walls) {
           : cursorDate === baseDate)
       matches = yearDelta >= 0 && yearDelta % interval === 0 && monthMatch && yearDayMatch
     }
+    // Which occurrences the rule has is decided on the times as written: an
+    // unresolved one by its wall-clock placeholder, against the series' own
+    // written start, COUNT and UNTIL, as before this placed anything on the
+    // local clock. Only an occurrence that belongs is then placed for display,
+    // so where the viewer is never adds or drops one (a UTC UNTIL compared with
+    // a local reading cut the last day off in Los Angeles but not in Madrid).
     var occurrenceMs = cursor.getTime()
+    var shownMs = occurrenceMs
+    var occurrenceWall = null
     if (zoned) {
       var placed = Ics.timeInZone({
         year: cursor.getUTCFullYear(), month: cursor.getUTCMonth() + 1,
         day: cursor.getUTCDate(), hour: cursor.getUTCHours(),
         minute: cursor.getUTCMinutes(), second: cursor.getUTCSeconds()
       }, tzid, source.timezones)
-      occurrenceMs = placed.resolved ? placed.ms : wallClockAsLocal(placed.ms)
-      var occurrenceWall = placed.resolved ? null : placed.ms
+      occurrenceMs = placed.ms
+      shownMs = placed.resolved ? placed.ms : wallClockAsLocal(placed.ms)
+      if (!placed.resolved) occurrenceWall = placed.ms
     }
-    if (matches && occurrenceMs >= Number(event.start.ms)) {
+    if (matches && occurrenceMs >= writtenStart) {
       count++
       if (countLimit > 0 && count > countLimit) break
       if (!until || occurrenceMs <= until) {
-        out.push(occurrenceMs)
-        if (walls && zoned && occurrenceWall !== null) walls[occurrenceMs] = occurrenceWall
+        out.push(shownMs)
+        if (walls && occurrenceWall !== null) walls[shownMs] = occurrenceWall
       }
     }
     if (until && occurrenceMs > until) break

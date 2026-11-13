@@ -636,6 +636,51 @@ const caldavResource = (href, components) => [
   process.env.TZ = saved
 }
 
+// Which occurrences a series has is decided on the times as written, never on
+// where they are shown: a UTC UNTIL against the local reading of an unresolved
+// occurrence cut the last day off in Los Angeles but not in Madrid (F4).
+{
+  const saved = process.env.TZ
+  const cache = load("calendar/Cache.js")
+  const series = rule => caldavResource("/cal/until.ics", [
+    'BEGIN:VEVENT\r\nUID:until\r\nSUMMARY:Until\r\n'
+      + 'DTSTART;TZID=Europe/Berlin:20261105T170000\r\nDTEND;TZID=Europe/Berlin:20261105T174500\r\n'
+      + 'RRULE:' + rule + '\r\nEND:VEVENT\r\n'])
+  const range = [Date.UTC(2026, 9, 1), Date.UTC(2027, 0, 1)]
+  const clock = e => { const d = new Date(e.start.ms); return [d.getMonth() + 1, d.getDate(), d.getHours()] }
+  for (const zone of ["Europe/Madrid", "America/Los_Angeles"]) {
+    process.env.TZ = zone
+    const days = feed.eventsFromCaldav(series("FREQ=DAILY;UNTIL=20261106T170000Z"), "work", ...range)
+    assert.deepStrictEqual(Array.from(days, clock), [[11, 5, 17], [11, 6, 17]],
+      "both meetings under " + zone)
+  }
+  process.env.TZ = "Europe/Madrid"
+  const store = cache.load(cache.serialize(cache.putRange(cache.emptyStore(), "me", ...range,
+    feed.eventsFromCaldav(series("FREQ=DAILY;UNTIL=20261106T170000Z"), "work", ...range), 1)))
+  process.env.TZ = "America/Los_Angeles"
+  const restored = cache.eventsFor(store, "me", ...range, ["work"])
+  const fresh = feed.eventsFromCaldav(series("FREQ=DAILY;UNTIL=20261106T170000Z"), "work", ...range)
+  assert.deepStrictEqual(Array.from(restored, e => [e.start.ms, e.end.ms]), Array.from(fresh, e => [e.start.ms, e.end.ms]),
+    "a Madrid cache restored in Los Angeles is a fresh read there")
+
+  // Rules whose end is an instant or a count have the same occurrences, by the
+  // wall clock each was written at, in every zone.
+  const written = e => e.wall.start
+  for (const rule of ["FREQ=DAILY;UNTIL=20261106T170000Z", "FREQ=DAILY;UNTIL=20261106T165900Z",
+      "FREQ=DAILY;UNTIL=20261108T000000Z", "FREQ=DAILY;COUNT=3", "FREQ=DAILY;INTERVAL=2;COUNT=3",
+      "FREQ=WEEKLY;BYDAY=TH,SU;UNTIL=20261201T000000Z", "FREQ=MONTHLY;BYMONTHDAY=5,30;COUNT=3"]) {
+    let expected = null
+    for (const zone of ["UTC", "Europe/Madrid", "America/Los_Angeles", "Asia/Tokyo", "Australia/Lord_Howe", "Pacific/Chatham"]) {
+      process.env.TZ = zone
+      const walls = Array.from(feed.eventsFromCaldav(series(rule), "work", ...range), written)
+      assert.ok(walls.length > 0, rule)
+      if (expected === null) expected = walls
+      else assert.deepStrictEqual(walls, expected, rule + " under " + zone)
+    }
+  }
+  process.env.TZ = saved
+}
+
 // The calendar cache keeps what eventsFromCaldav gave it. Restored after the
 // machine changed zone, unresolved events are placed for the clock it has now,
 // exactly as a fresh read would place them — never at the old zone's reading.
