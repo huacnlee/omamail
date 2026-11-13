@@ -214,6 +214,23 @@ printf 'Hello,\nThe report is ready.\n' | omamail send --account me@example.org 
 printf 'Hello,\nThe report is ready.\n' | omamail send --account me@example.org --to you@example.org --subject 'Report ready' --execute --json
 ```
 
+Use `send --send-id YOUR_ID --execute` for a repeatable submission. The ID belongs to the selected account: the same ID and message return the original delivery state, while changed content is refused with `outbox_send_id_conflict`. Reusing an ID never starts another delivery, including after failure or an uncertain acknowledgement. The ordinary `send` preview is still stateless; rerunning it reads the attachment paths again.
+
+For approval across separate invocations, freeze the message first:
+
+```sh
+printf 'Please review the attached report.\n' | omamail prepare --account me@example.org --to you@example.org --subject Report --attach /absolute/report.pdf --json
+omamail send-prepared DRAFT_ID --json
+omamail send-prepared DRAFT_ID --execute --json
+omamail status SEND_ID --account me@example.org --json
+```
+
+`prepare` returns a `draftId`, a reusable `sendId` and the preview, including each frozen attachment's SHA-256 digest. Review that preview before approving its exact draft ID with `send-prepared --execute`. The private local snapshot contains the account, selected sender, recipients, subject, body and attachment bytes; changing or removing the original files cannot change the send. Its SHA-256 ID binds the entire snapshot, and altered snapshots are refused before enqueueing. Sending rechecks that the original account can still send from the approved alias, without substituting another account or sender. Preparing identical content produces the same ID and therefore the same send; use an ordinary send with a new explicit send ID when a second, intentional delivery is needed. These local snapshots are separate from provider drafts and remain under the application's private state directory, `omamail/cli-drafts`, until removed.
+
+`reply MESSAGE_ID` and `reply-all MESSAGE_ID` accept the same stdin body, `--account`, `--from` and `--attach` options and return a frozen draft for the same approval step. They derive the subject and recipients from the source message; recipient and subject overrides are refused. Reply-To takes precedence over From for incoming messages. Reply-all expands address groups, adds visible To/Cc recipients, removes this account's own addresses and duplicates, and never copies Bcc. Empty groups such as `undisclosed-recipients:;` contribute no addresses. Sender-only replies do not require usable To/Cc headers. A reply to one's own sent message targets its original To recipients, even when that message has an external Reply-To. The frozen draft retains the provider thread ID, In-Reply-To and References; missing or malformed message IDs are refused rather than silently creating an unrelated message. Long reference chains retain the root and newest parents within the composer's limit. The stdin body is used as supplied, without automatically quoting the source.
+
+`senders --account ACCOUNT_ID --json` uses the same provider alias discovery as sending and labels identities with their registered account ID. `contacts QUERY --json` searches local JSON/vCard address books, Thunderbird/Betterbird and cached correspondents. Each candidate reports its source; cached correspondents are marked `inferred`. The result reports distinct matching addresses and `ambiguous` when more than one matches. These are local suggestions, not verified identities or automatic recipient selection; choose an explicit email address for `--to`. This command does not fetch Google Contacts.
+
 Executed actions report confirmed `succeededIds` and `failedIds`; partial
 failure exits 1 and retains the result beside the JSON error. IMAP and Outlook
 retain each fully acknowledged folder group even if a later group fails or
@@ -226,6 +243,8 @@ delivery is authoritative only through the returned `outbox` entry matching
 cancellation or uncertain delivery exits 1. Check Sent before retrying an
 uncertain delivery. Direct RPC callers must inspect the returned outbox state
 and use `outbox.snapshot` to follow entries still queued or sending.
+
+`status SEND_ID --account ACCOUNT_ID` looks up only that entry, including acknowledged entries hidden from the ordinary outbox list, and contacts a running outbox owner when necessary. A missing ID returns `outbox_not_found`. Successful lookup exits 0 regardless of delivery state; inspect `outbox.entries[0].state` for queued, sending, sent, failed, cancelled or unknown. If waiting after an accepted submission fails, the send command exits 1 with `outbox_wait_failed` but retains `result.accountId`, `result.sendId`, the last outbox snapshot and `result.waitError`. Use the receipt for targeted status lookup; a wait failure is not proof that the message was unsent.
 
 When a running backend owns the queue, the CLI submits to that owner through
 a private Unix socket in the outbox state directory. The owner retains the

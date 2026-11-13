@@ -233,6 +233,65 @@ pub fn suggest() -> Result<Value, &'static str> {
     ))
 }
 
+/// CLI discovery keeps source-specific candidates instead of treating a name as
+/// an address. Cached correspondents are observations, not address-book entries.
+pub fn search(query: &str) -> Result<Value, &'static str> {
+    if query.trim().is_empty() || query.len() > 1024 || query.chars().any(char::is_control) {
+        return Err("contacts_invalid_query");
+    }
+    let dirs = crate::platform::dirs::AppDirs::discover()?;
+    let home = crate::platform::dirs::AppDirs::home()?;
+    let mut sources = Vec::new();
+    for (directory, source) in [
+        (".thunderbird", "thunderbird"),
+        (".betterbird", "betterbird"),
+    ] {
+        let mut book = Book::new();
+        thunderbird(&mut book, &home.join(directory));
+        sources.push((source, book));
+    }
+    let mut book = Book::new();
+    cache(&mut book, &dirs.cache.join("omamail"));
+    sources.push(("mail-cache", book));
+    let mut book = Book::new();
+    if let Some(raw) = read(&dirs.config.join("omamail/contacts.json"))
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+    {
+        json_book(&mut book, &raw);
+    }
+    sources.push(("contacts.json", book));
+    let mut book = Book::new();
+    if let Some(raw) = read(&dirs.config.join("omamail/contacts.vcf")) {
+        vcard(&mut book, &raw);
+    }
+    sources.push(("contacts.vcf", book));
+    Ok(search_sources(query, sources))
+}
+
+fn search_sources(query: &str, sources: Vec<(&str, Book)>) -> Value {
+    let query = query.trim().to_lowercase();
+    let mut candidates = Vec::new();
+    let mut emails = std::collections::HashSet::new();
+    for (source, book) in sources {
+        for (email, mut person) in book {
+            if email.contains(&query)
+                || person["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&query)
+            {
+                emails.insert(email);
+                person["source"] = json!(source);
+                person["scope"] = json!("local");
+                person["inferred"] = json!(source == "mail-cache");
+                candidates.push(person);
+            }
+        }
+    }
+    json!({"query":query,"candidates":candidates,"distinctAddresses":emails.len(),"ambiguous":emails.len()>1,"selectionRequired":true})
+}
+
 fn discover(home: &Path, config: &Path, cached: &Path) -> Value {
     let mut book = Book::new();
     for name in [".thunderbird", ".betterbird"] {
@@ -273,6 +332,25 @@ fn sorted(book: Book) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn search_keeps_provenance_and_reports_name_ambiguity_without_selecting() {
+        let mut explicit = Book::new();
+        collect(&mut explicit, "Alex", "alex@example.org");
+        let mut inferred = Book::new();
+        collect(&mut inferred, "Alex", "other@example.org");
+        collect(&mut inferred, "Different name", "alex@example.org");
+        let result = search_sources(
+            "Alex",
+            vec![("contacts.json", explicit), ("mail-cache", inferred)],
+        );
+        assert_eq!(result["ambiguous"], true);
+        assert_eq!(result["distinctAddresses"], 2);
+        assert_eq!(result["selectionRequired"], true);
+        assert_eq!(result["candidates"].as_array().unwrap().len(), 3);
+        assert_eq!(result["candidates"][0]["source"], "contacts.json");
+        assert_eq!(result["candidates"][0]["inferred"], false);
+        assert_eq!(result["candidates"][1]["inferred"], true);
+    }
     #[test]
     fn reads_real_sqlite_and_cache_without_writing_sources() {
         let root =

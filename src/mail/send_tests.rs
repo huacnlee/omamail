@@ -27,6 +27,109 @@ fn identities() -> Value {
 }
 
 #[test]
+fn replies_preserve_thread_headers_and_exclude_own_aliases_and_blind_recipients() {
+    use base64::Engine;
+    use mailparse::MailHeaderMap;
+    let original = json!({"threadId":"thread-1","payload":{"headers":[
+        {"name":"From","value":"=?UTF-8?Q?Jos=C3=A9?= <sender@example.org>"},
+        {"name":"Reply-To","value":"Replies <reply@example.org>, other@example.org"},
+        {"name":"To","value":"alias@example.org,\r\n\tpeer@example.org, reply@example.org"},
+        {"name":"Cc","value":"a@example.org, copy@example.org, PEER@example.org"},
+        {"name":"Bcc","value":"hidden@example.org"},
+        {"name":"Subject","value":"=?UTF-8?Q?R=C3=A9sum=C3=A9?="},
+        {"name":"Message-ID","value":"<parent@example.org>"},
+        {"name":"References","value":"<root@example.org>"}
+    ]}});
+    for all in [false, true] {
+        let mut request = request();
+        request.to.clear();
+        request.subject.clear();
+        let threading = send::reply(&mut request, &identities(), &original, all).unwrap();
+        let mut prepared = send::prepare(&request, &identities()).unwrap();
+        prepared.threading(threading);
+        let preview = prepared.preview();
+        assert_eq!(
+            preview["to"],
+            if all {
+                json!([
+                    "Replies <reply@example.org>",
+                    "other@example.org",
+                    "peer@example.org"
+                ])
+            } else {
+                json!(["Replies <reply@example.org>", "other@example.org"])
+            }
+        );
+        assert_eq!(
+            preview["cc"],
+            if all {
+                json!(["copy@example.org"])
+            } else {
+                json!([])
+            }
+        );
+        assert_eq!(preview["bcc"], json!([]));
+        assert_eq!(preview["subject"], "Re: Résumé");
+        let payload = prepared.payload(0, "reply").unwrap();
+        assert_eq!(payload["threadId"], "thread-1");
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload["raw"].as_str().unwrap())
+            .unwrap();
+        let mail = mailparse::parse_mail(&bytes).unwrap();
+        assert_eq!(
+            mail.headers.get_first_value("In-Reply-To").unwrap(),
+            "<parent@example.org>"
+        );
+        assert_eq!(
+            mail.headers.get_first_value("References").unwrap(),
+            "<root@example.org> <parent@example.org>"
+        );
+        assert!(mail.headers.get_first_value("Bcc").is_none());
+    }
+    let mut request = request();
+    request.to.clear();
+    request.subject.clear();
+    let own = json!({"payload":{"headers":[
+        {"name":"From","value":"alias@example.org"},
+        {"name":"To","value":"peer@example.org"},
+        {"name":"Message-ID","value":"<sent@example.org>"}
+    ]}});
+    send::reply(&mut request, &identities(), &own, false).unwrap();
+    assert_eq!(request.to, ["peer@example.org"]);
+}
+
+#[test]
+fn malformed_reply_headers_cannot_create_a_send_plan() {
+    for (name, value) in [
+        ("Reply-To", "safe@example.org\r\nBcc: hidden@example.org"),
+        (
+            "Reply-To",
+            "=?UTF-8?B?DQpCY2M6IHZpY3RpbUBleGFtcGxlLm9yZw==?= <safe@example.org>",
+        ),
+        ("Message-ID", "missing-brackets@example.org"),
+        ("References", "<root@example.org> trailing"),
+    ] {
+        let mut request = request();
+        request.to.clear();
+        request.subject.clear();
+        let mut headers = vec![json!({"name":"From","value":"peer@example.org"})];
+        if name != "Message-ID" {
+            headers.push(json!({"name":"Message-ID","value":"<parent@example.org>"}));
+        }
+        headers.push(json!({"name":name,"value":value}));
+        assert!(
+            send::reply(
+                &mut request,
+                &identities(),
+                &json!({"payload":{"headers":headers}}),
+                true
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
 fn preview_normalizes_repeated_recipients_and_default_identity_without_files() {
     let mut request = request();
     request.to = vec![

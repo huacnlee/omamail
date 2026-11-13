@@ -263,7 +263,7 @@ impl Outbox {
 
     /// Only these idempotent, ID-bound operations may cross to the lease
     /// owner. Retrying submission reuses the exact persisted ID and digest.
-    async fn shared_call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+    pub(crate) async fn shared_call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
         loop {
             match self.call(method, params).await {

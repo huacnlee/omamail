@@ -243,6 +243,53 @@ pub(crate) fn prepare(request: &SendRequest, aliases: &Value) -> Result<Prepared
 }
 
 impl Prepared {
+    pub(crate) fn threading(&mut self, threading: Value) {
+        for key in ["inReplyTo", "references", "threadId"] {
+            self.fields[key] = threading[key].clone();
+            self.preview[key] = threading[key].clone();
+        }
+    }
+
+    pub(crate) fn check_sender(&self, aliases: &Value) -> Result<()> {
+        if aliases.as_array().is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row["email"].as_str().is_some_and(|email| {
+                    self.fields["from"]
+                        .as_str()
+                        .is_some_and(|from| from.eq_ignore_ascii_case(email))
+                })
+            })
+        }) {
+            Ok(())
+        } else {
+            Err("mail_send_sender_unavailable")
+        }
+    }
+
+    pub(crate) fn record(&self) -> Value {
+        json!({"version":1,"accountId":self.account.id,"provider":self.account.provider.id(),"fields":self.fields,"preview":self.preview})
+    }
+
+    pub(crate) fn restore(record: Value) -> Result<Self> {
+        if record["version"] != 1 {
+            return Err("mail_draft_invalid");
+        }
+        let account =
+            super::resolve_account(record["accountId"].as_str().ok_or("mail_draft_invalid")?)?;
+        if record["accountId"] != account.id
+            || record["provider"] != account.provider.id()
+            || !record["fields"].is_object()
+            || !record["preview"].is_object()
+        {
+            return Err("mail_draft_invalid");
+        }
+        Ok(Self {
+            account,
+            fields: record["fields"].clone(),
+            preview: record["preview"].clone(),
+        })
+    }
+
     pub(crate) fn preview(&self) -> Value {
         self.preview.clone()
     }
@@ -276,6 +323,161 @@ impl Prepared {
         verify_envelope(&bytes, &self.fields)?;
         Ok(payload)
     }
+}
+
+/// Use raw headers, not the reader's single-address display projection.
+pub(crate) fn reply(
+    request: &mut SendRequest,
+    aliases: &Value,
+    message: &Value,
+    all: bool,
+) -> Result<Value> {
+    if !request.to.is_empty()
+        || !request.cc.is_empty()
+        || !request.bcc.is_empty()
+        || !request.subject.is_empty()
+    {
+        return Err("mail_reply_recipient_override");
+    }
+    let headers = message["payload"]["headers"]
+        .as_array()
+        .ok_or("mail_reply_headers_missing")?;
+    let get = |name: &str| -> Result<String> {
+        let values: Vec<_> = headers
+            .iter()
+            .filter(|h| {
+                h["name"]
+                    .as_str()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })
+            .collect();
+        if values.len() > 1 {
+            return Err("mail_reply_duplicate_header");
+        }
+        let value = values
+            .first()
+            .map(|h| h["value"].as_str().ok_or("mail_reply_headers_missing"))
+            .transpose()?
+            .unwrap_or("");
+        // Unfold only legal continuation lines; bare newlines remain invalid.
+        let value = value
+            .replace("\r\n ", " ")
+            .replace("\r\n\t", " ")
+            .replace("\n ", " ")
+            .replace("\n\t", " ")
+            .replace('\t', " ");
+        if value.len() > MAX_HEADER || value.chars().any(char::is_control) {
+            return Err("mail_send_invalid_header");
+        }
+        if value.is_empty() {
+            return Ok(String::new());
+        }
+        let line = format!("{name}: {value}");
+        let (decoded, _) =
+            mailparse::parse_header(line.as_bytes()).map_err(|_| "mail_reply_headers_missing")?;
+        if matches!(name, "From" | "Reply-To" | "To" | "Cc") {
+            let addresses =
+                mailparse::addrparse_header(&decoded).map_err(|_| "mail_send_invalid_address")?;
+            let mut out = Vec::new();
+            for item in addresses.iter() {
+                let members = match item {
+                    mailparse::MailAddr::Single(single) => std::slice::from_ref(single),
+                    mailparse::MailAddr::Group(group) if name != "From" => group.addrs.as_slice(),
+                    _ => return Err("mail_send_invalid_address"),
+                };
+                for single in members {
+                    address(&single.addr)?;
+                    let name = single.display_name.as_deref().unwrap_or("");
+                    header(name)?;
+                    out.push(display(&single.addr, name));
+                }
+            }
+            Ok(out.join(", "))
+        } else {
+            let value = decoded.get_value();
+            header(&value)?;
+            Ok(value)
+        }
+    };
+    let own: HashSet<_> = aliases
+        .as_array()
+        .ok_or("mail_send_identities_invalid")?
+        .iter()
+        .filter_map(|a| a["email"].as_str())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let from = get("From")?;
+    let own_sender = parsed(&from)?
+        .iter()
+        .all(|(email, _)| own.contains(&email.to_ascii_lowercase()));
+    let mut seen = own.clone();
+    // A reply to our own message follows its original recipients, regardless
+    // of a Reply-To intended for the people who received it.
+    if !own_sender {
+        let reply_to = get("Reply-To")?;
+        let target = if reply_to.is_empty() { from } else { reply_to };
+        request.to = recipients(&[target], &mut seen)?;
+    }
+    // Sender-only replies do not depend on unrelated To/Cc headers.
+    if own_sender || all {
+        let original_to = get("To")?;
+        if !original_to.is_empty() {
+            request.to.extend(recipients(&[original_to], &mut seen)?);
+        }
+    }
+    if all {
+        let original_cc = get("Cc")?;
+        if !original_cc.is_empty() {
+            request.cc = recipients(&[original_cc], &mut seen)?;
+        }
+    }
+    let subject = get("Subject")?;
+    request.subject = if subject
+        .get(..3)
+        .is_some_and(|s| s.eq_ignore_ascii_case("re:"))
+    {
+        subject
+    } else {
+        format!("Re: {subject}")
+    };
+    let message_id = get("Message-ID")?;
+    if message_id.is_empty() {
+        return Err("mail_reply_message_id_missing");
+    }
+    let references = get("References")?;
+    let references = if references.is_empty() {
+        get("In-Reply-To")?
+    } else {
+        references
+    };
+    let valid_id = |id: &str| {
+        id.len() <= 254
+            && id.starts_with('<')
+            && id.ends_with('>')
+            && id[1..id.len() - 1].contains('@')
+            && id[1..id.len() - 1]
+                .bytes()
+                .all(|b| b.is_ascii_graphic() && !b"<>".contains(&b))
+    };
+    if !valid_id(&message_id) {
+        return Err("mail_reply_invalid_message_id");
+    }
+    let mut ids: Vec<_> = references.split_ascii_whitespace().collect();
+    if ids.iter().any(|id| !valid_id(id)) {
+        return Err("mail_reply_invalid_references");
+    }
+    if ids.last() != Some(&message_id.as_str()) {
+        ids.push(&message_id);
+    }
+    // The composer bounds references to 512 bytes. Keep root and newest parents
+    // rather than allowing it to cut a message ID in half.
+    while ids.join(" ").len() > 512 && ids.len() > 2 {
+        ids.remove(1);
+    }
+    let references = ids.join(" ");
+    Ok(
+        json!({"inReplyTo":message_id,"references":references,"threadId":message["threadId"].as_str().unwrap_or("")}),
+    )
 }
 
 pub(super) fn verify_envelope(bytes: &[u8], fields: &Value) -> Result<()> {

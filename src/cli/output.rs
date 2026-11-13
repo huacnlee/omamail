@@ -44,6 +44,9 @@ pub(super) fn print_result(result: Result<Value, &'static str>, json: bool, enve
 }
 
 fn result_failure(value: &Value) -> Option<&'static str> {
+    if value["waitError"].is_string() {
+        return Some("outbox_wait_failed");
+    }
     if value["failedIds"]
         .as_array()
         .is_some_and(|ids| !ids.is_empty())
@@ -52,9 +55,11 @@ fn result_failure(value: &Value) -> Option<&'static str> {
     }
     if value["executed"] == true && value["sendId"].is_string() {
         let entry = value["outbox"]["entries"]
-            .as_array()?
-            .iter()
-            .find(|entry| entry["id"] == value["sendId"])?;
+            .as_array()
+            .and_then(|entries| entries.iter().find(|entry| entry["id"] == value["sendId"]));
+        let Some(entry) = entry else {
+            return Some("outbox_delivery_unknown");
+        };
         return match entry["state"].as_str() {
             Some("sent") => None,
             Some("failed") if entry["error"] == "outbox_storage_unavailable" => {
@@ -191,6 +196,16 @@ fn pretty(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_status_and_wait_errors_never_claim_send_success() {
+        let mut result = json!({"executed":true,"accountId":"a@example.org","sendId":"receipt","outbox":{"entries":[]}});
+        assert_eq!(result_failure(&result), Some("outbox_delivery_unknown"));
+        result["waitError"] = json!("outbox_owner_unavailable");
+        assert_eq!(result_failure(&result), Some("outbox_wait_failed"));
+        let output = pretty(&result);
+        assert!(output.contains("receipt") && output.contains("outbox_owner_unavailable"));
+    }
 
     #[test]
     fn send_storage_failure_is_not_reported_as_a_provider_refusal() {
