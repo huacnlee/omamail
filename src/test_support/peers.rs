@@ -9,6 +9,8 @@ use std::{
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_rustls::TlsAcceptor;
 
+/// How long a peer waits for a client that never arrives.
+const ACCEPT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 /// How long a peer waits for a client that never finishes its handshake.
 const HANDSHAKE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -23,23 +25,43 @@ pub(crate) struct HttpTlsPeer {
 impl HttpTlsPeer {
     /// Serves `connections` attempts in the order the client makes them.
     pub(crate) async fn start(connections: usize) -> Self {
+        Self::start_with_deadlines(connections, ACCEPT_DEADLINE, HANDSHAKE_DEADLINE).await
+    }
+
+    /// Serves the attempts, with deadlines a regression test can shorten.
+    ///
+    /// A failed handshake is a refusal. An absent client and a stalled
+    /// handshake get their own reports, so a negative test cannot pass without
+    /// reaching TLS.
+    pub(crate) async fn start_with_deadlines(
+        connections: usize,
+        accept: std::time::Duration,
+        handshake: std::time::Duration,
+    ) -> Self {
         let (listener, port) = tls::bind().await;
         let acceptor = TlsAcceptor::from(tls::localhost_config());
         let (reports, received) = mpsc::unbounded_channel();
         let task = tokio::spawn(async move {
             for _ in 0..connections {
-                let mut stream = match tokio::time::timeout(
-                    HANDSHAKE_DEADLINE,
-                    tls::accept(&acceptor, &listener),
-                )
-                .await
-                {
-                    Ok(Ok(stream)) => stream,
+                let stream = match tokio::time::timeout(accept, listener.accept()).await {
+                    Ok(Ok((stream, _))) => stream,
                     _ => {
-                        let _ = reports.send("tls-refused-no-http");
-                        continue;
+                        let _ = reports.send("no-connection");
+                        break;
                     }
                 };
+                let mut stream =
+                    match tokio::time::timeout(handshake, acceptor.accept(stream)).await {
+                        Ok(Ok(stream)) => stream,
+                        Ok(Err(_)) => {
+                            let _ = reports.send("tls-refused-no-http");
+                            continue;
+                        }
+                        Err(_) => {
+                            let _ = reports.send("handshake-timeout");
+                            continue;
+                        }
+                    };
                 let report = match http::read_request(&mut stream).await {
                     Ok(Some(_)) => {
                         let _ = http::respond(&mut stream, 200, None, br#"{"ok":true}"#).await;
@@ -158,16 +180,18 @@ impl ScriptedHttpsPeer {
         let shared = state.clone();
         let task = tokio::spawn(async move {
             loop {
-                let mut stream = match tokio::time::timeout(
-                    HANDSHAKE_DEADLINE,
-                    tls::accept(&acceptor, &listener),
-                )
-                .await
-                {
-                    Ok(Ok(stream)) => stream,
-                    _ => continue,
+                // Count every accepted TCP connection, as the baseline peer
+                // did: a handshake the client aborts is still a connection.
+                let stream = match tokio::time::timeout(ACCEPT_DEADLINE, listener.accept()).await {
+                    Ok(Ok((stream, _))) => stream,
+                    _ => break,
                 };
                 shared.lock().unwrap().connections += 1;
+                let mut stream =
+                    match tokio::time::timeout(HANDSHAKE_DEADLINE, acceptor.accept(stream)).await {
+                        Ok(Ok(stream)) => stream,
+                        _ => continue,
+                    };
                 let Ok(Some(request)) = http::read_request(&mut stream).await else {
                     continue;
                 };
@@ -209,15 +233,19 @@ impl ScriptedHttpsPeer {
     /// The requests received since the last `responses` call.
     ///
     /// A connection without an HTTP request means TLS refused the client, so
-    /// the two counts must agree.
+    /// the two counts must agree. The assertion runs after the lock is
+    /// released, so a mismatch leaves the peer usable.
     pub(crate) fn requests(&self) -> Vec<Value> {
-        let state = self.state.lock().unwrap();
+        let (connections, requests) = {
+            let state = self.state.lock().unwrap();
+            (state.connections, state.requests.clone())
+        };
         assert_eq!(
-            state.connections,
-            state.requests.len() as u64,
+            connections,
+            requests.len() as u64,
             "an unexpected connection occurred even though TLS prevented an HTTP request"
         );
-        state.requests.clone()
+        requests
     }
 }
 

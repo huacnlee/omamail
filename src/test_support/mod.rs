@@ -7,4 +7,5 @@ pub(crate) mod http;
 pub(crate) mod jmap;
 pub(crate) mod peers;
 pub(crate) mod starttls;
+mod tests;
 pub(crate) mod tls;
