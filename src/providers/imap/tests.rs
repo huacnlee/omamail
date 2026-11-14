@@ -1,32 +1,16 @@
 use super::*;
+use crate::test_support::{peers::HttpTlsPeer, starttls::StartTlsPeer};
 use tokio::net::TcpListener;
 #[tokio::test]
 async fn proton_custom_port_requires_starttls_before_credentials() {
-    use std::io::{BufRead, BufReader as BlockingReader};
-    let mut peer = std::process::Command::new("python3")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/providers/imap/starttls_test.py"
-        ))
-        .args(["imap", "local", "starttls"])
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut output = BlockingReader::new(peer.stdout.take().unwrap());
-    let mut port = String::new();
-    output.read_line(&mut port).unwrap();
-    let settings = json!({"imapHost":"127.0.0.1", "imapPort":port.trim().parse::<u16>().unwrap(), "insecure":true});
+    let mut peer = StartTlsPeer::start(false, "local", false).await;
+    let settings = json!({"imapHost":"127.0.0.1", "imapPort":peer.port, "insecure":true});
     let mut wire = connect(&settings, false).await.unwrap();
     write(&mut wire, b"synthetic-credential\r\n").await.unwrap();
-    let mut report = String::new();
-    output.read_line(&mut report).unwrap();
-    let success = peer.wait().unwrap().success();
-    assert_eq!(report.trim(), "encrypted-credentials");
-    assert!(success);
+    assert_eq!(peer.report().await, "encrypted-credentials");
 }
 #[tokio::test]
 async fn bridge_starttls_encrypts_credentials_and_never_downgrades() {
-    use std::io::{BufRead, BufReader as BlockingReader};
     for smtp in [false, true] {
         let bridge_port = if smtp { 1025 } else { 1143 };
         let standard_port = if smtp { 587 } else { 143 };
@@ -48,24 +32,10 @@ async fn bridge_starttls_encrypts_credentials_and_never_downgrades() {
             ("127.0.0.1", bridge_port, true, false, "malformed"),
             ("127.0.0.1", bridge_port, true, false, "buffered"),
         ] {
-            let mut peer = std::process::Command::new("python3")
-                .arg(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/src/providers/imap/starttls_test.py"
-                ))
-                .arg(if smtp { "smtp" } else { "imap" })
-                .arg(mode)
-                .arg(if implicit { "implicit" } else { "starttls" })
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .unwrap();
-            let mut output = BlockingReader::new(peer.stdout.take().unwrap());
-            let mut port = String::new();
-            output.read_line(&mut port).unwrap();
-            let port = port.trim().parse::<u16>().unwrap();
-            let settings = json!({"imapHost":"127.0.0.1", "imapPort":1143,
+            let mut peer = StartTlsPeer::start(smtp, mode, implicit).await;
+            let port = peer.port;
+            let mut settings = json!({"imapHost":"127.0.0.1", "imapPort":1143,
                 "smtpHost":host, "smtpPort":logical_port, "insecure":insecure});
-            let mut settings = settings;
             if !smtp {
                 settings["imapHost"] = json!(host);
                 settings["imapPort"] = json!(logical_port);
@@ -98,10 +68,8 @@ async fn bridge_starttls_encrypts_credentials_and_never_downgrades() {
             } else {
                 assert!(result.is_err());
             }
-            let mut report = String::new();
-            output.read_line(&mut report).unwrap();
             assert_eq!(
-                report.trim(),
+                peer.report().await,
                 if mode == "local" {
                     "encrypted-credentials"
                 } else {
@@ -109,7 +77,6 @@ async fn bridge_starttls_encrypts_credentials_and_never_downgrades() {
                 },
                 "smtp={smtp} host={host} port={logical_port} mode={mode}"
             );
-            assert!(peer.wait().unwrap().success());
             drop(secure);
         }
     }
@@ -452,23 +419,8 @@ fn smtp_preserves_final_line_and_rejects_bare_cr() {
 }
 #[tokio::test]
 async fn actual_tls_rejects_untrusted_issuer_and_wrong_hostname() {
-    use std::io::{BufRead, BufReader as BlockingReader};
-    let mut peer = std::process::Command::new("python3")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/providers/gmail_http_tls_test.py"
-        ))
-        .arg("3")
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut output = BlockingReader::new(peer.stdout.take().unwrap());
-    let mut port = String::new();
-    output.read_line(&mut port).unwrap();
-    let port: u16 = port.trim().parse().unwrap();
-    let mut cert = String::new();
-    output.read_line(&mut cert).unwrap();
-    let pem = std::fs::read_to_string(cert.trim()).unwrap();
+    let mut peer = HttpTlsPeer::start(3).await;
+    let pem = String::from_utf8(crate::test_support::tls::ca_pem()).unwrap();
     let b64: String = pem.lines().filter(|l| !l.starts_with("---")).collect();
     let der = STANDARD.decode(b64).unwrap();
     let mut trusted = RootCertStore::empty();
@@ -482,27 +434,22 @@ async fn actual_tls_rejects_untrusted_issuer_and_wrong_hostname() {
         ),
         ("127.0.0.1", trusted.clone()),
     ] {
-        let socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let socket = TcpStream::connect(("127.0.0.1", peer.port)).await.unwrap();
         let w: Wire = BufReader::new(Box::new(socket));
         assert!(matches!(
             tls_with_roots(w, host, roots).await,
             Err("mail_tls_failed")
         ));
-        let mut report = String::new();
-        output.read_line(&mut report).unwrap();
-        assert_eq!(report.trim(), "tls-refused-no-http");
+        assert_eq!(peer.report().await, "tls-refused-no-http");
     }
     // A private authority the store was built from — the system's, in
     // production — is honoured for the host it issued for (#185).
-    let socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let socket = TcpStream::connect(("127.0.0.1", peer.port)).await.unwrap();
     let w: Wire = BufReader::new(Box::new(socket));
     let mut secure = tls_with_roots(w, "localhost", trusted).await.unwrap();
     // close_notify, so the peer reads a clean end rather than a reset.
     secure.shutdown().await.unwrap();
-    let mut report = String::new();
-    output.read_line(&mut report).unwrap();
-    assert_eq!(report.trim(), "empty");
-    assert!(peer.wait().unwrap().success());
+    assert_eq!(peer.report().await, "empty");
 }
 #[test]
 fn pending_async_dns_is_cancelled_without_blocking_runtime_shutdown() {
