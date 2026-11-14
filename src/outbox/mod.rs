@@ -258,6 +258,14 @@ impl Outbox {
         )
     }
     pub async fn call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
+        // Raw RPC uses the same narrow owner bridge as prepared mail sends.
+        // Unkeyed operations and payload recovery still require local ownership.
+        if matches!(method, "outbox.enqueue" | "outbox.snapshot")
+            && text(params, "sendId").is_ok()
+            && params.get("includePayloads").is_none()
+        {
+            return self.shared_call(method, params).await;
+        }
         self.inner.call(method, params).await
     }
 
@@ -266,7 +274,7 @@ impl Outbox {
     async fn shared_call(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
         loop {
-            match self.call(method, params).await {
+            match self.inner.call(method, params).await {
                 Err("outbox_in_use") => (),
                 result => return result,
             }

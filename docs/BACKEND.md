@@ -238,6 +238,8 @@ the backend's existing stdin session. The lease remains held until its last
 owner/writer reference drops, then explicitly unlocks in the owning process;
 a forked child's pre-exec descriptor cannot prolong or release that ownership.
 
+Raw `outbox.enqueue` and `outbox.snapshot` RPC calls also use this owner bridge when they supply an explicit `sendId` and omit `includePayloads`. Compose once with `message.compose`, keep that payload and send ID for retries, and poll the ID-bound snapshot for the delivery result. Forwarded enqueue snapshots contain only the submitted entry; change notifications remain on the owner's session. Calls without a send ID, payload recovery and other outbox operations still require local ownership.
+
 `--json` works before or after the command. Operation errors exit 1 with
 `{"ok":false,"error":{"code":"..."}}` on stdout; human-readable errors use
 stderr. Invalid command syntax exits 2. JSON-RPC uses numeric error codes:
