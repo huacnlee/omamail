@@ -48,5 +48,31 @@ Item {
       compare(process.command[2], "status")
       verify(process.running, "a rescan must re-probe the backend pin")
     }
+
+    function test_rescan_during_a_status_check_is_not_dropped() {
+      var service = createTemporaryObject(factory, parent)
+      var runtime = service.backendRuntime
+      var process = runtimeProcess(runtime)
+      // The startup probe for the old pin is still in flight.
+      service.manifest = ({ id: "omamail", version: "0.11.3", __sourceDir: "" })
+      compare(process.command[2], "status")
+      verify(process.running, "the startup probe is still in flight")
+
+      // An update swaps the manifest before that probe answers.
+      service.manifest = ({ id: "omamail", version: "0.11.4", __sourceDir: "" })
+      wait(0)
+      verify(process.running, "the older probe must not be interrupted")
+
+      answer(runtime, "0.11.3")
+      wait(0)
+      verify(process.running, "a rescan during an in-flight check must be queued")
+      compare(process.command[2], "status")
+
+      // The follow-up probe reads the new checkout, not the older answer.
+      answer(runtime, "0.11.4")
+      wait(0)
+      wait(0)
+      compare(runtime.requiredVersion, "0.11.4")
+    }
   }
 }
