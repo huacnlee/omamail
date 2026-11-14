@@ -93,6 +93,12 @@ Item {
     name: "ReaderMode"
     when: windowShown
 
+    property var routed: []
+    Omamail.KeyRouter {
+      context: "reader"
+      onTriggered: function(id) { parent.routed.push(id) }
+    }
+
     function found(item, type) {
       if (!item) return null
       if (item.toString().indexOf(type) === 0) return item
@@ -152,6 +158,75 @@ Item {
     function test_the_body_is_separated_from_the_header() {
       verify(body().y >= 20,
         "mail content has its own section gap below the sender metadata")
+    }
+
+    function test_all_recipient_addresses_are_visible_and_long_headers_scroll() {
+      var original = mailService.selectedMessage
+      var originalId = mailService.selectedId
+      var recipients = []
+      for (var i = 0; i < 30; i++)
+        recipients.push({ display: "Person " + i, email: "person" + i + "@example.org" })
+      mailService.selectedMessage = {
+        id: "many-recipients", subject: "Team update",
+        from: { display: "Sender", email: "sender@example.org" },
+        to: recipients,
+        cc: [{ display: "<b>Reviewer</b>", email: "reviewer@example.org" }],
+        bcc: [{ display: "Archive", email: "archive@example.org" }],
+        fullTime: "14 November 2026", starred: false
+      }
+      reader.width = 560
+      mailService.selectedId = "many-recipients"
+      try {
+        wait(0)
+        var to = named(reader, "reader-to")
+        verify(to !== null, "To recipients have a visible row")
+        verify(to.text.indexOf("Person 29 <person29@example.org>") >= 0,
+          "the last recipient and full address are shown, without a cap")
+        verify(to.truncated, "large lists start as a compact preview")
+        var more = named(reader, "reader-to-more")
+        verify(more.visible)
+        verify(waitForRendering(more))
+        mouseClick(more, more.width / 2, more.height / 2)
+        tryCompare(to, "truncated", false)
+        var cc = named(reader, "reader-cc")
+        compare(cc.text, "Cc: <b>Reviewer</b> <reviewer@example.org>")
+        compare(cc.textFormat, Text.PlainText)
+        compare(named(reader, "reader-bcc").text, "Bcc: Archive <archive@example.org>")
+        var header = named(reader, "reader-header")
+        tryVerify(function() { return header.contentHeight > header.height })
+        verify(header.height < reader.height / 2, "the body retains reading space")
+        reader.forceActiveFocus()
+        for (var tab = 0; tab < 20 && !more.activeFocus; tab++) keyClick(Qt.Key_Tab)
+        verify(more.activeFocus, "Tab reaches the recipient disclosure")
+        routed = []
+        keyClick(Qt.Key_Down)
+        compare(routed.join(","), "cursorDown")
+        routed = []
+        keyClick(Qt.Key_PageDown)
+        verify(header.contentY > 0, "all header rows can be reached")
+        for (var page = 0; page < 30 && header.contentY < header.contentHeight - header.height; page++)
+          keyClick(Qt.Key_PageDown)
+        var bcc = named(reader, "reader-bcc")
+        var last = bcc.mapToItem(header, 0, bcc.height)
+        verify(last.y <= header.height, "the final recipient row is reachable by keyboard")
+        keyClick(Qt.Key_Space)
+        tryCompare(to, "truncated", true)
+        compare(routed.length, 0, "disclosure keys do not change mailbox selection")
+        compare(header.contentY, 0)
+        keyClick(Qt.Key_Space)
+        tryCompare(to, "truncated", false)
+        mailService.selectedId = originalId
+        mailService.selectedMessage = original
+        wait(0)
+        compare(header.contentY, 0)
+        compare(more.visible, false)
+        compare(named(reader, "reader-cc").visible, false)
+        compare(named(reader, "reader-bcc").visible, false)
+      } finally {
+        mailService.selectedMessage = original
+        mailService.selectedId = originalId
+        reader.width = 900
+      }
     }
 
     function test_changing_mode_asks_nothing_of_the_network() {
