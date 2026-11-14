@@ -1807,8 +1807,37 @@ function settingsScrollTarget(sections, key, contentHeight, viewportHeight) {
 // the reason moving stopped opening in the first place — so the panel marks a
 // previewed message read once the cursor has stayed on it, and arrival leaves
 // it alone.
-function marksReadOnArrival(summary, isPreview) {
+//
+// `markOnOpen` is the reader's "Mark messages read when opened" setting. Only
+// an explicit `false` turns it off, so a caller that does not pass it keeps
+// the default of marking read.
+function marksReadOnArrival(summary, isPreview, markOnOpen) {
   return !!summary && summary.unread === true && isPreview !== true
+    && markOnOpen !== false
+}
+
+// Which opening of the reader a read action has marked read, so that a read
+// of that message still in flight from before the action cannot paint it
+// unread again. With "Mark messages read when opened" off, the user's own
+// Shift+I is the only read an opening gets, and a stale reply would otherwise
+// undo it. The action counts when it names the open message, or reaches it
+// through its conversation. Mark all read counts only when the open message
+// is in an unread row of `rows`, because those are the only rows it marks.
+// Marking it unread forgets the read; any other action leaves the answer as it
+// was. `serial` is the opening now in the reader; a different opening never
+// matches.
+function readActionSerial(current, serial, openId, thread, ids, action, memberOnly, allRead, rows) {
+  if ((action !== "markRead" && action !== "markUnread") || !openId) return current
+  var targets = Array.isArray(ids) ? ids : []
+  var members = thread && Array.isArray(thread.memberIds) ? thread.memberIds : []
+  var listed = Array.isArray(rows) ? rows : []
+  var touches = allRead === true
+    ? action === "markRead" && listed.some(function(row) { return !!row && row.unread === true && rowHoldsMember(row, openId) })
+    : targets.indexOf(openId) >= 0
+      || (memberOnly !== true && members.indexOf(openId) >= 0
+        && targets.some(function(id) { return members.indexOf(id) >= 0 }))
+  if (!touches) return current
+  return action === "markRead" ? serial : -1
 }
 
 // Whether a dwell on a previewed message has anything to mark: it has to still
