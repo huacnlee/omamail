@@ -412,3 +412,21 @@ fn table_parts_stay_in_their_own_table() {
         "<table><tr><td><table><tr><td>x</td></tr></table></td><td>y</td></tr></table>"
     );
 }
+
+#[test]
+fn inline_hidden_images_are_removed() {
+    // Responsive mail: the desktop button shows, the mobile copy is hidden inline.
+    let png = "data:image/png;base64,iVBORw0KGgo=";
+    for hidden in ["display:none", "visibility:hidden"] {
+        let source = format!(
+            "<img src='https://cdn.example.com/desktop'>\
+             <img src='https://cdn.example.com/mobile' style='{hidden}'>"
+        );
+        let options = json!({"allowRemoteImages":true,"remoteImageData":{
+            "https://cdn.example.com/desktop":png,"https://cdn.example.com/mobile":png}});
+        let result = sanitize(&source, &options).unwrap();
+        assert_eq!(result["remoteImageSources"], json!(["https://cdn.example.com/desktop"]));
+        assert_eq!(result["images"], 1, "{hidden}");
+        assert_eq!(result["html"].as_str().unwrap().matches("<img").count(), 1, "{hidden}");
+    }
+}

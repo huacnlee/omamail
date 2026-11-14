@@ -49,8 +49,7 @@
 
 var RAW_TEXT_ELEMENTS = { script: true, style: true, textarea: true, title: true }
 
-// Elements with no closing tag and no children. An <img> that says
-// display:none has no subtree to take with it, and a <br> never closes.
+// Elements with no closing tag and no children: a <br> never closes.
 var VOID_ELEMENTS = {
   img: true, br: true, hr: true, input: true, meta: true, link: true,
   area: true, base: true, col: true, embed: true, source: true, track: true,
@@ -1014,7 +1013,8 @@ function isHiddenBy(declarations) {
 }
 
 function isHidden(node) {
-  if (VOID_ELEMENTS[node.name] === true) return false
+  // Images count too; see src/message/html/mod.rs.
+  if (VOID_ELEMENTS[node.name] === true && node.name !== "img") return false
   var style = attributeValue(node, "style")
   if (style === "") return false
   return isHiddenBy(splitDeclarations(style))
@@ -1427,7 +1427,8 @@ function sanitize(html, options) {
       // Most elements in real mail carry one, so asking twice was most of a
       // second pass over the document.
       var declarations = sourceDeclarations(child)
-      if (declarations !== null && VOID_ELEMENTS[child.name] !== true
+      if (declarations !== null
+        && (VOID_ELEMENTS[child.name] !== true || child.name === "img")
         && isHiddenBy(declarations)) continue
 
       // Collect fetch candidates while this walk already has the sender's

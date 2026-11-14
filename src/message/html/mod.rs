@@ -338,7 +338,10 @@ fn clean(n: &mut Node, images: &mut Images<'_>, colors: bool) {
             c.name = "div".into()
         }
         let styles = declarations(c.attr("style"));
-        if !tree::void(&c.name) && hidden(&styles) {
+        // Images count too. Responsive mail sends a desktop and a mobile copy
+        // of a button or logo and hides one inline; Qt ignores display:none,
+        // so keeping the hidden copy drew both.
+        if (!tree::void(&c.name) || c.name == "img") && hidden(&styles) {
             continue;
         }
         if c.name == "img" && images.sources.len() < images.limit {
