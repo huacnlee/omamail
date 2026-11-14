@@ -882,6 +882,59 @@ Column {
     }
   }
 
+  // A host that leaves sound to the operating system's notifications, as the
+  // standalone app does, does not offer this capability.
+  Rectangle {
+    objectName: "notification-sound-settings"
+    visible: !!root.service && !!root.service.capabilities
+      && root.service.capabilities.notificationSound === true && root.service.notifyNewMail
+    width: parent.width
+    implicitHeight: Math.max(notifySoundText.implicitHeight, notifySoundSwitch.implicitHeight)
+      + Style.space(16)
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.textColor, root.accentColor)
+
+    Column {
+      id: notifySoundText
+      anchors.left: parent.left
+      anchors.leftMargin: Style.space(12)
+      anchors.right: notifySoundSwitch.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Text {
+        width: parent.width
+        text: "New mail sound"
+        color: root.textColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Text {
+        width: parent.width
+        text: "Play a sound with each notification, unless Do Not Disturb is on"
+        color: root.dimColor
+        font.family: root.panelFontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    ToggleSwitch {
+      id: notifySoundSwitch
+      objectName: "notification-sound-switch"
+      anchors.right: parent.right
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
+      checked: !!root.service && root.service.notifyNewMailSound
+      foreground: root.textColor
+      accent: root.accentColor
+      onToggled: if (root.service)
+        root.service.persistSetting("notifyNewMailSound", root.service.notifyNewMailSound ? "Off" : "On")
+    }
+  }
+
   Text {
     objectName: "notificationIntegrationError"
     width: parent.width

@@ -24,6 +24,7 @@ const QSet<QString> &allowedSettings()
         QStringLiteral("refreshIntervalSec"), QStringLiteral("maxMessages"),
         QStringLiteral("heavyMessageRendering"), QStringLiteral("contentDirection"),
         QStringLiteral("defaultQuery"), QStringLiteral("notifyNewMail"),
+        QStringLiteral("notifyNewMailSound"),
         QStringLiteral("oauthPort"), QStringLiteral("undoSendSeconds"),
         QStringLiteral("unifiedCalendarView"), QStringLiteral("calendarHourHeight"),
         QStringLiteral("openOnClick"),

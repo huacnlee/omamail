@@ -39,6 +39,8 @@ Item {
     property int undoSendSeconds: 10
     property bool unifiedCalendarView: false
     property bool notifyNewMail: true
+    property bool notifyNewMailSound: false
+    property var capabilities: ({ notificationSound: true })
     property string contentDirection: "auto"
     property var auth: null
     property var backend: fakeBackend
@@ -71,6 +73,9 @@ Item {
     function setUndoSendSeconds(_value) {}
     function setUnifiedCalendarView(_value) {}
     function setNotifyNewMail(_value) {}
+    function persistSetting(key, value) {
+      if (key === "notifyNewMailSound") notifyNewMailSound = value === "On"
+    }
     function setContentDirection(_value) {}
     function setAlwaysRenderHeavyMessages(_value) {}
   }
@@ -260,6 +265,29 @@ Item {
       verify(!senderField().visible)
       fakeService.backendCanNameSender = true
       verify(senderField().visible)
+    }
+
+    // The sound only exists next to a notification the plugin sends itself.
+    function test_the_sound_switch_follows_notifications_and_the_capability() {
+      var row = find("notification-sound-settings")
+      verify(row.visible)
+      fakeService.notifyNewMail = false
+      verify(!row.visible)
+      fakeService.notifyNewMail = true
+      fakeService.capabilities = ({ notifications: true })
+      verify(!row.visible)
+      fakeService.capabilities = ({ notificationSound: true })
+      verify(row.visible)
+    }
+
+    function test_the_sound_switch_writes_the_setting() {
+      var toggle = find("notification-sound-switch")
+      verify(!toggle.checked)
+      toggle.toggled()
+      compare(fakeService.notifyNewMailSound, true)
+      verify(toggle.checked)
+      toggle.toggled()
+      compare(fakeService.notifyNewMailSound, false)
     }
   }
 }

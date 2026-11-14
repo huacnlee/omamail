@@ -18,7 +18,8 @@ Item {
       property int barSize: 30
     }
     property int opens: 0
-    function updateEntryInline(id, entry) {}
+    property var savedEntry: null
+    function updateEntryInline(id, entry) { savedEntry = entry }
     function summon(id, payload) {
       if (id !== "omamail") throw new Error("Wrong application")
       opens++
@@ -40,6 +41,16 @@ Item {
       notificationForeground: "#112233"
       notificationAccent: "#445566"
       nativeNotifications: true
+    }
+  }
+
+  Component {
+    id: pluginNotificationFactory
+    Account.NewMailNotification {
+      pluginDir: service.pluginDir
+      accountId: "imap:plain@example.org"
+      notificationForeground: "#112233"
+      notificationAccent: "#445566"
     }
   }
 
@@ -196,6 +207,48 @@ Item {
       notifier.notify([{id:"7",from:{display:"Sender"},subject:"Subject",snippet:"Body"}])
       compare(Quickshell.notifications.length, 0)
       compare(latestNotification(notifier), null)
+    }
+
+    function soundCommands() {
+      return Quickshell.detachedCommands.filter(function(command) {
+        return String(command[1]).endsWith("/scripts/notify-sound.sh")
+      })
+    }
+
+    function test_a_batch_plays_one_sound_only_when_enabled() {
+      Quickshell.detachedCommands = []
+      var arrivals = [{id:"1",from:{display:"A"}}, {id:"2",from:{display:"B"}}]
+      var silent = createTemporaryObject(pluginNotificationFactory, parent)
+      silent.notify(arrivals)
+      verify(latestNotification(silent), "the notification itself was still sent")
+      compare(soundCommands().length, 0)
+      var audible = createTemporaryObject(pluginNotificationFactory, parent, { playSound: true })
+      audible.notify(arrivals)
+      compare(soundCommands().length, 1)
+    }
+
+    function test_the_saved_setting_decides_whether_an_account_plays_a_sound() {
+      Quickshell.detachedCommands = []
+      var account = service.findAccount(second)
+      service.persistSetting("notifyNewMailSound", "On")
+      compare(host.savedEntry.notifyNewMailSound, "On")
+      finish(notification(account, [{ id: "audible" }]), "")
+      compare(soundCommands().length, 1)
+      service.persistSetting("notifyNewMailSound", "Off")
+      compare(host.savedEntry.notifyNewMailSound, "Off")
+      finish(notification(account, [{ id: "silent" }]), "")
+      compare(soundCommands().length, 1)
+    }
+
+    function test_standalone_notifications_never_run_the_sound_helper() {
+      Quickshell.detachedCommands = []
+      var native = createTemporaryObject(nativeNotificationFactory, parent, { playSound: true })
+      native.notify([{id:"1",from:{display:"A"}}])
+      compare(Quickshell.notifications.length, 1)
+      compare(soundCommands().length, 0)
+      var unavailable = createTemporaryObject(unavailableNotificationFactory, parent, { playSound: true })
+      unavailable.notify([{id:"1",from:{display:"A"}}])
+      compare(soundCommands().length, 0)
     }
   }
 }
