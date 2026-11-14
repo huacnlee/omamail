@@ -1,4 +1,4 @@
-//! A conservative recognizer for uncompressed XML streams, not a PDF validator.
+//! A conservative recognizer for XML streams and FreeText strings, not a PDF validator.
 //! No decompression, reference resolution, rendering, or external resources.
 //! Unsupported syntax keeps the ordinary active-content refusal in place.
 use std::collections::HashSet;
@@ -20,7 +20,6 @@ const REFUSED_NAMES: &[&[u8]] = &[
     b"Encrypt",
     b"XRef",
     b"XRefStm",
-    b"Prev",
 ];
 
 fn decoded_name(raw: &[u8]) -> Option<Vec<u8>> {
@@ -79,12 +78,15 @@ struct Dictionary {
     subtype: Option<Vec<u8>>,
     length: Option<usize>,
     filtered: bool,
+    previous: Option<usize>,
+    rich_text: Option<std::ops::Range<usize>>,
 }
 
 enum Value {
     Name(Vec<u8>),
     Integer(usize),
     Dictionary(Dictionary),
+    String(std::ops::Range<usize>),
     Other,
 }
 
@@ -170,6 +172,7 @@ impl Reader<'_> {
             b'/' => Some(Value::Name(self.name()?)),
             b'(' => {
                 self.at += 1;
+                let start = self.at;
                 let mut nesting = 1usize;
                 while nesting > 0 {
                     let byte = *self.bytes.get(self.at)?;
@@ -187,7 +190,7 @@ impl Reader<'_> {
                         return None;
                     }
                 }
-                Some(Value::Other)
+                Some(Value::String(start..self.at - 1))
             }
             b'[' => {
                 self.at += 1;
@@ -222,6 +225,9 @@ impl Reader<'_> {
                         (b"Type", Value::Name(name)) => dictionary.kind = Some(name),
                         (b"Subtype", Value::Name(name)) => dictionary.subtype = Some(name),
                         (b"Length", Value::Integer(length)) => dictionary.length = Some(length),
+                        (b"Prev", Value::Integer(previous)) => dictionary.previous = Some(previous),
+                        (b"Prev", _) => return None,
+                        (b"RC", Value::String(range)) => dictionary.rich_text = Some(range),
                         (b"Filter" | b"F" | b"FFilter" | b"FDecodeParms", _) => {
                             dictionary.filtered = true;
                         }
@@ -274,9 +280,9 @@ impl Reader<'_> {
     }
 }
 
-/// Positions of declarations whose five-byte marker may be masked for scanning.
-/// Every other byte, including the rest of each XML stream, is still scanned.
-pub(super) fn xml_declarations(bytes: &[u8]) -> Option<Vec<usize>> {
+/// Recognized XML declaration and FreeText body markers to mask for scanning.
+/// Every other byte, including the rest of each XML stream/string, is still scanned.
+pub(super) fn xml_declarations(bytes: &[u8]) -> Option<Vec<std::ops::Range<usize>>> {
     if bytes.len() > super::MAX_BYTES
         || !(bytes.starts_with(b"%PDF-1.")
             && bytes.get(7).is_some_and(|b| (b'0'..=b'7').contains(b))
@@ -296,6 +302,7 @@ pub(super) fn xml_declarations(bytes: &[u8]) -> Option<Vec<usize>> {
         at: 8,
     };
     let mut declarations = Vec::new();
+    let mut previous_xref = None;
     loop {
         reader.whitespace();
         let start = reader.at;
@@ -314,20 +321,49 @@ pub(super) fn xml_declarations(bytes: &[u8]) -> Option<Vec<usize>> {
                     return None;
                 }
             }
-            if !matches!(reader.value(0)?, Value::Dictionary(_)) {
+            let Value::Dictionary(trailer) = reader.value(0)? else {
+                return None;
+            };
+            if trailer.previous != previous_xref {
                 return None;
             }
             reader.keyword(b"startxref")?;
             if reader.integer()? != start {
                 return None;
             }
-            break;
+            previous_xref = Some(start);
+            reader.whitespace();
+            if reader.at == reader.bytes.len() {
+                break;
+            }
+            continue;
         }
         reader.at = start;
         reader.integer()?;
         reader.integer()?;
         reader.keyword(b"obj")?;
         let value = reader.value(0)?;
+        if let Value::Dictionary(dictionary) = &value {
+            // FreeText annotations store their rich text as an XML body in
+            // a literal string. It is not a standalone HTML document. Mask
+            // only the declaration and body marker; all other bytes retain
+            // the ordinary active-content checks.
+            if dictionary.kind.as_deref() == Some(b"Annot")
+                && dictionary.subtype.as_deref() == Some(b"FreeText")
+            {
+                if let Some(range) = &dictionary.rich_text {
+                    let text = &bytes[range.clone()];
+                    if xml_declaration(text) {
+                        declarations.push(range.start..range.start + 5);
+                        if let Some(at) = text.windows(5).position(|part| part == b"<body") {
+                            if text.get(at + 5).is_some_and(|b| space(*b) || *b == b'>') {
+                                declarations.push(range.start + at..range.start + at + 5);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         reader.whitespace();
         let after_value = reader.at;
         if reader.keyword(b"stream").is_some() {
@@ -355,7 +391,7 @@ pub(super) fn xml_declarations(bytes: &[u8]) -> Option<Vec<usize>> {
                 let bom = usize::from(stream.starts_with(b"\xef\xbb\xbf")) * 3;
                 let xml = &stream[bom..];
                 if xml_declaration(xml) {
-                    declarations.push(data_start + bom);
+                    declarations.push(data_start + bom..data_start + bom + 5);
                 }
             }
             // Never search for endstream through arbitrary bytes. Only the
