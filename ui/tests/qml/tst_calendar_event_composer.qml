@@ -340,10 +340,10 @@ Item {
       composer.beginEdit("google:me@example.com", {summary:"Half hour",
         start:{ms:new Date(2026,9,28,15,0).getTime()},end:{ms:new Date(2026,9,28,15,30).getTime()}})
       wait(0)
-      typeField("event-start-time-field", "1")
+      typeField("event-start-time-field", "x")
       compare(findChild(composer,"event-end-time-field").text, "15:30")
       verify(!composer.dateRange.ok)
-      for (var i = 0; i < "6:00".length; i++) keyClick("6:00"[i])
+      typeField("event-start-time-field", "16:00")
       compare(findChild(composer,"event-end-time-field").text, "16:30")
       keyClick(Qt.Key_Return)
       compare(eventController.updateCalls, 1)
@@ -379,6 +379,162 @@ Item {
       typeField("event-start-time-field", "13:00")
       compare(findChild(composer,"event-end-time-field").text, "14:00")
       verify(composer.dateRange.ok)
+    }
+
+    // The fields read what people type, and write it back in full on leaving.
+    function test_typed_dates_and_times_are_read_and_tidied() {
+      composer.begin()
+      findChild(composer,"event-title-field").text = "Haircut"
+      var date = findChild(composer,"event-start-date-field")
+      var time = findChild(composer,"event-start-time-field")
+      findChild(composer,"event-end-date-field").text = "3 nov 2026"
+      findChild(composer,"event-end-time-field").text = "3pm"
+      date.text = "3 novembre 2026"
+      time.text = "14h30"
+      compare(composer.dateRange.ok, true, "Return can save before the fields are tidied")
+      compare(composer.dateRange.startMs, new Date(2026, 10, 3, 14, 30).getTime())
+      verify(findChild(composer,"event-date-summary").text.indexOf("30 min") >= 0)
+      date.forceActiveFocus()
+      findChild(composer,"event-title-field").forceActiveFocus()
+      compare(date.text, "2026-11-03")
+      time.forceActiveFocus()
+      findChild(composer,"event-title-field").forceActiveFocus()
+      compare(time.text, "14:30")
+      date.text = "someday"
+      compare(composer.dateRange.ok, false)
+      verify(findChild(composer,"event-date-range-error").visible)
+    }
+
+    // Moving the start carries the end the same length later.
+    function test_the_end_follows_the_start() {
+      composer.beginWith({ title: "Dinner", startMs: new Date(2026, 8, 12, 19, 0).getTime(),
+        endMs: new Date(2026, 8, 12, 21, 0).getTime() })
+      wait(0)
+      var date = findChild(composer,"event-start-date-field")
+      typeField("event-start-date-field", "13 sep 2026")
+      compare(composer.whenText(), "13 sep 2026 19:00 21:00")
+      compare(findChild(composer,"event-end-date-field").text, "2026-09-13")
+      var time = findChild(composer,"event-start-time-field")
+      typeField("event-start-time-field", "20h")
+      compare(findChild(composer,"event-end-time-field").text, "22:00")
+      // Editing the end leaves the start alone.
+      var end = findChild(composer,"event-end-time-field")
+      end.forceActiveFocus()
+      end.text = "23:00"
+      compare(time.text, "20:00", "tidied on leaving, and not moved by the end")
+    }
+
+    function test_arrow_keys_step_a_day_or_a_quarter_hour() {
+      composer.beginWith({ title: "Call", startMs: new Date(2026, 8, 12, 9, 0).getTime(),
+        endMs: new Date(2026, 8, 12, 9, 30).getTime() })
+      var time = findChild(composer,"event-start-time-field")
+      time.forceActiveFocus()
+      keyClick(Qt.Key_Up)
+      compare(time.text, "09:15")
+      compare(findChild(composer,"event-end-time-field").text, "09:45")
+      var date = findChild(composer,"event-start-date-field")
+      date.forceActiveFocus()
+      keyClick(Qt.Key_Down)
+      compare(date.text, "2026-09-11")
+      compare(findChild(composer,"event-end-date-field").text, "2026-09-11")
+      var endDate = findChild(composer,"event-end-date-field")
+      endDate.forceActiveFocus()
+      keyClick(Qt.Key_Up)
+      compare(endDate.text, "2026-09-12")
+      compare(date.text, "2026-09-11")
+      compare(eventController.createCalls, 0)
+    }
+
+    function editMeeting() {
+      composer.beginWith({ title: "Call", startMs: new Date(2026, 9, 28, 15, 0).getTime(),
+        endMs: new Date(2026, 9, 28, 15, 30).getTime() })
+      wait(0)
+    }
+
+    function test_a_start_abandoned_half_typed_leaves_the_end_as_it_was() {
+      editMeeting()
+      typeField("event-start-time-field", "1")
+      keyClick(Qt.Key_Backspace)
+      compare(findChild(composer,"event-end-time-field").text, "15:30")
+      typeField("event-title-field", "x")
+      typeField("event-start-time-field", "15:00")
+      compare(findChild(composer,"event-end-time-field").text, "15:30")
+      verify(composer.dateRange.ok)
+    }
+
+    function test_the_held_length_survives_the_month_picker() {
+      editMeeting()
+      var picker = findChild(composer,"event-date-picker")
+      typeField("event-start-date-field", "x")
+      mouseClick(findChild(composer,"event-start-date-field-picker"))
+      tryCompare(picker, "opened", true)
+      picker.pick("2026-10-30")
+      tryCompare(picker, "opened", false)
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-30")
+      compare(findChild(composer,"event-end-time-field").text, "15:30")
+      verify(composer.dateRange.ok)
+      composer.close()
+      editMeeting()
+      typeField("event-start-date-field", "x")
+      mouseClick(findChild(composer,"event-start-date-field-picker"))
+      tryCompare(picker, "opened", true)
+      keyClick(Qt.Key_Escape)
+      tryCompare(picker, "opened", false)
+      typeField("event-start-date-field", "2026-10-30")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-30")
+    }
+
+    function test_turning_all_day_off_does_not_apply_an_old_length() {
+      composer.beginWith({startMs:new Date(2026,9,28).getTime(),endMs:new Date(2026,9,31).getTime(),allDay:true})
+      wait(0)
+      findChild(composer,"event-start-date-field").forceActiveFocus()
+      composer.allDay = false
+      var end = findChild(composer,"event-end-date-field").text
+      typeField("event-start-date-field", "2026-11-05")
+      compare(findChild(composer,"event-end-date-field").text, end)
+    }
+
+    function test_a_time_stepped_past_midnight_takes_its_date_along() {
+      composer.beginWith({ title: "Late", startMs: new Date(2026, 9, 28, 23, 45).getTime(),
+        endMs: new Date(2026, 9, 29, 0, 15).getTime() })
+      wait(0)
+      findChild(composer,"event-start-time-field").forceActiveFocus()
+      keyClick(Qt.Key_Up)
+      compare(findChild(composer,"event-start-date-field").text, "2026-10-29")
+      compare(findChild(composer,"event-start-time-field").text, "00:00")
+      compare(findChild(composer,"event-end-date-field").text, "2026-10-29")
+      compare(findChild(composer,"event-end-time-field").text, "00:30")
+      keyClick(Qt.Key_Down)
+      compare(findChild(composer,"event-start-date-field").text, "2026-10-28")
+      compare(findChild(composer,"event-start-time-field").text, "23:45")
+      compare(composer.dateRange.endMs - composer.dateRange.startMs, 30 * 60000)
+    }
+
+    // The month picker sets the field it was opened from, and its Return
+    // picks a day rather than saving the event.
+    function test_the_date_picker_fills_its_field() {
+      composer.beginWith({ title: "Trip", startMs: new Date(2026, 8, 12, 9, 0).getTime(),
+        endMs: new Date(2026, 8, 12, 10, 0).getTime() })
+      var picker = findChild(composer,"event-date-picker")
+      mouseClick(findChild(composer,"event-start-date-field-picker"))
+      tryCompare(picker, "opened", true)
+      compare(picker.cursor, "2026-09-12")
+      var day = findChild(picker.contentItem,"date-picker-day-2026-09-20")
+      verify(day)
+      waitForItemPolished(findChild(picker.contentItem,"date-picker-grid"))
+      wait(50)
+      mouseClick(day)
+      tryCompare(picker, "opened", false)
+      compare(findChild(composer,"event-start-date-field").text, "2026-09-20")
+      compare(findChild(composer,"event-end-date-field").text, "2026-09-20")
+      mouseClick(findChild(composer,"event-end-date-field-picker"))
+      tryCompare(picker, "opened", true)
+      keyClick(Qt.Key_Right)
+      keyClick(Qt.Key_Down)
+      keyClick(Qt.Key_Return)
+      tryCompare(picker, "opened", false)
+      compare(findChild(composer,"event-end-date-field").text, "2026-09-28")
+      compare(eventController.createCalls, 0, "Return in the picker picks, it does not save")
     }
 
     // A suggestion from a message opens the form filled in, on the
