@@ -2,46 +2,21 @@
 use super::Session;
 use crate::mail::tests::{account_fixture, fixture_tree, isolated};
 use serde_json::{Value, json};
-use std::{
-    fs,
-    io::{BufRead, BufReader},
-    process::{Child, Command, Stdio},
-    sync::Arc,
-};
+use std::{fs, sync::Arc};
 
 const ACCOUNT: &str = "jmap:user@example.test";
 
 struct Peer {
-    child: Child,
+    _server: crate::test_support::jmap::JmapPeer,
     client: reqwest::Client,
     endpoint: String,
 }
 
-impl Drop for Peer {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
 impl Peer {
     async fn start(scenario: &str, learns_junk: bool) -> (Self, Session) {
-        let mut child = Command::new("python3")
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/providers/jmap/mailbox_tls_test.py"
-            ))
-            .arg(scenario)
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut output = BufReader::new(child.stdout.take().unwrap());
-        let mut port = String::new();
-        output.read_line(&mut port).unwrap();
-        let mut cert = String::new();
-        output.read_line(&mut cert).unwrap();
-        let cert = fs::read(cert.trim()).unwrap();
-        let endpoint = format!("https://localhost:{}", port.trim().parse::<u16>().unwrap());
+        let server = crate::test_support::jmap::JmapPeer::start(scenario).await;
+        let cert = crate::test_support::tls::ca_pem();
+        let endpoint = format!("https://localhost:{}", server.port);
         let client = reqwest::Client::builder()
             .no_proxy()
             .default_headers(reqwest::header::HeaderMap::from_iter([(
@@ -92,7 +67,7 @@ impl Peer {
         .unwrap();
         (
             Self {
-                child,
+                _server: server,
                 client,
                 endpoint,
             },

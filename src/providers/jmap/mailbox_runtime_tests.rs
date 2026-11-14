@@ -1,33 +1,11 @@
 use super::*;
-use std::io::{BufRead, BufReader};
-struct Peer(std::process::Child);
-impl Drop for Peer {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 #[tokio::test]
 async fn native_mailbox_read_thread_actions_and_submission_preserve_workflow() {
-    let mut peer = Peer(
-        std::process::Command::new("python3")
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/providers/jmap/mailbox_tls_test.py"
-            ))
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .unwrap(),
-    );
-    let mut output = BufReader::new(peer.0.stdout.take().unwrap());
-    let mut port = String::new();
-    output.read_line(&mut port).unwrap();
-    let port: u16 = port.trim().parse().unwrap();
-    let mut cert = String::new();
-    output.read_line(&mut cert).unwrap();
+    let peer = crate::test_support::jmap::JmapPeer::start("default").await;
+    let port = peer.port;
     let client = client_builder()
         .add_root_certificate(
-            reqwest::Certificate::from_pem(&std::fs::read(cert.trim()).unwrap()).unwrap(),
+            reqwest::Certificate::from_pem(&crate::test_support::tls::ca_pem()).unwrap(),
         )
         .build()
         .unwrap();
@@ -222,7 +200,6 @@ async fn native_mailbox_read_thread_actions_and_submission_preserve_workflow() {
             .iter()
             .all(|r| r["authorization"] == true)
     );
-    assert!(peer.0.wait().unwrap().success());
 }
 
 #[test]
