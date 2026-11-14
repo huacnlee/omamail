@@ -303,10 +303,20 @@ fn set_mode(path: &Path, _: u32) {
     } else {
         format!("{user}:F")
     };
-    for arguments in [vec!["/setowner".to_owned(), user.clone()],
-        vec!["/inheritance:r".to_owned(), "/grant:r".to_owned(), grant]] {
-        let output = Command::new("icacls").arg(path).args(arguments).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    for arguments in [
+        vec!["/setowner".to_owned(), user.clone()],
+        vec!["/inheritance:r".to_owned(), "/grant:r".to_owned(), grant],
+    ] {
+        let output = Command::new("icacls")
+            .arg(path)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 
@@ -323,7 +333,9 @@ fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
 fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
     use std::hash::{Hash, Hasher};
     use std::os::windows::{ffi::OsStrExt, fs::MetadataExt};
-    use windows_sys::Win32::Security::{GetFileSecurityW, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GetFileSecurityW, OWNER_SECURITY_INFORMATION,
+    };
     let metadata = fs::metadata(path).unwrap();
     let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let flags = DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION;
@@ -331,16 +343,32 @@ fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
     unsafe { GetFileSecurityW(name.as_ptr(), flags, std::ptr::null_mut(), 0, &mut needed) };
     assert!(needed > 0);
     let mut descriptor = vec![0u8; needed as usize];
-    assert_ne!(unsafe { GetFileSecurityW(name.as_ptr(), flags, descriptor.as_mut_ptr().cast(), needed, &mut needed) }, 0);
+    assert_ne!(
+        unsafe {
+            GetFileSecurityW(
+                name.as_ptr(),
+                flags,
+                descriptor.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        },
+        0
+    );
     descriptor.truncate(needed as usize);
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     descriptor.hash(&mut hash);
     // Capture bytes separately in fixture_snapshot, and here preserve native
     // timestamps, attributes, owner and DACL: a same-size write or permission
     // repair must not pass a read-only regression merely because length stayed put.
-    (metadata.len(),
-        (metadata.last_write_time() as i64, metadata.creation_time() as i64),
-        (metadata.file_attributes() as i64, hash.finish() as i64))
+    (
+        metadata.len(),
+        (
+            metadata.last_write_time() as i64,
+            metadata.creation_time() as i64,
+        ),
+        (metadata.file_attributes() as i64, hash.finish() as i64),
+    )
 }
 
 type FixtureSnapshot = Vec<(
@@ -445,10 +473,10 @@ async fn malformed_final_imap_action_id_prevents_all_network_and_cache_changes()
         loop {
             let mut line = String::new();
             if match reader.read_line(&mut line).await {
-                            Ok(n) => n == 0,
-                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
-                            Err(error) => panic!("synthetic IMAP read failed: {error}"),
-                        } {
+                Ok(n) => n == 0,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                Err(error) => panic!("synthetic IMAP read failed: {error}"),
+            } {
                 break;
             }
             let response = if line.starts_with("O1 LOGIN ") {
@@ -1075,6 +1103,88 @@ fn send_previews_repeatable_inputs_and_strict_bounded_utf8_without_writes() {
     assert_no_runtime_storage(&fixture.0);
 }
 
+#[test]
+fn frozen_draft_tampering_and_invalid_ids_never_reach_outbox_or_credentials() {
+    let fixture = mail_list_fixture(9, false);
+    let output = root_mail(
+        &fixture.0,
+        &[
+            "prepare",
+            "--account",
+            "imap:imap@example.org",
+            "--to",
+            "one@example.org",
+            "--json",
+        ],
+        b"approved",
+    );
+    assert!(output.status.success(), "{output:?}");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = value["result"]["draftId"].as_str().unwrap();
+    let path = state_root(&fixture.0).join(format!("omamail/cli-drafts/{id}.json"));
+    #[cfg(unix)]
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let review = root_mail(&fixture.0, &["send-prepared", id, "--json"], b"");
+    assert!(review.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&review.stdout).unwrap()["result"]["body"],
+        "approved"
+    );
+    let mut record: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    record["fields"]["to"] = serde_json::json!("unapproved@example.org");
+    fs::write(&path, record.to_string()).unwrap();
+    for (id, error) in [
+        (id, "mail_draft_changed"),
+        ("../outbox", "mail_draft_invalid_id"),
+    ] {
+        let output = root_mail(
+            &fixture.0,
+            &["send-prepared", id, "--execute", "--json"],
+            b"",
+        );
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["error"]["code"],
+            error
+        );
+    }
+    assert!(!state_root(&fixture.0).join("omamail/outbox.json").exists());
+    assert!(!fixture.0.join("credential-touched").exists());
+}
+
+#[test]
+fn sender_discovery_keeps_registered_account_identity() {
+    let fixture = mail_list_fixture(9, false);
+    let output = root_mail(
+        &fixture.0,
+        &["senders", "--account", "imap:imap@example.org", "--json"],
+        b"",
+    );
+    assert!(output.status.success(), "{output:?}");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["result"]["accountId"], "imap:imap@example.org");
+    assert_eq!(
+        value["result"]["identities"][0]["accountId"],
+        "imap:imap@example.org"
+    );
+    assert_eq!(
+        value["result"]["identities"][0]["email"],
+        "imap@example.org"
+    );
+    assert_eq!(value["result"]["provider"], "imap");
+    assert_eq!(value["result"]["defaultEmail"], "imap@example.org");
+    let wrong = root_mail(
+        &fixture.0,
+        &["senders", "--account", "imap@example.org", "--json"],
+        b"",
+    );
+    assert_eq!(wrong.status.code(), Some(1));
+    assert!(!fixture.0.join("credential-touched").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn invalid_send_inputs_never_reach_credentials_or_outbox_even_with_execute() {
@@ -1225,18 +1335,29 @@ fn failed_execution_retains_target_results_and_exits_one() {
 #[tokio::test]
 async fn one_shot_send_owns_delivery_until_durable_terminal_result() {
     for (generic, acknowledge) in [(false, true), (true, false)] {
-        real_smtp_send(generic, acknowledge, false, false).await;
+        real_smtp_send(generic, acknowledge, false, false, false).await;
     }
 }
 
 #[tokio::test]
 async fn concurrent_send_uses_idle_serve_owner_and_survives_owner_crash_or_smtp_ack_loss() {
     for (acknowledge, crash) in [(true, false), (false, false), (false, true)] {
-        real_smtp_send(false, acknowledge, true, crash).await;
+        real_smtp_send(false, acknowledge, true, crash, false).await;
     }
 }
 
-async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bool) {
+#[tokio::test]
+async fn approved_draft_sends_frozen_attachment_bytes_and_retry_never_redelivers() {
+    real_smtp_send(false, true, true, false, true).await;
+}
+
+async fn real_smtp_send(
+    generic: bool,
+    acknowledge: bool,
+    owner: bool,
+    crash: bool,
+    prepared: bool,
+) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = mail_list_fixture(9, true);
@@ -1330,10 +1451,16 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
             message.extend(line);
         }
         let parsed = mailparse::parse_mail(&message).unwrap();
-        assert_eq!(
-            parsed.get_body().unwrap().trim_end(),
-            "private body 工\nsecond line"
-        );
+        let body = if prepared {
+            assert_eq!(
+                parsed.subparts[1].get_body_raw().unwrap(),
+                b"approved attachment"
+            );
+            parsed.subparts[0].get_body().unwrap()
+        } else {
+            parsed.get_body().unwrap()
+        };
+        assert_eq!(body.trim_end(), "private body 工\nsecond line");
         if acknowledge {
             writer.write_all(b"250 accepted\r\n").await.unwrap();
         }
@@ -1357,6 +1484,38 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
     });
     let root = fixture.0.clone();
     let sending = tokio::task::spawn_blocking(move || {
+        if prepared {
+            let attachment = root.join("approved.txt");
+            fs::write(&attachment, b"approved attachment").unwrap();
+            let output = root_mail(
+                &root,
+                &[
+                    "prepare",
+                    "--account",
+                    "imap:imap@example.org",
+                    "--to",
+                    "one@example.org",
+                    "--attach",
+                    attachment.to_str().unwrap(),
+                    "--json",
+                ],
+                "private body 工\nsecond line".as_bytes(),
+            );
+            assert!(output.status.success(), "{output:?}");
+            let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let id = result["result"]["draftId"].as_str().unwrap();
+            assert_eq!(
+                result["result"]["attachments"][0]["sha256"],
+                "5702404bec3e027229def7d2c67d97dc5be952a6c4b35b9b6ae5cc951f83b6e7"
+            );
+            fs::write(&attachment, b"unapproved replacement").unwrap();
+            fs::remove_file(attachment).unwrap();
+            return root_mail(
+                &root,
+                &["send-prepared", id, "--execute", "--json"],
+                b"ignored",
+            );
+        }
         let (args, body) = if generic {
             (vec!["call", "mail.send", "--json"], serde_json::json!({"account":"imap:imap@example.org","to":["one@example.org"],"body":"private body 工\nsecond line","execute":true}).to_string().into_bytes())
         } else {
@@ -1368,6 +1527,8 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
                     "--to",
                     "one@example.org",
                     "--execute",
+                    "--send-id",
+                    "cli-retry",
                     "--json",
                 ],
                 "private body 工\nsecond line".as_bytes().to_vec(),
@@ -1407,6 +1568,84 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
     assert_eq!(durable[0]["id"], value["result"]["sendId"]);
     assert!(!String::from_utf8_lossy(&output.stdout).contains("private body"));
     assert!(output.stderr.is_empty());
+    let id = value["result"]["sendId"].as_str().unwrap().to_owned();
+    let root = fixture.0.clone();
+    let expected = if acknowledge { "sent" } else { "unknown" };
+    tokio::task::spawn_blocking(move || {
+        let status = root_mail(
+            &root,
+            &[
+                "status",
+                &id,
+                "--account",
+                "imap:imap@example.org",
+                "--json",
+            ],
+            b"",
+        );
+        assert!(status.status.success(), "{status:?}");
+        let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(
+            status["result"]["outbox"]["entries"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(status["result"]["outbox"]["entries"][0]["state"], expected);
+        if !generic {
+            let retry = if prepared {
+                root_mail(
+                    &root,
+                    &[
+                        "send-prepared",
+                        id.strip_prefix("draft-").unwrap(),
+                        "--execute",
+                        "--json",
+                    ],
+                    b"",
+                )
+            } else {
+                root_mail(
+                    &root,
+                    &[
+                        "send",
+                        "--account",
+                        "imap:imap@example.org",
+                        "--to",
+                        "one@example.org",
+                        "--send-id",
+                        &id,
+                        "--execute",
+                        "--json",
+                    ],
+                    "private body 工\nsecond line".as_bytes(),
+                )
+            };
+            let retry: Value = serde_json::from_slice(&retry.stdout).unwrap();
+            assert_eq!(retry["result"]["sendId"], id);
+            assert_eq!(retry["result"]["outbox"]["entries"][0]["state"], expected);
+            let conflict = root_mail(
+                &root,
+                &[
+                    "send",
+                    "--account",
+                    "imap:imap@example.org",
+                    "--to",
+                    "one@example.org",
+                    "--send-id",
+                    &id,
+                    "--execute",
+                    "--json",
+                ],
+                b"different content",
+            );
+            let conflict: Value = serde_json::from_slice(&conflict.stdout).unwrap();
+            assert_eq!(conflict["error"]["code"], "outbox_send_id_conflict");
+        }
+    })
+    .await
+    .unwrap();
     finished.send(()).unwrap();
     peer.await.unwrap();
     if let Some(mut child) = desktop {
@@ -1526,7 +1765,9 @@ async fn imap_action_preview_requires_discovered_destinations_and_execution_uses
                         let mut line = String::new();
                         if match reader.read_line(&mut line).await {
                             Ok(n) => n == 0,
-                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {
+                                true
+                            }
                             Err(error) => panic!("synthetic IMAP read failed: {error}"),
                         } {
                             break;
@@ -1647,10 +1888,10 @@ async fn imap_archive_keeps_confirmed_folder_results_when_later_select_refuses()
         loop {
             let mut line = String::new();
             if match reader.read_line(&mut line).await {
-                            Ok(n) => n == 0,
-                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
-                            Err(error) => panic!("synthetic IMAP read failed: {error}"),
-                        } {
+                Ok(n) => n == 0,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                Err(error) => panic!("synthetic IMAP read failed: {error}"),
+            } {
                 break;
             }
             let response = if line.starts_with("O1 LOGIN ") {
@@ -1862,4 +2103,128 @@ fn agent_disabled_build_has_no_worker_or_agent_rpc() {
             "unknown_method"
         );
     }
+}
+#[tokio::test]
+async fn cli_replies_accept_recipient_groups_and_ignore_unneeded_headers() {
+    for (command, headers, to, cc) in [
+        (
+            "reply",
+            "To: undisclosed-recipients:;\r\n",
+            vec!["writer@example.org"],
+            vec![],
+        ),
+        (
+            "reply",
+            "To: not-an-address\r\nCc: also-not-an-address\r\n",
+            vec!["writer@example.org"],
+            vec![],
+        ),
+        (
+            "reply-all",
+            "To: Team: imap@example.org, peer@example.org;\r\nCc: Copy: peer@example.org, copy@example.org;\r\n",
+            vec!["writer@example.org", "peer@example.org"],
+            vec!["copy@example.org"],
+        ),
+        (
+            "reply-all",
+            "To: undisclosed-recipients:;\r\n",
+            vec!["writer@example.org"],
+            vec![],
+        ),
+    ] {
+        let raw = format!(
+            "From: writer@example.org\r\n{headers}Subject: Group reply\r\nMessage-ID: <parent@example.org>\r\n\r\nOriginal body"
+        );
+        let result = prepare_reply_from_imap(command, raw).await;
+        assert_eq!(result["to"], serde_json::json!(to), "{command}: {headers}");
+        assert_eq!(result["cc"], serde_json::json!(cc));
+        assert_eq!(result["bcc"], serde_json::json!([]));
+    }
+}
+
+#[tokio::test]
+async fn cli_replies_to_own_sent_mail_ignore_external_reply_to() {
+    for command in ["reply", "reply-all"] {
+        let result = prepare_reply_from_imap(command,
+            "From: imap@example.org\r\nReply-To: replies@example.org\r\nTo: peer@example.org\r\nCc: copy@example.org\r\nBcc: hidden@example.org\r\nSubject: Sent reply\r\nMessage-ID: <sent@example.org>\r\n\r\nOriginal body".into()).await;
+        assert_eq!(result["to"], serde_json::json!(["peer@example.org"]));
+        assert_eq!(
+            result["cc"],
+            if command == "reply-all" {
+                serde_json::json!(["copy@example.org"])
+            } else {
+                serde_json::json!([])
+            }
+        );
+        assert_eq!(result["bcc"], serde_json::json!([]));
+    }
+}
+
+async fn prepare_reply_from_imap(command: &'static str, raw: String) -> Value {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fixture = mail_list_fixture(listener.local_addr().unwrap().port(), true);
+    let peer = tokio::spawn(async move {
+        let (stream, _) =
+            tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"* OK ready\r\n").await.unwrap();
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).await.unwrap() > 0);
+            let response = if line.starts_with("O1 LOGIN ") {
+                "O1 OK login\r\n".into()
+            } else if line == "O1 CAPABILITY\r\n" {
+                "* CAPABILITY IMAP4rev1\r\nO1 OK caps\r\n".into()
+            } else if line == "O1 LIST \"\" \"*\"\r\n" {
+                "* LIST () \"/\" INBOX\r\nO1 OK folders\r\n".into()
+            } else if line == "O1 SELECT \"INBOX\"\r\n" {
+                "O1 OK selected\r\n".into()
+            } else if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
+                assert!(
+                    line.contains("BODY.PEEK[]"),
+                    "reply must not mark read: {line}"
+                );
+                format!(
+                    "* 7 FETCH (UID 7 FLAGS () RFC822.SIZE {} BODY[] {{{}}}\r\n{}\r\n)\r\nO1 OK fetched\r\n",
+                    raw.len(),
+                    raw.len(),
+                    raw
+                )
+            } else {
+                panic!("unexpected read or mutation: {line:?}");
+            };
+            writer.write_all(response.as_bytes()).await.unwrap();
+            if line.starts_with("O1 UID FETCH 7 (UID FLAGS ") {
+                break;
+            }
+        }
+    });
+    let root = fixture.0.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        root_mail(
+            &root,
+            &[
+                command,
+                "7:INBOX",
+                "--account",
+                "imap:imap@example.org",
+                "--json",
+            ],
+            b"Approved reply",
+        )
+    })
+    .await
+    .unwrap();
+    peer.await.unwrap();
+    assert!(output.status.success(), "{command}: {output:?}");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["result"]["body"], "Approved reply");
+    assert_eq!(value["result"]["frozen"], true);
+    assert!(!state_root(&fixture.0).join("omamail/outbox.json").exists());
+    value["result"].clone()
 }

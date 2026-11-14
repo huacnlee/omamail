@@ -753,3 +753,13 @@ async fn production_jmap_uses_fresh_roles_and_preserves_empty_and_repeated_expan
         assert_eq!(fixture_tree(&fixture.root), before);
     }
 }
+#[tokio::test]
+async fn cli_wait_failure_keeps_the_receipt_and_last_snapshot() {
+    let session = super::Session::default();
+    // Empty account fails at the outbox boundary before accessing any storage.
+    let mut receipt = serde_json::json!({"executed":true,"accountId":"","sendId":"recoverable-id","outbox":{"entries":[{"id":"recoverable-id","state":"queued"}]}});
+    let _ = session.finish_cli_send(&mut receipt).await;
+    assert_eq!(receipt["sendId"], "recoverable-id");
+    assert_eq!(receipt["outbox"]["entries"][0]["state"], "queued");
+    assert_eq!(receipt["waitError"], "outbox_invalid_params");
+}

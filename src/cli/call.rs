@@ -16,7 +16,7 @@ pub(super) async fn dispatch(
     }
     let mut result = session.dispatch(method, params).await?;
     if method == "mail.send" && result["executed"] == true {
-        session.finish_cli_send(&mut result).await?;
+        session.finish_cli_send(&mut result).await;
     }
     Ok(result)
 }

@@ -547,7 +547,8 @@ async fn the_outbox_hands_graph_the_queued_message_whole_and_keeps_the_draft_whe
         async move {
             session.dispatch("outbox.enqueue", &job).await.unwrap();
             let mut done = json!({"accountId": ACCOUNT, "sendId": id});
-            session.finish_cli_send(&mut done).await.unwrap();
+            session.finish_cli_send(&mut done).await;
+            assert!(done.get("waitError").is_none(), "{done}");
             done["outbox"]["entries"][0]["clone"].clone()
         }
     };

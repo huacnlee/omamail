@@ -12,12 +12,22 @@ mod action_tests;
 // name the account was given, then its configured aliases. The name is the
 // account's, not the server settings', because nothing a server says sets it.
 fn configured_identities(settings: &Value) -> Result<Value, &'static str> {
-    let email = settings["email"].as_str().filter(|value| !value.is_empty()).or_else(|| settings["imap"]["username"].as_str()).ok_or("mail_send_sender_unavailable")?;
+    let email = settings["email"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .or_else(|| settings["imap"]["username"].as_str())
+        .ok_or("mail_send_sender_unavailable")?;
     let name = sender_name(settings["senderName"].as_str().unwrap_or(""));
-    let aliases = settings["imap"]["aliases"].as_array().cloned().unwrap_or_default();
-    if aliases.len() > 1024 { return Err("mail_send_identities_invalid"); }
+    let aliases = settings["imap"]["aliases"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if aliases.len() > 1024 {
+        return Err("mail_send_identities_invalid");
+    }
     let default = aliases.iter().any(|alias| alias["isDefault"] == true);
-    let mut rows = vec![json!({"email":email,"displayName":name,"isPrimary":true,"isDefault":!default})];
+    let mut rows =
+        vec![json!({"email":email,"displayName":name,"isPrimary":true,"isDefault":!default})];
     rows.extend(aliases);
     Ok(json!(rows))
 }
@@ -26,8 +36,16 @@ fn configured_identities(settings: &Value) -> Result<Value, &'static str> {
 // hand-edited entry names agent sends exactly as it names composer sends
 // instead of failing them.
 fn sender_name(raw: &str) -> String {
-    let line: String = raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-    line.split(' ').filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ").trim().to_string()
+    let line: String = raw
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    line.split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
 }
 
 struct ProviderList<'a> {
@@ -67,9 +85,12 @@ impl crate::mail::send::IdentityLookup for ProviderIdentities<'_> {
                 Provider::Imap | Provider::Outlook => {
                     let account = account.clone();
                     tokio::task::spawn_blocking(move || {
-                        let settings = crate::auth::settings_readonly(account.provider.id(), &account.id)?;
+                        let settings =
+                            crate::auth::settings_readonly(account.provider.id(), &account.id)?;
                         configured_identities(&settings)
-                    }).await.map_err(|_| "worker_failed")?
+                    })
+                    .await
+                    .map_err(|_| "worker_failed")?
                 }
             }
         })
@@ -368,17 +389,108 @@ async fn m365_call(method: &str, params: &Value) -> Result<Value, &'static str> 
 }
 
 impl Session {
-    pub(crate) async fn finish_cli_send(&self, result: &mut Value) -> Result<(), &'static str> {
-        result["outbox"] = self
+    pub(crate) async fn cli_identities(
+        &self,
+        account: &crate::mail::Account,
+    ) -> Result<Value, &'static str> {
+        use crate::mail::send::IdentityLookup;
+        ProviderIdentities { session: self }
+            .identities(account)
+            .await
+    }
+
+    pub(crate) async fn cli_status(
+        &self,
+        account: &crate::mail::Account,
+        id: &str,
+    ) -> Result<Value, &'static str> {
+        let snapshot = self
             .outbox
-            .wait_for_send(
-                result["accountId"]
-                    .as_str()
-                    .ok_or("outbox_invalid_params")?,
-                result["sendId"].as_str().ok_or("outbox_invalid_params")?,
+            .shared_call(
+                "outbox.snapshot",
+                &json!({"accountId":account.id,"sendId":id}),
             )
             .await?;
-        Ok(())
+        if snapshot["entries"].as_array().is_none_or(Vec::is_empty) {
+            return Err("outbox_not_found");
+        }
+        Ok(json!({"accountId":account.id,"sendId":id,"outbox":snapshot}))
+    }
+
+    pub(crate) async fn cli_prepare(
+        &self,
+        params: &Value,
+        reply: Option<(&str, bool)>,
+    ) -> Result<crate::mail::send::Prepared, &'static str> {
+        let mut request = SendRequest::try_from(params)?;
+        if let Some((id, _)) = reply {
+            ReadRequest::try_from(&json!({"account":request.account.id,"id":id}))?;
+        }
+        let aliases = self.cli_identities(&request.account).await?;
+        let threading = if let Some((id, all)) = reply {
+            let opened = self
+                .dispatch(
+                    "reader.open",
+                    &json!({
+                        "accountId":request.account.id,"id":id,
+                        "requestId":format!("cli-reply-{}", std::process::id()),
+                        "cacheOnly":false,"now":chrono::Utc::now().timestamp_millis(),
+                        "options":{"allowRemoteImages":false,"withReader":true}
+                    }),
+                )
+                .await?;
+            if opened["id"] != id {
+                return Err("mail_read_message_mismatch");
+            }
+            Some(crate::mail::send::reply(
+                &mut request,
+                &aliases,
+                &opened,
+                all,
+            )?)
+        } else {
+            None
+        };
+        let mut prepared =
+            tokio::task::spawn_blocking(move || crate::mail::send::prepare(&request, &aliases))
+                .await
+                .map_err(|_| "worker_failed")??;
+        if let Some(threading) = threading {
+            prepared.threading(threading);
+        }
+        prepared.payload(0, "preview")?;
+        Ok(prepared)
+    }
+
+    pub(crate) async fn cli_send_prepared(
+        &self,
+        prepared: crate::mail::send::Prepared,
+        id: &str,
+    ) -> Result<Value, &'static str> {
+        // Recheck current account permission without changing the approved sender.
+        let aliases = self.cli_identities(&prepared.account).await?;
+        prepared.check_sender(&aliases)?;
+        let mut result = self.outbox.enqueue_mail(prepared, Some(id)).await?;
+        self.finish_cli_send(&mut result).await;
+        Ok(result)
+    }
+
+    pub(crate) async fn finish_cli_send(&self, result: &mut Value) {
+        let settled = async {
+            self.outbox
+                .wait_for_send(
+                    result["accountId"]
+                        .as_str()
+                        .ok_or("outbox_invalid_params")?,
+                    result["sendId"].as_str().ok_or("outbox_invalid_params")?,
+                )
+                .await
+        }
+        .await;
+        match settled {
+            Ok(snapshot) => result["outbox"] = snapshot,
+            Err(error) => result["waitError"] = json!(error),
+        }
     }
 
     pub(super) async fn mail_call(
@@ -685,15 +797,31 @@ mod tests {
     fn configured_identities_name_the_primary_address_with_the_sender_name() {
         let rows = configured_identities(&json!({"email":"me@example.org","senderName":"  Jane Example ",
             "imap":{"aliases":[{"email":"alias@example.org","displayName":"Alias","isDefault":true}]}})).unwrap();
-        assert_eq!(rows, json!([
+        assert_eq!(
+            rows,
+            json!([
             {"email":"me@example.org","displayName":"Jane Example","isPrimary":true,"isDefault":false},
-            {"email":"alias@example.org","displayName":"Alias","isDefault":true}]));
-        let unnamed = configured_identities(&json!({"imap":{"username":"me@example.org"}})).unwrap();
-        assert_eq!(unnamed, json!([{"email":"me@example.org","displayName":"","isPrimary":true,"isDefault":true}]));
+            {"email":"alias@example.org","displayName":"Alias","isDefault":true}])
+        );
+        let unnamed =
+            configured_identities(&json!({"imap":{"username":"me@example.org"}})).unwrap();
+        assert_eq!(
+            unnamed,
+            json!([{"email":"me@example.org","displayName":"","isPrimary":true,"isDefault":true}])
+        );
         let edited = configured_identities(&json!({"email":"me@example.org","senderName":"Jane\r\nBcc: x@example.org\u{7f}\tExample"})).unwrap();
-        assert_eq!(edited[0]["displayName"], "Jane Bcc: x@example.org Example", "one header line, as the UI stores it");
-        let c1 = configured_identities(&json!({"email":"me@example.org","senderName":"Jane\u{85}Example\u{9f}"})).unwrap();
-        assert_eq!(c1[0]["displayName"], "Jane Example", "a C1 control too, which the composer would refuse");
+        assert_eq!(
+            edited[0]["displayName"], "Jane Bcc: x@example.org Example",
+            "one header line, as the UI stores it"
+        );
+        let c1 = configured_identities(
+            &json!({"email":"me@example.org","senderName":"Jane\u{85}Example\u{9f}"}),
+        )
+        .unwrap();
+        assert_eq!(
+            c1[0]["displayName"], "Jane Example",
+            "a C1 control too, which the composer would refuse"
+        );
     }
 
     #[test]
@@ -702,31 +830,57 @@ mod tests {
         use mailparse::MailHeaderMap;
         for provider in [crate::mail::Provider::Imap, crate::mail::Provider::Outlook] {
             for name in [
-                "Jane\r\nBcc: attacker@example.org", "Jane\rBcc: attacker@example.org",
-                "Jane\nBcc: attacker@example.org", "Jane\0Bcc: attacker@example.org",
-                "Jane\tExample\u{7f}", "田中 太郎", "Jane \"Quoted\" \\ Example",
-                "Jane\r\n", "Jane\n", "Jane\0",
+                "Jane\r\nBcc: attacker@example.org",
+                "Jane\rBcc: attacker@example.org",
+                "Jane\nBcc: attacker@example.org",
+                "Jane\0Bcc: attacker@example.org",
+                "Jane\tExample\u{7f}",
+                "田中 太郎",
+                "Jane \"Quoted\" \\ Example",
+                "Jane\r\n",
+                "Jane\n",
+                "Jane\0",
             ] {
                 let rows = configured_identities(&json!({"email":"me@example.org","senderName":name,
                     "imap":{"aliases":[{"email":"alias@example.org","displayName":"Alias \"名\" \\","isDefault":false}]}})).unwrap();
                 for from in ["me@example.org", "alias@example.org"] {
                     let request = crate::mail::SendRequest {
-                        account: crate::mail::Account { id: format!("{}:me@example.org", provider.id()), provider },
-                        from: from.into(), to: vec!["recipient@example.org".into()], cc: vec![], bcc: vec![],
-                        subject: "Synthetic preview".into(), body: "Line one\nLine two\n".into(),
-                        attachments: vec![], execute: false, send_id: None,
+                        account: crate::mail::Account {
+                            id: format!("{}:me@example.org", provider.id()),
+                            provider,
+                        },
+                        from: from.into(),
+                        to: vec!["recipient@example.org".into()],
+                        cc: vec![],
+                        bcc: vec![],
+                        subject: "Synthetic preview".into(),
+                        body: "Line one\nLine two\n".into(),
+                        attachments: vec![],
+                        execute: false,
+                        send_id: None,
                     };
                     let prepared = crate::mail::send::prepare(&request, &rows).unwrap();
                     assert_eq!(prepared.preview()["executed"], false);
                     assert_eq!(prepared.preview()["to"], json!(["recipient@example.org"]));
                     let payload = prepared.payload(0, "synthetic-name-boundary").unwrap();
-                    let bytes = URL_SAFE_NO_PAD.decode(payload["raw"].as_str().unwrap()).unwrap();
+                    let bytes = URL_SAFE_NO_PAD
+                        .decode(payload["raw"].as_str().unwrap())
+                        .unwrap();
                     let parsed = mailparse::parse_mail(&bytes).unwrap();
-                    assert_eq!(parsed.headers.get_all_values("From").len(), 1, "{provider:?}: {name:?}");
-                    assert_eq!(parsed.headers.get_all_values("To"), ["recipient@example.org"]);
+                    assert_eq!(
+                        parsed.headers.get_all_values("From").len(),
+                        1,
+                        "{provider:?}: {name:?}"
+                    );
+                    assert_eq!(
+                        parsed.headers.get_all_values("To"),
+                        ["recipient@example.org"]
+                    );
                     assert!(parsed.headers.get_all_values("Bcc").is_empty(), "{name:?}");
                     assert!(parsed.headers.get_all_values("Cc").is_empty());
-                    let addresses = mailparse::addrparse(&parsed.headers.get_first_value("From").unwrap()).unwrap();
+                    let addresses =
+                        mailparse::addrparse(&parsed.headers.get_first_value("From").unwrap())
+                            .unwrap();
                     assert_eq!(addresses.len(), 1);
                     match &addresses[0] {
                         mailparse::MailAddr::Single(address) => assert_eq!(address.addr, from),
@@ -738,15 +892,33 @@ mod tests {
             // Aliases keep their own names: malformed alias metadata must be
             // refused before any payload exists, rather than being cleaned as
             // though it were the account's primary sender name.
-            for name in ["Alias\r\nBcc: attacker@example.org", "Alias\0", "Alias\n", "=?UTF-8?B?WA==?="] {
+            for name in [
+                "Alias\r\nBcc: attacker@example.org",
+                "Alias\0",
+                "Alias\n",
+                "=?UTF-8?B?WA==?=",
+            ] {
                 let rows = configured_identities(&json!({"email":"me@example.org","senderName":"Safe",
                     "imap":{"aliases":[{"email":"alias@example.org","displayName":name,"isDefault":true}]}})).unwrap();
                 let request = crate::mail::SendRequest {
-                    account: crate::mail::Account { id: format!("{}:me@example.org", provider.id()), provider },
-                    from: "alias@example.org".into(), to: vec!["recipient@example.org".into()], cc: vec![], bcc: vec![],
-                    subject: "Synthetic preview".into(), body: "Body".into(), attachments: vec![], execute: false, send_id: None,
+                    account: crate::mail::Account {
+                        id: format!("{}:me@example.org", provider.id()),
+                        provider,
+                    },
+                    from: "alias@example.org".into(),
+                    to: vec!["recipient@example.org".into()],
+                    cc: vec![],
+                    bcc: vec![],
+                    subject: "Synthetic preview".into(),
+                    body: "Body".into(),
+                    attachments: vec![],
+                    execute: false,
+                    send_id: None,
                 };
-                assert!(crate::mail::send::prepare(&request, &rows).is_err(), "{name:?}");
+                assert!(
+                    crate::mail::send::prepare(&request, &rows).is_err(),
+                    "{name:?}"
+                );
             }
         }
     }

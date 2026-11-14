@@ -1,6 +1,7 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use std::io::{self, Read};
 mod call;
+use crate::mail::drafts;
 mod mail;
 mod output;
 
@@ -35,6 +36,41 @@ enum Command {
     Spam(mail::Action),
     /// Preview a message with UTF-8 body on stdin (maximum 16 MiB); --execute sends
     Send(mail::Send),
+    /// Freeze a message and its attachments for later approval (body on stdin)
+    Prepare(mail::Message),
+    /// Prepare a threaded reply to a message (body on stdin)
+    Reply {
+        #[arg(value_name = "MESSAGE_ID")]
+        id: String,
+        #[command(flatten)]
+        message: mail::Message,
+    },
+    /// Prepare a threaded reply to sender and visible recipients (body on stdin)
+    ReplyAll {
+        #[arg(value_name = "MESSAGE_ID")]
+        id: String,
+        #[command(flatten)]
+        message: mail::Message,
+    },
+    /// Review or explicitly send the frozen draft; retries reuse its send ID
+    SendPrepared {
+        #[arg(value_name = "DRAFT_ID")]
+        id: String,
+        /// Approve sending this exact draft
+        #[arg(long)]
+        execute: bool,
+    },
+    /// Look up one send, including acknowledged entries and a running desktop outbox
+    Status {
+        #[command(flatten)]
+        account: mail::AccountArg,
+        #[arg(value_name = "SEND_ID")]
+        id: String,
+    },
+    /// Discover sender aliases for a registered account
+    Senders(mail::AccountArg),
+    /// Search local contacts with source information; never select a recipient automatically
+    Contacts { query: String },
     /// Serve JSON-RPC 2.0 on persistent stdin/stdout pipes
     Serve,
     #[cfg(all(feature = "agent", unix))]
@@ -159,7 +195,15 @@ pub fn run() {
             | Command::Trash(_)
             | Command::Spam(_)
             | Command::Send(_)
+            | Command::Prepare(_)
+            | Command::Reply { .. }
+            | Command::ReplyAll { .. }
+            | Command::SendPrepared { .. }
+            | Command::Status { .. }
+            | Command::Senders(_)
+            | Command::Contacts { .. }
     );
+    let reply_all = matches!(command, Command::ReplyAll { .. });
     let result = match command {
         Command::List(args) => runtime.block_on(session.dispatch("mail.list", &args.params())),
         Command::Read(args) => runtime.block_on(session.dispatch("mail.read", &args.params())),
@@ -174,6 +218,35 @@ pub fn run() {
         Command::Send(args) => args
             .params(io::stdin())
             .and_then(|params| runtime.block_on(call::dispatch(&session, "mail.send", &params))),
+        Command::Prepare(args) => args.params(io::stdin()).and_then(|params| {
+            runtime.block_on(session.cli_prepare(&params, None)).and_then(drafts::save)
+        }),
+        Command::Reply { id, message } | Command::ReplyAll { id, message } => {
+            message.params(io::stdin()).and_then(|params| {
+                runtime.block_on(session.cli_prepare(&params, Some((&id, reply_all)))).and_then(drafts::save)
+            })
+        }
+        Command::SendPrepared { id, execute } => drafts::load(&id).and_then(|prepared| {
+            if execute { runtime.block_on(session.cli_send_prepared(prepared, &format!("draft-{id}"))) }
+            else {
+                drafts::preview(&prepared, &id)
+            }
+        }),
+        Command::Status { account, id } => crate::mail::resolve_account(account.account.as_deref().unwrap_or(""))
+            .and_then(|account| runtime.block_on(session.cli_status(&account, &id))),
+        Command::Senders(args) => crate::mail::resolve_account(args.account.as_deref().unwrap_or("")).and_then(|account| {
+            let aliases = runtime.block_on(session.cli_identities(&account))?;
+            let mut result = crate::account::senders::request(&serde_json::json!({"mailboxes":[{"id":account.id,"ready":true,"aliases":aliases}]}))?;
+            result["accountId"] = serde_json::json!(account.id);
+            result["provider"] = serde_json::json!(account.provider.id());
+            if let Some(rows) = aliases.as_array() {
+                result["defaultEmail"] = rows.iter().find(|row| row["isDefault"] == true)
+                    .or_else(|| rows.iter().find(|row| row["isPrimary"] == true))
+                    .or_else(|| rows.first()).map(|row| row["email"].clone()).unwrap_or(serde_json::Value::Null);
+            }
+            Ok(result)
+        }),
+        Command::Contacts { query } => crate::contacts::search(&query),
         Command::Info => runtime.block_on(session.dispatch("system.info", &empty)),
         Command::Accounts { .. } => runtime.block_on(session.dispatch("accounts.list", &empty)),
         Command::Providers { .. } => runtime.block_on(session.dispatch("providers.list", &empty)),

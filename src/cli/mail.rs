@@ -7,7 +7,7 @@ use std::{io::Read, path::PathBuf};
 pub(super) struct AccountArg {
     /// Registered account ID (defaults to the active account)
     #[arg(long, value_name = "ID")]
-    account: Option<String>,
+    pub(super) account: Option<String>,
 }
 
 impl AccountArg {
@@ -121,9 +121,29 @@ impl Mark {
 #[derive(Args)]
 pub(super) struct Send {
     #[command(flatten)]
-    account: AccountArg,
+    message: Message,
     #[command(flatten)]
     execution: ExecuteArg,
+    /// Reusable account-scoped ID; retry only with exactly the same message
+    #[arg(long)]
+    send_id: Option<String>,
+}
+
+impl Send {
+    pub(super) fn params(&self, input: impl Read) -> Result<Value, &'static str> {
+        let mut params = self.message.params(input)?;
+        params["execute"] = json!(self.execution.execute);
+        if let Some(id) = &self.send_id {
+            params["sendId"] = json!(id);
+        }
+        Ok(params)
+    }
+}
+
+#[derive(Args)]
+pub(super) struct Message {
+    #[command(flatten)]
+    account: AccountArg,
     /// Recipient address; repeat for additional recipients
     #[arg(long)]
     to: Vec<String>,
@@ -143,7 +163,7 @@ pub(super) struct Send {
     attach: Vec<PathBuf>,
 }
 
-impl Send {
+impl Message {
     pub(super) fn params(&self, input: impl Read) -> Result<Value, &'static str> {
         let mut bytes = Vec::new();
         input
@@ -179,7 +199,7 @@ impl Send {
         params["subject"] = json!(self.subject);
         params["body"] = json!(body);
         params["attachments"] = json!(attachments);
-        params["execute"] = json!(self.execution.execute);
+        params["execute"] = json!(false);
         Ok(params)
     }
 }
