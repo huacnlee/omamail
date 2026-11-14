@@ -519,3 +519,97 @@ async fn quota_pacing_lets_a_page_through_and_spreads_a_bulk_trash() {
         "refused calls waited anyway"
     );
 }
+
+// One deadline covers a whole read, waiting for a turn included. A refused read
+// gives its turn away while it backs off; when slow reads take every turn in
+// the meantime, its retry gives up at the deadline instead of starting late.
+#[tokio::test(start_paused = true)]
+async fn a_retry_queued_behind_slow_reads_gives_up_at_the_read_deadline() {
+    let session = &Session::default();
+    let attempts = &Cell::new(0);
+    let started = tokio::time::Instant::now();
+    let refused = async {
+        let answer = session
+            .read(
+                "one",
+                5,
+                || async { grant("token") },
+                |_| async {
+                    attempts.set(attempts.get() + 1);
+                    Err("gmail_rate_limited")
+                },
+            )
+            .await;
+        (answer, started.elapsed())
+    };
+    let slow = async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        futures_util::future::join_all((0..MAX_READS_IN_FLIGHT).map(|_| {
+            session.read(
+                "one",
+                5,
+                || async { grant("token") },
+                |_| async {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    Ok(json!({}))
+                },
+            )
+        }))
+        .await
+    };
+    let ((answer, elapsed), slow) = tokio::join!(refused, slow);
+    assert_eq!(answer, Err("gmail_timeout"));
+    assert!(
+        elapsed <= gmail_http::DEADLINE,
+        "returned after {elapsed:?}"
+    );
+    assert_eq!(attempts.get(), 1, "no attempt starts after the deadline");
+    assert!(
+        slow.iter().all(|read| *read == Err("gmail_timeout")),
+        "{slow:?}"
+    );
+}
+
+// A token refresh that finishes as the read's deadline passes resumes the read
+// before its timer is checked. The request must not start on that last poll,
+// whether the refresh came first or after a 401.
+#[tokio::test(start_paused = true)]
+async fn a_refresh_ending_at_the_deadline_starts_no_request() {
+    for unauthorized_first in [false, true] {
+        let session = &Session::default();
+        let refreshes = &Cell::new(0);
+        let gets = &Cell::new(0);
+        let answer = session
+            .read(
+                "one",
+                5,
+                || async {
+                    refreshes.set(refreshes.get() + 1);
+                    // The first grant arrives at once only when a 401 is to follow it.
+                    if !unauthorized_first || refreshes.get() > 1 {
+                        tokio::time::sleep(gmail_http::DEADLINE).await;
+                    }
+                    grant(&format!("token-{}", refreshes.get()))
+                },
+                |token| async move {
+                    gets.set(gets.get() + 1);
+                    if token == "token-1" && unauthorized_first {
+                        Err("gmail_unauthorized")
+                    } else {
+                        Ok(json!({}))
+                    }
+                },
+            )
+            .await;
+        assert_eq!(
+            answer,
+            Err("gmail_timeout"),
+            "401 first: {unauthorized_first}"
+        );
+        assert_eq!(
+            gets.get(),
+            usize::from(unauthorized_first),
+            "no request after the deadline (401 first: {unauthorized_first})"
+        );
+    }
+}
