@@ -76,6 +76,31 @@ Item {
       compare(view.todayIso, Calendar.isoDate(new Date(controller.nowMs)))
     }
 
+    function cleanup() {
+      controller.zone = Qt.binding(function() { return Calendar.zoneSignature(controller.nowMs) })
+    }
+
+    // The zone itself cannot be changed from inside a test process; its rules
+    // are covered in test_calendar_feed.js. This covers the view acting on it:
+    // new cells, the shown day kept, and the events asked for again.
+    function test_zone_change_rebuilds_the_shown_days() {
+      view.visibleMonth = new Date(2026, 10, 1)
+      view.visibleWeek = new Date(2026, 10, 11, 15, 30)
+      wait(0)
+      var month = view.days, week = view.weekDays
+      controller.nowMs = controller.nowMs + 60000
+      verify(view.days === month && view.weekDays === week, "a tick alone keeps the cells")
+      controller.rangeStart = 0
+
+      controller.zone = "moved"
+      verify(view.days !== month, "month cells are built again")
+      verify(view.weekDays !== week, "week columns are built again")
+      compare(Calendar.isoDate(view.visibleMonth), "2026-11-01")
+      compare(view.visibleWeek.getTime(), new Date(2026, 10, 11).getTime(),
+        "the shown day is rebuilt from its calendar date")
+      tryCompare(controller, "rangeStart", view.days[0].startMs)
+    }
+
     function test_tick_preserves_browsed_month() {
       view.visibleMonth = new Date(2025, 1, 1)
       controller.nowMs = new Date(2026, 9, 27, 23, 59).getTime()
