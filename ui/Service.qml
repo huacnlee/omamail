@@ -41,7 +41,7 @@ Item {
   property var manifest: null
   property var loadedManifest: null
   onManifestChanged: {
-    if (loadedManifest && manifest) Qt.callLater(privateRuntime.refresh)
+    if (loadedManifest && manifest) privateRuntime.queueRefresh()
     loadedManifest = manifest
   }
   property var pluginRegistry: null

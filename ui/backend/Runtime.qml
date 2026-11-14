@@ -32,6 +32,7 @@ Item {
   property string response: ""
   property bool received: false
   property bool timedOut: false
+  property bool refreshQueued: false
   signal validated()
 
   function refresh() {
@@ -55,6 +56,19 @@ Item {
     }
     run("status")
   }
+  // A manifest swap can arrive while a probe is still running. Keep one refresh
+  // pending so the older checkout's answer cannot stand as the final pin.
+  function queueRefresh() {
+    if (bundled || pluginDir === "") return
+    if (busy) { refreshQueued = true; return }
+    Qt.callLater(root.refresh)
+  }
+  function flushQueuedRefresh() {
+    if (!refreshQueued) return
+    refreshQueued = false
+    Qt.callLater(root.refresh)
+  }
+
   function install() { if (canInstall) run("install") }
   function enableCli() { if (!development && !cliInstalled && state === "ready") run("enable-cli") }
   function disableCli() { if (!development && cliInstalled) run("disable-cli") }
@@ -109,6 +123,9 @@ Item {
         root.cliInstalled = false
       }
       operation.running = false
+      // The queued refresh is not flushed here: terminating a process is
+      // asynchronous, so a probe started now could still be refused as busy.
+      // onExited flushes it once the process is really gone.
     }
   }
   Process {
@@ -123,14 +140,23 @@ Item {
     }
     onExited: function(exitCode) {
       deadline.stop()
-      if (root.timedOut) return
+      if (root.timedOut) {
+        // The stalled probe has now let go: this is the first moment a queued
+        // refresh can actually run, so it is flushed here rather than at the
+        // deadline, where it would have been dropped.
+        root.timedOut = false
+        root.flushQueuedRefresh()
+        return
+      }
       var result = Rules.decode(root.response)
       if ((root.action === "enable-cli" || root.action === "disable-cli") && exitCode !== 0) {
         root.error = result.error
         if (root.error === "") root.error = "Backend CLI operation failed"
+        root.flushQueuedRefresh()
         return
       }
       if (root.action === "install" && exitCode === 0 && result.state === "ready") {
+        root.refreshQueued = false
         Qt.callLater(root.refresh)
         return
       }
@@ -145,6 +171,7 @@ Item {
       } else {
         root.applyResult(result, exitCode)
       }
+      root.flushQueuedRefresh()
     }
   }
 }
