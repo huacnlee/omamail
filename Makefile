@@ -3,7 +3,7 @@ QMLLINT := /usr/lib/qt6/bin/qmllint
 .DEFAULT_GOAL := test
 QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryController.qml ui/compose/PendingCompose.qml \
 	ui/tests/compatibility/tst_published_agent.qml \
-	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml \
+	ui/tests/qml/tst_unified_batch.qml ui/tests/qml/tst_clipboard_arguments.qml ui/tests/qml/tst_service_rescan.qml \
 	ui/tests/qml/tst_reader_subject_menu.qml ui/tests/qml/tst_drafts_refresh.qml ui/tests/qml/tst_account_hosts.qml \
 	ui/tests/qml/tst_credential_store_retry.qml \
 	ui/tests/qml/tst_google_sign_in_errors.qml \
@@ -128,6 +128,7 @@ backend:
 # The parsing, formatting, and decision rules live in plain JS precisely so
 # they can be tested without a compositor. These run anywhere node does.
 test-js:
+	node ui/tests/test_manifest.js
 	node app/tests/test_theme.js
 	node app/tests/test_shell_theme.js
 	node ui/tests/test_bar_bridge.js

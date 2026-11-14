@@ -22,6 +22,9 @@ Update it with:
 omarchy plugin update omamail
 ```
 
+Omarchy keeps this plugin loaded between summons (`keepLoaded`), so an update only rescans it: the panel reloads from the new code and the resident service re-probes its pinned backend, but `ui/Service.qml` itself is not replaced.
+An update that changes service code needs `omarchy plugin disable omamail && omarchy plugin enable omamail` (or `omarchy restart shell`) to take effect.
+
 Click the envelope in the bar, install the pinned backend when prompted, and add your mailbox. Prebuilt plugin backends are available for Linux x86_64 and aarch64.
 
 ### Standalone desktop app

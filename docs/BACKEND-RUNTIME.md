@@ -59,6 +59,9 @@ to pick up a state change made outside the plugin's own knowledge. This is
 the fastest way to confirm whether a failure is a stale connection or a real
 one: if disable/enable clears it, it was the former.
 
+An `omarchy plugin update omamail` only rescans, so a `keepLoaded` service is not recreated: it re-probes `backend-runtime.py status` when the fresh manifest arrives and swaps the backend only if the pin moved.
+The QML service code itself is still kept, so disable/enable (or a shell restart) remains the way to replace it after an update.
+
 ## Standalone bundled backend
 
 The standalone Qt host under `app/` uses the same `ui/` composition and Rust business modules through small Quickshell compatibility adapters. A production archive places one exact-version `omamail` backend beside `omamail-app`, together with the QML, manifest, Qt libraries, and platform plugin. Production resource lookup accepts that bundled backend only; it does not search PATH, resolve `latest`, or use `OMAMAIL_BIN`. The environment override and source-resource lookup are enabled only when `OMAMAIL_DEVELOPMENT_RESOURCES=1`, which is what `make app-run` sets for a checkout build.

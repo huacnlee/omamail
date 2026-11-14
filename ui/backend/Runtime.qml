@@ -32,6 +32,7 @@ Item {
   property string response: ""
   property bool received: false
   property bool timedOut: false
+  property bool refreshQueued: false
   signal validated()
 
   function refresh() {
@@ -55,6 +56,19 @@ Item {
     }
     run("status")
   }
+  // A manifest swap can arrive while a probe is still running. Keep one refresh
+  // pending so the older checkout's answer cannot stand as the final pin.
+  function queueRefresh() {
+    if (bundled || pluginDir === "") return
+    if (busy) { refreshQueued = true; return }
+    Qt.callLater(root.refresh)
+  }
+  function flushQueuedRefresh() {
+    if (!refreshQueued) return
+    refreshQueued = false
+    Qt.callLater(root.refresh)
+  }
+
   function install() { if (canInstall) run("install") }
   function enableCli() { if (!development && !cliInstalled && state === "ready") run("enable-cli") }
   function disableCli() { if (!development && cliInstalled) run("disable-cli") }
@@ -109,6 +123,7 @@ Item {
         root.cliInstalled = false
       }
       operation.running = false
+      root.flushQueuedRefresh()
     }
   }
   Process {
@@ -128,9 +143,11 @@ Item {
       if ((root.action === "enable-cli" || root.action === "disable-cli") && exitCode !== 0) {
         root.error = result.error
         if (root.error === "") root.error = "Backend CLI operation failed"
+        root.flushQueuedRefresh()
         return
       }
       if (root.action === "install" && exitCode === 0 && result.state === "ready") {
+        root.refreshQueued = false
         Qt.callLater(root.refresh)
         return
       }
@@ -145,6 +162,7 @@ Item {
       } else {
         root.applyResult(result, exitCode)
       }
+      root.flushQueuedRefresh()
     }
   }
 }
