@@ -100,6 +100,7 @@ Item {
     }
 
     function cleanup() {
+      mailService.applySettings({})
       mailService.accountList = ({ version: 1, accounts: [], activeId: "" })
       wait(0)
       mailService.recount()
@@ -302,6 +303,129 @@ Item {
         compare(mailService.accountList.accounts[0].email, "", "nothing was written")
         compare(asked("m365.signInBegin").length, 0)
       }
+    }
+
+    // ------------------------------------------- the organization's app, set once
+
+    readonly property string organizationClient: "abcdef11-2222-3333-4444-55555555555f"
+
+    function test_an_organization_app_in_the_settings_leaves_only_the_address_to_type() {
+      useBackend()
+      mailService.applySettings({ m365ClientId: " ABCDEF11-2222-3333-4444-55555555555F " })
+      var account = openForm(false)
+      compare(named(app, "m365-client-id-field").visible, false, "there is no ID to type")
+      verify(named(app, "m365-organization-app").visible, "the page says why")
+      verify(named(app, "m365-organization-app").text.indexOf(organizationClient) >= 0,
+        "and which app, since the field that would show it is hidden: " + named(app, "m365-organization-app").text)
+      var steps = namedAll(app, "m365-step")
+      compare(steps.length, 4)
+      for (var i = 0; i < steps.length; i++) compare(steps[i].visible, false, "nothing to register: " + steps[i].text)
+      compare(named(app, "m365-admin-note").visible, false)
+      compare(named(app, "m365-sign-in").enabled, false, "the address is still needed")
+      named(app, "m365-address-field").text = address
+      compare(named(app, "m365-sign-in").enabled, true)
+      named(app, "m365-address-field").accepted()
+      tryCompare(account, "accountId", accountId)
+      tryVerify(function() { return asked("m365.signInBegin").length === 1 }, 2000, "Enter in the address signs in")
+      compare(asked("m365.signInBegin")[0].params, { accountId: accountId, address: address, clientId: organizationClient },
+        "the organization's app, in the backend's spelling")
+      compare(mailService.accountList.accounts[0].clientId, organizationClient, "and the mailbox keeps the ID it signed in with")
+    }
+
+    function test_a_setting_that_is_not_an_application_id_leaves_the_field_to_be_filled_in() {
+      mailService.applySettings({ m365ClientId: "not-a-guid" })
+      openForm(false)
+      verify(named(app, "m365-client-id-field").visible)
+      var note = named(app, "m365-organization-app")
+      verify(!note || !note.visible, "no word of an organization's app")
+      verify(namedAll(app, "m365-step")[0].visible, "the registration steps are there")
+      named(app, "m365-address-field").text = address
+      compare(named(app, "m365-sign-in").enabled, false, "and the ID is still asked for")
+      named(app, "setup-page").item.signIn()
+      compare(named(app, "m365-error").text, "Add the Application (client) ID from Microsoft Entra")
+      compare(asked("m365.signInBegin").length, 0, "the setting is never sent")
+    }
+
+    function test_a_mailbox_saved_with_its_own_application_keeps_it_when_the_organization_sets_another() {
+      useBackend()
+      var account = savedMailbox()
+      refuse(asked("m365.verify")[0], "m365_signed_out")
+      tryVerify(function() { return !account.auth.loggedIn && !account.auth.recoveringSession }, 2000)
+      mailService.applySettings({ m365ClientId: organizationClient })
+      app.openSettings()
+      app.editAccount(0)
+      waitForRendering(app)
+      compare(app.page, "setup")
+      verify(named(app, "m365-client-id-field").visible, "its own ID is shown, not hidden behind the setting")
+      compare(named(app, "m365-client-id-field").text, client)
+      var note = named(app, "m365-organization-app")
+      verify(!note || !note.visible, "no word of an organization's app")
+      named(app, "setup-page").item.signIn()
+      tryVerify(function() { return asked("m365.signInBegin").length === 1 }, 2000)
+      compare(asked("m365.signInBegin")[0].params.clientId, client, "signing in again uses the mailbox's own app")
+    }
+
+    readonly property string otherOrganizationClient: "12345678-aaaa-bbbb-cccc-1234567890ab"
+
+    // A sign-in begun on the organization's app, then cancelled: the mailbox is
+    // saved with that app's ID while the page stays open on the same auth object.
+    function cancelledOnTheOrganizationApp() {
+      useBackend()
+      mailService.applySettings({ m365ClientId: organizationClient })
+      var account = openForm(false)
+      named(app, "m365-address-field").text = address
+      var begun = pressSignIn(account)
+      compare(begun.params.clientId, organizationClient)
+      account.auth.timeScale = 0.01
+      answerRestore()
+      reply(begun, begin())
+      polled(1)
+      named(app, "m365-cancel-sign-in").clicked()
+      tryVerify(function() { return !account.auth.loginBusy }, 2000)
+      compare(mailService.accountList.accounts[0].clientId, organizationClient, "the mailbox is saved with the app")
+      mark = fixture.requests.length
+      return account
+    }
+
+    function retryKeepsTheSavedApp(account) {
+      waitForRendering(app)
+      verify(named(app, "m365-client-id-field").visible, "the mailbox's own ID is shown, not the setting's")
+      compare(named(app, "m365-client-id-field").text, organizationClient)
+      var note = named(app, "m365-organization-app")
+      verify(!note || !note.visible, "no word of an organization's app")
+      named(app, "setup-page").item.signIn()
+      tryVerify(function() { return asked("m365.signInBegin").length === 1 }, 2000, "the retry asks for a code")
+      compare(asked("m365.signInBegin")[0].params.clientId, organizationClient, "the retry uses the app the mailbox was saved with")
+      compare(mailService.accountList.accounts[0].clientId, organizationClient, "and the saved entry keeps it")
+    }
+
+    function test_a_cancelled_sign_in_retries_on_its_saved_app_after_the_setting_names_another() {
+      var account = cancelledOnTheOrganizationApp()
+      mailService.applySettings({ m365ClientId: otherOrganizationClient })
+      retryKeepsTheSavedApp(account)
+    }
+
+    function test_a_cancelled_sign_in_retries_on_its_saved_app_after_the_setting_is_cleared() {
+      var account = cancelledOnTheOrganizationApp()
+      mailService.applySettings({})
+      retryKeepsTheSavedApp(account)
+    }
+
+    function test_an_id_being_typed_is_kept_when_the_saved_one_changes_under_it() {
+      useBackend()
+      var account = savedMailbox()
+      refuse(asked("m365.verify")[0], "m365_signed_out")
+      tryVerify(function() { return !account.auth.loggedIn && !account.auth.recoveringSession }, 2000)
+      app.openSettings()
+      app.editAccount(0)
+      waitForRendering(app)
+      compare(named(app, "m365-client-id-field").text, client)
+      named(app, "m365-client-id-field").text = otherOrganizationClient
+      var list = JSON.parse(JSON.stringify(mailService.accountList))
+      list.accounts[0].clientId = organizationClient
+      mailService.accountList = list
+      tryCompare(account.auth, "clientId", organizationClient)
+      compare(named(app, "m365-client-id-field").text, otherOrganizationClient, "what is being typed stays")
     }
 
     function test_the_whole_route_from_the_chooser_to_a_window_with_mail_in_it() {
