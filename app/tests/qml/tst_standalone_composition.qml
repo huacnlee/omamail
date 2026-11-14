@@ -104,6 +104,11 @@ TestCase {
   }
 
   Component {
+    id: backgroundComponent
+    Standalone.Main { nativeHost: host; nativeFileStore: host; startedInBackground: true }
+  }
+
+  Component {
     id: gmailAuthComponent
     Providers.AuthManager {
       pluginDir: "/fixture/plugin"
@@ -515,6 +520,119 @@ TestCase {
     verify(quitRow.visible)
     quitRow.activated()
     compare(host.quitCalled, true)
+  }
+
+  function mailtoPayload() {
+    return JSON.stringify({mailto:"mailto:ada@example.com?subject=Hello%20there&cc=bob@example.com"})
+  }
+
+  function verifyDraft(composition) {
+    tryVerify(function() { return composition.app.composing }, 2000, "a draft opens")
+    compare(findChild(composition, "compose-to-field").text, "ada@example.com")
+    compare(findChild(composition, "compose-cc-field").text, "bob@example.com")
+    compare(findChild(composition, "compose-subject-field").text, "Hello there")
+    compare(host.pendingOpen, "", "the launch was taken")
+  }
+
+  function test_a_background_start_stays_hidden_until_launched_again() {
+    host.files["/fixture/config/omamail/window.json"] = JSON.stringify({windowOpen:true})
+    var composition = createTemporaryObject(backgroundComponent, testCase)
+    verify(composition)
+    tryVerify(function() { return composition.service.windowPrefsLoaded })
+    wait(50)
+    compare(composition.service.restoreWindow, false, "the window open at last logout stays shut")
+    verify(!composition.app.opened)
+    verify(!composition.visible)
+    host.requestOpen("{}")
+    verify(composition.app.opened)
+    tryVerify(function() { return composition.visible })
+    verify(!composition.app.composing, "a plain launch opens no draft")
+    compare(host.windowBringBacks, 1)
+  }
+
+  function test_a_relaunch_shows_a_window_hidden_without_telling_the_app() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    tryVerify(function() { return composition.visible })
+    verify(composition.app.opened)
+    composition.hide()
+    verify(!composition.visible)
+    host.requestOpen("{}")
+    tryVerify(function() { return composition.visible })
+    compare(host.windowBringBacks, 1, "a window out of sight is brought back too")
+  }
+
+  function test_a_mailto_launch_opens_a_draft_in_a_cold_background_app() {
+    var composition = createTemporaryObject(backgroundComponent, testCase)
+    verify(composition)
+    host.requestOpen(mailtoPayload())
+    wait(20)
+    verify(!composition.app.composing, "the link waits for recovery to be read")
+    composition.app.composeRecoveryLoaded = true
+    verifyDraft(composition)
+    tryVerify(function() { return composition.visible })
+  }
+
+  function test_a_mailto_launch_opens_a_draft_in_a_running_app() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    tryVerify(function() { return composition.visible })
+    verify(!composition.app.composing)
+    composition.app.composeRecoveryLoaded = true
+    host.requestOpen(mailtoPayload())
+    verifyDraft(composition)
+  }
+
+  function editedDraft(composition) {
+    composition.app.composeRecoveryLoaded = true
+    host.requestOpen(mailtoPayload())
+    verifyDraft(composition)
+    var field = findChild(composition, "compose-subject-field")
+    field.text = "My own words"
+    var compose = field
+    while (compose && typeof compose.hasUserChanges !== "function") compose = compose.parent
+    compose.userModified = true
+    host.requestOpen(JSON.stringify({mailto:"mailto:eve@example.com?subject=Second"}))
+    var dialog = findChild(composition, "compose-exit-dialog")
+    tryCompare(dialog, "opened", true)
+    compare(field.text, "My own words", "the edited draft stays until the question is answered")
+    return {dialog: dialog, field: field, compose: compose}
+  }
+
+  function test_a_mailto_launch_cancelled_keeps_the_edited_draft() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    tryVerify(function() { return composition.visible })
+    var draft = editedDraft(composition)
+    draft.dialog.cancel()
+    tryCompare(draft.dialog, "opened", false)
+    wait(0)
+    compare(draft.field.text, "My own words")
+    compare(findChild(composition, "compose-to-field").text, "ada@example.com")
+    compare(composition.app.heldDraft, null)
+  }
+
+  function test_a_mailto_launch_discarding_opens_the_link() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    tryVerify(function() { return composition.visible })
+    var draft = editedDraft(composition)
+    draft.dialog.discard()
+    tryVerify(function() { return findChild(composition, "compose-to-field").text === "eve@example.com" })
+    compare(draft.field.text, "Second")
+  }
+
+  function test_a_mailto_launch_whose_save_fails_asks_again() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    tryVerify(function() { return composition.visible })
+    var draft = editedDraft(composition)
+    // This fixture has no mailbox, so the save fails and the draft comes back.
+    draft.dialog.save()
+    tryCompare(draft.dialog, "opened", true)
+    wait(0)
+    compare(draft.field.text, "My own words")
+    verify(composition.app.heldDraft !== null, "the link still waits")
+    draft.dialog.cancel()
+    tryVerify(function() { return composition.app.heldDraft === null })
+    compare(draft.field.text, "My own words")
   }
 
   function test_window_size_restores_and_is_saved_after_resize() {
