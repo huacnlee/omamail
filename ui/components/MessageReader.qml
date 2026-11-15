@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls as Controls
 import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
@@ -149,7 +150,10 @@ Item {
 
   readonly property var attachments: service ? service.selectedAttachments || [] : []
   property bool attachmentsExpanded: false
-  onSelectedIdChanged: resetAttachments()
+  onSelectedIdChanged: {
+    resetAttachments()
+    headerBlock.contentY = 0
+  }
   onServiceChanged: resetAttachments()
   onAttachmentsChanged: if (attachments.length === 0) resetAttachments()
 
@@ -321,15 +325,23 @@ Item {
 
   // --------------------------------------------------------------- headers
 
-  Item {
+  Flickable {
     id: headerBlock
+    objectName: "reader-header"
     visible: !!root.summary
     anchors.top: parent.top
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.margins: root.pageInset
-    implicitHeight: (backBar.visible ? backBar.implicitHeight + Style.space(14) : 0)
+    contentHeight: (backBar.visible ? backBar.implicitHeight + Style.space(14) : 0)
       + headerColumn.implicitHeight
+    implicitHeight: Math.min(contentHeight, root.height * 0.45)
+    contentWidth: width
+    clip: true
+    flickableDirection: Flickable.VerticalFlick
+    boundsBehavior: Flickable.StopAtBounds
+    WheelScroller { view: headerBlock }
+    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
     BackBar {
       id: backBar
@@ -425,15 +437,16 @@ Item {
 
       Text {
         id: fromLine
+        objectName: "reader-from"
         width: parent.width
         textFormat: Text.PlainText
         text: root.summary
-          ? root.summary.from.display + "  <" + root.summary.from.email + ">"
+          ? Mail.fullAddress(root.summary.from)
           : ""
         color: root.textColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.bodySmall
-        elide: Text.ElideRight
+        wrapMode: Text.Wrap
         horizontalAlignment: root.headerAlignment
 
         TapHandler {
@@ -445,30 +458,94 @@ Item {
         }
       }
 
-      // Everyone the message went to — To, Cc and Bcc, which a sent message
-      // carries — so a right-click on the line can name any of them.
+      Repeater {
+        model: ["to", "cc", "bcc"]
+        delegate: Column {
+          id: recipientRow
+          required property string modelData
+          readonly property var addresses: root.summary ? (root.summary[modelData] || []) : []
+          property bool expanded: false
+          readonly property string messageId: root.selectedId
+          onMessageIdChanged: expanded = false
+          width: headerColumn.width
+          visible: addresses.length > 0
+          Text {
+            id: recipientLine
+            objectName: "reader-" + recipientRow.modelData
+            width: parent.width
+            textFormat: Text.PlainText
+            text: (recipientRow.modelData === "to" ? "To: "
+              : recipientRow.modelData === "cc" ? "Cc: " : "Bcc: ")
+              + Mail.fullAddressList(recipientRow.addresses)
+            color: root.dimColor
+            font.family: root.panelFontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.Wrap
+            maximumLineCount: recipientRow.expanded ? 2147483647 : 2
+            elide: Text.ElideRight
+            horizontalAlignment: root.headerAlignment
+
+            TapHandler {
+              acceptedButtons: Qt.RightButton
+              onTapped: function(eventPoint) {
+                var scene = recipientLine.mapToGlobal(eventPoint.position.x, eventPoint.position.y)
+                root.addressMenuRequested(recipientRow.addresses, scene.x, scene.y)
+              }
+            }
+          }
+          Controls.Button {
+            id: moreButton
+            objectName: "reader-" + recipientRow.modelData + "-more"
+            visible: recipientRow.expanded || recipientLine.truncated
+            text: recipientRow.expanded ? "Show less"
+              : "Show all " + recipientRow.addresses.length + " " + recipientRow.modelData + " recipients"
+            padding: Style.space(4)
+            focusPolicy: Qt.StrongFocus
+            Keys.onShortcutOverride: function(event) {
+              // Space activates this focused control rather than selecting mail.
+              if (event.key === Qt.Key_Space && event.modifiers === Qt.NoModifier)
+                event.accepted = true
+            }
+            contentItem: Text {
+              text: moreButton.text
+              textFormat: Text.PlainText
+              color: moreButton.hovered || moreButton.activeFocus ? root.textColor : root.dimColor
+              font.family: root.panelFontFamily
+              font.pixelSize: Style.font.caption
+            }
+            background: Rectangle {
+              radius: Style.cornerRadius
+              color: moreButton.hovered || moreButton.activeFocus
+                ? Style.hoverFillFor(root.textColor, root.accentColor) : "transparent"
+              border.width: moreButton.activeFocus ? Style.normalBorderWidth : 0
+              border.color: root.accentColor
+            }
+            // Standard navigation inside the focused, scrollable disclosure.
+            Keys.onPressed: function(event) {
+              var step = event.key === Qt.Key_PageDown ? headerBlock.height
+                : event.key === Qt.Key_PageUp ? -headerBlock.height : 0
+              if (!step) return
+              headerBlock.contentY = Math.max(0, Math.min(
+                headerBlock.contentHeight - headerBlock.height, headerBlock.contentY + step))
+              event.accepted = true
+            }
+            onClicked: {
+              recipientRow.expanded = !recipientRow.expanded
+              if (!recipientRow.expanded) headerBlock.contentY = 0
+            }
+          }
+        }
+      }
+
       Text {
-        id: toLine
         width: parent.width
         textFormat: Text.PlainText
-        text: root.summary
-          ? "to " + Mail.formatAddressList(root.summary.to, 3) + " · " + root.summary.fullTime
-          : ""
+        text: root.summary ? root.summary.fullTime : ""
         color: root.dimColor
         font.family: root.panelFontFamily
         font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
+        wrapMode: Text.Wrap
         horizontalAlignment: root.headerAlignment
-
-        TapHandler {
-          acceptedButtons: Qt.RightButton
-          onTapped: function(eventPoint) {
-            if (!root.summary) return
-            var all = (root.summary.to || []).concat(root.summary.cc || [], root.summary.bcc || [])
-            var scene = toLine.mapToGlobal(eventPoint.position.x, eventPoint.position.y)
-            root.addressMenuRequested(all, scene.x, scene.y)
-          }
-        }
       }
     }
   }
