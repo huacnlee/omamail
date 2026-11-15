@@ -175,25 +175,8 @@ async fn response_limit_refuses_body_and_stream_close_aborts_task() {
 
 #[tokio::test]
 async fn invalid_tls_certificate_and_hostname_never_receive_credentials() {
-    use std::io::{BufRead, BufReader};
-    let mut peer = std::process::Command::new("python3")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/providers/gmail_http_tls_test.py"
-        ))
-        .arg("3")
-        .arg("3")
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut output = BufReader::new(peer.stdout.take().unwrap());
-    let mut port = String::new();
-    output.read_line(&mut port).unwrap();
-    let port: u16 = port.trim().parse().unwrap();
-    let mut certificate_path = String::new();
-    output.read_line(&mut certificate_path).unwrap();
-    let certificate =
-        reqwest::Certificate::from_pem(&std::fs::read(certificate_path.trim()).unwrap()).unwrap();
+    let mut peer = crate::test_support::peers::HttpTlsPeer::start(3).await;
+    let certificate = reqwest::Certificate::from_pem(&crate::test_support::tls::ca_pem()).unwrap();
     let trusted = client_builder()
         .add_root_certificate(certificate)
         .build()
@@ -201,19 +184,14 @@ async fn invalid_tls_certificate_and_hostname_never_receive_credentials() {
     let untrusted = client_builder().build().unwrap();
     for (client, host) in [(&untrusted, "localhost"), (&trusted, "127.0.0.1")] {
         let mut request = prepare(&params()).unwrap();
-        request.url = Url::parse(&format!("https://{host}:{port}/")).unwrap();
+        request.url = Url::parse(&format!("https://{host}:{}/", peer.port)).unwrap();
         assert_eq!(execute(client, request).await, Err("jmap_network_failed"));
-        let mut report = String::new();
-        output.read_line(&mut report).unwrap();
-        assert_eq!(report.trim(), "tls-refused-no-http");
+        assert_eq!(peer.report().await, "tls-refused-no-http");
     }
     let mut request = prepare(&params()).unwrap();
-    request.url = Url::parse(&format!("https://localhost:{port}/")).unwrap();
+    request.url = Url::parse(&format!("https://localhost:{}/", peer.port)).unwrap();
     assert_eq!(execute(&trusted, request).await.unwrap()["status"], 200);
-    let mut report = String::new();
-    output.read_line(&mut report).unwrap();
-    assert_eq!(report.trim(), "http-received");
-    assert!(peer.wait().unwrap().success());
+    assert_eq!(peer.report().await, "http-received");
 }
 
 #[tokio::test]
