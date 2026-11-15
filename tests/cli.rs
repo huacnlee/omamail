@@ -1225,18 +1225,23 @@ fn failed_execution_retains_target_results_and_exits_one() {
 #[tokio::test]
 async fn one_shot_send_owns_delivery_until_durable_terminal_result() {
     for (generic, acknowledge) in [(false, true), (true, false)] {
-        real_smtp_send(generic, acknowledge, false, false).await;
+        real_smtp_send(generic, acknowledge, false, false, false).await;
     }
 }
 
 #[tokio::test]
 async fn concurrent_send_uses_idle_serve_owner_and_survives_owner_crash_or_smtp_ack_loss() {
     for (acknowledge, crash) in [(true, false), (false, false), (false, true)] {
-        real_smtp_send(false, acknowledge, true, crash).await;
+        real_smtp_send(false, acknowledge, true, crash, false).await;
     }
 }
 
-async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bool) {
+#[tokio::test]
+async fn raw_outbox_rpc_submits_threaded_reply_to_running_desktop_owner() {
+    real_smtp_send(false, true, true, false, true).await;
+}
+
+async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bool, raw: bool) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = mail_list_fixture(9, true);
@@ -1334,6 +1339,17 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
             parsed.get_body().unwrap().trim_end(),
             "private body 工\nsecond line"
         );
+        if raw {
+            use mailparse::MailHeaderMap;
+            assert_eq!(
+                parsed.headers.get_first_value("In-Reply-To").as_deref(),
+                Some("<parent@example.org>")
+            );
+            assert_eq!(
+                parsed.headers.get_first_value("References").as_deref(),
+                Some("<root@example.org> <parent@example.org>")
+            );
+        }
         if acknowledge {
             writer.write_all(b"250 accepted\r\n").await.unwrap();
         }
@@ -1357,6 +1373,46 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
     });
     let root = fixture.0.clone();
     let sending = tokio::task::spawn_blocking(move || {
+        if raw {
+            let invoke = |method: &str, params: Value| {
+                let output = root_mail(
+                    &root,
+                    &["call", method, "--json"],
+                    params.to_string().as_bytes(),
+                );
+                assert!(output.status.success(), "{method}: {output:?}");
+                let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(value["ok"], true, "{value}");
+                (output, value["result"].clone())
+            };
+            let (_, payload) = invoke(
+                "message.compose",
+                serde_json::json!({"fields":{
+                    "from":"imap@example.org","to":"one@example.org","subject":"Re: example",
+                    "body":"private body 工\nsecond line",
+                    "inReplyTo":"<parent@example.org>","references":"<root@example.org> <parent@example.org>"
+                }}),
+            );
+            let params = serde_json::json!({"accountId":"imap:imap@example.org","provider":"imap","sendId":"rpc-reply","payload":payload,"delaySeconds":0});
+            let (_, queued) = invoke("outbox.enqueue", params.clone());
+            assert_eq!(queued["id"], "rpc-reply");
+            // Replaying the exact composed payload must not deliver it twice.
+            assert_eq!(invoke("outbox.enqueue", params).1["duplicate"], true);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                let (output, status) = invoke(
+                    "outbox.snapshot",
+                    serde_json::json!({"accountId":"imap:imap@example.org","sendId":"rpc-reply"}),
+                );
+                assert_eq!(status["entries"].as_array().unwrap().len(), 1);
+                assert!(status["entries"][0].get("payload").is_none());
+                if status["entries"][0]["state"] == "sent" {
+                    return output;
+                }
+                assert!(std::time::Instant::now() < deadline, "{status}");
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
         let (args, body) = if generic {
             (vec!["call", "mail.send", "--json"], serde_json::json!({"account":"imap:imap@example.org","to":["one@example.org"],"body":"private body 工\nsecond line","execute":true}).to_string().into_bytes())
         } else {
@@ -1384,7 +1440,10 @@ async fn real_smtp_send(generic: bool, acknowledge: bool, owner: bool, crash: bo
         desktop.as_mut().unwrap().wait().await.unwrap();
     }
     let output = sending.await.unwrap();
-    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    if raw {
+        value["result"] = serde_json::json!({"sendId":"rpc-reply","outbox":value["result"]});
+    }
     assert_eq!(
         value["result"]["outbox"]["entries"][0]["state"],
         if acknowledge { "sent" } else { "unknown" },
