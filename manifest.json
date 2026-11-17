@@ -117,14 +117,14 @@
         "label": "AI agent",
         "options": ["System default", "OpenCode", "Codex", "Claude"],
         "defaultValue": "System default",
-        "description": "Agent for new mail chats and calendar suggestions. System default follows Omarchy; unsupported defaults disable AI. Changing the selection starts fresh chats and keeps previous chats read-only. Requires backend API 6."
+        "description": "Agent for new mail chats and calendar suggestions. System default follows Omarchy; unsupported defaults disable AI. Changing the selection starts fresh chats and keeps previous chats read-only. Requires backend API 6 or newer."
       },
       {
         "key": "aiModel",
         "type": "string",
         "label": "AI model (optional)",
         "defaultValue": "",
-        "description": "Leave blank for the selected agent's default model. OpenCode takes provider/model or provider/model#variant; Codex and Claude take their model names. Changing the model starts fresh chats and keeps previous chats read-only. Requires backend API 6."
+        "description": "Leave blank for the selected agent's default model. OpenCode takes provider/model or provider/model#variant; Codex and Claude take their model names. Changing the model starts fresh chats and keeps previous chats read-only. Requires backend API 6 or newer."
       },
       {
         "key": "suggestEvents",

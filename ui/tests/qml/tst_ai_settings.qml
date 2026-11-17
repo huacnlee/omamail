@@ -67,5 +67,13 @@ Item {
       findChild(panel, "settings-ai-agent").changed("Codex")
       compare(service.writes.length, 0)
     }
+    function test_unavailable_note_describes_the_feature_minimum() {
+      var note = findChild(panel, "settings-ai-note")
+      verify(note, "the panel explains its state in one place")
+      verify(note.text.indexOf("API 6") < 0, "a ready backend needs no API note")
+      service.backendCanChooseAgent = false
+      verify(note.text.indexOf("API 6 or newer") >= 0, "the gate names its minimum revision")
+      verify(note.text.indexOf("API 6 required") < 0, "the gate does not present API 6 as the current requirement")
+    }
   }
 }
