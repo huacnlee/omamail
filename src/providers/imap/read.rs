@@ -407,6 +407,15 @@ fn query(query: &str) -> Result<(String, String)> {
     }
     Ok((folder, criteria))
 }
+/// Non-ASCII criteria must declare their charset (RFC 3501 §6.4.4). Without it
+/// servers such as Purelymail treat a Greek or accented term as matching all mail
+fn uid_search(criteria: &str) -> String {
+    if criteria.is_ascii() {
+        format!("UID SEARCH {criteria}")
+    } else {
+        format!("UID SEARCH CHARSET UTF-8 {criteria}")
+    }
+}
 fn search_uids(data: &[u8]) -> Result<Vec<u32>> {
     let mut out = BTreeSet::new();
     for row in nodes(data)? {
@@ -570,7 +579,7 @@ async fn list(w: &mut Wire, p: &Value, boxes: &Mailboxes) -> Result<Value> {
             let first = window[0];
             let last = *window.last().unwrap();
             matches.extend(search_uids(
-                &command(w, &format!("UID SEARCH UID {first}:{last} {criteria}")).await?,
+                &command(w, &uid_search(&format!("UID {first}:{last} {criteria}"))).await?,
             )?);
         }
         Ok((matches, dates))
