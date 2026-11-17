@@ -272,23 +272,9 @@ async fn pending_dns_is_inside_the_whole_request_deadline() {
 
 #[tokio::test]
 async fn tls_verifies_issuer_and_original_hostname_before_http() {
-    use std::io::{BufRead, BufReader};
-    let mut peer = std::process::Command::new("python3")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/providers/gmail_http_tls_test.py"
-        ))
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut output = BufReader::new(peer.stdout.take().unwrap());
-    let mut port = String::new();
-    output.read_line(&mut port).unwrap();
-    let address: SocketAddr = format!("127.0.0.1:{}", port.trim()).parse().unwrap();
-    let mut certificate = String::new();
-    output.read_line(&mut certificate).unwrap();
-    let certificate =
-        reqwest::Certificate::from_pem(&std::fs::read(certificate.trim()).unwrap()).unwrap();
+    let mut peer = crate::test_support::peers::HttpTlsPeer::start(2).await;
+    let address: SocketAddr = format!("127.0.0.1:{}", peer.port).parse().unwrap();
+    let certificate = reqwest::Certificate::from_pem(&crate::test_support::tls::ca_pem()).unwrap();
     let trusted = client_builder()
         .resolve("sender.example", address)
         .add_root_certificate(certificate)
@@ -306,11 +292,8 @@ async fn tls_verifies_issuer_and_original_hostname_before_http() {
         )
         .await;
         assert!(result.is_err());
-        let mut report = String::new();
-        output.read_line(&mut report).unwrap();
-        assert_eq!(report.trim(), "tls-refused-no-http");
+        assert_eq!(peer.report().await, "tls-refused-no-http");
     }
-    assert!(peer.wait().unwrap().success());
 }
 
 fn gradient(width: u32, height: u32, alpha: bool) -> image::DynamicImage {

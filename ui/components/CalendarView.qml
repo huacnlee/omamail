@@ -30,6 +30,84 @@ Item {
   property string selectedEventId: ""
   property bool monthPointerDown: false
   property Item hoveredMonthDay: null
+  property var monthDrag: null
+  property var pendingMonthMove: null
+  property bool monthMoveSaved: false
+  readonly property var monthMove: pendingMonthMove || (monthDrag && monthDrag.active ? monthDrag : null)
+  readonly property var monthMoveEvent: {
+    if (!monthMove || !monthMove.range) return null
+    var event = Plain.plain(monthMove.event)
+    event.start.ms = monthMove.range.start
+    event.end.ms = monthMove.range.end
+    return event
+  }
+  function cancelMonthDrag() {
+    var active = monthDrag !== null
+    monthDrag = null
+    monthPointerDown = false
+    return active
+  }
+  function monthDayAt(point) {
+    if (point.x < 0 || point.y < 0 || point.x >= monthGrid.width || point.y >= monthGrid.height) return -1
+    return Math.floor(point.y / monthGrid.weekHeight) * 7 + Math.floor(point.x / (monthGrid.width / 7))
+  }
+  function monthMoveRefusal(event) {
+    if (pendingMonthMove || (controller && (controller.eventWriting || controller.creatingEvent)))
+      return "Another event change is still in progress"
+    return controller ? controller.rescheduleRefusal(event) : "Calendar is unavailable"
+  }
+  function updateMonthDrag(point) {
+    if (!monthDrag) return
+    var drag = Plain.plain(monthDrag)
+    if (!drag.active && Math.abs(point.x - drag.initial.x) + Math.abs(point.y - drag.initial.y) < 6) return
+    drag.active = true
+    var to = monthDayAt(point)
+    drag.range = to < 0 || monthMoveRefusal(drag.event) !== "" ? null
+      : Calendar.gestureRange(drag.event, to - drag.from, 0, "")
+    monthDrag = drag
+  }
+  function finishMonthDrag(point) {
+    if (!monthDrag) return
+    updateMonthDrag(point)
+    var drag = monthDrag
+    cancelMonthDrag()
+    if (!drag.active) { activateEvent(drag.event); return }
+    if (!drag.range || drag.range.start === drag.event.start.ms) return
+    // Keep presentation separate from the provider/cache event. The normal write
+    // path still owns validation, guest confirmation, and rollback errors.
+    pendingMonthMove = drag
+    monthMoveSaved = false
+    if (!reschedule(drag.event, drag.range.start, drag.range.end)) pendingMonthMove = null
+  }
+  function settleMonthMove() {
+    if (monthMoveSaved && controller && !controller.loading && !controller.pendingRangeStart) {
+      pendingMonthMove = null
+      monthMoveSaved = false
+    }
+  }
+  function monthEventOpacity(event) {
+    var key = Calendar.eventKey(event)
+    if (pendingMonthMove && Calendar.eventKey(pendingMonthMove.event) === key) return 0
+    return monthDrag && monthDrag.active && Calendar.eventKey(monthDrag.event) === key ? 0.35 : 1
+  }
+  component MonthEventMouse: MouseArea {
+    required property var eventData
+    anchors.fill: parent
+    preventStealing: true
+    enabled: parent.opacity > 0
+    cursorShape: root.monthDrag && root.monthDrag.active
+      ? (root.monthDrag.range ? Qt.ClosedHandCursor : Qt.ForbiddenCursor)
+      : root.monthMoveRefusal(eventData) === "" ? Qt.OpenHandCursor : Qt.PointingHandCursor
+    onPressed: function(mouse) {
+      root.beginMonthGesture()
+      var point = mapToItem(monthGrid, mouse.x, mouse.y)
+      root.monthDrag = { event: Plain.plain(eventData), initial: point,
+        from: root.monthDayAt(point), active: false, range: null }
+    }
+    onPositionChanged: function(mouse) { if (pressed) root.updateMonthDrag(mapToItem(monthGrid, mouse.x, mouse.y)) }
+    onReleased: function(mouse) { root.finishMonthDrag(mapToItem(monthGrid, mouse.x, mouse.y)) }
+    onCanceled: root.cancelMonthDrag()
+  }
   function zoomHours(direction) {
     if ((viewMode === "day" || viewMode === "week") && !detailOpen) weekView.zoomHours(direction)
   }
@@ -57,7 +135,7 @@ Item {
     monthHoverDelay.stop()
     monthOverflow.close()
   }
-  onViewModeChanged: { monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null; syncAgenda() }
+  onViewModeChanged: { cancelMonthDrag(); monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null; syncAgenda() }
   onDaysChanged: syncAgenda()
   // The agenda's clock ticks every minute to drop finished events. Its model
   // changes only when the list does, so a tick leaves the scroll where it was.
@@ -71,7 +149,7 @@ Item {
     function onEventsChanged() { root.syncAgenda() }
     function onNowMsChanged() { root.syncAgenda() }
   }
-  onVisibleMonthChanged: { monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null }
+  onVisibleMonthChanged: { cancelMonthDrag(); monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null }
   onDetailOpenChanged: if (detailOpen) { monthOverflow.close(); monthHoverDelay.stop() }
   Timer {
     id: monthHoverDelay
@@ -136,10 +214,13 @@ Item {
     dimColor: root.dimColor
   }
 
-  onControllerChanged: if (controller && controller.sourcesLoaded)
-    Qt.callLater(root.refresh)
+  onControllerChanged: {
+    cancelMonthDrag()
+    pendingMonthMove = null
+    if (controller && controller.sourcesLoaded) Qt.callLater(root.refresh)
+  }
   onVisibleChanged: {
-    if (!visible) { monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null }
+    if (!visible) { cancelMonthDrag(); monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null }
     else if (controller && controller.sourcesLoaded) Qt.callLater(root.refresh)
   }
 
@@ -153,6 +234,7 @@ Item {
   Connections {
     target: root.Window.window
     function onActiveChanged() {
+      if (!root.Window.window.active) root.cancelMonthDrag()
       if (root.visible && root.Window.window.active && root.controller && root.controller.sourcesLoaded)
         root.refresh()
     }
@@ -161,6 +243,13 @@ Item {
   Connections {
     target: root.controller
     ignoreUnknownSignals: true
+    function onCalendarScopeChanged() { root.cancelMonthDrag(); root.pendingMonthMove = null }
+    function onEnabledSourceKeyChanged() { root.cancelMonthDrag(); root.pendingMonthMove = null }
+    function onEventUpdated(ok, error) {
+      if (!root.pendingMonthMove) return
+      if (!ok) root.pendingMonthMove = null
+      else { root.monthMoveSaved = true; Qt.callLater(root.settleMonthMove) }
+    }
     function onSourcesLoadedChanged() {
       if (root.controller && root.controller.sourcesLoaded) root.refresh()
     }
@@ -178,6 +267,7 @@ Item {
       }
     }
     function onLoadingChanged() {
+      root.settleMonthMove()
       if (root.controller.loading || !root.detailEvent || root.controller.lastError !== "") return
       var source = root.controller.findSource(root.detailEvent.sourceId)
       if (source && source.enabled === false) return
@@ -239,8 +329,9 @@ Item {
     })
   }
 
-  // Escape's first answer while the busy-day preview is up.
+  // Escape cancels a held drag before dismissing the busy-day preview or navigating.
   function dismissPreview() {
+    if (cancelMonthDrag()) return true
     if (!monthOverflow.opened) return false
     monthOverflow.close()
     monthHoverDelay.stop()
@@ -251,14 +342,15 @@ Item {
   function closeDetail() { detailReadSerial++; detailLoading = false; detailError = ""; waitingForEvent = false; detailEvent = null }
 
   function reschedule(event, startMs, endMs) {
-    if (!controller || !event || !event.start || !event.end) return
+    event = Plain.plain(event)
+    if (!controller || !event || !event.start || !event.end) return false
     var refusal = controller.rescheduleRefusal(event)
-    if (refusal !== "") { controller.lastError = refusal; return }
+    if (refusal !== "") { controller.lastError = refusal; return false }
     if ((event.attendees || []).some(function(attendee) { return attendee.self !== true })) {
       controller.composeRequested({ editingEvent: event, startMs: startMs, endMs: endMs })
-      return
+      return false
     }
-    controller.updateEvent(event.sourceId, event, Calendar.rescheduleFields(event, startMs, endMs))
+    return controller.updateEvent(event.sourceId, event, Calendar.rescheduleFields(event, startMs, endMs))
   }
 
   function activateSelection() {
@@ -808,6 +900,7 @@ Item {
               model: Math.min(dayCell.dayEvents.length, dayCell.eventLimit)
               delegate: Rectangle {
                 id: monthEvent
+                objectName: "calendar-month-event-" + String(eventData.googleId || eventData.uid)
                 required property int index
                 readonly property var eventData: dayCell.dayEvents[index]
                 readonly property color eventColor: calendarPalette.colorFor(
@@ -819,6 +912,7 @@ Item {
                   eventData && Calendar.eventKey(eventData) === root.selectedEventId ? 0.28 : 0.15)
                 border.width: eventData && Calendar.eventKey(eventData) === root.selectedEventId ? 2 : 0
                 border.color: eventColor
+                opacity: root.monthEventOpacity(eventData)
 
                 Rectangle {
                   anchors.left: parent.left
@@ -848,28 +942,8 @@ Item {
                   textFormat: Text.PlainText
                 }
 
-                MouseArea {
-                  anchors.fill: parent
-                  cursorShape: Qt.PointingHandCursor
-                  preventStealing: true
-                  property point initial: Qt.point(0, 0)
-                  onPressed: function(mouse) { root.beginMonthGesture(); initial = mapToItem(monthGrid, mouse.x, mouse.y) }
-                  onCanceled: root.monthPointerDown = false
-                  onReleased: function(mouse) {
-                    root.monthPointerDown = false
-                    var point = mapToItem(monthGrid, mouse.x, mouse.y)
-                    if (Math.abs(point.x - initial.x) + Math.abs(point.y - initial.y) < 6) {
-                      root.activateEvent(monthEvent.eventData)
-                      return
-                    }
-                    if (!root.controller || root.controller.rescheduleRefusal(monthEvent.eventData) !== "") return
-                    if (point.x < 0 || point.y < 0 || point.x >= monthGrid.width || point.y >= monthGrid.height) return
-                    var rows = root.days.length / 7
-                    var from = Math.floor(initial.y / (monthGrid.height / rows)) * 7 + Math.floor(initial.x / (monthGrid.width / 7))
-                    var to = Math.floor(point.y / (monthGrid.height / rows)) * 7 + Math.floor(point.x / (monthGrid.width / 7))
-                    var range = Calendar.gestureRange(monthEvent.eventData, to - from, 0, "")
-                    if (range) root.reschedule(monthEvent.eventData, range.start, range.end)
-                  }
+                MonthEventMouse {
+                  eventData: monthEvent.eventData
                 }
               }
             }
@@ -911,6 +985,7 @@ Item {
           color: Qt.alpha(eventColor, Calendar.eventKey(eventData) === root.selectedEventId ? 0.28 : 0.15)
           border.color: eventColor
           border.width: Calendar.eventKey(eventData) === root.selectedEventId ? 1 : 0
+          opacity: root.monthEventOpacity(eventData)
           Rectangle {
             anchors.left: parent.left
             height: parent.height
@@ -950,26 +1025,66 @@ Item {
             font.family: root.panelFontFamily
             font.pixelSize: Style.font.caption
           }
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            preventStealing: true
-            property point initial: Qt.point(0, 0)
-            onPressed: function(mouse) { root.beginMonthGesture(); initial = mapToItem(monthGrid, mouse.x, mouse.y) }
-            onCanceled: root.monthPointerDown = false
-            onReleased: function(mouse) {
-              root.monthPointerDown = false
-              var point = mapToItem(monthGrid, mouse.x, mouse.y)
-              if (Math.abs(point.x - initial.x) + Math.abs(point.y - initial.y) < 6) {
-                root.activateEvent(spanBar.eventData)
-                return
+          MonthEventMouse {
+            eventData: spanBar.eventData
+          }
+        }
+      }
+
+      // One segment per week also previews spans dragged across a row boundary.
+      Repeater {
+        model: Calendar.spanLayout(root.monthMoveEvent ? [root.monthMoveEvent] : [], root.days).segments
+        delegate: Rectangle {
+          required property var modelData
+          objectName: "calendar-month-drop-target-" + modelData.week
+          z: 10
+          x: modelData.startColumn * monthGrid.width / 7 + Style.space(2)
+          y: modelData.week * monthGrid.weekHeight + Style.space(2)
+          width: (modelData.endColumn - modelData.startColumn + 1) * monthGrid.width / 7 - Style.space(4)
+          height: monthGrid.weekHeight - Style.space(4)
+          color: Qt.alpha(root.accentColor, 0.08)
+          border.color: root.accentColor
+          border.width: 1
+          Rectangle {
+            objectName: "calendar-month-move-preview-" + modelData.week
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: Style.space(2)
+            height: Math.min(parent.height, previewLabels.implicitHeight + Style.space(8))
+            color: root.backgroundColor
+            border.color: root.accentColor
+            radius: Style.space(3)
+            clip: true
+            Column {
+              id: previewLabels
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.margins: Style.space(5)
+              Text {
+                width: parent.width
+                text: String(modelData.event.summary || "Untitled event")
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: root.textColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.caption
               }
-              if (!root.controller || root.controller.rescheduleRefusal(spanBar.eventData) !== "") return
-              if (point.x < 0 || point.y < 0 || point.x >= monthGrid.width || point.y >= monthGrid.height) return
-              var from = Math.floor(initial.y / monthGrid.weekHeight) * 7 + Math.floor(initial.x / (monthGrid.width / 7))
-              var to = Math.floor(point.y / monthGrid.weekHeight) * 7 + Math.floor(point.x / (monthGrid.width / 7))
-              var range = Calendar.gestureRange(spanBar.eventData, to - from, 0, "")
-              if (range) root.reschedule(spanBar.eventData, range.start, range.end)
+              Text {
+                objectName: "calendar-month-move-status-" + modelData.week
+                width: parent.width
+                text: (root.pendingMonthMove ? (root.monthMoveSaved ? "Refreshing · " : "Saving · ") : "Move to ")
+                  + Qt.formatDateTime(new Date(modelData.event.start.ms), "ddd d MMM")
+                  + (modelData.event.start.allDay ? "" : " · " + Calendar.timeLabel(modelData.event.start.ms, root.timeFormat))
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                maximumLineCount: 3
+                elide: Text.ElideRight
+                color: root.dimColor
+                font.family: root.panelFontFamily
+                font.pixelSize: Style.font.caption
+              }
             }
           }
         }

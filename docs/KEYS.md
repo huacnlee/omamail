@@ -305,6 +305,8 @@ scrolling under the pointer would fight the mouse.
 
 ## The mouse
 
+In the month calendar, dragging an event previews its destination date. Escape cancels a held drag before navigating back; releasing outside the calendar also cancels. After a drop, the preview stays visible while saving and refreshing, or returns to the original date if saving fails. Events with guests still open the existing confirmation form before saving.
+
 The mouse does not move the keyboard's cursor. A row draws its own hover
 (`MessageRow.hot`), clicking one opens it, and right-clicking one sets the
 cursor explicitly before opening its menu — but hovering does nothing to

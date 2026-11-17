@@ -676,11 +676,8 @@ mod tests {
     use crate::mail::{Account, Mailbox, Provider, ReadRequest};
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use std::{
-        fs,
         future::Future,
-        io::{BufRead, BufReader},
         pin::Pin,
-        process::{Command, Stdio},
         sync::{Arc, Mutex},
     };
 
@@ -1022,26 +1019,14 @@ mod tests {
 
     #[tokio::test]
     async fn jmap_adapter_keeps_thread_state_from_nonrepresentative_members() {
-        let mut peer = Command::new("python3")
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/providers/jmap/mailbox_tls_test.py"
-            ))
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut output = BufReader::new(peer.stdout.take().unwrap());
-        let mut port = String::new();
-        output.read_line(&mut port).unwrap();
-        let mut certificate = String::new();
-        output.read_line(&mut certificate).unwrap();
+        let peer = crate::test_support::jmap::JmapPeer::start("default").await;
+        let port = peer.port;
         let jmap = std::sync::Arc::new(
             crate::providers::jmap::Session::with_test_certificate(
-                &fs::read(certificate.trim()).unwrap(),
+                &crate::test_support::tls::ca_pem(),
             )
             .unwrap(),
         );
-        let port: u16 = port.trim().parse().unwrap();
         let boxes = vec![
             json!({"id":"I","role":"inbox"}),
             json!({"id":"S","role":"sent"}),
@@ -1122,7 +1107,7 @@ mod tests {
         assert_eq!(preview["targetIds"], json!(["e1"]));
         let report_client = reqwest::Client::builder()
             .add_root_certificate(
-                reqwest::Certificate::from_pem(&fs::read(certificate.trim()).unwrap()).unwrap(),
+                reqwest::Certificate::from_pem(&crate::test_support::tls::ca_pem()).unwrap(),
             )
             .build()
             .unwrap();
@@ -1154,7 +1139,5 @@ mod tests {
                     Some("Mailbox/get" | "Email/query" | "Email/get" | "Thread/get")
                 ))
         );
-        let _ = peer.kill();
-        let _ = peer.wait();
     }
 }

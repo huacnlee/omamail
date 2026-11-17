@@ -618,24 +618,8 @@ async fn production_client_refuses_plain_http_before_connecting() {
 
 #[tokio::test]
 async fn real_tls_rejects_untrusted_certificate_before_sending_credentials() {
-    use std::io::{BufRead, BufReader};
-    let mut peer = std::process::Command::new("python3")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/providers/gmail_http_tls_test.py"
-        ))
-        .arg("3")
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut output = BufReader::new(peer.stdout.take().unwrap());
-    let mut port = String::new();
-    output.read_line(&mut port).unwrap();
-    let port: u16 = port.trim().parse().unwrap();
-    let mut certificate_path = String::new();
-    output.read_line(&mut certificate_path).unwrap();
-    let certificate =
-        reqwest::Certificate::from_pem(&std::fs::read(certificate_path.trim()).unwrap()).unwrap();
+    let mut peer = crate::test_support::peers::HttpTlsPeer::start(3).await;
+    let certificate = reqwest::Certificate::from_pem(&crate::test_support::tls::ca_pem()).unwrap();
     let trusted = client_builder()
         .add_root_certificate(certificate)
         .build()
@@ -644,27 +628,22 @@ async fn real_tls_rejects_untrusted_certificate_before_sending_credentials() {
     // reject the mismatched IP hostname (the certificate only names localhost).
     for (client, host) in [(client().unwrap(), "localhost"), (&trusted, "127.0.0.1")] {
         let mut request = get_request();
-        request.url = format!("https://{host}:{port}/messages/abc");
+        request.url = format!("https://{host}:{}/messages/abc", peer.port);
         assert_eq!(
             execute(client, request, DEADLINE).await,
             Err("gmail_http_failed")
         );
-        let mut report = String::new();
-        output.read_line(&mut report).unwrap();
-        assert_eq!(report.trim(), "tls-refused-no-http");
+        assert_eq!(peer.report().await, "tls-refused-no-http");
     }
     // A successful trusted, matching-host control proves that the previous
     // rejection was hostname verification, not a malformed CA/end-entity cert.
     let mut request = get_request();
-    request.url = format!("https://localhost:{port}/messages/abc");
+    request.url = format!("https://localhost:{}/messages/abc", peer.port);
     assert_eq!(
         execute(&trusted, request, DEADLINE).await.unwrap(),
         serde_json::json!({"ok":true})
     );
-    let mut report = String::new();
-    output.read_line(&mut report).unwrap();
-    assert_eq!(report.trim(), "http-received");
-    assert!(peer.wait().unwrap().success());
+    assert_eq!(peer.report().await, "http-received");
 }
 
 #[test]

@@ -39,11 +39,25 @@ async fn owner_submission_ack_loss_replays_one_durable_id_without_another_delive
         Arc::new(|_| Box::pin(async { panic!("submitter must never deliver") })),
         Some(dir.0.clone()),
     );
-    let replay = submitter
-        .shared_call("outbox.enqueue", &params)
+    let replay = submitter.call("outbox.enqueue", &params).await.unwrap();
+    assert_eq!(replay["duplicate"], true);
+    let status = submitter
+        .call(
+            "outbox.snapshot",
+            &json!({"accountId":"a@example.org","sendId":"lost-reply"}),
+        )
         .await
         .unwrap();
-    assert_eq!(replay["duplicate"], true);
+    assert_eq!(status["entries"][0]["state"], "unknown");
+    assert!(status["entries"][0].get("payload").is_none());
+    let other = submitter
+        .call(
+            "outbox.snapshot",
+            &json!({"accountId":"other@example.org","sendId":"lost-reply"}),
+        )
+        .await
+        .unwrap();
+    assert!(other["entries"].as_array().unwrap().is_empty());
     let result = submitter
         .wait_for_send("a@example.org", "lost-reply")
         .await
@@ -56,7 +70,7 @@ async fn owner_submission_ack_loss_replays_one_durable_id_without_another_delive
     let mut conflicting = params;
     conflicting["payload"]["raw"] = json!("different");
     assert_eq!(
-        submitter.shared_call("outbox.enqueue", &conflicting).await,
+        submitter.call("outbox.enqueue", &conflicting).await,
         Err("outbox_send_id_conflict")
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -75,6 +89,18 @@ async fn owner_bridge_rejects_unbounded_frames_unkeyed_mutations_and_payload_rea
         .await
         .unwrap();
     let before = storage::read(&dir.0).unwrap();
+    let submitter = Outbox::with_root(
+        Arc::new(|_| Box::pin(async { panic!("submitter must not deliver") })),
+        Some(dir.0.clone()),
+    );
+    for (method, params) in [
+        ("outbox.flush", json!({"accountId":"a@example.org"})),
+        ("outbox.snapshot", json!({"accountId":"a@example.org"})),
+        ("outbox.snapshot", json!({"accountId":"a@example.org","sendId":"one","includePayloads":true})),
+        ("outbox.enqueue", json!({"accountId":"a@example.org","provider":"gmail","payload":{"raw":"private"}})),
+    ] {
+        assert_eq!(submitter.call(method, &params).await, Err("outbox_in_use"));
+    }
     for (method, params) in [
         (
             "outbox.flush",
@@ -835,6 +861,7 @@ async fn competing_backend_cannot_own_the_same_queue() {
     let second = Outbox::with_root(executor, Some(dir.0.clone()));
     assert_eq!(
         second
+            .inner
             .call("outbox.enqueue", &enqueue("duplicate", "a@example.org", 0))
             .await,
         Err("outbox_in_use")

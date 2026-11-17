@@ -353,6 +353,20 @@ function parseAddressList(value) {
   return result
 }
 
+function fullAddress(address) {
+  if (!address) return ""
+  var name = String(address.display || "")
+  var email = String(address.email || "")
+  return name && email && name !== email ? name + " <" + email + ">" : email || name
+}
+
+function fullAddressList(addresses) {
+  var result = []
+  for (var i = 0; addresses && i < addresses.length; i++)
+    result.push(fullAddress(addresses[i]))
+  return result.join(", ")
+}
+
 function formatAddressList(addresses, limit) {
   var list = Array.isArray(addresses) ? addresses : []
   var max = Math.max(1, Math.floor(Number(limit) || 3))

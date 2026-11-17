@@ -1,13 +1,10 @@
 use super::*;
-use std::io::{BufRead, BufReader, Write};
+use crate::test_support::peers::ScriptedHttpsPeer;
 use std::net::SocketAddr;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 
 struct Peer {
-    process: Child,
-    input: ChildStdin,
-    output: BufReader<ChildStdout>,
+    server: ScriptedHttpsPeer,
     client: reqwest::Client,
     port: u16,
 }
@@ -22,25 +19,11 @@ impl reqwest::dns::Resolve for LoopbackDns {
 }
 
 impl Peer {
-    fn new() -> Self {
-        let mut process = Command::new("python3")
-            .env("PYTHONUTF8", "1")
-            .arg(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/src/calendar/discovery_tls_test.py"
-            ))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let input = process.stdin.take().unwrap();
-        let mut output = BufReader::new(process.stdout.take().unwrap());
-        let mut line = String::new();
-        output.read_line(&mut line).unwrap();
-        let info: Value = serde_json::from_str(&line).unwrap();
-        let address: SocketAddr = format!("127.0.0.1:{}", info["port"]).parse().unwrap();
+    async fn new() -> Self {
+        let server = ScriptedHttpsPeer::start().await;
+        let address: SocketAddr = format!("127.0.0.1:{}", server.port).parse().unwrap();
         let certificate = reqwest::Certificate::from_pem(
-            &std::fs::read(info["certificate"].as_str().unwrap()).unwrap(),
+            &std::fs::read(crate::test_support::tls::testdata("discovery.pem")).unwrap(),
         )
         .unwrap();
         let client = super::super::client_builder()
@@ -49,35 +32,18 @@ impl Peer {
             .build()
             .unwrap();
         Self {
-            process,
-            input,
-            output,
+            server,
             client,
             port: address.port(),
         }
     }
 
-    fn command(&mut self, value: Value) -> Value {
-        writeln!(self.input, "{value}").unwrap();
-        self.input.flush().unwrap();
-        let mut line = String::new();
-        self.output.read_line(&mut line).unwrap();
-        serde_json::from_str(&line).unwrap()
+    fn responses(&self, responses: Value) {
+        self.server.responses(responses);
     }
 
-    fn responses(&mut self, responses: Value) {
-        self.command(json!({"responses": responses}));
-    }
-
-    fn requests(&mut self) -> Vec<Value> {
-        let report = self.command(json!({}));
-        let requests = report["requests"].as_array().unwrap().clone();
-        assert_eq!(
-            report["connections"].as_u64().unwrap(),
-            requests.len() as u64,
-            "an unexpected connection occurred even though TLS prevented an HTTP request"
-        );
-        requests
+    fn requests(&self) -> Vec<Value> {
+        self.server.requests()
     }
 
     async fn dav(&self) -> Result<(Url, String), &'static str> {
@@ -93,17 +59,9 @@ impl Peer {
     }
 }
 
-impl Drop for Peer {
-    fn drop(&mut self) {
-        let _ = writeln!(self.input, "{{\"stop\":true}}");
-        let _ = self.input.flush();
-        let _ = self.process.wait();
-    }
-}
-
 #[tokio::test]
 async fn https_icloud_redirects_never_send_credentials_to_foreign_origins() {
-    let mut peer = Peer::new();
+    let peer = Peer::new().await;
     let foreign_port = format!("https://p37-caldav.icloud.com:{}/stolen", peer.port);
     let loopback = format!("https://127.0.0.1:{}/stolen", peer.port);
     for status in [301, 302, 303, 307, 308] {
@@ -162,7 +120,7 @@ async fn https_icloud_redirects_never_send_credentials_to_foreign_origins() {
 
 #[tokio::test]
 async fn https_graph_redirects_and_next_links_do_not_leak_bearer_tokens() {
-    let mut peer = Peer::new();
+    let peer = Peer::new().await;
     for status in [301, 302, 303, 307, 308] {
         peer.responses(json!([{"status":status,"location":"https://outside.example.test/stolen"}]));
         assert_eq!(

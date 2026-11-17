@@ -703,7 +703,9 @@ fn parse_messages(data: &[u8], folder: &str, full: bool, boxes: &Mailboxes) -> R
         }
         let Some(uid) = uid else { continue };
         let Some(raw) = raw else { continue };
-        let payload = crate::message::parse(raw)?;
+        // The IMAP transport already bounds a whole response at `LIMIT`, so a full
+        // read may carry a message with attachments larger than `MAX_MESSAGE`.
+        let payload = crate::message::parse_up_to(raw, LIMIT)?;
         result.push(json!({"id":format!("{uid}:{folder}"),"threadId":format!("{uid}:{folder}"),"labelIds":flags_labels(&flags,folder,boxes),"internalDate":date,"sizeEstimate":size,"snippet":if full{snippet(&payload)}else{String::new()},"payload":payload}));
     }
     Ok(result)
