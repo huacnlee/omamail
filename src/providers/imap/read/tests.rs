@@ -424,3 +424,11 @@ async fn a_command_that_is_never_answered_ends_the_call() {
     );
     peer.abort();
 }
+#[test]
+fn non_ascii_search_declares_utf8_charset() {
+    assert_eq!(uid_search("UID 1:9 TEXT \"invoice\""), "UID SEARCH UID 1:9 TEXT \"invoice\"");
+    assert_eq!(
+        uid_search("UID 1:9 TEXT \"ατομικής\""),
+        "UID SEARCH CHARSET UTF-8 UID 1:9 TEXT \"ατομικής\""
+    );
+}
