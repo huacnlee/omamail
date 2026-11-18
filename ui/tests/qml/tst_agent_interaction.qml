@@ -188,6 +188,12 @@ Item {
       compare(service.sentEnvelope.cc,"copy@example.org")
       compare(service.sentEnvelope.body,"My reply")
       compare(service.sentEnvelope.inReplyTo,"message")
+      deliveryQueue.deliveryStates = ({"agent-adjusted":"failed"})
+      popup.sentProposals = ({})
+      popup.proposalEdits = ({})
+      verify(!findChild(popup,"agent-apply-draft").enabled)
+      verify(findChild(popup,"agent-proposal-recipients").text.indexOf("Original proposal") === 0)
+      deliveryQueue.deliveryStates = ({})
     }
     function test_second_reply_draft_does_not_inherit_first_draft_chat() {
       popup.composer=draft

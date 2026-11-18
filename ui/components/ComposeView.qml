@@ -144,15 +144,15 @@ DropArea {
     begin("new", null, "", [])
     restoreDraft(Agent.proposalDraft(envelope, parentId, draftKey))
   }
-  function applyProposal(envelope, edits) {
+  function applyProposal(envelope, edits, source) {
     if (!opened || String(envelope.accountId) !== accountId) return false
     if (envelope.draftKey ? String(envelope.draftKey) !== draftKey
         : !replyMessageId || String(envelope.replyMessageId || "") !== replyMessageId) return false
     var quote = retainedReplyQuote()
-    if (edits && edits.includeHistory !== undefined)
+    if (edits && edits.includeHistory !== undefined && source && quote === String(source.replyQuote || ""))
       quote = edits.includeHistory ? String(envelope.replyQuote || "") : ""
-    if (edits && edits.to !== undefined) toField.text = envelope.to
-    if (edits && edits.cc !== undefined) {
+    if (edits && edits.to !== undefined && source && toField.text === String(source.to || "")) toField.text = envelope.to
+    if (edits && edits.cc !== undefined && source && ccField.text === String(source.cc || "")) {
       ccField.text = envelope.cc
       ccVisible = ccField.text !== ""
     }

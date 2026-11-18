@@ -58,7 +58,6 @@ FocusScope {
     if (edits.cc !== undefined) envelope.cc = edits.cc
     if (edits.includeHistory === false) {
       envelope.body = Agent.replyOnly(envelope.body, envelope.replyQuote)
-      envelope.replyQuote = ""
     }
     if (send) {
       if (proposalRoutingChanged(source)) { localError = routingChangedText; return false }
@@ -67,7 +66,7 @@ FocusScope {
       var sent = Object.assign({}, sentProposals); sent[proposal.id] = true; sentProposals = sent
       return true
     }
-    if (composer) return composer.applyProposal(envelope, edits)
+    if (composer) return composer.applyProposal(envelope, edits, source)
     else applyProposalRequested(envelope, job ? String(job.id) : "")
     return true
   }
@@ -568,6 +567,7 @@ FocusScope {
               readonly property string sendId: "agent-" + modelData.id
               readonly property string delivery: queue ? String(queue.deliveryStates[sendId] || "") : ""
               readonly property bool submitted: delivery !== "" || !!root.sentProposals[modelData.id]
+              readonly property bool previousSubmission: submitted && !root.sentProposals[modelData.id]
               Component.onCompleted: if (queue) queue.watchDelivery(sendId)
               width: parent.width
               height: proposalContent.implicitHeight + Style.space(24)
@@ -582,7 +582,8 @@ FocusScope {
                 Text {
                   objectName: "agent-proposal-recipients"
                   width: parent.width
-                  text: proposalCard.envelope ? "From: " + String(proposalCard.envelope.from || "")
+                  text: proposalCard.previousSubmission ? "Original proposal. The recipients and history used for delivery are not available in this preview."
+                    : proposalCard.envelope ? "From: " + String(proposalCard.envelope.from || "")
                     + "\nTo: " + proposalCard.toValue
                     + (proposalCard.ccValue ? "\nCc: " + proposalCard.ccValue : "")
                     + (proposalCard.envelope.bcc ? "\nBcc: " + proposalCard.envelope.bcc : "")
@@ -646,7 +647,7 @@ FocusScope {
                 }
                 Button {
                   objectName: "agent-proposal-history"
-                  visible: !!proposalCard.envelope && !!proposalCard.envelope.replyMessageId
+                  visible: !proposalCard.previousSubmission && !!proposalCard.envelope && !!proposalCard.envelope.replyMessageId
                   readonly property bool included: !!proposalCard.envelope && !!proposalCard.envelope.replyQuote && proposalCard.edits.includeHistory !== false
                   text: included ? "Quoted history: included" : "Quoted history: not included"
                   enabled: !!proposalCard.envelope && !!proposalCard.envelope.replyQuote && !proposalCard.submitted
@@ -673,7 +674,7 @@ FocusScope {
                     tooltipText: "Edit the message, recipients and quoted history"
                     foreground: root.textColor; accent: root.accentColor
                     fontFamily: root.panelFontFamily; bordered: true
-                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && (!proposalCard.submitted || ["failed", "cancelled", "unknown"].indexOf(proposalCard.delivery) >= 0)
+                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && !proposalCard.previousSubmission && (!proposalCard.submitted || ["failed", "cancelled", "unknown"].indexOf(proposalCard.delivery) >= 0)
                     onClicked: {
                       if (root.useProposal(proposalCard.modelData, false) && root.composer) root.close()
                     }
