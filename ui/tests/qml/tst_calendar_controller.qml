@@ -326,6 +326,15 @@ Item {
       compare(controller.caldavServerDiscoveryError, "Update the backend to discover CalDAV calendars")
     }
 
+    function test_a_refused_redirect_says_to_enter_the_caldav_host() {
+      mailService.backend.ready = true
+      verify(controller.discoverCaldavServer("https://example.com", "me@example.org", "secret"))
+      mailService.caldavCallback(null, { code: -32000, message: "calendar_origin_refused" })
+      compare(controller.caldavServerDiscovering, false)
+      verify(controller.caldavServerDiscoveryError.indexOf("Enter the CalDAV server's own address") >= 0,
+        controller.caldavServerDiscoveryError)
+    }
+
     function init() {
       // Reset here rather than at the end of each case: a failed compare aborts
       // the function, so a restore on its last line does not run and one real

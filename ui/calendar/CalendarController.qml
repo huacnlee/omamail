@@ -394,8 +394,11 @@ Item {
     var code = String(error && error.message || error || "")
     if (code === "calendar_auth_refused") return "That username or password was refused"
     if (code === "calendar_invalid_url") return "Enter an https:// CalDAV server address"
+    // Credentials never leave the entered origin, so an RFC 6764 redirect to
+    // another host (example.com -> caldav.example.com) stops here; the way on
+    // is to enter that host directly.
     if (code === "calendar_origin_refused")
-      return "The server tried to redirect discovery somewhere else and was refused"
+      return "The server redirected to a different address, which was refused to keep your password safe. Enter the CalDAV server's own address instead, such as https://caldav.example.com"
     if (code === "calendar_timeout") return "Calendar discovery timed out"
     return "No calendars were found at that address"
   }
