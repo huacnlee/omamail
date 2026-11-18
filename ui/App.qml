@@ -10,6 +10,7 @@ import qs.Ui
 import "account/Model.js" as Model
 import "account" as Account
 import "account/Accounts.js" as Accounts
+import "account/Unified.js" as Unified
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "compose" as Compose
@@ -491,9 +492,14 @@ Item {
     opened = true
     if (service) service.windowOpen = true
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
-    if (payload.accountId && service) service.switchTo(String(payload.accountId))
-    if (payload.messageId) Qt.callLater(function() {
-      root.openMessage(String(payload.messageId))
+    // A notification can outlive the account it names; Service.switchTo
+    // refuses one that is gone, and then there is no message to open either.
+    var accountKnown = true
+    if (payload.accountId && service) accountKnown = service.switchTo(String(payload.accountId)) !== false
+    if (payload.messageId && accountKnown) Qt.callLater(function() {
+      root.openMessage(Unified.notifiedId(!!service && service.unified === true,
+        payload.accountId, payload.messageId))
+      if (windowFocus.item) windowFocus.item.bringToFront()
     })
     if (payload.view === "calendar" && showCalendar()) {
       Qt.callLater(function() {
@@ -1378,6 +1384,17 @@ Item {
       searchBar.setQuery(text)
       root.backToList()
     })
+  }
+
+  // Hyprland only: the standalone host has no compositor to ask. The QML test
+  // runner clears HYPRLAND_INSTANCE_SIGNATURE so a test can never focus the
+  // developer's real windows. See hyprland/WindowFocus.qml.
+  Loader {
+    id: windowFocus
+    active: !root.standaloneWindowChrome
+      && !!Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
+    source: "hyprland/WindowFocus.qml"
+    onLoaded: item.windowTitle = Qt.binding(function() { return window.title })
   }
 
   FloatingWindow {
