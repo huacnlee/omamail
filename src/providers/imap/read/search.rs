@@ -306,7 +306,7 @@ async fn step(
             let live = if folder.excluded { "" } else { "UNDELETED " };
             let data = command(
                 &mut wire,
-                &format!("UID SEARCH UID {first}:{last} {live}{criteria}"),
+                &uid_search(&format!("UID {first}:{last} {live}{criteria}")),
             )
             .await?;
             matches = search_uids(&data)?
