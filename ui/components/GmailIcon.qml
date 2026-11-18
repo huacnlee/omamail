@@ -42,12 +42,14 @@ Item {
       var h = height
       if (w <= 0 || h <= 0) return
 
-      // The body is inset vertically so a wide-but-short envelope keeps the
-      // 3:2 proportion a letter actually has.
+      // The bar scales every icon by its longest side, so the ink has to fill
+      // the square to read at the same size as its neighbours. A 3:2 letter
+      // left the envelope looking a size smaller; about 6:5 still reads as an
+      // envelope rather than a box.
       var left = w * 0.06
       var right = w * 0.94
-      var top = h * 0.20
-      var bottom = h * 0.80
+      var top = h * 0.13
+      var bottom = h * 0.87
       var stroke = Math.max(1, w * 0.085)
 
       ctx.strokeStyle = root.color
@@ -72,11 +74,12 @@ Item {
       ctx.strokeStyle = root.markColor
       ctx.lineWidth = Math.max(1, stroke * 0.54)
       ctx.beginPath()
-      ctx.moveTo(left + innerW * 0.30, bottom - innerH * 0.18)
-      ctx.lineTo(left + innerW * 0.30, top + innerH * 0.36)
-      ctx.lineTo(left + innerW * 0.50, top + innerH * 0.60)
-      ctx.lineTo(left + innerW * 0.70, top + innerH * 0.36)
-      ctx.lineTo(left + innerW * 0.70, bottom - innerH * 0.18)
+      // The stems span 0.27–0.73 so the gap above the M matches the gap below.
+      ctx.moveTo(left + innerW * 0.30, top + innerH * 0.73)
+      ctx.lineTo(left + innerW * 0.30, top + innerH * 0.27)
+      ctx.lineTo(left + innerW * 0.50, top + innerH * 0.52)
+      ctx.lineTo(left + innerW * 0.70, top + innerH * 0.27)
+      ctx.lineTo(left + innerW * 0.70, top + innerH * 0.73)
       ctx.stroke()
     }
   }
