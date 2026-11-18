@@ -8,8 +8,8 @@ pub(crate) mod diagnostics;
 mod discovery;
 pub mod invitations;
 pub mod reminders;
-pub use discovery::{discover, discover_caldav_server};
 pub use discovery::google as discover_google;
+pub use discovery::{discover, discover_caldav_server};
 
 const LIMIT: usize = 16 * 1024 * 1024;
 static CLIENT: OnceLock<Result<Client, &'static str>> = OnceLock::new();

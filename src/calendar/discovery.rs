@@ -380,7 +380,16 @@ async fn dav_propfind(
     body: &'static str,
     resolve: &dyn Fn(&Url, &str) -> Result<Url, &'static str>,
 ) -> Result<(Url, String), &'static str> {
-    dav_propfind_with_client(super::client()?, url, username, password, depth, body, resolve).await
+    dav_propfind_with_client(
+        super::client()?,
+        url,
+        username,
+        password,
+        depth,
+        body,
+        resolve,
+    )
+    .await
 }
 
 async fn dav_propfind_with_client(
@@ -655,8 +664,15 @@ async fn icloud(account: &str) -> Result<Value, &'static str> {
     let (principal, home_xml) =
         dav_propfind(principal, &username, &password, "0", HOME, &resolve_icloud).await?;
     let home = resolve_icloud(&principal, &nested_href(&home_xml, b"calendar-home-set")?)?;
-    let (home, collections_xml) =
-        dav_propfind(home, &username, &password, "1", COLLECTIONS, &resolve_icloud).await?;
+    let (home, collections_xml) = dav_propfind(
+        home,
+        &username,
+        &password,
+        "1",
+        COLLECTIONS,
+        &resolve_icloud,
+    )
+    .await?;
     let build = |url: &Url, name: &str, writable: bool| {
         json!({
             "sourceId": source_id("icloud", account, url.as_str(), false),
@@ -729,8 +745,10 @@ async fn resolve_caldav_root(
     let well_known = origin
         .join("/.well-known/caldav")
         .map_err(|_| "calendar_invalid_url")?;
-    match dav_propfind_status(client, well_known, username, password, "0", PRINCIPAL, resolve)
-        .await
+    match dav_propfind_status(
+        client, well_known, username, password, "0", PRINCIPAL, resolve,
+    )
+    .await
     {
         Ok((resolved, StatusCode::MULTI_STATUS, _)) => Ok(resolved),
         Ok(_) | Err("calendar_request_failed") => Ok(origin.clone()),
@@ -754,7 +772,10 @@ async fn caldav_server_with_client(
     let (root, principal_xml) =
         dav_propfind_with_client(client, root, username, password, "0", PRINCIPAL, &resolve)
             .await?;
-    let principal = resolve(&root, &nested_href(&principal_xml, b"current-user-principal")?)?;
+    let principal = resolve(
+        &root,
+        &nested_href(&principal_xml, b"current-user-principal")?,
+    )?;
     let (principal, home_xml) =
         dav_propfind_with_client(client, principal, username, password, "0", HOME, &resolve)
             .await?;
@@ -762,9 +783,7 @@ async fn caldav_server_with_client(
     let (home, collections_xml) =
         dav_propfind_with_client(client, home, username, password, "1", COLLECTIONS, &resolve)
             .await?;
-    let build = |url: &Url, name: &str, writable: bool| {
-        json!({"url": url.as_str(), "name": name, "readOnly": !writable})
-    };
+    let build = |url: &Url, name: &str, writable: bool| json!({"url": url.as_str(), "name": name, "readOnly": !writable});
     let calendars = dav_calendars(&collections_xml, &home, "Calendar", &resolve, &build)?;
     Ok(json!({"calendars": calendars}))
 }
@@ -861,9 +880,7 @@ mod tests {
     fn dav_parser_returns_only_event_calendars_and_access() {
         let xml = r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/123/calendars/work/</d:href><d:propstat><d:prop><d:displayname>Work &amp; Travel</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set><d:current-user-privilege-set><d:privilege><d:write-content/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response><d:response><d:href>/123/reminders/</d:href><d:propstat><d:prop><d:resourcetype><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set></d:prop></d:propstat></d:response></d:multistatus>"#;
         let base = Url::parse("https://p37-caldav.icloud.com/123/calendars/").unwrap();
-        let build = |url: &Url, name: &str, writable: bool| {
-            json!({"url": url.as_str(), "name": name, "readOnly": !writable})
-        };
+        let build = |url: &Url, name: &str, writable: bool| json!({"url": url.as_str(), "name": name, "readOnly": !writable});
         let values = dav_calendars(xml, &base, "Calendar", &resolve_icloud, &build).unwrap();
         assert_eq!(values.len(), 1);
         assert_eq!(values[0]["name"], "Work & Travel");
@@ -882,9 +899,7 @@ mod tests {
     fn dav_parser_reads_an_aggregate_all_privilege_as_writable() {
         let xml = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/123/calendars/home/</d:href><d:propstat><d:prop><d:displayname>Home</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:current-user-privilege-set><d:privilege><d:all/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response><d:response><d:href>/123/calendars/shared/</d:href><d:propstat><d:prop><d:displayname>Shared</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:current-user-privilege-set><d:privilege><d:read/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response></d:multistatus>"#;
         let base = Url::parse("https://p37-caldav.icloud.com/123/calendars/").unwrap();
-        let build = |url: &Url, name: &str, writable: bool| {
-            json!({"url": url.as_str(), "name": name, "readOnly": !writable})
-        };
+        let build = |url: &Url, name: &str, writable: bool| json!({"url": url.as_str(), "name": name, "readOnly": !writable});
         let values = dav_calendars(xml, &base, "Calendar", &resolve_icloud, &build).unwrap();
         assert_eq!(values.len(), 2);
         assert_eq!(values[0]["name"], "Home");
