@@ -513,7 +513,10 @@ Item {
         compare(view.firstHour, 0)
         compare(view.lastHour, 24)
         for (var i = 0; i < 20; i++) mouseWheel(scroll, scroll.width - 20, scroll.height / 2, 0, -120)
-        compare(Math.round(scroll.contentY + scroll.height), Math.round(scroll.contentHeight))
+        // The wheel glides; the gesture below needs it landed.
+        tryVerify(function() {
+          return Math.abs(scroll.contentY + scroll.height - scroll.contentHeight) < 0.01
+        }, 2000)
         var slots = findChild(view, "calendar-time-slots-2026-10-01")
         created.clear()
         var late = 23 * scroll.hourHeight
@@ -523,7 +526,7 @@ Item {
         compare(created.count, 1)
         compare(new Date(created.signalArguments[0][0]).getHours(), 23)
         for (var j = 0; j < 20; j++) mouseWheel(scroll, scroll.width - 20, scroll.height / 2, 0, 120)
-        compare(scroll.contentY, 0)
+        tryCompare(scroll, "contentY", 0, 2000)
       }
       view.resetTimeScroll()
     }

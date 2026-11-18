@@ -267,10 +267,10 @@ Item {
       view.contentY = 0
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, -120)
-      compare(view.contentY, 240, "one notch, in the real hierarchy")
+      tryCompare(view, "contentY", 240, 2000, "one notch, in the real hierarchy")
 
       mouseWheel(view, view.width / 2, view.height / 2, 0, 120)
-      compare(view.contentY, 0)
+      tryCompare(view, "contentY", 0, 2000)
     }
 
     function test_the_rail_lists_the_pages_sections_in_order() {
