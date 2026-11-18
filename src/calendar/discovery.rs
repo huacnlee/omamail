@@ -385,13 +385,29 @@ async fn dav_propfind(
 
 async fn dav_propfind_with_client(
     client: &reqwest::Client,
-    mut url: Url,
+    url: Url,
     username: &str,
     password: &str,
     depth: &str,
     body: &'static str,
     resolve: &dyn Fn(&Url, &str) -> Result<Url, &'static str>,
 ) -> Result<(Url, String), &'static str> {
+    dav_propfind_status(client, url, username, password, depth, body, resolve)
+        .await
+        .map(|(url, _, body)| (url, body))
+}
+
+// The same walk, also returning the final status, for a caller that must
+// tell a WebDAV answer (207) from any other success.
+async fn dav_propfind_status(
+    client: &reqwest::Client,
+    mut url: Url,
+    username: &str,
+    password: &str,
+    depth: &str,
+    body: &'static str,
+    resolve: &dyn Fn(&Url, &str) -> Result<Url, &'static str>,
+) -> Result<(Url, StatusCode, String), &'static str> {
     for _ in 0..4 {
         let response = client
             .request(Method::from_bytes(b"PROPFIND").unwrap(), url.clone())
@@ -414,10 +430,11 @@ async fn dav_propfind_with_client(
         if matches!(response.status().as_u16(), 401 | 403) {
             return Err("calendar_auth_refused");
         }
-        if response.status() != StatusCode::MULTI_STATUS && !response.status().is_success() {
+        let status = response.status();
+        if status != StatusCode::MULTI_STATUS && !status.is_success() {
             return Err("calendar_request_failed");
         }
-        return Ok((url, response_body(response).await?));
+        return Ok((url, status, response_body(response).await?));
     }
     Err("calendar_too_many_redirects")
 }
@@ -696,8 +713,10 @@ fn caldav_server_params(params: &Value) -> Result<(String, String, String), &'st
 // RFC 6764: a bare server address is expected to answer at its own
 // `.well-known/caldav` with a redirect naming where the real service lives.
 // A server with no well-known support answers with an ordinary failure
-// (commonly 404), which is not itself an error here — discovery falls back
-// to the address the user entered. An authentication refusal or a redirect
+// (commonly 404), or with a success that is not WebDAV at all (a web host's
+// 200 HTML page). Neither is itself an error here: only a 207 Multi-Status
+// counts as a CalDAV answer, and anything else falls back to the address
+// the user entered. An authentication refusal or a redirect
 // that tried to leave the entered origin is a real answer and is returned
 // as-is rather than papered over by that fallback.
 async fn resolve_caldav_root(
@@ -710,11 +729,11 @@ async fn resolve_caldav_root(
     let well_known = origin
         .join("/.well-known/caldav")
         .map_err(|_| "calendar_invalid_url")?;
-    match dav_propfind_with_client(client, well_known, username, password, "0", PRINCIPAL, resolve)
+    match dav_propfind_status(client, well_known, username, password, "0", PRINCIPAL, resolve)
         .await
     {
-        Ok((resolved, _)) => Ok(resolved),
-        Err("calendar_request_failed") => Ok(origin.clone()),
+        Ok((resolved, StatusCode::MULTI_STATUS, _)) => Ok(resolved),
+        Ok(_) | Err("calendar_request_failed") => Ok(origin.clone()),
         Err(code) => Err(code),
     }
 }

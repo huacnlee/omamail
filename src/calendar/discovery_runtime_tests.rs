@@ -228,6 +228,33 @@ async fn a_fastmail_like_bare_address_resolves_through_its_own_well_known_redire
     }
 }
 
+// A web host that serves its own page at any path answers the well-known
+// PROPFIND with a 200, not a 207. That is not a CalDAV answer: discovery
+// falls back to the entered address instead of reading the page as one.
+#[tokio::test]
+async fn a_well_known_answered_by_a_web_page_falls_back_to_the_entered_address() {
+    let peer = Peer::new().await;
+    peer.responses(json!([
+        {"status":200,"body":"<!doctype html><html><body>Welcome</body></html>"},
+        {"status":207,"body":r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/</d:href><d:propstat><d:prop><d:current-user-principal><d:href>/dav/principals/me/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>"#},
+        {"status":207,"body":r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/dav/principals/me/</d:href><d:propstat><d:prop><c:calendar-home-set><d:href>/dav/calendars/me/</d:href></c:calendar-home-set></d:prop></d:propstat></d:response></d:multistatus>"#},
+        {"status":207,"body":r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>/dav/calendars/me/home/</d:href><d:propstat><d:prop><d:displayname>Home</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set></d:prop></d:propstat></d:response></d:multistatus>"#}
+    ]));
+    let result = peer
+        .caldav_server("https://caldav.fastmail.com/dav/")
+        .await
+        .unwrap();
+    assert_eq!(result["calendars"][0]["name"], "Home");
+    assert_eq!(
+        result["calendars"][0]["url"],
+        "https://caldav.fastmail.com/dav/calendars/me/home/"
+    );
+    let requests = peer.requests();
+    assert_eq!(requests.len(), 4, "{requests:?}");
+    assert_eq!(requests[0]["path"], "/.well-known/caldav");
+    assert_eq!(requests[1]["path"], "/dav/");
+}
+
 // The well-known redirect is exactly the hop `https_icloud_redirects_never_
 // send_credentials_to_foreign_origins` already distrusts a server-supplied
 // address at — generic discovery must refuse it just as strictly, and must
