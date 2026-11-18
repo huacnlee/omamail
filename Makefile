@@ -270,6 +270,7 @@ test-qml:
 	python3 tests/test_outlook_http.py "$(QMLTESTRUNNER)"
 	python3 tests/test_sidebar_text.py "$(QMLTESTRUNNER)"
 	python3 tests/test_tooltip_text.py "$(QMLTESTRUNNER)"
+	python3 tests/test_calendar_discovery_text.py "$(QMLTESTRUNNER)"
 	QMLTESTRUNNER="$(QMLTESTRUNNER)" cargo test --locked --lib message::html::tests::native_output_cannot_trigger_qt_resource_requests -- --ignored
 
 test-app-qml:

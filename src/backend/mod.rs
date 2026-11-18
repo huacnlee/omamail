@@ -447,6 +447,9 @@ impl Session {
             }
             return Box::pin(crate::calendar::discover(params)).await;
         }
+        if method == "calendar.discoverCaldavServer" {
+            return Box::pin(crate::calendar::discover_caldav_server(params)).await;
+        }
         if method == "cache.bodyPutUpload" {
             let mut params = params.as_object().cloned().ok_or("invalid_params")?;
             if params
