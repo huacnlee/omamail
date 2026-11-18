@@ -26,7 +26,7 @@ Item {
       resolvedProvider = ""
       providerAvailable = selectedAgent === "System default" && selectedModel === ""
       availabilityError = providerAvailable ? ""
-        : "Update the mail backend to choose an AI agent or model (API 6 required)."
+        : "Update the mail backend to choose an AI agent or model (API 6 or newer required)."
       return
     }
     if (!providerAvailable) availabilityError = "Checking the selected AI agent..."

@@ -23,7 +23,7 @@ function startOptions(payload, selectedAgent, selectedModel, apiVersion) {
   var selected = provider(selectedAgent)
   if (!validModel(model)) return { error: "Enter a model ID without spaces or control characters (up to 200 characters)." }
   if ((selected !== "" || model !== "") && !(Number(apiVersion) >= 6))
-    return { error: "Update the mail backend to choose an AI agent or model (API 6 required)." }
+    return { error: "Update the mail backend to choose an AI agent or model (API 6 or newer required)." }
   var params = {payload: payload}
   if (selected !== "") params.provider = selected
   if (model !== "") params.model = model

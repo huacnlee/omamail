@@ -149,7 +149,7 @@ Item {
       bridge.apiVersion = 5
       verify(!runner.start({prompt:"Question"}))
       compare(bridge.requests.length, 0)
-      verify(runner.lastError.indexOf("API 6") >= 0)
+      verify(runner.lastError.indexOf("API 6 or newer") >= 0)
       bridge.apiVersion = 6
       verify(runner.start({prompt:"Question"}))
       compare(bridge.requests[0].params.provider, "opencode")
