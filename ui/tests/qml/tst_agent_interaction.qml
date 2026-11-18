@@ -483,6 +483,7 @@ Item {
       verify(waitForRendering(popup))
       var send=findChild(popup,"agent-send-email")
       var edit=findChild(popup,"agent-apply-draft")
+      verify(popup.useProposal(proposal,true))
       deliveryQueue.deliveryStates=({"agent-p":"queued"})
       compare(send.text,"Queued for sending")
       compare(send.enabled,false)
