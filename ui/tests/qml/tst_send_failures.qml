@@ -284,6 +284,7 @@ Item {
       verify(recipients.text.indexOf("To: original@example.test") >= 0)
       verify(named(app.composeAgent, "agent-proposal-routing-changed").visible)
       if (data.field === "to") {
+        app.composeAgent.editProposalField(card.id, "to", "preview@example.test")
         verify(app.composeAgent.useProposal(card, false))
         compare(named(compose, "compose-to-field").text, "corrected@example.test")
         compare(named(compose, "compose-body-editor").text, card.body)
@@ -295,6 +296,7 @@ Item {
         compare(composed[0].params.fields.body, card.body)
       }
       runner.shownProposals = []
+      app.composeAgent.proposalEdits = ({})
       runner.jobs = []; runner.scopesByAccount = ({})
       app.composeAgent.close()
       BackendFixture.markReady(mailService)

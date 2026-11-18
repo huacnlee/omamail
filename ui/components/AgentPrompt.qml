@@ -27,6 +27,14 @@ FocusScope {
   property var returnFocus: null
   property string localError: ""
   property var sentProposals: ({})
+  property var proposalEdits: ({})
+  function editProposalField(id, field, value) {
+    var edits = Object.assign({}, proposalEdits)
+    var entry = Object.assign({}, edits[id] || {})
+    entry[field] = value
+    edits[id] = entry
+    proposalEdits = edits
+  }
   readonly property var proposals: service && service.backendCanAgentProposals && service.agentShownId === (job ? String(job.id) : "")
     ? (service.agentShownProposals || []) : []
   onProposalsChanged: syncConversation()
@@ -35,23 +43,30 @@ FocusScope {
     return ({subject:"",body:"",applicable:false})
   }
   signal applyProposalRequested(var envelope, string parentId)
-  readonly property string routingChangedText: "Recipients or sender changed. Use this version, then send from the composer."
+  readonly property string routingChangedText: "The sender, recipients or quoted history changed. Edit the draft to send with your current choices."
   function proposalRoutingChanged(envelope) {
     return !!proposalComposer && typeof proposalComposer.proposalRoutingChanged === "function"
       && proposalComposer.proposalRoutingChanged(envelope)
   }
   function useProposal(proposal, send) {
-    var envelope = proposal.envelope ? Agent.proposalEnvelope(Object.assign({}, proposal.envelope,
+    var edits = proposalEdits[proposal.id] || {}
+    var source = proposal.envelope
+    var envelope = source ? Agent.proposalEnvelope(Object.assign({}, source,
       {subject: String(proposal.subject), body: String(proposal.body)})) : null
     if (!envelope || !proposal.applicable || (send && sentProposals[proposal.id])) return false
+    if (edits.to !== undefined) envelope.to = edits.to
+    if (edits.cc !== undefined) envelope.cc = edits.cc
+    if (edits.includeHistory === false) {
+      envelope.body = Agent.replyOnly(envelope.body, envelope.replyQuote)
+    }
     if (send) {
-      if (proposalRoutingChanged(envelope)) { localError = routingChangedText; return false }
-      var accepted = proposalComposer && proposalComposer.sendProposal(envelope, proposal.id, job ? String(job.id) : "")
+      if (proposalRoutingChanged(source)) { localError = routingChangedText; return false }
+      var accepted = proposalComposer && proposalComposer.sendProposal(envelope, proposal.id, job ? String(job.id) : "", source)
       if (!accepted) { localError = "Could not queue this email. Check its recipients and mailbox."; return false }
       var sent = Object.assign({}, sentProposals); sent[proposal.id] = true; sentProposals = sent
       return true
     }
-    if (composer) return composer.applyProposal(envelope)
+    if (composer) return composer.applyProposal(envelope, edits, source)
     else applyProposalRequested(envelope, job ? String(job.id) : "")
     return true
   }
@@ -542,12 +557,17 @@ FocusScope {
               objectName: "agent-draft-proposal"
               readonly property var modelData: parent.proposal
               readonly property var envelope: modelData.envelope || null
+              readonly property var edits: root.proposalEdits[modelData.id] || ({})
+              readonly property string toValue: edits.to !== undefined ? edits.to : String(envelope && envelope.to || "")
+              readonly property string ccValue: edits.cc !== undefined ? edits.cc : String(envelope && envelope.cc || "")
+              property bool editingRecipients: false
               readonly property bool routingChanged: root.proposalRoutingChanged(envelope)
               readonly property var queue: root.service && typeof root.service.agentProposalQueue === "function" && envelope
                 ? root.service.agentProposalQueue(envelope.accountId) : null
               readonly property string sendId: "agent-" + modelData.id
               readonly property string delivery: queue ? String(queue.deliveryStates[sendId] || "") : ""
               readonly property bool submitted: delivery !== "" || !!root.sentProposals[modelData.id]
+              readonly property bool previousSubmission: submitted && !root.sentProposals[modelData.id]
               Component.onCompleted: if (queue) queue.watchDelivery(sendId)
               width: parent.width
               height: proposalContent.implicitHeight + Style.space(24)
@@ -562,9 +582,10 @@ FocusScope {
                 Text {
                   objectName: "agent-proposal-recipients"
                   width: parent.width
-                  text: proposalCard.envelope ? "From: " + String(proposalCard.envelope.from || "")
-                    + "\nTo: " + String(proposalCard.envelope.to || "")
-                    + (proposalCard.envelope.cc ? "\nCc: " + proposalCard.envelope.cc : "")
+                  text: proposalCard.previousSubmission ? "Original proposal. The recipients and history used for delivery are not available in this preview."
+                    : proposalCard.envelope ? "From: " + String(proposalCard.envelope.from || "")
+                    + "\nTo: " + proposalCard.toValue
+                    + (proposalCard.ccValue ? "\nCc: " + proposalCard.ccValue : "")
                     + (proposalCard.envelope.bcc ? "\nBcc: " + proposalCard.envelope.bcc : "")
                     + (proposalCard.envelope.replyTo ? "\nReply-To: " + proposalCard.envelope.replyTo : "")
                     : "This proposal has no saved recipients or attachment snapshot. Ask again from its message or draft."
@@ -573,6 +594,37 @@ FocusScope {
                   color: root.dimColor
                   font.family: root.panelFontFamily
                   font.pixelSize: Style.font.caption
+                }
+                Button {
+                  objectName: "agent-edit-recipients"
+                  visible: !!proposalCard.envelope && !proposalCard.submitted
+                  text: proposalCard.editingRecipients ? "Done editing recipients" : "Edit recipients"
+                  foreground: root.textColor
+                  onClicked: proposalCard.editingRecipients = !proposalCard.editingRecipients
+                }
+                Repeater {
+                  model: proposalCard.editingRecipients && !proposalCard.submitted ? ["To", "Cc"] : []
+                  Row {
+                    required property string modelData
+                    width: proposalContent.width
+                    Text {
+                      width: Style.space(32)
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: parent.modelData
+                      color: root.dimColor
+                      font.family: root.panelFontFamily
+                    }
+                    TextField {
+                      objectName: "agent-proposal-" + parent.modelData.toLowerCase()
+                      width: parent.width - Style.space(32)
+                      text: parent.modelData === "To" ? proposalCard.toValue : proposalCard.ccValue
+                      placeholderText: "recipient@example.com"
+                      foreground: root.textColor
+                      accent: root.accentColor
+                      font.family: root.panelFontFamily
+                      onTextEdited: root.editProposalField(proposalCard.modelData.id, parent.modelData.toLowerCase(), text)
+                    }
+                  }
                 }
                 Text {
                   width: parent.width
@@ -593,6 +645,16 @@ FocusScope {
                   font.family: root.panelFontFamily
                   font.pixelSize: Style.font.bodySmall
                 }
+                Button {
+                  objectName: "agent-proposal-history"
+                  visible: !proposalCard.previousSubmission && !!proposalCard.envelope && !!proposalCard.envelope.replyMessageId
+                  readonly property bool included: !!proposalCard.envelope && !!proposalCard.envelope.replyQuote && proposalCard.edits.includeHistory !== false
+                  text: included ? "Quoted history: included" : "Quoted history: not included"
+                  enabled: !!proposalCard.envelope && !!proposalCard.envelope.replyQuote && !proposalCard.submitted
+                  foreground: root.textColor
+                  tooltipText: included ? "Omit quoted history" : "Include quoted history"
+                  onClicked: root.editProposalField(proposalCard.modelData.id, "includeHistory", !included)
+                }
                 Text {
                   width: parent.width
                   visible: !!proposalCard.envelope && proposalCard.envelope.attachments.length > 0
@@ -608,11 +670,14 @@ FocusScope {
                   spacing: Style.space(8)
                   Button {
                     objectName: "agent-apply-draft"
-                    text: root.composer ? "Use this version" : "Edit draft..."
+                    text: "Edit draft..."
+                    tooltipText: "Edit the message, recipients and quoted history"
                     foreground: root.textColor; accent: root.accentColor
                     fontFamily: root.panelFontFamily; bordered: true
-                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && (!proposalCard.submitted || ["failed", "cancelled", "unknown"].indexOf(proposalCard.delivery) >= 0)
-                    onClicked: root.useProposal(proposalCard.modelData, false)
+                    enabled: !!proposalCard.envelope && proposalCard.modelData.applicable && !proposalCard.previousSubmission && (!proposalCard.submitted || ["failed", "cancelled", "unknown"].indexOf(proposalCard.delivery) >= 0)
+                    onClicked: {
+                      if (root.useProposal(proposalCard.modelData, false) && root.composer) root.close()
+                    }
                   }
                   Button {
                     objectName: "agent-send-email"
