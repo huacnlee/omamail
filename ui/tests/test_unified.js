@@ -28,6 +28,13 @@ assert.strictEqual(
 // Anything that is not a composed id addresses nothing rather than being
 // guessed at.
 deepEqual(unified.splitUnifiedId("42"), { accountId: "", id: "" })
+
+// A notification's message id, as the list on screen addresses it.
+assert.strictEqual(unified.notifiedId(true, "me@example.org", "42"), "me@example.org" + SEP + "42")
+assert.strictEqual(unified.notifiedId(false, "me@example.org", "42"), "42", "one mailbox: its own id")
+assert.strictEqual(unified.notifiedId(true, "", "42"), "42", "no account to compose with")
+assert.strictEqual(unified.notifiedId(true, "a@b.com", "a@b.com" + SEP + "42"), "a@b.com" + SEP + "42",
+  "an id that is already composed is not composed twice")
 deepEqual(unified.splitUnifiedId(""), { accountId: "", id: "" })
 deepEqual(unified.splitUnifiedId(unified.unifiedId("", "42")),
   { accountId: "", id: "" }, "an empty account is not an account")

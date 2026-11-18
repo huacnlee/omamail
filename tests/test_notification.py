@@ -72,6 +72,47 @@ class NotificationTest(unittest.TestCase):
             self.assertEqual([arg for arg in args[:-3] if arg.startswith('--action=')],
                 ['--action=default=Open event...', '--action=snooze=Snooze', '--action=dismiss=Dismiss'])
 
+    def test_summon_target_rides_on_the_notification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory)
+            notify = tmp / 'notify-send'
+            notify.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
+                              'open(os.environ["CAPTURE"],"w").write(json.dumps(sys.argv[1:]))\n')
+            notify.chmod(0o700)
+            env = dict(os.environ, PATH=str(tmp) + ':' + os.environ['PATH'],
+                       XDG_CACHE_HOME=str(tmp / 'cache'), CAPTURE=str(tmp / 'argv'))
+
+            def run(*target):
+                if (tmp / 'argv').exists():
+                    (tmp / 'argv').unlink()
+                result = subprocess.run(['python3', str(ROOT / 'scripts/notify-mail.py'), *target,
+                    '#eeeeee', '#abcdef', '--', 'title', 'body'], env=env, cwd=tmp)
+                self.assertEqual(result.returncode, 0)
+                return json.loads((tmp / 'argv').read_text())
+
+            target = json.dumps({'accountId': 'imap:a@example.org', 'messageId': 'INBOX:42',
+                                 'mailto': '$(touch forbidden)'})
+            args = run('--summon', target)
+            hint = args[args.index('-h') + 1]
+            prefix = 'string:omarchy-exec-argv:'
+            self.assertTrue(hint.startswith(prefix))
+            argv = json.loads(hint[len(prefix):])
+            self.assertEqual(argv[:4], ['omarchy-shell', 'shell', 'summon', 'omamail'])
+            self.assertEqual(json.loads(argv[4]),
+                {'accountId': 'imap:a@example.org', 'messageId': 'INBOX:42'}, 'rebuilt, extras dropped')
+            self.assertIn('--action=default=Read...', args)
+            self.assertEqual(args[-3:], ['--', 'title', 'body'])
+
+            self.assertNotIn('-h', run(), 'no target, no click command')
+            # A target that does not validate drops the click command, never the notification.
+            for bad in ['[]', '{"accountId": "a"}', '{"accountId": 1, "messageId": "m"}', 'nope',
+                        json.dumps({'accountId': 'a', 'messageId': 'm\0x'}),
+                        json.dumps({'accountId': 'a', 'messageId': 'm' * 2049})]:
+                args = run('--summon', bad)
+                self.assertNotIn('-h', args, bad)
+                self.assertEqual(args[-3:], ['--', 'title', 'body'])
+            self.assertFalse((tmp / 'forbidden').exists())
+            self.assertFalse((ROOT / 'forbidden').exists())
 
 if __name__ == '__main__':
     unittest.main()
