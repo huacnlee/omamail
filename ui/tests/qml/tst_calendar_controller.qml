@@ -25,7 +25,8 @@ Item {
     property var credentialWrites: []
     property var configWrites: []
     property var configCallback: null
-    property var backend: ({ ready: false, apiVersion: 10, call: function(method, params, callback) {
+    property var backend: ({ ready: false, apiVersion: 10,
+      protocolInfo: ({ methods: ["calendar.discoverCaldavServer"] }), call: function(method, params, callback) {
       mailService.requests.push({ method: method, params: params })
       if (method === "calendar.discover") {
         mailService.discoveryCallback = callback
@@ -315,7 +316,10 @@ Item {
 
     function test_caldav_discovery_waits_for_a_backend_that_has_it() {
       mailService.backend.ready = true
-      mailService.backend.apiVersion = 6
+      // A released backend of API 7 to 9 predates the method; the version
+      // number alone must not open the wizard.
+      mailService.backend.apiVersion = 9
+      mailService.backend.protocolInfo = ({ methods: ["calendar.discover"] })
       verify(!controller.canDiscoverCaldavServer())
       verify(!controller.discoverCaldavServer("https://caldav.example", "me@example.org", "first"))
       compare(mailService.requests.length, 0)
@@ -337,7 +341,7 @@ Item {
       mailService.verifyCallback = null
       mailService.discoveryCallback = null
       mailService.caldavCallback = null
-      mailService.backend.apiVersion = 7
+      mailService.backend.protocolInfo = ({ methods: ["calendar.discoverCaldavServer"] })
       controller.cancelCaldavServerDiscovery()
       caldavSpy.clear()
       caldavAddedSpy.clear()

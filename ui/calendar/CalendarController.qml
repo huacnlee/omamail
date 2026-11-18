@@ -380,10 +380,14 @@ Item {
     writeSources()
   }
 
-  // The walk is the backend's: calendar.discoverCaldavServer arrived with API 7.
+  // The walk is the backend's. Asked of the connected binary's own method
+  // list rather than an API number, so a released backend that predates the
+  // method never shows a wizard every call of which would fail.
   function canDiscoverCaldavServer() {
-    return !!service && !!service.backend && service.backend.ready === true
-      && Number(service.backend.apiVersion) >= 7
+    var backend = !!service ? service.backend : null
+    return !!backend && backend.ready === true
+      && !!backend.protocolInfo && Array.isArray(backend.protocolInfo.methods)
+      && backend.protocolInfo.methods.indexOf("calendar.discoverCaldavServer") >= 0
   }
 
   function caldavServerDiscoveryFailure(error) {
