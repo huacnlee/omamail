@@ -163,6 +163,32 @@ Item {
       compare(popup.useProposal(proposal,false),false)
       compare(service.sentEnvelope,null)
     }
+    function test_send_from_edited_ai_preview() {
+      service.jobs=[{id:"chat",messageId:"m1",accountId:service.activeAccountId,state:"done",canContinue:true}]
+      popup.openCenteredFor("m1","Mail")
+      var proposal={id:"adjusted",accountId:service.activeAccountId,subject:"Re: Plan",
+        body:"My reply",applicable:true}
+      proposal.envelope=service.agentReplyEnvelope(proposal)
+      proposal.envelope.replyMessageId="m1"
+      proposal.envelope.replyQuote="> Original message"
+      service.agentShownProposals=[proposal]
+      verify(waitForRendering(popup))
+      findChild(popup,"agent-edit-recipients").clicked()
+      var to=findChild(popup,"agent-proposal-to")
+      var cc=findChild(popup,"agent-proposal-cc")
+      to.text="other@example.org"; to.textEdited()
+      cc.text="copy@example.org"; cc.textEdited()
+      var history=findChild(popup,"agent-proposal-history")
+      compare(history.text,"Quoted history: included")
+      history.clicked()
+      compare(history.text,"Quoted history: not included")
+      findChild(popup,"agent-send-email").clicked()
+      verify(service.sentEnvelope)
+      compare(service.sentEnvelope.to,"other@example.org")
+      compare(service.sentEnvelope.cc,"copy@example.org")
+      compare(service.sentEnvelope.body,"My reply")
+      compare(service.sentEnvelope.inReplyTo,"message")
+    }
     function test_second_reply_draft_does_not_inherit_first_draft_chat() {
       popup.composer=draft
       draft.fields={accountId:service.activeAccountId,draftKey:"d1",replyMessageId:"m1",body:"First"}

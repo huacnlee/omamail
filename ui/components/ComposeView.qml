@@ -117,6 +117,15 @@ DropArea {
     if (mode !== "reply" && mode !== "replyAll") return ""
     return Agent.replyOnly(bodyEdit.text, bodyQuote) !== bodyEdit.text ? bodyQuote : ""
   }
+  function toggleReplyHistory() {
+    if (!bodyQuote || (mode !== "reply" && mode !== "replyAll")) return
+    var body = bodyEdit.text
+    var reply = Agent.replyOnly(body, bodyQuote)
+    if (reply !== body) bodyEdit.remove(reply.length, bodyEdit.length)
+    else bodyEdit.insert(bodyEdit.length, "\n\n" + bodyQuote)
+    bodyWasEdited = true
+    noteUserModified()
+  }
   // Who the draft is, without its contents: enough to find its agent jobs.
   function draftIdentity() {
     return ({ from: fromEmail, accountId: accountId, draftId: sourceDraftId, draftKey: draftKey,
@@ -135,17 +144,25 @@ DropArea {
     begin("new", null, "", [])
     restoreDraft(Agent.proposalDraft(envelope, parentId, draftKey))
   }
-  function applyProposal(envelope) {
+  function applyProposal(envelope, edits) {
     if (!opened || String(envelope.accountId) !== accountId) return false
     if (envelope.draftKey ? String(envelope.draftKey) !== draftKey
         : !replyMessageId || String(envelope.replyMessageId || "") !== replyMessageId) return false
-    bodyQuote = String(envelope.replyQuote || "")
+    var quote = retainedReplyQuote()
+    if (edits && edits.includeHistory !== undefined)
+      quote = edits.includeHistory ? String(envelope.replyQuote || "") : ""
+    if (edits && edits.to !== undefined) toField.text = envelope.to
+    if (edits && edits.cc !== undefined) {
+      ccField.text = envelope.cc
+      ccVisible = ccField.text !== ""
+    }
+    var reply = Agent.replyOnly(envelope.body, envelope.replyQuote)
     subjectField.text = String(envelope.subject)
-    replaceBody(envelope.body)
+    replaceBody(quote ? reply + "\n\n" + quote : reply)
     return true
   }
-  function sendProposal(envelope, proposalId, parentId) {
-    if (!service || proposalRoutingChanged(envelope)) return false
+  function sendProposal(envelope, proposalId, parentId, source) {
+    if (!service || proposalRoutingChanged(source || envelope)) return false
     // Prepare a real recovery draft before dispatch, without replacing newer
     // manual edits. Undo and failures use the same parked-draft path as Send.
     var draft = Agent.proposalDraft(envelope, parentId, String(envelope.draftKey || newDraftKey()))
@@ -168,6 +185,7 @@ DropArea {
       || String(envelope.cc || "") !== ccField.text
       || String(envelope.bcc || "") !== bccField.text
       || String(envelope.replyTo || "") !== replyToField.text
+      || String(envelope.replyQuote || "") !== retainedReplyQuote()
   }
 
   function replaceBody(text) {
@@ -1668,6 +1686,16 @@ DropArea {
         width: parent.width
         foreground: root.textColor
       }
+    }
+
+    Button {
+      objectName: "compose-reply-history"
+      visible: (root.mode === "reply" || root.mode === "replyAll") && root.bodyQuote !== ""
+      x: root.formInset
+      text: root.retainedReplyQuote() ? "Remove quoted history" : "Add original quoted history"
+      foreground: root.textColor
+      fontSize: Style.font.caption
+      onClicked: root.toggleReplyHistory()
     }
 
     Item {
