@@ -160,6 +160,101 @@ async fn icloud_refusal_never_contacts_an_untrusted_target() {
     );
 }
 
+// A discovered mailbox calendar is saved with its address, and a saved file
+// can be edited. The mailbox password is read only for an address on the
+// mailbox's own HTTPS origin: any other host or port is refused before the
+// keyring is asked and before a connection is opened.
+#[tokio::test]
+async fn imap_refusal_never_reads_the_password_or_contacts_another_origin() {
+    if crate::mail::tests::isolated() {
+        return;
+    }
+    use crate::credentials::{
+        CredentialKey, CredentialKind, CredentialStore, Error as StoreError, Secret,
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    struct CountingStore {
+        reads: Arc<AtomicUsize>,
+        answer: Arc<AtomicBool>,
+    }
+    impl CredentialStore for CountingStore {
+        fn get(&self, key: &CredentialKey) -> Result<Secret, StoreError> {
+            assert_eq!(key.kind, CredentialKind::ImapPassword);
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            if self.answer.load(Ordering::SeqCst) {
+                Secret::new(b"synthetic-password".to_vec())
+            } else {
+                Err(StoreError::Missing)
+            }
+        }
+        fn put(&self, _: &CredentialKey, _: &[u8]) -> Result<(), StoreError> {
+            panic!("a calendar request never stores a credential")
+        }
+        fn delete(&self, _: &CredentialKey) -> Result<(), StoreError> {
+            panic!("a calendar request never deletes a credential")
+        }
+    }
+    let account = "imap:person@example.test";
+    let _fixture = crate::mail::tests::account_fixture(json!({"version":1,"activeId":account,
+        "accounts":[{"provider":"imap","email":"person@example.test",
+          "imap":{"imapHost":"mail.example.test","imapPort":993,"username":"person@example.test"}}]}));
+    let reads = Arc::new(AtomicUsize::new(0));
+    // The store would hand the password over, so only the origin check stands
+    // between a foreign address and a signed-in request.
+    let answer = Arc::new(AtomicBool::new(true));
+    let _store = crate::credentials::tests::isolated_store(CountingStore {
+        reads: reads.clone(),
+        answer: answer.clone(),
+    });
+    // Loopback stands in for both a foreign host and a foreign port, so a
+    // regression connects here instead of leaving the machine.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    for url in [
+        format!("https://127.0.0.1:{port}/dav/person/calendar/"),
+        format!("https://localhost:{port}/dav/person/calendar/"),
+        "https://outside.example.test/dav/person/calendar/".to_owned(),
+        "https://mail.example.test.outside.example.test/dav/person/calendar/".to_owned(),
+    ] {
+        for operation in ["list", "delete"] {
+            let result = call(
+                &json!({
+                    "source":{"kind":"imap","accountId":account,"url":url},
+                    "operation":operation,"body":"synthetic report","href":"event.ics"
+                }),
+                None,
+            )
+            .await;
+            assert_eq!(result, Err("calendar_origin_refused"), "{operation} {url}");
+        }
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), 0, "the password was read");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), listener.accept())
+            .await
+            .is_err(),
+        "a refused address was contacted"
+    );
+    // Positive control: the mailbox's own origin does reach the keyring, so
+    // the refusals above are the origin check and not a missing account. The
+    // store now answers Missing, which ends the request before the network.
+    answer.store(false, Ordering::SeqCst);
+    let own = call(
+        &json!({
+            "source":{"kind":"imap","accountId":account,
+              "url":"https://MAIL.example.test:443/dav/person/calendar/"},
+            "operation":"list","body":"synthetic report"
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(own, Err("auth_signed_out"));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
 // A Graph calendar id is base64 with `=` padding, which the request builder
 // writes into the path literally while a nextLink may carry it as `%3D`. Both
 // spell the same resource, so the second page must not be refused; a link that

@@ -361,3 +361,9 @@ The local x86_64 musl test process crashed under Docker emulation. Subsequent
 v0.9.0 native Actions builds and published-asset verification supersede that
 architecture gap, as recorded above. Future releases still require their own
 hosted checks; passing local tests alone is not release availability.
+
+## Calendars on an IMAP mailbox's own server (API 10)
+
+`calendar.discover` also accepts an IMAP mailbox that is not iCloud and whose IMAP host is a name: a loopback name or an IP address (Proton Bridge on 127.0.0.1, for example) is refused, and the UI offers no Find calendars for it. It looks for CalDAV the way RFC 6764 describes, at `https://<IMAP host>/.well-known/caldav` and then the server root, follows `current-user-principal` and `calendar-home-set`, and lists the event calendars in that home with the mailbox's own sign-in name and password. It answers `{provider: "imap", accountId, calendars}` in the iCloud shape. The password goes to HTTPS on the IMAP host's default port and nowhere else: redirects, principals, homes and calendar addresses are each checked against that origin before a request carries it, and a refused password is not retried at the root. A server that keeps its calendars on another host is not followed there; it can still be connected by hand as a CalDAV calendar with its own password.
+
+Discovered calendars are sources of kind `imap`. `calendar.request` reads the mailbox password from the keyring only after checking the request address against the same origin, so an edited `calendars.json` cannot send it elsewhere. The UI offers Find calendars for these mailboxes from API 10; an older backend leaves the button hidden and refuses saved `imap` sources with "Update the backend".

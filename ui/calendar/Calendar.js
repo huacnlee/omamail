@@ -583,6 +583,9 @@ function nativeRequestError(kind, accountId, error) {
   // that is what a refusal points at; there is no separate calendar password.
   if (kind === "icloud")
     return "iCloud calendar request failed. Check the mailbox's app-specific password in Settings"
+  // A calendar found on the mailbox's own server signs in as the mailbox.
+  if (kind === "imap")
+    return "CalDAV calendar request failed. Check the mailbox's password in Settings"
   return "The calendar request failed"
 }
 
@@ -968,7 +971,7 @@ function writeRefusal(source, event, operation) {
   if (source.kind === "google" && event && event.organizer && event.organizer.self === false
       && event.guestsCanModify !== true && operation !== "delete")
     return "Only the organizer can change this event"
-  if (source.kind !== "caldav" && source.kind !== "icloud") return ""
+  if (source.kind !== "caldav" && source.kind !== "icloud" && source.kind !== "imap") return ""
   // A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0, but
   // the event's href still names the series' shared file — the raw line the
   // parser kept answers for it.

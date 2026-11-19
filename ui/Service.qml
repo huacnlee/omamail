@@ -104,6 +104,7 @@ Item {
   readonly property bool backendCanSuggestGoogleContacts: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
+  readonly property bool backendCanDiscoverMailboxCalendars: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
   readonly property bool backendCanSaveInvitations: backend.ready && backend.apiVersion >= 9
   // Older backends send the bare address.

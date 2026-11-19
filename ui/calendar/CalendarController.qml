@@ -236,6 +236,7 @@ Item {
       if (String(account.id || "") !== String(accountId || "")) continue
       return account.signedIn === true
         && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud"
+          || (account.calendarProvider === "imap" && service.backendCanDiscoverMailboxCalendars === true)
           || (account.calendarProvider === "google" && service.backendCanGoogleCalendars === true))
     }
     return false
@@ -614,6 +615,10 @@ Item {
       callback(null, "Update the backend to access Google calendars")
       return
     }
+    if (source && source.kind === "imap" && service.backendCanDiscoverMailboxCalendars !== true) {
+      callback(null, "Update the backend to access this calendar")
+      return
+    }
     if (source && service.backendCanDiscoverCalendars !== true) {
       if (source.kind === "microsoft" && String(source.calendarId || "") !== ""
           && isDefaultMicrosoftCalendar(source)) {
@@ -645,7 +650,7 @@ Item {
     var fields = {}
     if (eventSource.kind === "google" && service.backendCanGoogleCalendars === true)
       fields.sendUpdates = eventDraft.sendUpdates
-    if (eventSource.kind === "caldav" || eventSource.kind === "icloud") {
+    if (Sources.davKind(eventSource.kind)) {
       var base = String(eventSource.url || "")
       if (base.charAt(base.length - 1) !== "/") base += "/"
       fields.href = base + encodeURIComponent(eventDraft.uid) + ".ics"
@@ -659,7 +664,7 @@ Item {
     // Undo belongs to the calendar the change was made in: a write that lands
     // after the view moved to another account offers nothing to undo there.
     var scope = calendarScope
-    if (writeSource.kind === "caldav" || writeSource.kind === "icloud") {
+    if (Sources.davKind(writeSource.kind)) {
       fields.href = String(writeEvent.href || Calendar.caldavEventUrl(writeSource.url, writeEvent))
       if (!fields.href) { finishWrite(false, "The event's address is outside this calendar's server"); return }
       if (writeDraft) fields.body = writeDraft.ics
@@ -1106,7 +1111,7 @@ Item {
     queue = pending
     if (activeSource.kind === "google") startGoogle()
     else if (activeSource.kind === "microsoft") startGraph()
-    else if (activeSource.kind === "caldav" || activeSource.kind === "icloud") startPasswordLookup()
+    else if (Sources.davKind(activeSource.kind)) startPasswordLookup()
     else failSource("The HEY CLI does not expose calendar events")
   }
 
@@ -1114,13 +1119,13 @@ Item {
 
   function startNativeList() {
     var fields = { start: new Date(rangeStart).toISOString(), end: new Date(rangeEnd).toISOString() }
-    if (activeSource.kind === "caldav" || activeSource.kind === "icloud")
+    if (Sources.davKind(activeSource.kind))
       fields.body = Calendar.caldavReport(rangeStart, rangeEnd)
     nativeRequest(activeSource, "list", fields, function(result, error) {
       if (error) { root.failSource(error); return }
       var body = String(result && result.body || "")
       var values = []
-      if (root.activeSource.kind === "caldav" || root.activeSource.kind === "icloud")
+      if (Sources.davKind(root.activeSource.kind))
         values = Calendar.eventsFromCaldav(body, root.activeSource.id, root.rangeStart, root.rangeEnd)
       else {
         var payload = null

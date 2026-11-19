@@ -12,3 +12,4 @@ Required when touching native IMAP/SMTP transport, IMAP parsing, listing, paging
 - Use `UID EXPUNGE`, never bare `EXPUNGE`, which also deletes messages marked by other clients.
 - IDs are `<uid>:<folder>`; UIDs alone collide across folders.
 - Discover folders with LIST and SPECIAL-USE; do not guess localized/provider-specific names.
+- Calendars on the mailbox's own server are found over HTTPS on the IMAP host only (RFC 6764 well-known addresses, then the root) and signed in with the mailbox password; nothing a server answers may move that password to another origin. See [backend runtime](../BACKEND-RUNTIME.md#calendars-on-an-imap-mailboxs-own-server-api-10).

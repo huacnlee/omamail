@@ -29,7 +29,7 @@ pub(super) fn context(provider: &str, operation: &str, stage: &str) -> Value {
         (
             "provider",
             provider,
-            &["google", "microsoft", "caldav", "icloud"][..],
+            &["google", "microsoft", "caldav", "icloud", "imap"][..],
         ),
         (
             "operation",
