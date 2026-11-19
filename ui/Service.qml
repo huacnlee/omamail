@@ -447,6 +447,7 @@ Item {
   ContactBook { id: contactBook; service: root }
   readonly property var recipientContacts: contactBook.contacts
   readonly property bool contactsLoading: contactBook.loading
+  readonly property alias contactBook: contactBook
   function refreshRecipientContacts() { contactBook.refresh() }
 
   function registerMailtoHandler() {
@@ -933,6 +934,7 @@ Item {
   }
 
   function removeAccountAt(index) {
+    contactBook.removing(accountList.accounts[index])
     activeIndex = -1
     accountList = Accounts.removeAt(accountList, index)
     saveAccounts({ allowDrop: true })

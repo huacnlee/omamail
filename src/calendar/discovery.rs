@@ -57,10 +57,14 @@ fn source_id(provider: &str, account: &str, remote: &str, is_default: bool) -> S
     format!("{provider}:{account}:{:x}", digest.finalize())
 }
 
-pub(super) async fn response_body(mut response: Response) -> Result<String, &'static str> {
+pub(super) async fn response_body(response: Response) -> Result<String, &'static str> {
+    bounded_body(response, DISCOVERY_LIMIT).await
+}
+
+async fn bounded_body(mut response: Response, limit: usize) -> Result<String, &'static str> {
     if response
         .content_length()
-        .is_some_and(|size| size > DISCOVERY_LIMIT as u64)
+        .is_some_and(|size| size > limit as u64)
     {
         return Err("calendar_response_too_large");
     }
@@ -70,7 +74,7 @@ pub(super) async fn response_body(mut response: Response) -> Result<String, &'st
         .await
         .map_err(|_| "calendar_network_failed")?
     {
-        if chunk.len() > DISCOVERY_LIMIT - bytes.len() {
+        if chunk.len() > limit - bytes.len() {
             return Err("calendar_response_too_large");
         }
         bytes.extend_from_slice(&chunk);
@@ -446,6 +450,7 @@ async fn dav_propfind_with_client(
         password,
         depth,
         body,
+        DISCOVERY_LIMIT,
         &resolve_icloud,
     )
     .await
@@ -463,6 +468,7 @@ pub(crate) async fn dav_request(
     password: &str,
     depth: &str,
     body: &'static str,
+    limit: usize,
     resolve: &(dyn Fn(&Url, &str) -> Result<Url, &'static str> + Sync),
 ) -> Result<(Url, String), &'static str> {
     let method = Method::from_bytes(method.as_bytes()).map_err(|_| "calendar_invalid_operation")?;
@@ -491,16 +497,19 @@ pub(crate) async fn dav_request(
         if response.status() != StatusCode::MULTI_STATUS && !response.status().is_success() {
             return Err("calendar_request_failed");
         }
-        return Ok((url, response_body(response).await?));
+        return Ok((url, bounded_body(response, limit).await?));
     }
     Err("calendar_too_many_redirects")
 }
 
-fn local_name(raw: &[u8]) -> &[u8] {
+pub(crate) fn local_name(raw: &[u8]) -> &[u8] {
     raw.rsplit(|byte| *byte == b':').next().unwrap_or(raw)
 }
 
-fn append_reference(target: &mut String, reference: &BytesRef<'_>) -> Result<(), &'static str> {
+pub(crate) fn append_reference(
+    target: &mut String,
+    reference: &BytesRef<'_>,
+) -> Result<(), &'static str> {
     if let Some(value) = reference
         .resolve_char_ref()
         .map_err(|_| "calendar_invalid_response")?
@@ -566,6 +575,7 @@ fn nested_href(xml: &str, container: &[u8]) -> Result<String, &'static str> {
 pub(crate) struct DavCollection {
     pub(crate) href: String,
     pub(crate) name: String,
+    pub(crate) is_addressbook: bool,
     is_calendar: bool,
     saw_component: bool,
     supports_events: bool,
@@ -605,6 +615,7 @@ pub(crate) fn dav_collections(xml: &str) -> Result<Vec<DavCollection>, &'static 
                 if let Some(value) = current.as_mut() {
                     match name.as_slice() {
                         b"calendar" => value.is_calendar = true,
+                        b"addressbook" => value.is_addressbook = true,
                         // RFC 3744 §3.12: `all` aggregates every privilege,
                         // so a server may report it instead of `write`.
                         b"write" | b"write-content" | b"all" => value.writable = true,
@@ -628,6 +639,7 @@ pub(crate) fn dav_collections(xml: &str) -> Result<Vec<DavCollection>, &'static 
                 if let Some(value) = current.as_mut() {
                     match local_name(event.name().as_ref()) {
                         b"calendar" => value.is_calendar = true,
+                        b"addressbook" => value.is_addressbook = true,
                         b"write" | b"write-content" | b"all" => value.writable = true,
                         b"comp" => {
                             value.saw_component = true;
@@ -769,6 +781,7 @@ pub(crate) async fn mailbox_home(
                 password,
                 "0",
                 PRINCIPAL,
+                DISCOVERY_LIMIT,
                 &resolve,
             )
             .await?;
@@ -781,6 +794,7 @@ pub(crate) async fn mailbox_home(
                 password,
                 "0",
                 home_body,
+                DISCOVERY_LIMIT,
                 &resolve,
             )
             .await?;
@@ -830,6 +844,7 @@ async fn mailbox_calendars_with(
         password,
         "1",
         COLLECTIONS,
+        DISCOVERY_LIMIT,
         &resolve,
     )
     .await?;

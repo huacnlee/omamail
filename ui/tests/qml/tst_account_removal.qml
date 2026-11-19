@@ -145,6 +145,30 @@ Item {
       compare(emails(), [ada])
     }
 
+    // A removed mailbox's address books go with it: its snapshot is owed a
+    // delete until the backend confirms one (tst_contact_book covers the
+    // request itself), and no other mailbox's is.
+    function test_removing_a_mailbox_deletes_its_address_book_snapshot() {
+      BackendFixture.markReady(mailService, 10)
+      mailService.contactBook.owedForgets = []
+      seed([ada, bob], adaId)
+      app.editAccount(1)
+      app.removeCurrentAccountFromEditor()
+      app.confirmAccountRemoval(dialog().request)
+      compare(emails(), [ada])
+      tryCompare(mailService.contactBook, "owedForgets", [bobId])
+
+      // A profile that names a row as a mailbox already here removes that
+      // row, not the mailbox; the surviving mailbox keeps its books.
+      mailService.contactBook.owedForgets = []
+      seed([ada, bob], adaId)
+      mailService.nameAccount(1, ada)
+      compare(emails(), [ada])
+      wait(50)
+      compare(mailService.contactBook.owedForgets, [])
+      BackendFixture.markReady(mailService)
+    }
+
     // A persisted mailbox whose address cannot be repaired has no id too, but
     // it is not the form's pending draft. Remove must not silently discard it
     // and leave its editor merely because no confirmation request can name it.
