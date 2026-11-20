@@ -34,19 +34,58 @@ struct Prepared {
     base: Value,
     source_hash: [u8; 32],
     fallback: Option<(Arc<Value>, i64)>,
+    // The message's own pictures (`cid:` parts) as checked data URIs keyed by
+    // Content-ID. Prepared once at open: the part bytes are not kept after it.
+    inline: Arc<Value>,
 }
 impl Prepared {
     fn bytes(&self) -> Result<usize, &'static str> {
+        let inline = inline_bytes(&self.inline);
         if let Some((resource, _)) = &self.fallback {
             return Ok(serde_json::to_vec(resource.as_ref())
                 .map_err(|_| "invalid_message")?
-                .len());
+                .len()
+                + inline);
         }
         Ok(self.source.len()
+            + inline
             + serde_json::to_vec(&self.base)
                 .map_err(|_| "invalid_message")?
                 .len())
     }
+}
+fn inline_bytes(inline: &Value) -> usize {
+    inline
+        .as_object()
+        .map(|map| {
+            map.iter()
+                .map(|(k, v)| k.len() + v.as_str().map_or(0, str::len))
+                .sum()
+        })
+        .unwrap_or(0)
+}
+/// Every embedded picture of one message the reader may draw, as data URIs.
+/// Each is sniffed, shrunk and refused exactly as a fetched picture is; the
+/// set is bounded so three copies of it (sanitized, reading and plain-text
+/// marker views) still fit one reader response.
+async fn inline_image_data(resource: Arc<Value>) -> Value {
+    const MAX_TOTAL: usize = 8 * 1024 * 1024;
+    let parts = tokio::task::spawn_blocking(move || message::content::inline_images(&resource))
+        .await
+        .unwrap_or_default();
+    let mut out = serde_json::Map::new();
+    let mut total = 0usize;
+    for (id, bytes) in parts {
+        let Ok(uri) = crate::public_http::embedded_image(bytes).await else {
+            continue;
+        };
+        if !message::html::is_raster_data_image(&uri) || uri.len() > MAX_TOTAL - total {
+            continue;
+        }
+        total += uri.len();
+        out.insert(id, Value::String(uri));
+    }
+    Value::Object(out)
 }
 #[derive(Clone)]
 struct Job {
@@ -326,10 +365,21 @@ impl Session {
             let renders = self.renders.clone();
             let store = self.reader.clone();
             let resource = Arc::new(resource);
+            // The size gate the prepared message has to pass anyway, first:
+            // a resource that will be refused costs no picture decoding.
+            if serde_json::to_vec(resource.as_ref())
+                .map_err(|_| "invalid_message")?
+                .len()
+                > MAX_BYTES
+            {
+                return Err("reader_resource_too_large");
+            }
+            let inline = Arc::new(inline_image_data(resource.clone()).await);
+            job.current()?;
             let job = job.clone();
             tokio::task::spawn_blocking(move || {
                 job.current()?;
-                let prepared = Arc::new(prepare_for_store(resource.clone(), &id, now)?);
+                let prepared = Arc::new(prepare_for_store(resource.clone(), &id, now, inline)?);
                 let mut store_guard = store.lock().map_err(|_| "session_failed")?;
                 let live_guard = job.live.lock().map_err(|_| "session_failed")?;
                 if !*live_guard {
@@ -367,7 +417,47 @@ impl Session {
         result
     }
 }
-fn prepare(resource: &Value, id: &str, now: i64) -> Result<Prepared, &'static str> {
+/// One picture attachment prepared for the image viewer: sniffed, shrunk and
+/// refused exactly like a fetched picture, and returned as a data URI. With
+/// `data` the caller hands over bytes the provider already returned; with
+/// `accountId`, `id` and `attachmentId` the bytes come from the cached message
+/// resource and nothing touches the network, so a thumbnail never costs a
+/// download. A resource that carries only the part's locator answers
+/// `attachment_image_unavailable`.
+pub(super) async fn attachment_image(params: &Value) -> Result<Value, &'static str> {
+    let fields = params.as_object().ok_or("invalid_params")?;
+    let bytes = if let Some(data) = fields.get("data") {
+        if fields.len() != 1 {
+            return Err("invalid_params");
+        }
+        let data = data.as_str().ok_or("invalid_params")?.to_owned();
+        tokio::task::spawn_blocking(move || crate::attachment::decode(&data))
+            .await
+            .map_err(|_| "worker_failed")??
+    } else {
+        if fields.len() != 3 {
+            return Err("invalid_params");
+        }
+        let account = field(params, "accountId")?.to_lowercase();
+        let id = field(params, "id")?.to_owned();
+        let wanted = field(params, "attachmentId")?.to_owned();
+        cache::validate_params(&json!({"accountId":account,"id":id}), true)?;
+        let resource = cache::resource::read(&account, &id)
+            .await?
+            .ok_or("attachment_image_unavailable")?;
+        tokio::task::spawn_blocking(move || message::content::attachment_bytes(&resource, &wanted))
+            .await
+            .map_err(|_| "worker_failed")?
+            .ok_or("attachment_image_unavailable")?
+    };
+    Ok(json!({"data":crate::public_http::embedded_image(bytes).await?}))
+}
+fn prepare(
+    resource: &Value,
+    id: &str,
+    now: i64,
+    inline: Arc<Value>,
+) -> Result<Prepared, &'static str> {
     let mut prepared = message::content::prepare_for_render(resource, now)?;
     let source = prepared
         .as_object_mut()
@@ -421,22 +511,32 @@ fn prepare(resource: &Value, id: &str, now: i64) -> Result<Prepared, &'static st
     }
     let mut parts = Vec::new();
     calendars(&resource["payload"], 0, &mut 4096, &mut parts)?;
+    let mut hash = Sha256::new();
+    hash.update(source.as_bytes());
+    hash.update(serde_json::to_vec(inline.as_ref()).map_err(|_| "invalid_message")?);
     Ok(Prepared {
-        source_hash: Sha256::digest(source.as_bytes()).into(),
+        source_hash: hash.finalize().into(),
         fallback: None,
+        inline,
         source,
         base: json!({"id":id,"threadId":resource["threadId"],"labelIds":resource["labelIds"],"hasHtml":has_html,"payload":{"mimeType":"multipart/mixed","headers":resource["payload"]["headers"],"parts":parts},"nativeSummary":prepared["summary"],"nativeContent":prepared}),
     })
 }
 
-fn prepare_for_store(resource: Arc<Value>, id: &str, now: i64) -> Result<Prepared, &'static str> {
-    prepare_for_store_bounded(resource, id, now, MAX_BYTES)
+fn prepare_for_store(
+    resource: Arc<Value>,
+    id: &str,
+    now: i64,
+    inline: Arc<Value>,
+) -> Result<Prepared, &'static str> {
+    prepare_for_store_bounded(resource, id, now, MAX_BYTES, inline)
 }
 fn prepare_for_store_bounded(
     resource: Arc<Value>,
     id: &str,
     now: i64,
     limit: usize,
+    inline: Arc<Value>,
 ) -> Result<Prepared, &'static str> {
     // Preserve the existing accepted resource limit. A pathological charset
     // expansion can make prepared text larger than its original resource; keep
@@ -448,7 +548,7 @@ fn prepare_for_store_bounded(
     {
         return Err("reader_resource_too_large");
     }
-    let prepared = prepare(resource.as_ref(), id, now)?;
+    let prepared = prepare(resource.as_ref(), id, now, inline.clone())?;
     if prepared.bytes()? <= limit {
         return Ok(prepared);
     }
@@ -457,6 +557,7 @@ fn prepare_for_store_bounded(
         base: Value::Null,
         source_hash: [0; 32],
         fallback: Some((resource, now)),
+        inline,
     })
 }
 
@@ -471,7 +572,7 @@ fn render_prepared(
 ) -> Result<Value, &'static str> {
     if let Some((resource, now)) = &prepared.fallback {
         return render_prepared(
-            &prepare(resource.as_ref(), id, *now)?,
+            &prepare(resource.as_ref(), id, *now, prepared.inline.clone())?,
             account,
             id,
             key,
@@ -487,6 +588,13 @@ fn render_prepared(
     revision.update(prepared.source_hash);
     revision.update(serde_json::to_vec(&options).map_err(|_| "invalid_params")?);
     let revision = format!("{:x}", revision.finalize());
+    // After the revision, which `source_hash` already binds to these pictures,
+    // and only from the prepared message: a caller cannot name its own.
+    options["inlineImageData"] = if prepared.inline.is_object() {
+        prepared.inline.as_ref().clone()
+    } else {
+        json!({})
+    };
     let mut rendered = super::content::render(
         &json!({"accountId":account,"messageId":id,"html":prepared.source,"options":options}),
         renders,
@@ -546,7 +654,7 @@ pub(super) fn projection(
     live: Option<&Arc<Mutex<bool>>>,
 ) -> Result<Value, &'static str> {
     render_prepared(
-        &prepare(resource, id, now)?,
+        &prepare(resource, id, now, Default::default())?,
         account,
         id,
         key,
@@ -613,7 +721,11 @@ mod tests {
     fn opaque_sources_are_bound_to_account_and_message() {
         let mut store = ReaderStore::default();
         let key = store
-            .put("a", "m", Arc::new(prepare(&fixture(), "m", 0).unwrap()))
+            .put(
+                "a",
+                "m",
+                Arc::new(prepare(&fixture(), "m", 0, Default::default()).unwrap()),
+            )
             .unwrap();
         assert!(store.get("b", "m", &key).is_err());
         assert!(store.get("a", "other", &key).is_err());
@@ -716,7 +828,7 @@ mod tests {
     }
     #[test]
     fn compact_render_preserves_both_documents_and_every_policy_field() {
-        let prepared = prepare(&fixture(), "m", 0).unwrap();
+        let prepared = prepare(&fixture(), "m", 0, Default::default()).unwrap();
         let options = json!({"withPlainText":true,"withReader":true});
         let mut old = super::super::content::render(
             &json!({"accountId":"a","messageId":"m","html":prepared.source,"options":options}),
@@ -746,7 +858,8 @@ mod tests {
     fn prepared_cache_discards_file_octets_and_reuses_prepared_identity() {
         let mut resource = fixture();
         resource["payload"]["parts"][1]["body"]["data"] = json!("A".repeat(2 * 1024 * 1024));
-        let prepared = Arc::new(prepare_for_store(Arc::new(resource), "m", 0).unwrap());
+        let prepared =
+            Arc::new(prepare_for_store(Arc::new(resource), "m", 0, Default::default()).unwrap());
         assert!(prepared.fallback.is_none());
         assert!(prepared.bytes().unwrap() < 10000);
         let mut store = ReaderStore::default();
@@ -759,7 +872,9 @@ mod tests {
             json!({"id":"m","payload":{"mimeType":"text/plain","headers":[],"body":{"data":"SGVsbG8"}}}),
         );
         let old_bytes = serde_json::to_vec(resource.as_ref()).unwrap().len();
-        let prepared = prepare_for_store_bounded(resource.clone(), "m", 0, old_bytes).unwrap();
+        let prepared =
+            prepare_for_store_bounded(resource.clone(), "m", 0, old_bytes, Default::default())
+                .unwrap();
         assert!(prepared.fallback.is_some());
         assert_eq!(prepared.bytes().unwrap(), old_bytes);
         let rendered = render_prepared(
@@ -786,11 +901,13 @@ mod tests {
             )
             .unwrap()
         );
-        assert!(prepare_for_store_bounded(resource, "m", 0, old_bytes - 1).is_err());
+        assert!(
+            prepare_for_store_bounded(resource, "m", 0, old_bytes - 1, Default::default()).is_err()
+        );
     }
     #[test]
     fn revision_tracks_every_render_policy_and_source_without_instance_keys() {
-        let prepared = prepare(&fixture(), "m", 0).unwrap();
+        let prepared = prepare(&fixture(), "m", 0, Default::default()).unwrap();
         let render = |p: &Prepared, key: &str, options: Value| {
             render_prepared(p,"a","m",key,options,&Default::default(),None).unwrap()["nativeRender"]["revision"].clone()
         };
@@ -809,7 +926,184 @@ mod tests {
             json!(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("<p>Different</p>"));
         assert_ne!(
             first,
-            render(&prepare(&resource, "m", 0).unwrap(), "first", json!({}))
+            render(
+                &prepare(&resource, "m", 0, Default::default()).unwrap(),
+                "first",
+                json!({})
+            )
         );
+    }
+
+    // A message's pasted screenshots and signature logos are `cid:` parts. The
+    // reader draws them as checked data in every view; Qt has no `cid:` scheme,
+    // so an unresolved reference, a part that is not a picture, or a map the
+    // caller supplies must never reach it as a source.
+    #[tokio::test]
+    async fn embedded_parts_resolve_cid_sources_and_nothing_else_does() {
+        let mut png = Vec::new();
+        image::RgbaImage::new(2, 2)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let encode = |b: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b);
+        let html = "<p>Before</p><img src=\"cid:Logo%40Example\" alt=\"logo\">\
+            <img src=\"cid:missing@example\" alt=\"gone\"><img src=\"cid:fake@example\" alt=\"fake\">";
+        let part = |id: &str, data: &[u8]| {
+            json!({"mimeType":"image/png","filename":"x.png","headers":[
+                {"name":"Content-ID","value":format!("<{id}>")},
+                {"name":"Content-Disposition","value":"inline"}],
+                "body":{"attachmentId":"part","size":data.len(),"data":encode(data)}})
+        };
+        let resource = json!({"id":"m","payload":{"mimeType":"multipart/related","headers":[],"parts":[
+            {"mimeType":"text/html","body":{"data":encode(html.as_bytes())}},
+            part("logo@example", &png),
+            part("fake@example", b"not a picture")
+        ]}});
+        let inline = inline_image_data(Arc::new(resource.clone())).await;
+        assert_eq!(
+            inline.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["logo@example"]
+        );
+        let prepared = prepare(&resource, "m", 0, Arc::new(inline)).unwrap();
+        let forged = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&png)
+        );
+        let result = render_prepared(
+            &prepared,
+            "a",
+            "m",
+            "k",
+            json!({"inlineImageData":{"missing@example":forged}}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        let rendered = &result["nativeRender"];
+        for document in [&rendered["document"], &rendered["reader"]["document"]] {
+            let text = document.to_string();
+            assert_eq!(text.matches("data:image/png;base64,").count(), 1, "{text}");
+            assert!(!text.contains("cid:"), "{text}");
+        }
+        assert!(rendered["reader"]["document"].to_string().contains("gone"));
+        assert!(
+            rendered["plainText"]["images"][0]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+    }
+
+    // The pictures a message's HTML names are kept up to 8 MiB in all, so the
+    // three views still fit one reader response: a message carrying more opens
+    // with the ones that fit, and a part no `cid:` reference names is never
+    // prepared at all.
+    #[tokio::test]
+    async fn embedded_pictures_past_the_budget_are_dropped_and_unnamed_parts_ignored() {
+        let noise = |seed: u32| {
+            let mut state = seed;
+            let picture = image::RgbImage::from_fn(1300, 1000, |_, _| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let [a, b, c, _] = state.to_le_bytes();
+                image::Rgb([a, b, c])
+            });
+            let mut png = Vec::new();
+            picture
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .unwrap();
+            png
+        };
+        let mut small = Vec::new();
+        image::RgbaImage::new(2, 2)
+            .write_to(
+                &mut std::io::Cursor::new(&mut small),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        let first = noise(1);
+        let second = noise(2);
+        // Each is more than half the budget once it is a data URI.
+        assert!(first.len() * 4 / 3 > 4 * 1024 * 1024 && second.len() * 4 / 3 > 4 * 1024 * 1024);
+        let encode = |b: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b);
+        let part = |id: &str, data: &[u8]| {
+            json!({"mimeType":"image/png","headers":[
+                {"name":"Content-ID","value":format!("<{id}>")},
+                {"name":"Content-Disposition","value":"inline"}],
+                "body":{"data":encode(data)}})
+        };
+        let html = "<img src=\"cid:first@example\"><img src=\"cid:second@example\"><img src=\"cid:small@example\">";
+        let resource = json!({"id":"m","payload":{"mimeType":"multipart/related","headers":[],"parts":[
+            {"mimeType":"text/html","body":{"data":encode(html.as_bytes())}},
+            part("first@example", &first),
+            part("second@example", &second),
+            part("small@example", &small),
+            part("unnamed@example", &small)
+        ]}});
+        let inline = inline_image_data(Arc::new(resource.clone())).await;
+        let mut kept = inline
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        kept.sort();
+        assert_eq!(kept, ["first@example", "small@example"]);
+        assert!(inline_bytes(&inline) <= 8 * 1024 * 1024);
+        let prepared = prepare(&resource, "m", 0, Arc::new(inline)).unwrap();
+        let result = render_prepared(
+            &prepared,
+            "a",
+            "m",
+            "k",
+            json!({"withReader":true}),
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        let text = result["nativeRender"]["document"].to_string();
+        assert_eq!(
+            text.matches("data:image/png;base64,").count(),
+            2,
+            "the two that fit are drawn"
+        );
+        assert!(!text.contains("cid:"));
+    }
+
+    // The viewer draws an attachment only as the backend prepared it: a real
+    // picture comes back as checked raster data, anything else is refused, and
+    // the bytes are found in the downloaded message by the part's locator.
+    #[tokio::test]
+    async fn attachment_pictures_are_prepared_or_refused() {
+        let mut png = Vec::new();
+        image::RgbaImage::new(3, 2)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&png);
+        let prepared = attachment_image(&json!({"data":encoded})).await.unwrap();
+        assert!(message::html::is_raster_data_image(
+            prepared["data"].as_str().unwrap()
+        ));
+        assert_eq!(
+            attachment_image(&json!({"data":"PHN2Zz48L3N2Zz4"})).await,
+            Err("public_image_refused"),
+            "an SVG is not a picture this draws"
+        );
+        assert_eq!(
+            attachment_image(&json!({"data":encoded,"open":true})).await,
+            Err("invalid_params")
+        );
+        let resource = json!({"payload":{"parts":[
+            {"mimeType":"text/plain","body":{"data":"aGk"}},
+            {"mimeType":"image/png","filename":"a.png","body":{"attachmentId":"part:2","data":encoded}},
+            {"mimeType":"image/png","filename":"b.png","body":{"attachmentId":"part:3"}}
+        ]}});
+        assert_eq!(
+            message::content::attachment_bytes(&resource, "part:2"),
+            Some(png)
+        );
+        assert_eq!(
+            message::content::attachment_bytes(&resource, "part:3"),
+            None
+        );
+        assert_eq!(message::content::attachment_bytes(&resource, ""), None);
     }
 }

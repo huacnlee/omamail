@@ -16,6 +16,10 @@ mod tests;
 mod tree;
 pub(crate) use policy::decode as decode_entities;
 pub use policy::is_public_url;
+/// A `data:image/...;base64,` URI whose bytes carry a supported raster signature.
+pub fn is_raster_data_image(s: &str) -> bool {
+    policy::raster(s)
+}
 use policy::*;
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -268,6 +272,36 @@ impl<'a> Images<'a> {
             .unwrap_or("")
             .into()
     }
+    /// What an inline source draws as: sender-embedded raster data as it is,
+    /// a `cid:` reference as the message's own part prepared at open, or
+    /// nothing. Qt has no `cid:` scheme, so an unresolved one never reaches it.
+    pub fn embedded(&self, source: &str) -> String {
+        let url = source.trim();
+        if raster(url) {
+            return url.into();
+        }
+        if !url
+            .get(..4)
+            .is_some_and(|head| head.eq_ignore_ascii_case("cid:"))
+        {
+            return String::new();
+        }
+        // Without a message to resolve against (a lone fragment, such as a
+        // signature being cleaned) the reference stays what it was.
+        let Some(parts) = self
+            .options
+            .get("inlineImageData")
+            .filter(|m| m.is_object())
+        else {
+            return source.into();
+        };
+        Some(parts)
+            .and_then(|m| m.get(crate::message::content::content_id(url)))
+            .and_then(Value::as_str)
+            .filter(|s| raster(s))
+            .unwrap_or("")
+            .into()
+    }
     pub fn allowed(&self) -> bool {
         self.options.get("allowRemoteImages") == Some(&Value::Bool(true))
     }
@@ -298,7 +332,16 @@ impl<'a> Images<'a> {
         }
         let source = n.attr("src").to_owned();
         match image_kind(&source) {
-            "inline" => self.admit(&source),
+            "inline" => {
+                let rendered = self.embedded(&source);
+                if rendered.is_empty() || !self.admit(&rendered) {
+                    return false;
+                }
+                if rendered != source {
+                    n.set("src", &rendered);
+                }
+                true
+            }
             "none" => true,
             "remote" => {
                 if tracking(n) {
@@ -498,7 +541,30 @@ pub fn to_text(s: &str) -> Result<String, &'static str> {
 pub fn sanitize(source: &str, options: &Value) -> Result<Value, &'static str> {
     let mut root = parse(source)?;
     let plain = if options["withPlainText"] == true {
-        read_plain(&root)
+        let mut plain = read_plain(&root);
+        // A plain-text marker opens its picture from this list, and a `cid:`
+        // there is a part only this side can read. Bounded on its own so the
+        // markers cannot repeat one large picture past the reader response.
+        let images = Images::new(options);
+        let mut left: usize = 8 * 1024 * 1024;
+        if let Some(list) = plain["images"].as_array_mut() {
+            for value in list.iter_mut() {
+                let source = value.as_str().unwrap_or("");
+                if !source
+                    .trim()
+                    .get(..4)
+                    .is_some_and(|h| h.eq_ignore_ascii_case("cid:"))
+                {
+                    continue;
+                }
+                let rendered = images.embedded(source);
+                if raster(&rendered) && rendered.len() <= left {
+                    left -= rendered.len();
+                    *value = Value::String(rendered);
+                }
+            }
+        }
+        plain
     } else {
         Value::Null
     };

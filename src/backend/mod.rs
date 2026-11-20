@@ -235,6 +235,9 @@ impl Session {
             .await
             .map_err(|_| "worker_failed")?;
         }
+        if method == "attachment.image" {
+            return reader::attachment_image(params).await;
+        }
         if method == "attachment.storeUpload" {
             let mut fields = params.as_object().cloned().ok_or("invalid_params")?;
             if fields

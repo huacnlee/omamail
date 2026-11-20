@@ -90,6 +90,7 @@ pub const ALL: &[&str] = &[
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
+    "attachment.image",
     "public.image",
     "public.unsubscribe",
     "calendar.request",
