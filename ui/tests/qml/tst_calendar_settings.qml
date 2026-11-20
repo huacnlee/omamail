@@ -17,7 +17,9 @@ Item {
     property int undoSendSeconds: 10
     property int settingChanges: 0
     property var accountSummaries: []
+    property var accountList: ({ version: 1, accounts: [] })
     property bool backendCanDiscoverCalendars: true
+    property bool backendCanDiscoverMailboxCalendars: true
     property bool backendCanGoogleCalendars: true
     property bool backendCanSaveInvitations: true
     property var settings: ({})
@@ -94,6 +96,7 @@ Item {
     function init() {
       mailService.accountSummaries = []
       mailService.backendCanDiscoverCalendars = true
+      mailService.backendCanDiscoverMailboxCalendars = true
       calendarController.sourceList = ({ version: 1, sources: [] })
       calendarController.discoverCalls = 0
       calendarController.toggleCalls = 0
@@ -231,6 +234,26 @@ Item {
       compare(calendarController.removedId, "icloud:orphan")
     }
 
+    // A calendar found on a mailbox's own server is not an iCloud one, and
+    // says so when it outlives its mailbox.
+    function test_a_mailbox_server_calendar_whose_mailbox_is_gone_says_caldav() {
+      mailService.accountSummaries = []
+      calendarController.sourceList = ({ version: 1, sources: [{
+        id: "imap:orphan", kind: "imap", name: "Team",
+        accountId: "imap:gone@example.org", url: "https://mail.example.org/dav/gone/team/",
+        enabled: true, discovered: true, colorKey: "accent"
+      }] })
+      wait(1)
+      var details = []
+      function collect(item) {
+        if (!item) return
+        if (item.objectName === "calendar-source-detail") details.push(item.text)
+        for (var i = 0; i < item.children.length; i++) collect(item.children[i])
+      }
+      collect(settings)
+      compare(details, ["CalDAV · Mailbox removed"])
+    }
+
     function test_old_backend_does_not_offer_discovery() {
       mailService.accountSummaries = [{ id: "imap:person@icloud.com",
         email: "person@icloud.com", calendarProvider: "icloud", signedIn: true }]
@@ -238,6 +261,36 @@ Item {
       wait(1)
       compare(findChild(settings, "calendar-discover-icloud"), null)
       compare(calendarController.discoverCalls, 0)
+    }
+
+    // Any other IMAP mailbox may keep calendars on its own server; the
+    // button is offered only by a backend that knows how to look there.
+    function test_an_imap_mailbox_offers_its_servers_calendars_from_api_10() {
+      mailService.accountSummaries = [{ id: "imap:me@example.org",
+        email: "me@example.org", provider: "imap", calendarProvider: "imap", signedIn: true }]
+      mailService.accountList = ({ version: 1, accounts: [{ id: "imap:me@example.org",
+        email: "me@example.org", provider: "imap", imap: { imapHost: " Mail.Example.org " } }] })
+      calendarController.sourceList = ({ version: 1, sources: [] })
+      mailService.backendCanDiscoverMailboxCalendars = false
+      wait(1)
+      compare(findChild(settings, "calendar-discover-imap"), null)
+      mailService.backendCanDiscoverMailboxCalendars = true
+      wait(1)
+      var discover = findChild(settings, "calendar-discover-imap")
+      verify(discover !== null)
+      compare(discover.text, "Find calendars")
+      // Pressing it signs in to the mail host with the mailbox password; the
+      // row names that host first.
+      compare(findChild(settings, "calendar-account-imap").detail,
+        "Find calendars on mail.example.org. This sends the mailbox password to that server over HTTPS.")
+      discover.forceActiveFocus()
+      keyClick(Qt.Key_Return)
+      compare(calendarController.discoverCalls, 1)
+      calendarController.sourceList = ({ version: 1, sources: [{ id: "imap:found", kind: "imap",
+        accountId: "imap:me@example.org", url: "https://mail.example.org/dav/me/team/",
+        name: "Team", enabled: true }] })
+      wait(1)
+      compare(findChild(settings, "calendar-account-imap").detail, "CalDAV on mail.example.org · 1 calendar")
     }
 
     function test_google_setup_failure_keeps_calendars_and_offers_retry() {

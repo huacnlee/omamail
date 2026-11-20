@@ -3,7 +3,7 @@
 // Defense in depth: only this small vocabulary can reach a label or stdin.
 // scripts/diagnostics.py applies the same policy again before persistence.
 var fields = {
-  provider: ["google", "microsoft", "caldav", "icloud"],
+  provider: ["google", "microsoft", "caldav", "icloud", "imap"],
   operation: ["list", "get", "lookup", "instances", "create", "update", "delete", "move", "import", "saveInvitation", "attendance"],
   stage: ["validation", "authentication", "request", "response"],
   field: ["start", "end", "start.dateTime", "end.dateTime", "start.timeZone", "end.timeZone", "recurrence", "iCalUID", "calendarId", "eventId", "timeMin", "timeMax"],
@@ -37,7 +37,7 @@ function calendarMethod(method) {
 function summary(data) {
   data = clean(data)
   var parts = []
-  if (data.provider) parts.push({google:"Google", microsoft:"Microsoft", caldav:"CalDAV", icloud:"iCloud"}[data.provider])
+  if (data.provider) parts.push({google:"Google", microsoft:"Microsoft", caldav:"CalDAV", icloud:"iCloud", imap:"CalDAV"}[data.provider])
   if (data.operation) parts.push(data.operation)
   if (data.stage && data.stage !== "request") parts.push(data.stage)
   if (data.httpStatus) parts.push("HTTP " + data.httpStatus)

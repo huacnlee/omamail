@@ -156,7 +156,7 @@ worker_failed'''.split()) | {
 METHODS = set(json.loads((ROOT / 'backend-api.json').read_text())['methods']) | {'backend.request'}
 
 DETAIL_FIELDS = {
-    'provider': {'google', 'microsoft', 'caldav', 'icloud'},
+    'provider': {'google', 'microsoft', 'caldav', 'icloud', 'imap'},
     'operation': {'list', 'get', 'lookup', 'instances', 'create', 'update', 'delete', 'move', 'import', 'saveInvitation', 'attendance', 'verify'},
     'stage': {'validation', 'authentication', 'request', 'response'},
     'field': {'start', 'end', 'start.dateTime', 'end.dateTime', 'start.timeZone', 'end.timeZone', 'recurrence', 'iCalUID', 'calendarId', 'eventId', 'timeMin', 'timeMax'},
