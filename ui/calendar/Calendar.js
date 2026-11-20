@@ -1115,6 +1115,29 @@ function isoDate(date) {
   return date.getFullYear() + "-" + two(date.getMonth() + 1) + "-" + two(date.getDate())
 }
 
+// A Date is an instant: it does not remember the time zone it was built in. A
+// machine that changes zone while running (a laptop on a trip) therefore keeps
+// day cells whose midnights belong to the old zone, and all-day events read
+// afterwards overlap two of them. This names the zone by its UTC offset at
+// the start of each month of this year and next, so a holder of built days can
+// tell when to build them again. Two zones that agree today but not in summer
+// still differ, and a clock change within one zone is not a move.
+function zoneSignature(nowMs) {
+  var year = new Date(Number(nowMs) || Date.now()).getFullYear()
+  var offsets = []
+  for (var month = 0; month < 24; month++)
+    offsets.push(new Date(year, month, 1).getTimezoneOffset())
+  return offsets.join(",")
+}
+
+// The start of a calendar day ("YYYY-MM-DD") in the zone the machine is in
+// now, built the way monthDays builds its cells: where a clock change skips
+// midnight it is still that day.
+function dateFromIso(iso) {
+  var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""))
+  return parts ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])) : null
+}
+
 function monthDays(year, monthIndex, weekStart) {
   var first = new Date(Number(year), Number(monthIndex), 1)
   var startDay = Math.floor(Number(weekStart))

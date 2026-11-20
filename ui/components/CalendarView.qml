@@ -24,6 +24,28 @@ Item {
 
   property date visibleMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   property date visibleWeek: new Date()
+  // The calendar days being shown, kept as text. After the machine changes
+  // time zone the dates above are no longer its midnights and can read as the
+  // day before, so the days are built again from these. They follow the dates
+  // only: a Date read gives a binding nothing else to depend on.
+  readonly property string visibleMonthIso: Calendar.isoDate(visibleMonth)
+  readonly property string visibleWeekIso: Calendar.isoDate(visibleWeek)
+  readonly property string zone: String(controller && controller.zone || "")
+  property string shownZone: ""
+  onZoneChanged: {
+    var previous = shownZone
+    shownZone = zone
+    // Learning the zone for the first time is not a move.
+    if (previous === "" || zone === "") return
+    var month = Calendar.dateFromIso(visibleMonthIso), week = Calendar.dateFromIso(visibleWeekIso)
+    if (month) visibleMonth = month
+    if (week) visibleWeek = week
+    // The cells are built again even where the month's date did not move, so
+    // let go of whatever pointed at the old ones.
+    cancelMonthDrag(); pendingMonthMove = null
+    monthOverflow.close(); monthHoverDelay.stop(); hoveredMonthDay = null
+    Qt.callLater(root.refresh)
+  }
   property string viewMode: "month"
   property Item toolbarHost: null
   readonly property real toolbarHeight: calendarToolbar.height
@@ -176,9 +198,16 @@ Item {
   readonly property real toolbarFontSize: Style.font.body
   readonly property real toolbarControlHeight: Style.spacing.controlHeight
   readonly property var monthSpans: Calendar.monthSpanLayout(controller ? controller.events : [], days)
-  readonly property var days: Calendar.monthGridDays(
-    visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
-  readonly property var weekDays: Calendar.weekDays(visibleWeek.getTime(), 1)
+  // Naming the zone makes both rebuild when it changes, even where the dates
+  // above did not move.
+  readonly property var days: {
+    root.zone
+    return Calendar.monthGridDays(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
+  }
+  readonly property var weekDays: {
+    root.zone
+    return Calendar.weekDays(visibleWeek.getTime(), 1)
+  }
   readonly property var displayDays: viewMode === "day" ? weekDays.filter(function(day) {
     return day.isoDate === Calendar.isoDate(visibleWeek)
   }) : weekDays

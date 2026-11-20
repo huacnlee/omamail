@@ -66,6 +66,8 @@ Item {
   property string discoveryChoiceAccount: ""
   property bool clockRunning: false
   property double nowMs: Date.now()
+  // Checked on every tick of the clock: see Calendar.zoneSignature.
+  property string zone: Calendar.zoneSignature(nowMs)
   property bool refreshAfterSourceWrite: false
   property bool creatingEvent: false
   property var eventSource: null

@@ -750,8 +750,6 @@ assert.strictEqual(feed.zoomedHourHeight(25, 37.5, 1, 37.5), 43, "growing starts
 assert.strictEqual(feed.zoomedHourHeight(0, 122.5, 1, 122.5), 0)
 assert.strictEqual(feed.zoomedHourHeight(0, 122.5, -1, 122.5), 0)
 
-console.log("test_calendar_feed.js ok")
-
 // -------------------------------------------------------------- Microsoft
 {
   const view = {
@@ -876,3 +874,61 @@ console.log("test_calendar_feed.js ok")
     else process.env.TZ = previousTZ
   }
 }
+
+// A laptop that changes time zone keeps running. Day cells built before the
+// move hold the old zone's midnights, so an all-day event read after it showed
+// on its own day and on the day before. The zone's signature tells the view to
+// build the days again from the calendar day it was showing.
+{
+  const previousTZ = process.env.TZ
+  const cellsShowing = (event, days) => days.filter(day => feed.eventsOnDay([event], day).length)
+    .map(day => day.isoDate).join(" ")
+  const allDay = (year, month, day) => ({ summary: "Hair cut",
+    start: { ms: new Date(year, month, day).getTime(), allDay: true },
+    end: { ms: new Date(year, month, day + 1).getTime(), allDay: true } })
+  try {
+    process.env.TZ = "America/Los_Angeles"
+    const noon = Date.UTC(2026, 10, 11, 20)
+    const pacific = feed.zoneSignature(noon)
+    assert.strictEqual(feed.zoneSignature(noon + 60000), pacific, "a tick of the clock is not a move")
+    assert.strictEqual(feed.zoneSignature(Date.UTC(2026, 9, 31, 20)), pacific,
+      "nor is the clock going back within one zone")
+    const shown = feed.isoDate(new Date(2026, 10, 1))
+    const builtBefore = feed.monthGridDays(2026, 10, 1)
+
+    process.env.TZ = "America/Phoenix"
+    const event = allDay(2026, 10, 10)
+    assert.strictEqual(cellsShowing(event, builtBefore), "2026-11-09 2026-11-10",
+      "the fault: days kept from the old zone show the event twice")
+    const mountain = feed.zoneSignature(noon)
+    assert.notStrictEqual(mountain, pacific, "moving an hour east is noticed")
+    const rebuilt = feed.dateFromIso(shown)
+    assert.strictEqual(
+      cellsShowing(event, feed.monthGridDays(rebuilt.getFullYear(), rebuilt.getMonth(), 1)),
+      "2026-11-10", "days built again show it once")
+
+    // Phoenix and Denver agree in November and differ in summer.
+    process.env.TZ = "America/Denver"
+    assert.notStrictEqual(feed.zoneSignature(noon), mountain, "a zone that differs only in summer is noticed")
+
+    // Moving west, the old midnight is 23:00 the day before: the month shown
+    // must stay December rather than slip to November.
+    process.env.TZ = "America/Phoenix"
+    const midnight = new Date(2026, 11, 1)
+    const month = feed.isoDate(midnight)
+    process.env.TZ = "America/Los_Angeles"
+    assert.strictEqual(midnight.getMonth(), 10, "the kept instant now reads as November")
+    assert.strictEqual(feed.dateFromIso(month).getMonth(), 11)
+    assert.strictEqual(feed.dateFromIso(month).getDate(), 1)
+
+    // Santiago skips midnight when its clocks go forward: the day still starts.
+    process.env.TZ = "America/Santiago"
+    assert.strictEqual(feed.isoDate(feed.dateFromIso("2026-09-06")), "2026-09-06")
+    assert.strictEqual(feed.dateFromIso("soon"), null)
+  } finally {
+    if (previousTZ === undefined) delete process.env.TZ
+    else process.env.TZ = previousTZ
+  }
+}
+
+console.log("test_calendar_feed.js ok")
