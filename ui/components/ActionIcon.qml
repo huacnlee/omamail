@@ -35,6 +35,36 @@ Item {
   property real strokeScale: 1.4
 
   readonly property bool drawsMark: brand && name === "gmail"
+  // The mark's geometry in whole pixels. It keeps the lines of the 16-unit
+  // grid it was drawn on — frame at 1–15 across and 3–13 down, stems at 3.6
+  // and 12.4, peak at 5.6, valley at 9.3 — but scaled to an 18–21px header,
+  // a 1.4-unit stroke on those lines lands between pixels and every edge comes
+  // out a two-tone blur. Each line is moved to the nearest pixel centre (a
+  // whole coordinate for an even stroke, a half one for an odd stroke), with
+  // right and bottom mirrored from left and top so the ink stays centred.
+  readonly property var markGeometry: {
+    var n = Math.round(root.iconSize)
+    if (!drawsMark || n <= 0) return null
+    var s = n / 16
+    var stroke = Math.max(1, Math.round(root.strokeScale * s))
+    var half = stroke / 2
+    function onPixel(v) { return stroke % 2 === 1 ? Math.floor(v) + 0.5 : Math.round(v) }
+    var left = onPixel(1 * s)
+    var top = onPixel(3 * s)
+    var bottom = n - top
+    var stemLeft = onPixel(3.6 * s)
+    // The stems end on the inside of the bottom edge rather than on it.
+    return {
+      stroke: stroke, left: left, right: n - left, top: top, bottom: bottom,
+      stemLeft: stemLeft, stemRight: n - stemLeft, middle: n / 2,
+      peak: onPixel(5.6 * s), floor: bottom - half, valley: 9.3 * s,
+      // Where the envelope's ink ends, for lining it up with a line of text.
+      inkBottom: bottom + half
+    }
+  }
+  // A baseline at the bottom of the envelope's ink, so a caller can sit the
+  // mark on a line of text the way a capital letter sits on it.
+  baselineOffset: markGeometry ? markGeometry.inkBottom : height
   readonly property string glyphText: drawsMark ? "" : Icons.glyph(name, filled)
 
   width: iconSize
@@ -83,15 +113,15 @@ Item {
       function onMarkColorChanged() { mark.requestPaint() }
       function onIconSizeChanged() { mark.requestPaint() }
       function onStrokeScaleChanged() { mark.requestPaint() }
+      function onMarkGeometryChanged() { mark.requestPaint() }
     }
 
     onPaint: {
       var ctx = getContext("2d")
       ctx.reset()
-      var s = width / 16
-      if (s <= 0) return
-      ctx.lineWidth = Math.max(1, root.strokeScale * s)
-      ctx.lineCap = "round"
+      var g = root.markGeometry
+      if (!g) return
+      ctx.lineWidth = g.stroke
       ctx.lineJoin = "round"
 
       // The Gmail mark: the envelope body, with the M fold inset inside it. A
@@ -100,12 +130,18 @@ Item {
       // the theme accent while the envelope stays in the foreground colour.
       ctx.strokeStyle = root.color
       ctx.beginPath()
-      ctx.rect(1 * s, 3 * s, 14 * s, 10 * s)
+      ctx.rect(g.left, g.top, g.right - g.left, g.bottom - g.top)
       ctx.stroke()
+      // Square ends that stop at the inside of the bottom edge: the stems
+      // stand on the envelope rather than being painted over it, which is
+      // what a round cap at the edge itself did — an accent smear across the
+      // frame's bottom line.
+      ctx.lineCap = "butt"
       ctx.strokeStyle = root.markColor
       ctx.beginPath()
-      ctx.moveTo(3.6 * s, 13 * s); ctx.lineTo(3.6 * s, 5.6 * s); ctx.lineTo(8 * s, 9.3 * s)
-      ctx.lineTo(12.4 * s, 5.6 * s); ctx.lineTo(12.4 * s, 13 * s)
+      ctx.moveTo(g.stemLeft, g.floor); ctx.lineTo(g.stemLeft, g.peak)
+      ctx.lineTo(g.middle, g.valley)
+      ctx.lineTo(g.stemRight, g.peak); ctx.lineTo(g.stemRight, g.floor)
       ctx.stroke()
     }
   }

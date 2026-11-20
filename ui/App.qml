@@ -1532,22 +1532,12 @@ Item {
           anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
-          ActionIcon {
-            anchors.verticalCenter: parent.verticalCenter
-            name: "gmail"
-            iconSize: Style.font.iconLarge
-            color: root.foreground
-            markColor: root.accent
-            brand: true
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact
-            text: "Omamail"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
+          AppTitle {
+            y: Math.round((parent.height - height) / 2)
+            showsTitle: !root.compact
+            foreground: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
           }
 
           // Next to the mark: this is the window's own menu, not an action on
