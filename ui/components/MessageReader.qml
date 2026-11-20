@@ -934,6 +934,24 @@ Item {
     spacing: Style.space(4)
     visible: !!root.summary
 
+    // The picture attachments as miniatures, above their names: a click
+    // opens the viewer. Drawn only from the downloaded message, never fetched
+    // for the occasion.
+    AttachmentThumbnails {
+      objectName: "attachment-thumbnails"
+      width: parent.width
+      // The footer keeps the chrome's eight-pixel inset; the pictures are
+      // content, so they start where the message text does.
+      leadingInset: Math.max(0, root.bodyInset - Style.space(8))
+      attachments: root.attachments
+      images: messageImages
+      textColor: root.textColor
+      dimColor: root.dimColor
+      accentColor: root.accentColor
+      panelFontFamily: root.panelFontFamily
+      onOpenRequested: function(attachment) { root.openAttachment(attachment) }
+    }
+
     // The count is always one row. Expanding files must not let their number
     // take the body away again: they scroll separately and use at most 40% of
     // the space left below the header, capped at a short list on tall windows.

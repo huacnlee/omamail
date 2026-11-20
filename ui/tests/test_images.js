@@ -68,6 +68,10 @@ assert.strictEqual(images.attachmentIndex(entries, attachments[2]), -1)
 
 assert.ok(!images.viewable(attachments[2]), "HEIC opens elsewhere")
 assert.ok(images.viewable(attachments[3]), "a known extension counts when the type is generic")
+assert.ok(images.isImage(attachments[2]), "HEIC is a picture for a thumbnail's type tile")
+assert.ok(images.thumbnailable(attachments[1]))
+assert.ok(!images.thumbnailable(attachments[3]), "a large file gets a type tile, not a decode")
+assert.strictEqual(images.typeLabel(attachments[2]), "HEIC")
 
 // ------------------------------------------------- stepping, zoom, names
 

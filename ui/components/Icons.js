@@ -41,6 +41,7 @@ var GLYPHS = {
   zoomIn: 0xF06ED,       // magnify-plus-outline
   zoomOut: 0xF06EC,      // magnify-minus-outline
   fit: 0xF18F4,          // fit-to-screen-outline — the whole picture in the window
+  image: 0xF0976,        // image-outline — a picture attachment shown without a thumbnail
   chevronDown: 0xF0140,  // chevron-down
   eye: 0xF06D0,          // eye-outline
   eyeOff: 0xF06D1,       // eye-off-outline

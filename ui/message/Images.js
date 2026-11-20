@@ -10,6 +10,10 @@
 // bytes (`attachment.image`); everything here decides which pictures there
 // are and how to step between them, never what bytes are safe.
 
+// Above this declared size an attachment's thumbnail is a type tile: a strip
+// of miniatures is not a reason to decode a camera original on every open.
+var THUMBNAIL_MAX_BYTES = 4 * 1024 * 1024
+var MAX_THUMBNAILS = 12
 var MIN_ZOOM = 0.1
 var MAX_ZOOM = 8
 var ZOOM_STEP = 1.25
@@ -33,6 +37,12 @@ function extensionOf(attachment) {
   return dot > 0 && dot < name.length - 1 ? name.substring(dot + 1).toLowerCase() : ""
 }
 
+// A picture attachment of any kind, viewable here or not.
+function isImage(attachment) {
+  return mimeOf(attachment).indexOf("image/") === 0
+    || VIEWABLE_EXTENSIONS[extensionOf(attachment)] === true
+}
+
 // One this window can draw. Mail clients label a photo application/octet-stream
 // often enough that a known extension counts; the backend still decides from
 // the bytes, and a refusal falls back to opening the file elsewhere.
@@ -42,6 +52,20 @@ function viewable(attachment) {
   if (VIEWABLE_TYPES[mime] !== undefined) return true
   return (mime === "" || mime === "application/octet-stream")
     && VIEWABLE_EXTENSIONS[extensionOf(attachment)] === true
+}
+
+function thumbnailable(attachment) {
+  var size = Math.floor(Number(attachment ? attachment.size : 0) || 0)
+  return viewable(attachment) && size > 0 && size <= THUMBNAIL_MAX_BYTES
+}
+
+// What a type tile says: the extension, else the subtype.
+function typeLabel(attachment) {
+  var extension = extensionOf(attachment)
+  if (extension !== "") return extension.substring(0, 5).toUpperCase()
+  var mime = mimeOf(attachment)
+  var slash = mime.indexOf("/")
+  return slash >= 0 ? mime.substring(slash + 1, slash + 6).toUpperCase() : "FILE"
 }
 
 // The attachments the viewer pages through, in the order they are listed.

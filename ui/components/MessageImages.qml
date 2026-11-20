@@ -7,8 +7,8 @@ import "../message/Images.js" as Images
 // Attachment bytes are never drawn as the provider returned them: the backend
 // sniffs, shrinks and refuses them (`attachment.image`, API 10) the way it does
 // a fetched picture. It reads them from the message it already downloaded when
-// it can, so nothing is fetched twice; otherwise the viewer, which somebody
-// asked for, falls back to the provider's own fetch. An older backend has no
+// it can, so nothing is fetched twice and a thumbnail costs no network; only
+// the viewer, which somebody asked for, falls back to the provider's fetch. An older backend has no
 // such method, and attachments then open in another application as before.
 QtObject {
   id: root
@@ -22,7 +22,13 @@ QtObject {
   // message no longer open is dropped rather than drawn over the next one.
   readonly property string messageKey: service ? String(service.selectedId || "") : ""
   property var cache: ({})
-  onMessageKeyChanged: { cache = ({}); pendingSave = null }
+  onMessageKeyChanged: {
+    cache = ({})
+    pendingSave = null
+    thumbnailQueue = []
+    thumbnailBusy = false
+    thumbnailGeneration++
+  }
 
   function current(key) { return key === messageKey && key !== "" }
 
@@ -35,7 +41,7 @@ QtObject {
 
   // The prepared picture for one attachment, "" when it is not one this can
   // show. `network` allows the provider fetch when the downloaded message
-  // does not carry the bytes.
+  // does not carry the bytes; a thumbnail passes false.
   function attachmentImage(attachment, network, done) {
     var finish = typeof done === "function" ? done : function() {}
     if (!available || !Images.viewable(attachment)) { finish(""); return }
@@ -84,6 +90,30 @@ QtObject {
         root.remember(attachment, prepared)
         finish(prepared)
       })
+    })
+  }
+
+  // Thumbnails ask one at a time, and only for the open message: changing
+  // message drops the ones not yet asked for, and the answer to the one in
+  // flight is not used (the backend method has no cancel of its own).
+  property var thumbnailQueue: []
+  property bool thumbnailBusy: false
+  property int thumbnailGeneration: 0
+  function thumbnail(attachment, done) {
+    thumbnailQueue = thumbnailQueue.concat([{ attachment: attachment, done: done }])
+    pumpThumbnails()
+  }
+  function pumpThumbnails() {
+    if (thumbnailBusy || thumbnailQueue.length === 0) return
+    var next = thumbnailQueue[0]
+    thumbnailQueue = thumbnailQueue.slice(1)
+    var generation = thumbnailGeneration
+    thumbnailBusy = true
+    attachmentImage(next.attachment, false, function(data) {
+      if (generation !== root.thumbnailGeneration) return
+      root.thumbnailBusy = false
+      next.done(data)
+      root.pumpThumbnails()
     })
   }
 

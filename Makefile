@@ -46,6 +46,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/ImagePopover.qml \
 	ui/components/MessageImages.qml \
 	ui/components/AttachmentRow.qml \
+	ui/components/AttachmentThumbnails.qml \
   ui/components/KeyHints.qml \
 	ui/components/MessageReader.qml \
 	ui/components/ConversationRail.qml \

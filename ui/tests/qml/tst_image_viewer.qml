@@ -72,7 +72,8 @@ Item {
     property var selectedAttachments: [
       ({ filename: "photo.jpg", mimeType: "image/jpeg", size: 2048, attachmentId: "att-photo" }),
       ({ filename: "IMG_0001.HEIC", mimeType: "image/heic", size: 2048, attachmentId: "att-heic" }),
-      ({ filename: "notes.pdf", mimeType: "application/pdf", size: 2048, attachmentId: "att-pdf" })
+      ({ filename: "notes.pdf", mimeType: "application/pdf", size: 2048, attachmentId: "att-pdf" }),
+      ({ filename: "camera.jpg", mimeType: "image/jpeg", size: 9 * 1024 * 1024, attachmentId: "att-big" })
     ]
     property var externalOpens: []
     property var externalUrls: []
@@ -172,7 +173,7 @@ Item {
       sheet.step(1)
       compare(sheet.index, 1)
       compare(sheet.source, gif, "the linked picture is still a page of the viewer")
-      compare(sheet.entries.length, 3, "two body pictures and the one viewable attachment")
+      compare(sheet.entries.length, 4, "two body pictures and the two viewable attachments")
       compare(sheet.entries[2].name, "photo.jpg")
       sheet.step(1)
       compare(sheet.index, 2)
@@ -182,6 +183,8 @@ Item {
       compare(backend.requests[0].params.id, "7:INBOX")
       compare(backend.requests[0].params.attachmentId, "att-photo")
       compare(backend.requests[0].params.data, undefined, "the downloaded message is read first")
+      sheet.step(1)
+      compare(sheet.index, 3)
       sheet.step(1)
       compare(sheet.index, 0, "the arrows wrap")
     }
@@ -194,7 +197,7 @@ Item {
       compare(sheet.index, 1)
       keyClick(Qt.Key_Left)
       keyClick(Qt.Key_Left)
-      compare(sheet.index, 2)
+      compare(sheet.index, 3, "Left from the first picture wraps to the last")
       var fitted = sheet.zoom
       keyClick(Qt.Key_Plus)
       compare(sheet.fitted, false)
@@ -237,6 +240,32 @@ Item {
       reader.openAttachment(files[2])
       verify(!viewer().opened)
       compare(mailService.externalOpens, ["att-heic", "att-pdf"])
+    }
+
+    // Miniatures come only from the message already downloaded: opening a
+    // message never fetches an attachment for a thumbnail, and a large file
+    // or a format Qt cannot draw is a type tile.
+    function test_thumbnails_never_fetch_and_open_the_viewer() {
+      // The same attachments again, so the strip builds its tiles afresh.
+      var files = JSON.parse(JSON.stringify(mailService.selectedAttachments))
+      mailService.selectedAttachments = []
+      mailService.selectedAttachments = files
+      var strip = named(reader, "attachment-thumbnails")
+      verify(strip && strip.visible)
+      compare(strip.pictures.length, 3, "photo, HEIC and the camera original; not the PDF")
+      var photo = named(strip, "attachment-thumbnail-0")
+      tryCompare(photo, "picture", png)
+      compare(named(strip, "attachment-thumbnail-1").picture, "", "HEIC is a type tile")
+      compare(named(strip, "attachment-thumbnail-2").picture, "", "a 9 MiB file is a type tile")
+      var asked = backend.requests.filter(function(r) { return r.method === "attachment.image" })
+      compare(asked.length, 1, "only the small viewable picture is prepared")
+      compare(asked[0].params.data, undefined)
+      compare(mailService.downloads, 0, "no provider fetch for a thumbnail")
+      strip.openRequested(mailService.selectedAttachments[0])
+      verify(viewer().opened)
+      compare(viewer().entry.name, "photo.jpg")
+      backend.apiVersion = 9
+      verify(!strip.visible, "an older backend cannot prepare them, so the strip goes")
     }
 
     function test_an_older_backend_opens_picture_attachments_elsewhere() {
@@ -406,6 +435,37 @@ Item {
       var detail = findChild(sheet, "imageViewerStatusDetail")
       verify(detail, "a PanelToolTip carries the detail")
       compare(detail.text, "Saved image-1.png to /home/user/Downloads")
+    }
+
+    // The strip asks for one miniature at a time and only for the open
+    // message: another message drops the rest of the queue.
+    function test_thumbnails_ask_one_at_a_time_and_stop_with_the_message() {
+      var files = mailService.selectedAttachments
+      backend.hold = true
+      mailService.selectedAttachments = []
+      mailService.selectedAttachments = [
+        ({ filename: "one.png", mimeType: "image/png", size: 2048, attachmentId: "att-photo" }),
+        ({ filename: "two.png", mimeType: "image/png", size: 2048, attachmentId: "att-two" }),
+        ({ filename: "three.png", mimeType: "image/png", size: 2048, attachmentId: "att-three" })]
+      wait(0)
+      var asked = function() { return backend.requests.filter(function(r) { return r.method === "attachment.image" }).length }
+      compare(asked(), 1, "one request in flight, the rest queued")
+      mailService.selectedId = "8:INBOX"
+      backend.held[0]({ data: png }, null)
+      wait(0)
+      compare(asked(), 1, "the queue went with the message")
+      backend.hold = false
+      mailService.selectedId = "7:INBOX"
+      mailService.selectedAttachments = files
+    }
+
+    // The miniatures start where the message text does, not at the chrome inset.
+    function test_the_strip_lines_up_with_the_message_text() {
+      var strip = named(reader, "attachment-thumbnails")
+      var first = named(strip, "attachment-thumbnail-0")
+      verify(first)
+      var at = first.mapToItem(reader, 0, 0).x
+      compare(at, reader.bodyInset, "the first tile starts on the text's left edge")
     }
 }
 }

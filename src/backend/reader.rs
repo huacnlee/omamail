@@ -421,8 +421,8 @@ impl Session {
 /// refused exactly like a fetched picture, and returned as a data URI. With
 /// `data` the caller hands over bytes the provider already returned; with
 /// `accountId`, `id` and `attachmentId` the bytes come from the cached message
-/// resource and nothing touches the network. A resource that carries only the
-/// part's locator answers
+/// resource and nothing touches the network, so a thumbnail never costs a
+/// download. A resource that carries only the part's locator answers
 /// `attachment_image_unavailable`.
 pub(super) async fn attachment_image(params: &Value) -> Result<Value, &'static str> {
     let fields = params.as_object().ok_or("invalid_params")?;
