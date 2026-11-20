@@ -216,10 +216,13 @@ fn image(n: &Node, s: &mut State, ctx: &mut Images<'_>) {
     };
     let rendered = if kind == "remote" {
         ctx.prepared(source)
+    } else if kind == "inline" {
+        ctx.embedded(source)
     } else {
         source.into()
     };
-    if (kind == "inline" || (kind == "remote" && ctx.allowed() && !rendered.is_empty()))
+    if (kind == "inline" || (kind == "remote" && ctx.allowed()))
+        && !rendered.is_empty()
         && ctx.admit(&rendered)
     {
         if kind == "remote" {

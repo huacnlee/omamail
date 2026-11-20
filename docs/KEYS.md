@@ -257,6 +257,11 @@ find a mailbox.
 `Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
 message list clamps.
 
+The image viewer is the same kind of popup. While it is open `Left` and `Right` page
+through the message's pictures (wrapping at either end), `+` and `-` zoom, `0` fits
+the picture to the window again, and `Escape` closes it; none of these reach the
+reader underneath. `ui/tests/qml/tst_image_viewer.qml` covers them.
+
 ## The cursor
 
 Hover must not write `cursorId`: Qt re-reports hover as content scrolls beneath a stationary pointer. Reveal keyboard selection with `Model.contentYToReveal`; the list is a `Column`, not a view with `positionViewAtIndex`.
