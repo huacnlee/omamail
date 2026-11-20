@@ -447,29 +447,49 @@ function escapeMarkup(text) {
 // Written into one array and joined once. Returning a string per level builds a
 // fresh copy of everything below it at every level, which on a document a few
 // hundred elements deep is most of the time this file spends.
-function serializeInto(node, out, fit) {
+// With `links`, each picture is numbered in document order and wrapped in an
+// `omarchy-image:N` link for the viewer; `Images.documentImages` walks the
+// same way. One already inside a sender's link keeps that link (anchors do not
+// nest) but still takes its number, so the viewer can page to it.
+function serializeInto(node, out, fit, links) {
   if (node.type === "text") {
     out.push(escapeMarkup(node.text))
     return
   }
+  var linked = false
   if (node.type !== "root") {
+    if (links && node.name === "img" && isDataImageSource(attributeValue(node, "src"))) {
+      links.count++
+      linked = links.inside === 0
+      if (linked) out.push("<a href=\"" + IMAGE_LINK_PREFIX + links.count + "\">")
+    }
     out.push("<" + node.name + serializeAttributes(fit ? fitAttributes(node, fit) : node.attrs))
     if (VOID_ELEMENTS[node.name] === true || node.selfClosing) {
       out.push(node.selfClosing ? "/>" : ">")
+      if (linked) out.push("</a>")
       return
     }
     out.push(">")
   }
-  for (var i = 0; i < node.children.length; i++) serializeInto(node.children[i], out, fit)
+  var anchor = !!links && node.name === "a"
+  if (anchor) links.inside++
+  for (var i = 0; i < node.children.length; i++) serializeInto(node.children[i], out, fit, links)
+  if (anchor) links.inside--
   if (node.type !== "root") out.push("</" + node.name + ">")
+  if (linked) out.push("</a>")
 }
 
 // `fit` is applied on the way out rather than to the tree, so the tree is still
 // exactly what the parse produced and can be handed to the next width.
-function serialize(node, fit) {
+function serialize(node, fit, linkImages) {
   var out = []
-  serializeInto(node, out, fit)
+  serializeInto(node, out, fit, linkImages === true ? { count: 0, inside: 0 } : null)
   return out.join("")
+}
+
+// A body picture as the reader's documents carry it: data the backend prepared.
+function isDataImageSource(value) {
+  return /^data:image\//i.test(String(value || "").substring(0, 11))
 }
 
 // A tree walk that may replace a node with nothing, with itself, or with its
@@ -1857,7 +1877,7 @@ function documentFor(bodyHtml, colors) {
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body" + baseDirectionAttribute(palette) + ">"
     + (pad > 0 ? "<div style=\"padding:" + pad + "px\">" : "")
-    + serialize(root, fit)
+    + serialize(root, fit, palette.linkImages)
     + (pad > 0 ? "</div>" : "")
     + "</body></html>"
 }
@@ -2855,7 +2875,7 @@ function readerDocumentFor(source, colors) {
     + "th{font-weight:bold;text-align:" + startEdge + ";}"
     + (maxImage >= MIN_IMAGE_WIDTH ? "img{max-width:" + maxImage + "px;}" : "")
     + "</style></head><body" + baseDirectionAttribute(palette) + ">"
-    + serialize(documentTree(source))
+    + serialize(documentTree(source), null, palette.linkImages)
     + "</body></html>"
 }
 
