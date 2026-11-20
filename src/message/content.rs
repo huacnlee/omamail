@@ -372,6 +372,129 @@ fn embedded_image(part: &Value) -> bool {
     disposition != "attachment"
         && (disposition == "inline" || !part_header(part, "Content-ID").trim().is_empty())
 }
+/// The pictures a message carries for its own HTML to show: every embedded
+/// image part with a Content-ID that the message's HTML names with a `cid:`
+/// reference, and its bytes in the resource, keyed by that ID as `cid:`
+/// sources name it (angle brackets dropped, compared case-blind).
+///
+/// Bytes only, never a decision about them: the caller sniffs, shrinks and
+/// refuses them the way it does a fetched picture. Parts no `cid:` reference
+/// names are not decoded at all, and the walk is bounded so a message of many
+/// or huge parts costs a known amount before anything is decoded.
+pub(crate) fn inline_images(message: &Value) -> Vec<(String, Vec<u8>)> {
+    const MAX_PARTS: usize = 64;
+    const MAX_PART_BYTES: usize = 16 * 1024 * 1024;
+    fn leaves<'a>(part: &'a Value, depth: usize, budget: &mut usize, out: &mut Vec<&'a Value>) {
+        if depth > 12 || *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        if let Some(children) = part["parts"].as_array().filter(|p| !p.is_empty()) {
+            for child in children {
+                leaves(child, depth + 1, budget, out);
+            }
+            return;
+        }
+        out.push(part);
+    }
+    let mut parts = Vec::new();
+    leaves(&message["payload"], 0, &mut 4096, &mut parts);
+    let mut wanted = std::collections::HashSet::new();
+    for part in &parts {
+        let data = text(&part["body"]["data"]);
+        if !text(&part["mimeType"])
+            .to_ascii_lowercase()
+            .starts_with("text/html")
+            || data.len() > MAX_PART_BYTES * 4 / 3 + 4
+        {
+            continue;
+        }
+        wanted.extend(cid_references(&bytes64(data)));
+    }
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    for part in parts {
+        if out.len() >= MAX_PARTS || wanted.is_empty() {
+            break;
+        }
+        if !embedded_image(part) {
+            continue;
+        }
+        let id = content_id(&part_header(part, "Content-ID"));
+        let data = text(&part["body"]["data"]);
+        if id.is_empty()
+            || !wanted.contains(&id)
+            || data.is_empty()
+            || data.len() > MAX_PART_BYTES * 4 / 3 + 4
+            || out.iter().any(|(known, _)| *known == id)
+        {
+            continue;
+        }
+        out.push((id, bytes64(data)));
+    }
+    out
+}
+/// Every `cid:` reference in an HTML body, in the form `content_id` gives.
+/// Read from the bytes, so any ASCII-compatible charset will do.
+fn cid_references(html: &[u8]) -> std::collections::HashSet<String> {
+    let mut found = std::collections::HashSet::new();
+    let mut at = 0;
+    while at + 4 <= html.len() && found.len() < 1024 {
+        if !html[at..at + 4].eq_ignore_ascii_case(b"cid:") {
+            at += 1;
+            continue;
+        }
+        let start = at + 4;
+        let mut end = start;
+        while end < html.len()
+            && end - start < 1024
+            && !matches!(
+                html[end],
+                b'"' | b'\'' | b'<' | b'>' | b')' | b' ' | b'\t' | b'\r' | b'\n'
+            )
+        {
+            end += 1;
+        }
+        let id = content_id(&String::from_utf8_lossy(&html[start..end]));
+        if !id.is_empty() {
+            found.insert(id);
+        }
+        at = end.max(start);
+    }
+    found
+}
+/// A Content-ID header or a `cid:` reference reduced to the form both share.
+/// RFC 2392 percent-encodes the URL form; the header has angle brackets.
+pub(crate) fn content_id(value: &str) -> String {
+    let value = value.trim();
+    let value = if value.len() >= 4 && value[..4].eq_ignore_ascii_case("cid:") {
+        &value[4..]
+    } else {
+        value
+    };
+    let value = value
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim();
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'%'
+            && at + 2 < bytes.len()
+            && bytes[at + 1].is_ascii_hexdigit()
+            && bytes[at + 2].is_ascii_hexdigit()
+        {
+            let hex = |b: u8| (b as char).to_digit(16).unwrap_or(0) as u8;
+            out.push(hex(bytes[at + 1]) << 4 | hex(bytes[at + 2]));
+            at += 3;
+            continue;
+        }
+        out.push(bytes[at]);
+        at += 1;
+    }
+    String::from_utf8_lossy(&out).to_lowercase()
+}
 fn attachment(part: &Value) -> bool {
     if embedded_image(part) {
         return false;

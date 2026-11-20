@@ -225,24 +225,35 @@ pub async fn unsubscribe(url: &str) -> Result<u16, &'static str> {
             .status,
     )
 }
+fn sniff(data: &[u8]) -> Option<&'static str> {
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if data.starts_with(b"\xff\xd8\xff") {
+        Some("image/jpeg")
+    } else if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
+        Some("image/webp")
+    } else if data.starts_with(b"BM") {
+        Some("image/bmp")
+    } else {
+        None
+    }
+}
+fn data_uri(mime: &str, data: &[u8]) -> Result<String, &'static str> {
+    Ok(match downscale::prepare(mime, data)? {
+        downscale::Prepared::Original => format!("data:{mime};base64,{}", STANDARD.encode(data)),
+        downscale::Prepared::Smaller(smaller) => {
+            format!("data:{mime};base64,{}", STANDARD.encode(smaller.as_slice()))
+        }
+    })
+}
 fn image_data(response: Response) -> Result<String, &'static str> {
     if !(200..300).contains(&response.status) {
         return Err("public_http_refused");
     }
     let data = response.body;
-    let mime = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "image/png"
-    } else if data.starts_with(b"\xff\xd8\xff") {
-        "image/jpeg"
-    } else if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
-        "image/gif"
-    } else if data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP") {
-        "image/webp"
-    } else if data.starts_with(b"BM") {
-        "image/bmp"
-    } else {
-        return Err("public_image_refused");
-    };
+    let mime = sniff(&data).ok_or("public_image_refused")?;
     let claimed = if response.content_type == "image/jpg" {
         "image/jpeg"
     } else {
@@ -251,12 +262,24 @@ fn image_data(response: Response) -> Result<String, &'static str> {
     if claimed != mime {
         return Err("public_image_refused");
     }
-    Ok(match downscale::prepare(mime, &data)? {
-        downscale::Prepared::Original => format!("data:{mime};base64,{}", STANDARD.encode(data)),
-        downscale::Prepared::Smaller(smaller) => {
-            format!("data:{mime};base64,{}", STANDARD.encode(smaller.as_slice()))
-        }
-    })
+    data_uri(mime, &data)
+}
+/// A picture the message itself carries, such as a `cid:` part, prepared like a
+/// fetched one: a known raster signature, shrunk when oversized, refused when
+/// its decode would cost more than the limits allow. No network is involved;
+/// the declared part type is not trusted, the bytes decide.
+pub async fn embedded_image(data: Vec<u8>) -> Result<String, &'static str> {
+    // A pasted screenshot is often larger than a fetched picture may be; it is
+    // already here, and `downscale` prices its decode before doing it.
+    const MAX_EMBEDDED: usize = 16 * 1024 * 1024;
+    if data.len() > MAX_EMBEDDED {
+        return Err("public_image_refused");
+    }
+    let mime = sniff(&data).ok_or("public_image_refused")?;
+    let _one_decode_at_a_time = downscale::slot().await;
+    tokio::task::spawn_blocking(move || data_uri(mime, &data))
+        .await
+        .map_err(|_| "worker_failed")?
 }
 pub async fn image(url: &str) -> Result<String, &'static str> {
     let response = fetch(url, MAX_IMAGE).await?;
