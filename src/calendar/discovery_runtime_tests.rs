@@ -177,3 +177,163 @@ async fn https_graph_redirects_and_next_links_do_not_leak_bearer_tokens() {
         "/v1.0/me/calendars?$skiptoken=next%2Bpage"
     );
 }
+
+fn mailbox() -> Mailbox {
+    Mailbox {
+        origin: mailbox_origin("mail.example.test").unwrap(),
+        username: "person@example.test".into(),
+    }
+}
+
+const MULTISTATUS: &str =
+    r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">"#;
+
+// The shape Radicale answers in behind a path prefix: the well-known address
+// redirects to the prefix, which names the principal, which is also the home.
+#[tokio::test]
+async fn https_mailbox_discovery_follows_well_known_and_keeps_the_password_on_the_mail_host() {
+    let peer = Peer::new().await;
+    let principal = format!(
+        "{MULTISTATUS}<d:response><d:href>/dav/</d:href><d:propstat><d:prop><d:current-user-principal><d:href>/dav/person%40example.test/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>"
+    );
+    let home = format!(
+        "{MULTISTATUS}<d:response><d:href>/dav/person%40example.test/</d:href><d:propstat><d:prop><c:calendar-home-set><d:href>/dav/person%40example.test/</d:href></c:calendar-home-set></d:prop></d:propstat></d:response></d:multistatus>"
+    );
+    let collections = format!(
+        "{MULTISTATUS}<d:response><d:href>/dav/person%40example.test/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response><d:response><d:href>/dav/person%40example.test/%D0%9A%D0%B0%D0%BB%D0%B5%D0%BD%D0%B4%D0%B0%D1%80%D1%8C/</d:href><d:propstat><d:prop><d:displayname>Team</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name=\"VEVENT\"/></c:supported-calendar-component-set><d:current-user-privilege-set><d:privilege><d:all/></d:privilege></d:current-user-privilege-set></d:prop></d:propstat></d:response><d:response><d:href>/dav/person%40example.test/contacts/</d:href><d:propstat><d:prop><d:displayname>Contacts</d:displayname><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response></d:multistatus>"
+    );
+    peer.responses(json!([
+        {"status":301,"location":"https://mail.example.test/dav/"},
+        {"status":207,"body":principal},
+        {"status":207,"body":home},
+        {"status":207,"body":collections},
+    ]));
+    let found = mailbox_calendars_with(
+        &peer.client,
+        "imap:person@example.test",
+        &mailbox(),
+        "synthetic-password",
+    )
+    .await
+    .unwrap();
+    assert_eq!(found["provider"], "imap");
+    let calendars = found["calendars"].as_array().unwrap();
+    assert_eq!(calendars.len(), 1, "{found}");
+    assert_eq!(calendars[0]["name"], "Team");
+    assert_eq!(calendars[0]["readOnly"], false);
+    assert_eq!(
+        calendars[0]["url"],
+        "https://mail.example.test/dav/person%40example.test/%D0%9A%D0%B0%D0%BB%D0%B5%D0%BD%D0%B4%D0%B0%D1%80%D1%8C/"
+    );
+    let requests = peer.requests();
+    let paths: Vec<_> = requests.iter().map(|r| r["path"].clone()).collect();
+    assert_eq!(
+        paths,
+        json!([
+            "/.well-known/caldav",
+            "/dav/",
+            "/dav/person%40example.test/",
+            "/dav/person%40example.test/"
+        ])
+        .as_array()
+        .unwrap()
+        .clone()
+    );
+    assert_eq!(requests[3]["depth"], "1");
+    for request in &requests {
+        assert!(
+            request["host"]
+                .as_str()
+                .unwrap()
+                .starts_with("mail.example.test")
+        );
+        assert_eq!(request["method"], "PROPFIND");
+    }
+}
+
+#[tokio::test]
+async fn https_mailbox_discovery_never_sends_the_password_off_the_mail_host() {
+    let peer = Peer::new().await;
+    let foreign_port = format!("https://mail.example.test:{}/stolen", peer.port);
+    for location in [
+        "https://outside.example.test/stolen",
+        "//outside.example.test/stolen",
+        "http://mail.example.test/stolen",
+        "https://mail.example.test.outside.example.test/stolen",
+        "https://mail.example.test@outside.example.test/stolen",
+        "https://person@mail.example.test/stolen",
+        "https://mail.example.test/stolen#fragment",
+        &foreign_port,
+    ] {
+        peer.responses(json!([{"status":307,"location":location}, {"body":"stolen"}]));
+        let error = mailbox_calendars_with(
+            &peer.client,
+            "imap:person@example.test",
+            &mailbox(),
+            "synthetic-password",
+        )
+        .await
+        .unwrap_err();
+        let requests = peer.requests();
+        assert_eq!(requests.len(), 1, "followed {location}: {requests:?}");
+        assert_eq!(requests[0]["path"], "/.well-known/caldav");
+        assert!(
+            matches!(
+                error,
+                "calendar_origin_refused" | "calendar_invalid_response"
+            ),
+            "{location}: {error}"
+        );
+    }
+    // A principal or home the server names elsewhere is refused the same way.
+    let principal = format!(
+        "{MULTISTATUS}<d:response><d:href>/</d:href><d:propstat><d:prop><d:current-user-principal><d:href>https://outside.example.test/p/</d:href></d:current-user-principal></d:prop></d:propstat></d:response></d:multistatus>"
+    );
+    peer.responses(json!([{"status":207,"body":principal}, {"body":"stolen"}]));
+    assert_eq!(
+        mailbox_calendars_with(
+            &peer.client,
+            "imap:person@example.test",
+            &mailbox(),
+            "synthetic-password",
+        )
+        .await
+        .err(),
+        Some("calendar_origin_refused")
+    );
+    assert_eq!(peer.requests().len(), 1);
+    // A refused password is not retried at the server root.
+    peer.responses(json!([{"status":401}, {"status":207,"body":"stolen"}]));
+    assert_eq!(
+        mailbox_calendars_with(
+            &peer.client,
+            "imap:person@example.test",
+            &mailbox(),
+            "synthetic-password",
+        )
+        .await
+        .err(),
+        Some("calendar_auth_refused")
+    );
+    assert_eq!(peer.requests().len(), 1);
+}
+
+// Without a well-known redirect the server root is asked, as RFC 6764 §5
+// allows; nothing beyond these two starting points is guessed.
+#[tokio::test]
+async fn https_mailbox_discovery_falls_back_to_the_server_root_once() {
+    let peer = Peer::new().await;
+    peer.responses(json!([{"status":404}, {"status":404}]));
+    assert!(
+        mailbox_calendars_with(
+            &peer.client,
+            "imap:person@example.test",
+            &mailbox(),
+            "synthetic-password",
+        )
+        .await
+        .is_err()
+    );
+    let paths: Vec<_> = peer.requests().iter().map(|r| r["path"].clone()).collect();
+    assert_eq!(paths, vec![json!("/.well-known/caldav"), json!("/")]);
+}

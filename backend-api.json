@@ -90,6 +90,7 @@
     "cache.calendarPut",
     "contacts.suggest",
     "contacts.google",
+    "contacts.dav",
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
@@ -455,6 +456,40 @@
       "errorCode": -32000,
       "equals": {
         "message": "calendar_origin_refused"
+      }
+    },
+    {
+      "name": "Mailbox server calendars refuse a plain-http address before any request",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "imap",
+          "accountId": "imap:missing@example.org",
+          "url": "http://example.org/calendar/"
+        },
+        "operation": "list",
+        "body": "report"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "calendar_invalid_url"
+      }
+    },
+    {
+      "name": "Mailbox server calendars sign in only as a registered mailbox",
+      "method": "calendar.request",
+      "params": {
+        "source": {
+          "kind": "imap",
+          "accountId": "imap:missing@example.org",
+          "url": "https://example.org/calendar/"
+        },
+        "operation": "list",
+        "body": "report"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "auth_account_missing"
       }
     },
     {
@@ -1368,6 +1403,55 @@
       }
     },
     {
+      "name": "Mailbox address books refuse an account that is not an IMAP mailbox",
+      "method": "contacts.dav",
+      "params": {
+        "accountId": "synthetic@example.invalid",
+        "operation": "read"
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Mailbox address books take a server only on a refresh that names one",
+      "method": "contacts.dav",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid",
+        "operation": "refresh",
+        "server": ""
+      },
+      "errorCode": -32602,
+      "equals": {
+        "message": "Invalid params"
+      }
+    },
+    {
+      "name": "Mailbox address books refresh only a registered mailbox, before any network",
+      "method": "contacts.dav",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid",
+        "operation": "refresh",
+        "server": "mail.example.invalid"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "contacts_provider_unsupported"
+      }
+    },
+    {
+      "name": "Mailbox address books answer a missing snapshot without the network",
+      "method": "contacts.dav",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid",
+        "operation": "read"
+      },
+      "equals": {
+        "enabled": false
+      }
+    },
+    {
       "name": "Microsoft 365 provider rules",
       "method": "providers.snapshot",
       "params": {},
@@ -1617,14 +1701,21 @@
   "unreleased": {
     "methods": [
       "calendar.verify",
-      "contacts.google"
+      "contacts.google",
+      "contacts.dav"
     ],
     "cases": [
       "Calendar validation errors preserve safe context",
       "Calendar authentication errors preserve safe context",
       "CalDAV verification refuses a plain-http address before any request",
       "CalDAV verification requires the password it is to check",
-      "Google Contacts refuses an account that is not a Gmail address"
+      "Google Contacts refuses an account that is not a Gmail address",
+      "Mailbox server calendars refuse a plain-http address before any request",
+      "Mailbox server calendars sign in only as a registered mailbox",
+      "Mailbox address books refuse an account that is not an IMAP mailbox",
+      "Mailbox address books answer a missing snapshot without the network",
+      "Mailbox address books take a server only on a refresh that names one",
+      "Mailbox address books refresh only a registered mailbox, before any network"
     ]
   }
 }

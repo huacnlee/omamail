@@ -262,6 +262,9 @@ impl Session {
                 .await
                 .map_err(|_| "worker_failed")?;
         }
+        if method == "contacts.dav" {
+            return crate::contacts::mailbox_books(params).await;
+        }
         if method == "contacts.google" {
             let account = params["accountId"]
                 .as_str()

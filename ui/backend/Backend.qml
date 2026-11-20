@@ -133,6 +133,9 @@ Item {
     // Google Contacts pages two People API listings within the backend's own
     // 60 s (DEADLINE in src/contacts/google.rs), after a token refresh.
     if (operation === "contacts.google") return 75000
+    // A mailbox's address books are read within the backend's own 45 s
+    // (DEADLINE in src/contacts/dav.rs).
+    if (operation === "contacts.dav") return 60000
     // A Microsoft 365 message body is up to 24 MiB and is given a minute on the wire.
     // Everything else, including a header listing, keeps the 30 second wait.
     var account = params ? String(params.accountId || "") : ""

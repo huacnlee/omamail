@@ -22,7 +22,17 @@ assert.strictEqual(accounts.calendarProvider({ provider: "imap", email: "person@
   imap: { imapHost: "imap.mail.me.com" } }), "icloud",
   "an iCloud custom-domain mailbox is identified by its saved server")
 assert.strictEqual(accounts.calendarProvider({ provider: "imap", email: "person@example.com",
-  imap: { imapHost: "imap.example.com" } }), "")
+  imap: { imapHost: "imap.example.com" } }), "imap",
+  "any other IMAP mailbox may keep calendars on its own server")
+assert.strictEqual(accounts.davHost({ provider: "imap", email: "person@example.com",
+  imap: { imapHost: " Mail.Example.com " } }), "mail.example.com",
+  "the host is named as the backend will reach it")
+assert.strictEqual(accounts.davHost({ provider: "imap", email: "person@icloud.com",
+  imap: { imapHost: "imap.mail.me.com" } }), "", "iCloud is asked on Apple's hosts instead")
+assert.strictEqual(accounts.davHost({ provider: "gmail", email: "person@gmail.com" }), "")
+for (const host of ["127.0.0.1", "localhost", "bridge.localhost", "::1", "[::1]", "10.0.0.5"])
+  assert.strictEqual(accounts.calendarProvider({ provider: "imap", email: "person@proton.me",
+    imap: { imapHost: host } }), "", "a local bridge or a bare address offers no Find calendars: " + host)
 assert.strictEqual(accounts.VERSION, 1)
 assert.strictEqual(accounts.count(accounts.emptyList()), 0)
 

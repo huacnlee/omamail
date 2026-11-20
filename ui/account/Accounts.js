@@ -63,8 +63,33 @@ function calendarProvider(raw) {
   var host = trimmed(account.imap && account.imap.imapHost).toLowerCase()
   var email = trimmed(account.email).toLowerCase()
   var domain = email.lastIndexOf("@") >= 0 ? email.substring(email.lastIndexOf("@") + 1) : ""
-  return host === "imap.mail.me.com" || ["icloud.com", "me.com", "mac.com"].indexOf(domain) >= 0
-    ? "icloud" : ""
+  if (host === "imap.mail.me.com" || ["icloud.com", "me.com", "mac.com"].indexOf(domain) >= 0)
+    return "icloud"
+  // Any other IMAP mailbox may keep calendars on its own server, found the
+  // way RFC 6764 describes (see calendar/discovery.rs) — unless its server is
+  // a loopback name or an address literal, such as Proton Bridge on
+  // 127.0.0.1, which the backend will not sign in to.
+  return namedServer(host) ? "imap" : ""
+}
+
+// A host name a mailbox's calendars could be found under: not empty, not a
+// loopback name, and not an IPv4 or IPv6 address (calendar/discovery.rs
+// mailbox_origin refuses the same).
+function namedServer(host) {
+  var name = String(host || "")
+  if (name === "" || name === "localhost" || /\.localhost$/.test(name)) return false
+  if (name.indexOf(":") >= 0 || name.indexOf("[") >= 0) return false
+  return !/^[0-9.]+$/.test(name) && !/^0x/i.test(name)
+}
+
+// The server that finding a mailbox's calendars or address books signs in to,
+// named the way the backend names it (calendar/discovery.rs mailbox_origin):
+// the IMAP host, trimmed and lower-case. Empty for any other mailbox, so a
+// consent text never names a host the password would not go to.
+function davHost(raw) {
+  var account = raw || {}
+  if (calendarProvider(account) !== "imap") return ""
+  return trimmed(account.imap && account.imap.imapHost).toLowerCase()
 }
 
 // Addresses are case-insensitive in practice and a server echoes the address

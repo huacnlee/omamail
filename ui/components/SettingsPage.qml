@@ -56,6 +56,7 @@ Column {
     values.push({ key: "writing", title: "Writing", y: writingHeading.y })
     values.push({ key: "mailboxes", title: "Mailboxes", y: mailboxesHeading.y })
     values.push({ key: "calendars", title: "Calendars", y: calendarsSection.y })
+    values.push({ key: "contacts", title: "Contacts", y: contactsSection.y })
     values.push({ key: "oauth", title: "Google OAuth client", y: oauthHeading.y })
     return values
   }
@@ -1410,6 +1411,22 @@ Column {
     onClientSetupRequested: root.clientSetupRequested()
     onAddAccountRequested: root.addRequested()
     onOpenCalendarRequested: root.openCalendarRequested()
+  }
+
+  PanelSeparator {
+    width: parent.width
+    foreground: root.textColor
+  }
+
+  ContactsSettings {
+    id: contactsSection
+    width: parent.width
+    service: root.service
+    textColor: root.textColor
+    dimColor: root.dimColor
+    accentColor: root.accentColor
+    urgentColor: root.urgentColor
+    panelFontFamily: root.panelFontFamily
   }
 
   PanelSeparator {

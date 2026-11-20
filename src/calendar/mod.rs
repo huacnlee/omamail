@@ -5,7 +5,7 @@ use std::{sync::OnceLock, time::Duration};
 
 pub mod attendance;
 pub(crate) mod diagnostics;
-mod discovery;
+pub(crate) mod discovery;
 pub mod invitations;
 pub mod reminders;
 pub use discovery::discover;
@@ -24,7 +24,7 @@ fn client_builder() -> reqwest::ClientBuilder {
         .timeout(Duration::from_secs(20))
 }
 
-pub(super) fn client() -> Result<&'static Client, &'static str> {
+pub(crate) fn client() -> Result<&'static Client, &'static str> {
     CLIENT
         .get_or_init(|| {
             client_builder()
@@ -268,13 +268,18 @@ fn prepare(params: &Value) -> Result<Request, &'static str> {
                 }
             }
         }
-        "caldav" | "icloud" => {
+        "caldav" | "icloud" | "imap" => {
             if !matches!(op, "list" | "create" | "update" | "delete") {
                 return Err("calendar_invalid_operation");
             }
             let base = if kind == "icloud" {
                 request.account_id = text(source, "accountId")?.into();
                 discovery::icloud_url(text(source, "url")?)?
+            } else if kind == "imap" {
+                // Checked against the mailbox's own server once its settings
+                // are read, before the password is.
+                request.account_id = text(source, "accountId")?.into();
+                configured_url(text(source, "url")?)?
             } else {
                 request.source_id = text(source, "id")?.into();
                 request.username = text(source, "username")?.into();
@@ -424,13 +429,22 @@ where
             crate::credentials::Secret::new(password.into_bytes())
                 .map_err(|_| "calendar_password_invalid")?,
         )
+    } else if request.kind == "imap" {
+        let mailbox = discovery::mailbox(&request.account_id)?;
+        mailbox.check(&request.url)?;
+        request.username = mailbox.username;
+        let password = crate::auth::password("imap", &request.account_id).await?;
+        Some(
+            crate::credentials::Secret::new(password.into_bytes())
+                .map_err(|_| "calendar_password_invalid")?,
+        )
     } else {
         None
     };
     let paginated = matches!(
         params["operation"].as_str(),
         Some("list" | "lookup" | "instances")
-    ) && !matches!(request.kind.as_str(), "caldav" | "icloud");
+    ) && !matches!(request.kind.as_str(), "caldav" | "icloud" | "imap");
     let origin = request.url.clone();
     let mut result = execute(
         client()?,
@@ -555,7 +569,7 @@ async fn execute(
     if let Some(etag) = request.if_match {
         builder = builder.header("If-Match", etag);
     }
-    if matches!(request.kind.as_str(), "caldav" | "icloud") {
+    if matches!(request.kind.as_str(), "caldav" | "icloud" | "imap") {
         builder = builder.basic_auth(request.username, password);
         if request.method.as_str() == "REPORT" {
             builder = builder

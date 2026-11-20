@@ -5,6 +5,7 @@ import "../calendar/Sources.js" as Sources
 import "../calendar/Invitations.js" as Invitations
 import "../providers/Registry.js" as Provider
 import "../backend/Plain.js" as Plain
+import "../account/Accounts.js" as Accounts
 
 Column {
   id: root
@@ -50,13 +51,28 @@ Column {
     return accounts.filter(function(account) {
       return account
         && (account.calendarProvider === "microsoft" || account.calendarProvider === "icloud"
+          || (account.calendarProvider === "imap" && root.service.backendCanDiscoverMailboxCalendars === true)
           || (account.calendarProvider === "google" && root.service.backendCanGoogleCalendars === true))
     })
   }
 
   function providerName(account) {
     return account && account.calendarProvider === "icloud" ? "iCloud"
+      : account && account.calendarProvider === "imap" ? "CalDAV"
       : account && account.calendarProvider === "google" ? "Google" : "Microsoft"
+  }
+
+  // A mailbox's own server is any host its IMAP settings name, so the row says
+  // which one Find calendars signs in to before the password goes there.
+  function accountDetail(account, calendars) {
+    var host = account && account.calendarProvider === "imap" && root.service
+      ? Accounts.davHost(Accounts.find(root.service.accountList, account.id)) : ""
+    var provider = host !== "" ? root.providerName(account) + " on " + host : root.providerName(account)
+    if (!account || account.signedIn !== true) return provider + " · Sign in to connect calendars"
+    if (calendars > 0) return provider + " · " + calendars + (calendars === 1 ? " calendar" : " calendars")
+    if (host !== "")
+      return "Find calendars on " + host + ". This sends the mailbox password to that server over HTTPS."
+    return provider + " · Uses this mailbox's sign-in"
   }
 
   function accountLabel(source) {
@@ -138,7 +154,7 @@ Column {
     var value = source || {}
     if (value.kind === "caldav") return String(value.url || "CalDAV")
     var provider = value.kind === "google" ? "Google"
-      : value.kind === "microsoft" ? "Microsoft" : "iCloud"
+      : value.kind === "microsoft" ? "Microsoft" : value.kind === "imap" ? "CalDAV" : "iCloud"
     var account = root.accountLabel(value)
     var detail = root.orphaned(value) ? provider + " · Mailbox removed"
       : account === "" ? provider + " calendar" : provider + " · " + account
@@ -496,12 +512,9 @@ Column {
       spacing: Style.space(2)
 
       SettingRow {
+        objectName: "calendar-account-" + String(accountBlock.modelData.calendarProvider || "account")
         title: String(accountBlock.modelData.email || accountBlock.modelData.label || "")
-        detail: root.providerName(accountBlock.modelData) + " · "
-          + (accountBlock.modelData.signedIn !== true ? "Sign in to connect calendars"
-            : accountBlock.calendars.length > 0
-              ? accountBlock.calendars.length + (accountBlock.calendars.length === 1 ? " calendar" : " calendars")
-              : "Uses this mailbox's sign-in")
+        detail: root.accountDetail(accountBlock.modelData, accountBlock.calendars.length)
         Button {
           id: discoveryButton
           objectName: "calendar-discover-" + String(accountBlock.modelData.calendarProvider || "account")

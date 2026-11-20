@@ -59,8 +59,9 @@ calendar_reminder_not_found calendar_reminders_invalid calendar_reminders_unavai
 calendar_request_failed calendar_response_too_large calendar_timeout calendar_too_many_calendars
 calendar_too_many_pages calendar_too_many_redirects calendar_too_many_reminders
 config_home_invalid
-contacts_auth_refused contacts_invalid_response contacts_network_failed contacts_request_failed
-contacts_response_too_large contacts_timeout
+contacts_auth_refused contacts_cache_unavailable contacts_invalid_response contacts_network_failed
+contacts_not_found contacts_origin_refused contacts_provider_unsupported contacts_request_failed
+contacts_response_too_large contacts_server_changed contacts_timeout contacts_too_many_books contacts_unavailable
 conversation_limit
 credential_missing credential_store_unavailable
 gmail_account_unknown gmail_client_invalid gmail_client_missing gmail_client_permissions
@@ -156,7 +157,7 @@ worker_failed'''.split()) | {
 METHODS = set(json.loads((ROOT / 'backend-api.json').read_text())['methods']) | {'backend.request'}
 
 DETAIL_FIELDS = {
-    'provider': {'google', 'microsoft', 'caldav', 'icloud'},
+    'provider': {'google', 'microsoft', 'caldav', 'icloud', 'imap'},
     'operation': {'list', 'get', 'lookup', 'instances', 'create', 'update', 'delete', 'move', 'import', 'saveInvitation', 'attendance', 'verify'},
     'stage': {'validation', 'authentication', 'request', 'response'},
     'field': {'start', 'end', 'start.dateTime', 'end.dateTime', 'start.timeZone', 'end.timeZone', 'recurrence', 'iCalUID', 'calendarId', 'eventId', 'timeMin', 'timeMax'},

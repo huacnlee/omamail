@@ -160,6 +160,16 @@ assert.strictEqual(sources.calendarEditorUrl({ sources: [{
 assert.strictEqual(sources.calendarEditorUrl({ sources: [{
   kind: "google", enabled: true, accountId: "me@gmail.com"
 }] }), "https://calendar.google.com/calendar/u/0/r/eventedit")
+assert.strictEqual(sources.calendarEditorUrl({ sources: [{
+  kind: "imap", enabled: true, accountId: "imap:me@example.org",
+  url: "https://mail.example.org/dav/me/calendar/"
+}] }), "")
+assert.strictEqual(sources.calendarEditorUrl({ sources: [{
+  kind: "imap", enabled: true, accountId: "imap:me@example.org",
+  url: "https://mail.example.org/dav/me/calendar/"
+}, {
+  kind: "google", enabled: true, accountId: "me@gmail.com"
+}] }), "https://calendar.google.com/calendar/u/0/r/eventedit")
 
 // Google visibility is seeded once, while future discovery refreshes access
 // and retains the local choice. A discovered primary must not become writable
@@ -255,6 +265,40 @@ assert.strictEqual(namedMicrosoft.sources[0].name, "Work appointments",
   assert.strictEqual(refreshed.sources[1].enabled, false, "refresh keeps visibility")
   assert.strictEqual(refreshed.sources[1].colorKey, "cyan", "refresh keeps color")
   assert.strictEqual(refreshed.sources[1].name, "Personal renamed")
+}
+
+// A calendar found on an IMAP mailbox's own server belongs to that mailbox: it
+// adopts the hand-connected copy of the same address, leaves the other
+// mailbox's calendars alone and is what the CalDAV request path receives.
+{
+  let before = sources.add(sources.emptyList(), {
+    id: "manual-team", kind: "caldav", name: "Team (by hand)",
+    url: "https://mail.example.org/dav/me%40example.org/team/",
+    username: "me@example.org", enabled: false, colorKey: "cyan"
+  })
+  before = sources.add(before, {
+    id: "imap:other", kind: "imap", name: "Other", accountId: "imap:other@example.org",
+    url: "https://mail.example.org/dav/other%40example.org/cal/", discovered: true
+  })
+  const found = sources.applyDiscovery(before, {
+    provider: "imap", accountId: "imap:me@example.org", calendars: [{
+      sourceId: "imap:stable-team", name: "Team",
+      url: "https://mail.example.org/dav/me%40example.org/team",
+      username: "me@example.org", readOnly: false
+    }]
+  })
+  assert.strictEqual(found.sources.map(s => s.id).join(), "imap:other,imap:stable-team")
+  assert.strictEqual(found.sources[1].kind, "imap")
+  assert.strictEqual(found.sources[1].enabled, false, "the hand-connected copy's visibility is kept")
+  assert.strictEqual(found.sources[1].colorKey, "cyan")
+  assert.strictEqual(found.sources[1].accountId, "imap:me@example.org")
+  assert.strictEqual(sources.validate(found.sources[1]).ok, true)
+  assert.strictEqual(sources.validate({ kind: "imap", name: "Team", url: "https://x/" }).ok, false,
+    "a mailbox calendar names its mailbox")
+  assert.strictEqual(sources.davKind("imap"), true)
+  assert.strictEqual(sources.providerLabel("imap"), "CalDAV")
+  assert.strictEqual(sources.forAccount(found, "imap:me@example.org").sources.map(s => s.id).join(),
+    "imap:stable-team")
 }
 
 {

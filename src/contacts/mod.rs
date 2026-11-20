@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod dav;
 mod google;
 
 const MAX_FILE: u64 = 16 * 1024 * 1024;
@@ -32,12 +33,22 @@ fn address(s: &str) -> bool {
             .next()
             .is_some_and(|p| p.len() >= 2 && p.bytes().all(|b| b.is_ascii_alphabetic()))
 }
+// RFC 5321 bounds a usable address at 254 octets; a longer name is cut
+// rather than let a server hand over a megabyte to draw.
+const MAX_ADDRESS: usize = 254;
+const MAX_NAME: usize = 256;
+
 fn collect(book: &mut Book, name: &str, email: &str) {
     let email = email.trim();
-    if !address(email) || book.len() >= MAX_CONTACTS {
+    if email.len() > MAX_ADDRESS || !address(email) || book.len() >= MAX_CONTACTS {
         return;
     }
-    let name: String = name.trim().chars().filter(|c| !c.is_control()).collect();
+    let name: String = name
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_NAME)
+        .collect();
     let key = email.to_lowercase();
     if !book.contains_key(&key) || (book[&key]["name"] == "" && !name.is_empty()) {
         book.insert(key, json!({"name":name,"email":email}));
@@ -76,28 +87,74 @@ fn json_book(book: &mut Book, raw: &Value) {
         }
     }
 }
+/// A text value with RFC 6350 §3.4 escapes undone; a line break is a space.
+fn unescape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.trim().chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n' | 'N') => out.push(' '),
+            Some(other) => out.push(other),
+            None => {}
+        }
+    }
+    out
+}
+
+/// "Given Family" from a structured `N` value (Family;Given;Additional;...).
+fn structured_name(value: &str) -> String {
+    let parts: Vec<String> = value.split(';').map(unescape).collect();
+    let given = parts.get(1).map(String::as_str).unwrap_or("");
+    let family = parts.first().map(String::as_str).unwrap_or("");
+    [given, family]
+        .iter()
+        .filter(|part| !part.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn vcard(book: &mut Book, text: &str) {
     let text = text
         .replace("\r\n", "\n")
+        .replace('\r', "\n")
         .replace("\n ", "")
         .replace("\n\t", "");
-    let mut name = "";
+    let mut name = String::new();
+    let mut structured = String::new();
     let mut emails = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        let Some((property, value)) = line.split_once(':') else {
+        let Some((head, value)) = line.split_once(':') else {
             continue;
         };
-        match property.split(';').next().unwrap_or("") {
-            "BEGIN" if value == "VCARD" => {
-                name = "";
+        // `item1.EMAIL;TYPE=work`: a group before the name, parameters after.
+        let property = head.split(';').next().unwrap_or("");
+        let property = property.rsplit('.').next().unwrap_or("");
+        match property.to_ascii_uppercase().as_str() {
+            "BEGIN" if value.trim().eq_ignore_ascii_case("VCARD") => {
+                name.clear();
+                structured.clear();
                 emails.clear();
             }
-            "FN" => name = value.trim(),
-            "EMAIL" => emails.push(value.trim()),
-            "END" if value == "VCARD" => {
+            "FN" => name = unescape(value),
+            "N" => structured = structured_name(value),
+            "EMAIL" => {
+                let email = value.trim();
+                let email = email
+                    .get(..7)
+                    .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+                    .map_or(email, |_| &email[7..]);
+                emails.push(email.to_owned());
+            }
+            "END" if value.trim().eq_ignore_ascii_case("VCARD") => {
+                let shown = if name.is_empty() { &structured } else { &name };
                 for email in emails.drain(..) {
-                    collect(book, name, email)
+                    collect(book, shown, &email)
                 }
             }
             _ => (),
@@ -259,6 +316,11 @@ pub async fn suggest_google(token: &str) -> Result<Value, &'static str> {
     Ok(json!({"granted":fetched["granted"],"contacts":sorted(book)}))
 }
 
+/// The address books on an IMAP mailbox's own server; see `dav.rs`.
+pub async fn mailbox_books(params: &Value) -> Result<Value, &'static str> {
+    dav::call(params).await
+}
+
 fn sorted(book: Book) -> Value {
     let mut values: Vec<_> = book.into_values().collect();
     values.sort_by_key(|v| {
@@ -316,6 +378,43 @@ mod tests {
         );
         assert_eq!(b["a@example.com"]["name"], "Jane");
     }
+    // Cards as CardDAV servers hand them back: CRLF lines, folded values,
+    // Apple's grouped properties, lower-case names, escapes and cards that
+    // carry only a structured name.
+    #[test]
+    fn reads_server_cards_with_groups_escapes_and_structured_names() {
+        let mut b = Book::new();
+        vcard(
+            &mut b,
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Doe\\, Jane\r\nitem1.EMAIL;type=INTERNET;type=pref:jane@ex\r\n ample.com\r\nitem1.X-ABLabel:work\r\nEND:VCARD\r\n\
+             begin:vcard\nn:Smith;John;;;\nemail:MAILTO:john@example.com\nend:vcard\n\
+             BEGIN:VCARD\nFN:\nN:Only;;;;\nEMAIL:only@example.com\nEMAIL:not an address\nEND:VCARD\n",
+        );
+        assert_eq!(b["jane@example.com"]["name"], "Doe, Jane");
+        assert_eq!(b["john@example.com"]["name"], "John Smith");
+        assert_eq!(b["only@example.com"]["name"], "Only");
+        assert_eq!(b.len(), 3);
+    }
+
+    // Server-supplied lengths are untrusted: an address longer than any
+    // mailbox can have is dropped and a name is cut to a drawable length.
+    #[test]
+    fn overlong_addresses_are_dropped_and_names_cut() {
+        let mut b = Book::new();
+        let long_local = "a".repeat(250);
+        collect(
+            &mut b,
+            &"N".repeat(5000),
+            &format!("{long_local}@example.com"),
+        );
+        collect(&mut b, &"N".repeat(5000), "ok@example.com");
+        assert_eq!(b.len(), 1);
+        assert_eq!(
+            b["ok@example.com"]["name"].as_str().unwrap().len(),
+            MAX_NAME
+        );
+    }
+
     #[test]
     fn named_contact_replaces_inferred_empty_name() {
         let mut b = Book::new();

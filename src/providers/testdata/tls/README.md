@@ -9,5 +9,5 @@ level and certificate signing. The leaf is constrained to TLS server use and
 names only `localhost`. Both certificates expire on 11 September 2036.
 
 `discovery.pem` and `discovery-key.pem` are a second self-signed leaf for the
-calendar discovery tests. It names the hosts those tests dial and expires on
-21 September 2036. The tests trust it directly, so it needs no CA.
+calendar and address book discovery tests. It names the hosts those tests dial
+and expires on 27 September 2036. The tests trust it directly, so it needs no CA.

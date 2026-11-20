@@ -104,6 +104,7 @@ Item {
   readonly property bool backendCanSuggestGoogleContacts: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanCheckMicrosoftConnection: backend.ready && backend.apiVersion >= 5
   readonly property bool backendCanDiscoverCalendars: backend.ready && backend.apiVersion >= 5
+  readonly property bool backendCanDiscoverMailboxCalendars: backend.ready && backend.apiVersion >= 10
   readonly property bool backendCanGoogleCalendars: backend.ready && backend.apiVersion >= 6
   readonly property bool backendCanSaveInvitations: backend.ready && backend.apiVersion >= 9
   // Older backends send the bare address.
@@ -446,6 +447,7 @@ Item {
   ContactBook { id: contactBook; service: root }
   readonly property var recipientContacts: contactBook.contacts
   readonly property bool contactsLoading: contactBook.loading
+  readonly property alias contactBook: contactBook
   function refreshRecipientContacts() { contactBook.refresh() }
 
   function registerMailtoHandler() {
@@ -932,6 +934,7 @@ Item {
   }
 
   function removeAccountAt(index) {
+    contactBook.removing(accountList.accounts[index])
     activeIndex = -1
     accountList = Accounts.removeAt(accountList, index)
     saveAccounts({ allowDrop: true })

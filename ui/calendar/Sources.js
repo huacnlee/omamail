@@ -4,7 +4,7 @@
 .import "../account/Accounts.js" as Accounts
 
 var VERSION = 1
-var KINDS = ["caldav", "google", "microsoft", "icloud", "hey"]
+var KINDS = ["caldav", "google", "microsoft", "icloud", "imap", "hey"]
 var COLOR_KEYS = Palette.keys()
 
 function defaultColorKey(identity) { return Palette.defaultKey(identity) }
@@ -15,6 +15,12 @@ function trimmed(value) {
 
 function emptyList() {
   return { version: VERSION, sources: [] }
+}
+
+// The kinds whose events are CalDAV resources: a hand-connected calendar, and
+// those discovered on an iCloud mailbox or on an IMAP mailbox's own server.
+function davKind(kind) {
+  return kind === "caldav" || kind === "icloud" || kind === "imap"
 }
 
 function normalizeKind(value) {
@@ -129,6 +135,12 @@ function validate(raw) {
     if (source.accountId === "") return { ok: false, error: "Choose a signed-in iCloud account" }
     if (source.name === "") return { ok: false, error: "That iCloud calendar has no name" }
     if (!/^https:\/\//i.test(source.url)) return { ok: false, error: "That iCloud calendar has no address" }
+    return { ok: true, source: source }
+  }
+  if (source.kind === "imap") {
+    if (source.accountId === "") return { ok: false, error: "Choose the mailbox this calendar belongs to" }
+    if (source.name === "") return { ok: false, error: "That calendar has no name" }
+    if (!/^https:\/\//i.test(source.url)) return { ok: false, error: "That calendar has no address" }
     return { ok: true, source: source }
   }
   if (source.kind === "hey")
@@ -248,7 +260,7 @@ function withMicrosoftAccounts(list, accountSummaries) {
 
 function comesWithAccount(source) {
   return !!source && (source.kind === "google" || source.kind === "microsoft"
-    || source.kind === "icloud")
+    || source.kind === "icloud" || source.kind === "imap")
 }
 
 function accountSummary(accountId, accountSummaries) {
@@ -304,8 +316,7 @@ function applyDiscovery(list, result) {
   var value = result || {}
   var provider = trimmed(value.provider).toLowerCase()
   var accountId = trimmed(value.accountId)
-  var kind = provider === "microsoft" ? "microsoft"
-    : (provider === "icloud" ? "icloud" : (provider === "google" ? "google" : ""))
+  var kind = ["microsoft", "icloud", "imap", "google"].indexOf(provider) >= 0 ? provider : ""
   if (kind === "" || accountId === "" || !Array.isArray(value.calendars))
     return copyList(list)
   var current = list && Array.isArray(list.sources) ? list.sources : []
@@ -318,7 +329,7 @@ function applyDiscovery(list, result) {
     for (var s = 0; s < current.length; s++) {
       var candidate = current[s] || {}
       if (trimmed(candidate.id) === id
-          || (kind === "icloud" && trimmed(remote.url) !== ""
+          || ((kind === "icloud" || kind === "imap") && trimmed(remote.url) !== ""
             && sameUrl(candidate.url, remote.url))) {
         saved = candidate
         break
@@ -343,7 +354,7 @@ function applyDiscovery(list, result) {
   for (var c = 0; c < current.length; c++) {
     var source = current[c] || {}
     var owned = source.kind === kind && trimmed(source.accountId) === accountId
-    var adopted = kind === "icloud" && source.kind === "caldav"
+    var adopted = (kind === "icloud" || kind === "imap") && source.kind === "caldav"
       && discovered.some(function(item) { return sameUrl(item.url, source.url) })
     if (!owned && !adopted) next = add(next, source)
   }
@@ -476,6 +487,10 @@ function calendarEditorUrl(list) {
     if (source.kind === "google")
       return "https://calendar.google.com/calendar/u/0/r/eventedit"
     if (source.kind === "icloud") return "https://www.icloud.com/calendar/"
+    // A mailbox's own server has no known calendar page: Radicale has none,
+    // and other servers keep theirs at paths of their own. Guessing would
+    // open a page that is likely not there, so the next source answers.
+    if (source.kind === "imap") continue
     if (source.kind === "caldav") {
       var match = /^(https:\/\/[^/]+)/i.exec(String(source.url || ""))
       if (match) return match[1] + "/apps/calendar/"
