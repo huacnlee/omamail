@@ -179,7 +179,8 @@ fi
 #    `foreground` is the fixed theme value and does not follow that switch.
 grep -q 'bar ? bar\.barForeground' BarWidget.qml \
   || fail "the bar icon must follow bar.barForeground in transparent mode"
-grep -q 'markColor: root.accent' App.qml \
+grep -q 'markColor: root.accent' components/AppTitle.qml \
+  && grep -Pzq 'AppTitle \{[^}]*\baccent: root\.accent' App.qml \
   || fail "the Omamail header M must use the active theme accent"
 grep -q 'markColor: Commons.Color.accent' BarWidget.qml \
   || fail "the bar M must use the active theme accent"
