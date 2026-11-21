@@ -114,7 +114,10 @@ Item {
   readonly property color accent: Commons.Color.accent
   readonly property color urgent: Commons.Color.urgent
   readonly property color danger: Commons.Color.urgent
-  readonly property color popupBackground: Commons.Color.popups.background
+  // Popups here draw inside the app window, where the compositor cannot blur
+  // what is behind them, so a theme's see-through popup color stays solid.
+  readonly property color popupBackground: Qt.rgba(Commons.Color.popups.background.r,
+    Commons.Color.popups.background.g, Commons.Color.popups.background.b, 1)
   readonly property color popupBorder: Commons.Color.popups.border
   // Shared themed border for mail and standalone window chrome.
   readonly property color borderColor: Style.normalBorderColor
