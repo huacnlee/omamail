@@ -14,6 +14,7 @@ Item {
   required property string accountId
   property bool nativeNotifications: false
   property bool pluginNotifications: true
+  property bool playSound: false
   signal activated(string targetAccountId, string messageId)
 
   // Each notification owns its waiter and target. A later poll must not replace
@@ -61,6 +62,7 @@ Item {
         root.notificationForeground, root.notificationAccent, "--", title, body]
     })
     if (request) request.running = true
+    if (playSound) Quickshell.execDetached(["sh", root.pluginDir + "/scripts/notify-sound.sh"])
   }
 
 }
