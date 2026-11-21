@@ -1308,6 +1308,32 @@ assert.strictEqual(model.marksReadOnArrival(null, false), false)
 // than silently previewing — the safe way round for the read mark.
 assert.strictEqual(model.marksReadOnArrival({ unread: true }, undefined), true)
 
+// With "Mark messages read when opened" off, opening leaves the message
+// unread; anything but an explicit false keeps the default.
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, false, false), false)
+assert.strictEqual(model.marksReadOnArrival({ unread: true }, false, true), true)
+
+// A read action marks the opening it reaches; unread forgets it, and an
+// action elsewhere or of another kind leaves it alone.
+{
+  const thread = { memberIds: ["row", "reply"] }
+  assert.strictEqual(model.readActionSerial(-1, 7, "reply", null, ["reply"], "markRead", false, false), 7)
+  assert.strictEqual(model.readActionSerial(-1, 7, "reply", thread, ["row"], "markRead", false, false), 7,
+    "a read on the row reaches the member open in the reader")
+  assert.strictEqual(model.readActionSerial(-1, 7, "reply", thread, ["row"], "markRead", true, false), -1,
+    "but not when it reads that member alone")
+  assert.strictEqual(model.readActionSerial(-1, 7, "reply", null, [], "markRead", false, true,
+    [{ id: "reply", unread: true }]), 7, "mark all read reaches an unread listed row")
+  assert.strictEqual(model.readActionSerial(-1, 7, "reply", null, [], "markRead", false, true,
+    [{ id: "reply", unread: false }]), -1, "but not one it leaves alone")
+  assert.strictEqual(model.readActionSerial(-1, 7, "reply", null, [], "markRead", false, true,
+    [{ id: "other", unread: true }]), -1, "nor a message outside the list")
+  assert.strictEqual(model.readActionSerial(7, 7, "reply", null, ["reply"], "markUnread", false, false), -1)
+  assert.strictEqual(model.readActionSerial(7, 7, "reply", null, ["other"], "markRead", false, false), 7)
+  assert.strictEqual(model.readActionSerial(7, 7, "reply", null, ["reply"], "star", false, false), 7)
+  assert.strictEqual(model.readActionSerial(-1, 7, "", null, ["reply"], "markRead", false, false), -1)
+}
+
 // The sender learns nothing from a message nobody opened.
 assert.strictEqual(model.showsRemoteImages(true, false), true)
 assert.strictEqual(model.showsRemoteImages(true, true), false,

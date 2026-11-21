@@ -2,6 +2,8 @@ import QtQuick 2.15
 import QtTest 1.3
 import "transports.js" as Transports
 import "NativeIntentFixture.js" as NativeIntentFixture
+import "NativeDomainFixture.js" as Native
+import "../../../benchmarks/mail/baseline/ui/message/Message.js" as Mail
 import "../../account" as Account
 
 // The queue must retain a rail action's single-message scope, including when
@@ -30,6 +32,31 @@ Item {
       windowOpen: true
     }
 
+  }
+
+  // The native bridge, with only the reader scripted: the cached copy answers
+  // at once and the live read waits until the test delivers it.
+  Component {
+    id: readerBackend
+    QtObject {
+      property var bridge: null
+      readonly property bool ready: true
+      readonly property var pending: bridge ? bridge.pending : []
+      property var live: null
+      signal notification(string method, var params)
+      function resource(unread) {
+        return {id: "m3", threadId: "d", labelIds: unread ? ["INBOX", "UNREAD"] : ["INBOX"],
+          payload: {mimeType: "text/plain", headers: [{name: "Subject", value: "One"},
+            {name: "From", value: "Sender <sender@example.org>"}],
+            body: {data: Mail.bytesToBase64(Mail.utf8Bytes("Body"), true)}}}
+      }
+      function call(method, params, callback) {
+        if (method === "reader.cancel") return callback({cancelled: true}, null)
+        if (method !== "reader.open") return bridge.call(method, params, callback)
+        if (params.cacheOnly) return callback(Native.readerProjection(resource(true), params), null)
+        live = function(message) { callback(Native.readerProjection(message, params), null) }
+      }
+    }
   }
 
   TestCase {
@@ -136,6 +163,32 @@ Item {
       Transports.fail(sent[0])
       tryCompare(account, "pendingAction", "")
       compare(account.memberSummaries.m1.unread, true, "failed automatic read restores the member")
+    }
+
+    // "Mark messages read when opened" off, through the real action path: the
+    // reader paints the cached copy, the user marks the message read while
+    // the live read is still out, and the live read then lands with the
+    // server's answer from before the action. It must not undo the read.
+    function test_a_manual_read_survives_a_live_read_started_before_it() {
+      var settings = JSON.parse(JSON.stringify(account.defaultSettingValues))
+      settings.markReadOnOpen = false
+      account.settings = settings
+      var reader = createTemporaryObject(readerBackend, parent, {bridge: account.backend})
+      account.backend = reader
+      account.select("m3", false)
+      tryCompare(account, "detailPainted", true)
+      compare(account.selectedMessage.unread, true, "the cached copy opens unread")
+      var before = Transports.transports(account.api)
+      verify(account.act("m3", "markRead"), "Shift+I is accepted")
+      settleNative()
+      compare(Transports.newSince(account.api, before).length, 1, "one read goes out")
+      compare(account.selectedMessage.unread, false)
+      verify(reader.live !== null, "the live read is still out")
+      reader.live(reader.resource(true))
+      settleNative()
+      compare(account.selectedMessage.unread, false, "the reader keeps the user's read")
+      compare(account.messages[0].unread, false, "and so does the row")
+      compare(Transports.newSince(account.api, before).length, 1, "with no second read sent")
     }
   }
 }

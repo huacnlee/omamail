@@ -111,7 +111,8 @@ void SettingsTest::acceptsTheSettingsServiceSends()
         {QStringLiteral("undoSendSeconds"), 10}, {QStringLiteral("unifiedCalendarView"), false},
         {QStringLiteral("calendarRemindersEnabled"), true},
         {QStringLiteral("calendarSnoozeMinutes"), 5}, {QStringLiteral("showBarIcon"), true},
-        {QStringLiteral("unifiedMailboxes"), false}, {QStringLiteral("suggestEvents"), false},
+        {QStringLiteral("unifiedMailboxes"), false}, {QStringLiteral("markReadOnOpen"), true},
+        {QStringLiteral("suggestEvents"), false},
         {QStringLiteral("aiAgent"), QStringLiteral("System default")},
         {QStringLiteral("aiModel"), QString()}, {QStringLiteral("calendarHourHeight"), 40},
         {QStringLiteral("invitationCalendars"), QVariantMap{}}, {QStringLiteral("aiChatResetAt"), 1}};
