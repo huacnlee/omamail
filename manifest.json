@@ -44,6 +44,7 @@
       "defaultQuery": "in:inbox",
       "notifyNewMail": "On",
       "oauthPort": 9481,
+      "m365ClientId": "",
       "undoSendSeconds": 10,
       "unifiedCalendarView": false,
       "calendarRemindersEnabled": true,
@@ -153,6 +154,13 @@
         "step": 1,
         "defaultValue": 9481,
         "description": "Loopback port used once during Google sign-in. HEY and IMAP accounts never use it. Change it only if something else already listens there."
+      },
+      {
+        "key": "m365ClientId",
+        "type": "string",
+        "label": "Microsoft 365 Application (client) ID",
+        "defaultValue": "",
+        "description": "For an organization that registered Omamail once in Microsoft Entra: its Application (client) ID. Adding a Microsoft 365 mailbox then asks only for the address. Leave empty to enter an ID for each mailbox."
       },
       {
         "key": "undoSendSeconds",
