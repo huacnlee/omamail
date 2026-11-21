@@ -691,11 +691,9 @@ Item {
 
   // A mailto: URL, or the blank draft `compose: true` asks for. The window is
   // already open when this runs — summon delivers the payload to open().
-  function openDraft(draft) {
-    if (!draft) return
-    pendingDraftId = ""
-    compose.beginDraft(draft)
-  }
+  function openDraft(draft) { composeRecoveryController.openDraft(draft) }
+  property var heldDraft: null
+  property var draftAwaitingRecovery: null
 
   function resumeHeldCompose() { pendingCompose.resume() }
 
@@ -760,6 +758,7 @@ Item {
         compose.recoverDetachedSave(saved)
         if (root.composeRecoveryRevision === recoveryRevision)
           root.saveComposeRecovery(saved)
+        root.scheduleComposeRecovery()
         service.fail("Could not save draft: " + String(error))
         return
       }
@@ -2899,11 +2898,14 @@ Item {
         popupBackgroundColor: root.popupBackground
         popupBorderColor: root.popupBorder
         panelFontFamily: root.fontFamily
+        onOpenedChanged: if (!opened) Qt.callLater(composeRecoveryController.dropHeldDraft)
         onSaveRequested: function(draftKey) {
           if (compose.opened && compose.draftKey === draftKey) root.saveAndLeaveCompose(true)
+          composeRecoveryController.releaseHeldDraft()
         }
         onDiscardRequested: function(draftKey) {
           if (compose.opened && compose.draftKey === draftKey) compose.finish()
+          composeRecoveryController.releaseHeldDraft()
         }
       }
 

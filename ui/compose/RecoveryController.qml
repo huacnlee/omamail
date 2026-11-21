@@ -45,6 +45,13 @@ QtObject {
   property string noticeBehindSaveFailure: ""
   property bool saveFailureHidUpdateNotice: false
   onRecoverySupportedChanged: { if (recoverySupported) root.readComposeRecovery() }
+  // Until recovery is read and its receipts checked, a draft opened now would
+  // be saved over a last session's edits nobody has seen. A backend too old for
+  // recovery has none to wait for.
+  readonly property bool recoveryPending: !!service && !!service.backend && !recoveryNeedsUpdate
+    && (!root.composeRecoveryLoaded || root.composeReceiptChecking)
+  readonly property string awaitingDraftNotice: "This link opens once saved drafts can be read. Reconnect the mail backend."
+  onRecoveryPendingChanged: { if (!recoveryPending) Qt.callLater(releaseAwaitingDraft) }
   onRecoveryNeedsUpdateChanged: {
     if (recoveryNeedsUpdate && root.composeWriteQueued) showRecoveryNotice(recoveryUpdateNotice, true)
   }
@@ -170,7 +177,10 @@ QtObject {
     root.service.backend.call("compose.recoveryRead", {}, function(result, error) {
       if (!root) return
       root.composeReading = false
-      if (error || !result) return
+      if (error || !result) {
+        if (root.draftAwaitingRecovery) showRecoveryNotice(awaitingDraftNotice)
+        return
+      }
       if (root.composeRecoveryConflict && root.composeWriteQueued) return
       root.composeStorageRevision = String(result.revision || "")
       root.composeRecoveryLoaded = true
@@ -180,6 +190,47 @@ QtObject {
       }
       root.drainComposeRecovery()
     })
+  }
+
+  // Edits are not replaced unasked, including a last session's still waiting
+  // in recovery: the usual question, the link held until it is answered.
+  function openDraft(draft, answered) {
+    if (!draft) return
+    if (!answered && recoveryPending) {
+      root.draftAwaitingRecovery = draft
+      return
+    }
+    // A saved draft stays in recovery until its save lands: not asked twice.
+    if (!answered && !compose.opened) restoreComposeRecovery()
+    if (compose.opened && compose.hasUserChanges()) {
+      root.heldDraft = draft
+      composeExitDialog.open()
+      return
+    }
+    root.pendingDraftId = ""
+    compose.beginDraft(draft)
+  }
+
+  // Recovery has settled: the link gets the question it could not get before.
+  function releaseAwaitingDraft() {
+    if (!root || !root.draftAwaitingRecovery) return
+    var draft = root.draftAwaitingRecovery
+    root.draftAwaitingRecovery = null
+    if (root.composeRecoveryNotice === awaitingDraftNotice) root.composeRecoveryNotice = ""
+    openDraft(draft)
+  }
+
+  // After Save or Discard. Another draft may have reopened: that one is asked
+  // about in turn.
+  function releaseHeldDraft() {
+    var draft = root.heldDraft
+    root.heldDraft = null
+    if (draft) openDraft(draft, true)
+  }
+
+  // The question closed unanswered.
+  function dropHeldDraft() {
+    if (!composeExitDialog.opened) root.heldDraft = null
   }
 
   function restoreComposeRecovery() {

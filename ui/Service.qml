@@ -1252,6 +1252,7 @@ Item {
   property string windowWritePayload: ""
   property bool windowWriting: false
   property bool restoreWindow: false
+  property bool keepWindowShut: false
   property int restoreAttempts: 0
 
   function applyWindowPrefs(raw) {
@@ -1263,7 +1264,7 @@ Item {
     bodyZoom = prefs.bodyZoom
     bodyMode = prefs.bodyMode
     alwaysShowImages = prefs.alwaysShowImages
-    restoreWindow = prefs.windowOpen
+    restoreWindow = prefs.windowOpen && !keepWindowShut
     restoreAttempts = 0
     windowPrefsLoaded = true
     if (restoreWindow) Qt.callLater(root.reopenWindow)

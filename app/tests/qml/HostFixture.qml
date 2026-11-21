@@ -12,6 +12,8 @@ QtObject {
   property bool hidden: false
   property bool quitCalled: false
   property var pendingNotificationActivation: ({})
+  property string pendingOpen: ""
+  property int windowBringBacks: 0
   property var environmentValues: ({
     HOME: "/fixture/home",
     XDG_CONFIG_HOME: "/fixture/config",
@@ -25,6 +27,7 @@ QtObject {
   property var watched: ({})
   signal notificationActivated(string accountId, string messageId)
   signal reopenRequested()
+  signal openRequested(string payload)
   signal closeRequested()
   signal changed(string path)
   signal failed(string path, string error)
@@ -41,6 +44,22 @@ QtObject {
     watched = ({})
     hidden = false
     quitCalled = false
+    pendingOpen = ""
+    windowBringBacks = 0
+  }
+
+  function requestOpen(payload) {
+    pendingOpen = String(payload)
+    openRequested(pendingOpen)
+  }
+  function takePendingOpen() {
+    var payload = pendingOpen
+    pendingOpen = ""
+    return payload
+  }
+  function bringWindowBack() {
+    windowBringBacks++
+    return false
   }
 
   function environment(name) { return String(environmentValues[name] || "") }
