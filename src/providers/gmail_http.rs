@@ -17,14 +17,14 @@ struct Request {
 
 const MAX_INPUT: usize = 64 * 1024;
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
-const DEADLINE: Duration = Duration::from_secs(20);
+pub(crate) const DEADLINE: Duration = Duration::from_secs(20);
 // Gmail meters each user at 250 quota units per second and rejects the excess
 // with 403 rateLimitExceeded or 429. Google asks for exponential backoff
 // starting at one second. A rejected request never ran, so resending it —
 // even a mutation — cannot duplicate anything; a timeout is different and is
 // never retried.
 const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(1);
-const RATE_LIMIT_RETRIES: usize = 3;
+pub(crate) const RATE_LIMIT_RETRIES: usize = 3;
 static CLIENT: OnceLock<Result<reqwest::Client, &'static str>> = OnceLock::new();
 
 // The integration fixture exercises the real dispatcher, credential reader and
@@ -81,6 +81,16 @@ pub async fn get(
     execute(client()?, request, DEADLINE).await
 }
 
+/// `get` without the rate-limit retries, for a caller that backs off itself.
+pub(crate) async fn get_once(
+    path: &[&str],
+    query: &[(String, String)],
+    token: &str,
+) -> Result<Value, &'static str> {
+    let request = prepare_get(path, query, token)?;
+    execute_once(client()?, request, DEADLINE).await
+}
+
 pub async fn refresh(id: &str, secret: &str, token: &str) -> Result<Value, &'static str> {
     let request = prepare_refresh(id, secret, token)?;
     execute(client()?, request, DEADLINE).await
@@ -109,6 +119,56 @@ async fn execute_with_backoff(
     deadline: Duration,
     backoff: Duration,
 ) -> Result<Value, &'static str> {
+    let started = std::time::Instant::now();
+    for retry in 0..=RATE_LIMIT_RETRIES {
+        let remaining = deadline.saturating_sub(started.elapsed());
+        let answer = execute_once(client, request.clone(), remaining).await;
+        if answer != Err("gmail_rate_limited") {
+            return answer;
+        }
+        let Some(wait) = rate_limit_wait(retry, started.elapsed(), deadline, backoff) else {
+            return answer;
+        };
+        tokio::time::sleep(wait).await;
+    }
+    unreachable!()
+}
+
+/// The pause before resending a request refused `retry + 1` times in the
+/// `elapsed` time since it was first sent, or `None` when the retries or the
+/// deadline are used up.
+pub(crate) fn backoff_wait(retry: usize, elapsed: Duration) -> Option<Duration> {
+    rate_limit_wait(retry, elapsed, DEADLINE, RATE_LIMIT_BACKOFF)
+}
+
+fn rate_limit_wait(
+    retry: usize,
+    elapsed: Duration,
+    deadline: Duration,
+    backoff: Duration,
+) -> Option<Duration> {
+    if retry >= RATE_LIMIT_RETRIES {
+        return None;
+    }
+    // Jitter from the clock keeps a screen of parallel calls from
+    // returning as the same burst that was just refused.
+    let jitter = backoff.as_nanos() as u64 / 2;
+    let jitter = Duration::from_nanos(
+        (std::time::SystemTime::UNIX_EPOCH
+            .elapsed()
+            .map_or(0, |t| t.subsec_nanos() as u64)
+            ^ elapsed.subsec_nanos() as u64)
+            % jitter.max(1),
+    );
+    let wait = backoff.saturating_mul(1 << retry) + jitter;
+    (elapsed + wait < deadline).then_some(wait)
+}
+
+async fn execute_once(
+    client: &reqwest::Client,
+    request: Request,
+    deadline: Duration,
+) -> Result<Value, &'static str> {
     #[cfg(test)]
     let test_transport = TEST_TRANSPORT.try_with(Clone::clone).ok();
     #[cfg(test)]
@@ -129,30 +189,7 @@ async fn execute_with_backoff(
     } else {
         (client, request)
     };
-    let started = std::time::Instant::now();
-    for retry in 0..=RATE_LIMIT_RETRIES {
-        let remaining = deadline.saturating_sub(started.elapsed());
-        let answer = attempt(client, request.clone(), remaining).await;
-        if answer != Err("gmail_rate_limited") || retry == RATE_LIMIT_RETRIES {
-            return answer;
-        }
-        // Jitter from the clock keeps a screen of parallel calls from
-        // returning as the same burst that was just refused.
-        let jitter = backoff.as_nanos() as u64 / 2;
-        let jitter = Duration::from_nanos(
-            (std::time::SystemTime::UNIX_EPOCH
-                .elapsed()
-                .map_or(0, |t| t.subsec_nanos() as u64)
-                ^ started.elapsed().subsec_nanos() as u64)
-                % jitter.max(1),
-        );
-        let wait = backoff.saturating_mul(1 << retry) + jitter;
-        if started.elapsed() + wait >= deadline {
-            return answer;
-        }
-        tokio::time::sleep(wait).await;
-    }
-    unreachable!()
+    attempt(client, request, deadline).await
 }
 
 async fn attempt(
