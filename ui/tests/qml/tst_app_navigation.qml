@@ -198,6 +198,7 @@ Item {
       record("act:" + String(action || "") + ":" + String(id || ""))
       return true
     }
+    function openInBrowser(id) { record("browser:" + String(id || "")) }
     function refuseUnavailableAction(action) {
       record("guard:" + String(action || ""))
       if (!refuseMove) return false
@@ -984,6 +985,25 @@ Item {
       app.back()
       compare(kinds(), "list,settings")
       compare(mailService.count("discard"), 0)
+    }
+
+    function test_open_in_browser_follows_the_reader_then_the_cursor() {
+      app.cursorId = "message-1"
+      app.runShortcut("openInBrowser", "b")
+      compare(mailService.count("browser:message-1"), 1,
+        "from the list the key opens the cursor row")
+
+      app.openMessage("message-2")
+      mailService.land()
+      app.runShortcut("openInBrowser", "b")
+      compare(mailService.count("browser:message-2"), 1,
+        "with a message open the key opens the one on screen")
+
+      app.backToList()
+      app.cursorId = ""
+      compare(app.runShortcut("openInBrowser", "b"), false,
+        "with no row to open the key does nothing")
+      compare(mailService.count("browser:"), 0, "and sends no browser request")
     }
 
     function test_an_unavailable_move_is_refused_before_the_picker_opens() {

@@ -95,6 +95,11 @@ var BINDINGS = [
     group: "Acting", label: "Move to",
     hint: { list: "move to", reader: "move to" },
     hintNeedsSelection: true, hintUnavailableId: "move" },
+  // `b` for browser, the reader's toolbar button. No hint: the button's
+  // provider URL is resolved when pressed, and a hint here would promise a
+  // browser on accounts whose provider has no web mailbox.
+  { id: "openInBrowser", keys: ["b"], contexts: MAIL,
+    group: "Acting", label: "Open in browser" },
   { id: "markRead", keys: ["Shift+I"], contexts: MAIL,
     group: "Acting", label: "Mark read" },
   { id: "markUnread", keys: ["Shift+U"], contexts: MAIL,
