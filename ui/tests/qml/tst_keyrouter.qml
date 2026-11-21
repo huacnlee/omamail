@@ -93,6 +93,37 @@ Item {
       compare(host.lastId, "toggleCheck")
     }
 
+    // The trash key is d, with Delete beside it for the desktop-mail habit
+    // (issue #58): one binding, two keys, live in the mail contexts only.
+    function test_delete_fires_trash_in_the_mailbox() {
+      keyClick(Qt.Key_Delete)
+      compare(host.lastId, "trash", "Delete trashes the cursor's row")
+      host.context = "reader"
+      host.lastId = ""
+      wait(20)
+      keyClick(Qt.Key_Delete)
+      compare(host.lastId, "trash", "and the open message's")
+    }
+
+    function test_delete_stays_editing_in_a_draft() {
+      host.context = "compose"
+      compose.opened = true
+      composeField.text = "ab"
+      composeField.cursorPosition = 0
+      scope.applyContextFocus()
+      wait(20)
+      keyClick(Qt.Key_Delete)
+      compare(host.lastId, "", "Delete in a draft is text editing, not trash")
+      compare(composeField.text, "b", "the field ate the character after the cursor")
+    }
+
+    function test_delete_is_dead_in_a_query() {
+      host.context = "search"
+      wait(20)
+      keyClick(Qt.Key_Delete)
+      compare(host.lastId, "", "Delete narrows nothing in a query")
+    }
+
     function test_the_same_letter_is_dead_on_a_form() {
       host.context = "page"
       wait(20)

@@ -276,6 +276,15 @@ assert.strictEqual(keymap.hintKeyFor(byId("open")), "o",
 assert.strictEqual(keymap.hintKeyFor(byId("archive")), "e",
   "falling back to the keys when there is nothing to shorten")
 
+// Delete beside d is one action, not a second one: the row binds both keys,
+// the sheet enumerates them, and the hint row keeps its short form.
+const trash = byId("trash")
+deepEqual(trash.keys, ["d", "Delete"])
+assert.strictEqual(keymap.displayFor(trash), "d, Delete",
+  "the sheet names every key that works")
+assert.strictEqual(keymap.hintKeyFor(trash), "d",
+  "the status bar keeps the one-letter hint")
+
 const listHints = keymap.hintsFor("list")
 assert.strictEqual(keymap.keycapLabel("Shift+J / Shift+K"), "shift+j / shift+k")
 assert.strictEqual(keymap.keycapLabel("Ctrl+Enter, Esc, Space"), "ctrl+enter, esc, space")
