@@ -100,6 +100,27 @@ fn prepare_bounds_untrusted_mime_and_restores_compose_text() {
     );
     assert!(content::request("message.prepare", &json!({"message":{},"now":"wrong"})).is_err());
     assert_eq!(content::request("message.composeText",&json!({"signature":" signed ","body":"one\ntwo","summary":{"subject":"hello","from":{"display":"Jane"},"fullTime":"today"}})).unwrap(),json!({"body":"\n\nsigned\n\nOn today, Jane wrote:\n> one\n> two","quote":"On today, Jane wrote:\n> one\n> two","replySubject":"Re: hello"}));
+    // The sender's address goes with the name: a forwarded message has to
+    // identify the original sender, and a display name alone cannot.
+    assert_eq!(
+        content::request("message.composeText", &json!({"body":"one","summary":{"subject":"hello","from":{"display":"Jane","email":"jane@example.org"},"fullTime":"today"}})).unwrap()["quote"],
+        json!("On today, Jane <jane@example.org> wrote:\n> one")
+    );
+    assert_eq!(
+        content::request("message.composeText", &json!({"body":"one","summary":{"from":{"email":"jane@example.org"},"fullTime":"today"}})).unwrap()["quote"],
+        json!("On today, jane@example.org wrote:\n> one")
+    );
+    // The quote takes the sender's client leftovers out: the image references
+    // it left in the text, and a whole HTML document sent as text. Neither
+    // belongs in a forwarded or answered message.
+    assert_eq!(
+        content::request("message.composeText", &json!({"body":"Boa tarde\n\n[cid:image006.png@01D8] www.site.com\ncid:image007.jpg@01D8  R. das Carmelitas","summary":{"from":{"display":"Marcia"},"fullTime":"today"}})).unwrap()["quote"],
+        json!("On today, Marcia wrote:\n> Boa tarde\n> \n>  www.site.com\n>   R. das Carmelitas")
+    );
+    assert_eq!(
+        content::request("message.composeText", &json!({"body":"<!DOCTYPE html>\n<html><body><p>Ola</p><p>Mundo</p></body></html>","summary":{"from":{"display":"XP"},"fullTime":"today"}})).unwrap()["quote"],
+        json!("On today, XP wrote:\n> Ola\n> Mundo")
+    );
 }
 
 #[test]

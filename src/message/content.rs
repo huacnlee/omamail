@@ -509,6 +509,37 @@ fn prepare_content(message: &Value, now: i64, read_html: bool) -> Result<Value> 
         json!({"summary":summarize(message,now)?,"body":{"text":body,"source":source,"bodyDirection":super::direction::resolve_body(&body,super::direction::AUTO)},"html":html,"attachments":files}),
     )
 }
+// The quote header names the sender, and the address goes with the name when
+// there is one. A display name alone cannot identify a sender in a forwarded
+// message — it is text the sender chose, and several people can choose it.
+fn sender_label(from: &Value) -> String {
+    let display = text(&from["display"]);
+    let email = text(&from["email"]);
+    match (display.is_empty(), email.is_empty()) {
+        (true, false) => email.to_owned(),
+        (false, true) => display.to_owned(),
+        (false, false) => format!("{display} <{email}>"),
+        (true, true) => String::new(),
+    }
+}
+// The quoted original is whatever the reader held, and a sender's client is
+// free to have put anything there: the image references it left behind in the
+// text (`cid:` markers from a signature), or a whole HTML document sent as
+// text. None of that is the message — it would only travel as quoted noise in
+// a forward or a reply — so the quote takes it out before marking the lines.
+fn quote_source(body: &str) -> String {
+    static CID: OnceLock<Regex> = OnceLock::new();
+    let cid = CID
+        .get_or_init(|| Regex::new(r"(?i)\[\s*cid:[^\]]*\]|\bcid:[^\s]+").unwrap());
+    let stripped = cid.replace_all(body, "").into_owned();
+    if super::looks_like_html(stripped.as_bytes()) {
+        // The JavaScript `htmlToText` trims; the quote takes the same bytes
+        // on either side of the wire.
+        html_to_text(&stripped).trim().to_owned()
+    } else {
+        stripped
+    }
+}
 pub fn request(method: &str, params: &Value) -> Result<Value> {
     if !params.is_object() {
         return Err("invalid_params");
@@ -536,13 +567,14 @@ pub fn request(method: &str, params: &Value) -> Result<Value> {
                     format!(
                         "On {}, {} wrote:\n",
                         text(&summary["fullTime"]),
-                        text(&summary["from"]["display"])
+                        sender_label(&summary["from"])
                     )
                 } else {
                     String::new()
                 };
+                let source = quote_source(text(&params["body"]));
                 prefix
-                    + &text(&params["body"])
+                    + &source
                         .split('\n')
                         .map(|line| format!("> {line}"))
                         .collect::<Vec<_>>()

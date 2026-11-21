@@ -811,7 +811,23 @@ assert.strictEqual(message.buildSendPayload({ to: "a@b.com", draftId: 7 }).draft
 
 const quoted = message.quoteBody(summary, "line one\nline two")
 assert.ok(quoted.indexOf("> line one\n> line two") > 0)
-assert.ok(quoted.indexOf("李四 wrote:") > 0)
+// The sender's address goes with the name: a forwarded message has to
+// identify the original sender, and a display name alone cannot.
+assert.ok(quoted.indexOf("李四 <li@example.com> wrote:") > 0)
+assert.ok(message.quoteBody({ from: { display: "Jane" }, fullTime: "today" }, "x")
+  .indexOf("On today, Jane wrote:") === 0, "no address available, the name alone stands")
+assert.ok(message.quoteBody({ from: { email: "jane@example.org" }, fullTime: "today" }, "x")
+  .indexOf("On today, jane@example.org wrote:") === 0)
+
+// The quote takes the sender's client leftovers out: the image references it
+// left in the text, and a whole HTML document sent as text. Neither belongs
+// in a forwarded or answered message.
+assert.strictEqual(message.quoteBody({ from: { display: "Marcia" }, fullTime: "today" },
+  "Boa tarde\n\n[cid:image006.png@01D8] www.site.com\ncid:image007.jpg@01D8  R. das Carmelitas"),
+  "On today, Marcia wrote:\n> Boa tarde\n> \n>  www.site.com\n>   R. das Carmelitas")
+assert.strictEqual(message.quoteBody({ from: { display: "XP" }, fullTime: "today" },
+  "<!DOCTYPE html>\n<html><body><p>Ola</p><p>Mundo</p></body></html>"),
+  "On today, XP wrote:\n> Ola\n> Mundo")
 
 // The reader wants the markup; the list row wants the flattened text. Both
 // walks must find the same part, and neither may return an attachment.
