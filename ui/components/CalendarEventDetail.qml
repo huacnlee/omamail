@@ -99,10 +99,11 @@ Rectangle {
         + Qt.formatDate(inclusiveEnd, "d MMMM yyyy") + " · All day"
     }
     var startDay = Qt.formatDate(start, "dddd, d MMMM yyyy")
+    var zone = Calendar.unresolvedZoneSuffix(event)
     if (start.toDateString() === end.toDateString())
-      return startDay + " · " + Calendar.timeRangeLabel(start.getTime(), end.getTime(), root.timeFormat)
+      return startDay + " · " + Calendar.timeRangeLabel(start.getTime(), end.getTime(), root.timeFormat) + zone
     return startDay + " · " + Calendar.timeLabel(start.getTime(), root.timeFormat) + " – "
-      + Calendar.dateTimeLabel(end.getTime(), "dddd, d MMMM yyyy", root.timeFormat, " · ")
+      + Calendar.dateTimeLabel(end.getTime(), "dddd, d MMMM yyyy", root.timeFormat, " · ") + zone
   }
 
   CalendarPalette {

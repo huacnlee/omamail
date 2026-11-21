@@ -1,5 +1,7 @@
 .pragma library
 
+.import "Calendar.js" as Calendar
+
 // Version 2 added the Google item id required by update and delete; version 3
 // adds the original CalDAV resource required to preserve fields during PUT.
 // Older ranges cannot recover either value, so they are fetched again instead
@@ -44,7 +46,10 @@ function eventsFor(store, scope, startMs, endMs, enabledSourceIds) {
     candidates.sort(function(a, b) { return Number(store.ranges[b].at) - Number(store.ranges[a].at) })
     if (candidates.length) source = store.ranges[candidates[0]]
   }
-  var values = source && Array.isArray(source.events) ? source.events : []
+  // Unresolved times were placed for the clock the machine had when they
+  // were stored; they are placed again for the clock it has now.
+  var values = (source && Array.isArray(source.events) ? source.events : [])
+    .map(Calendar.relocalized)
   var enabled = {}
   var ids = Array.isArray(enabledSourceIds) ? enabledSourceIds : []
   for (var i = 0; i < ids.length; i++) enabled[String(ids[i])] = true

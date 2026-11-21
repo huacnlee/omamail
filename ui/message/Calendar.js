@@ -919,6 +919,7 @@ function eventFromComponent(calendar, event, fallbackMethod) {
   var recurrence = property(event, "RRULE")
   var recurrenceId = resolveTime(property(event, "RECURRENCE-ID"), calendar)
   var excluded = []
+  var unresolvedExcluded = []
   var exclusionLines = properties(event, "EXDATE")
   for (var exclusionIndex = 0; exclusionIndex < exclusionLines.length; exclusionIndex++) {
     var values = String(exclusionLines[exclusionIndex].value || "").split(",")
@@ -928,6 +929,7 @@ function eventFromComponent(calendar, event, fallbackMethod) {
         value: values[valueIndex], raw: exclusionLines[exclusionIndex].raw
       }, calendar)
       if (excludedAt) excluded.push(excludedAt.ms)
+      if (excludedAt && excludedAt.resolved === false) unresolvedExcluded.push(excludedAt.ms)
     }
   }
 
@@ -946,7 +948,13 @@ function eventFromComponent(calendar, event, fallbackMethod) {
     recurrence: recurrence ? describeRecurrence(recurrence.value) : "",
     recurrenceRule: recurrence ? String(recurrence.value || "") : "",
     recurrenceIdMs: recurrenceId ? recurrenceId.ms : 0,
+    // Each identity says for itself whether it is an instant or a wall-clock
+    // placeholder: an override's RECURRENCE-ID names a slot of the series, so
+    // its own DTSTART — in UTC, or absent on a cancellation — says nothing
+    // about how that slot was written.
+    recurrenceIdResolved: !recurrenceId || recurrenceId.resolved !== false,
     excludedMs: excluded,
+    unresolvedExcludedMs: unresolvedExcluded,
     meetLink: conferenceLink(event),
     // Kept verbatim for the reply. A DTSTART rebuilt out of the moment this
     // parser settled on would answer a question the organiser did not ask; the
