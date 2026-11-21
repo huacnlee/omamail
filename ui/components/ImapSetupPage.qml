@@ -161,7 +161,12 @@ Column {
     }, passwordField.text)
   }
 
-  Component.onCompleted: syncFromStore()
+  Component.onCompleted: {
+    syncFromStore()
+    // A refused saved password is what brings a single mailbox's window back
+    // here, so the refusal came before this page and its change was missed.
+    if (auth && auth.savedPasswordRefused === true) errorText.text = auth.lastError
+  }
 
   Connections {
     target: root.auth
@@ -472,6 +477,7 @@ Column {
     spacing: Style.space(8)
 
     Button {
+      objectName: "imap-connect-button"
       visible: !root.signedIn
       text: root.busy ? "Checking" : "Connect the mailbox"
       enabled: !root.busy && addressField.text.trim() !== "" && passwordField.text !== ""

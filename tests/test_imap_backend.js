@@ -16,7 +16,7 @@ const context = {
 }
 context.root = context
 vm.createContext(context)
-for (const name of ["newHandle","backendError","nativeRequest","getMessages","sendMessage","verifyCredentials"])
+for (const name of ["newHandle","backendError","refusesSavedPassword","nativeRequest","getMessages","sendMessage","verifyCredentials"])
   vm.runInContext(method(name),context)
 const dnsError = "Could not find the mail server. Check the server address and your internet connection."
 let verification
