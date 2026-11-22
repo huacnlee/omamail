@@ -894,15 +894,10 @@ Item {
     if (cursorId === "") return false
     var acted = cursorId
     var row = service.messages[Model.indexById(service.messages, acted)]
-    // "Was open" is the conversation's: with the rail up the reader can be
-    // showing a member of the acted row rather than the row itself, and
-    // archiving from a member has to open the next row or go back rather than
-    // leave a message that has just moved on screen.
-    //
-    // And a preview is not open at all. It satisfies "is this the selected
-    // one" without having been opened, which made `e` on a previewed row call
-    // `openMessage` on the *next* one — an archive that reads a message, which
-    // is the fault this feature exists to avoid.
+    // "Was open" is the conversation's: with the rail up the reader can show a
+    // member of the acted row, so archiving from a member must open the next
+    // row or go back. A preview satisfies "selected" without being opened,
+    // which made `e` on a previewed row open the *next* message.
     var wasOpen = currentView === "reader" && !service.selectionIsPreview
       && (service.selectedId === acted || Model.rowHoldsMember(row, service.selectedId))
     // Worked out before the action, while the row still has neighbours.
@@ -1032,6 +1027,12 @@ Item {
     }
     if (id === "checkAll") return checkAll()
     if (id === "moveToLabel") return openLabelPicker()
+    if (id === "openInBrowser") {
+      var browserId = currentView === "reader" && service ? service.selectedId : cursorId
+      if (!service || browserId === "") return false
+      service.openInBrowser(browserId)
+      return true
+    }
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
     if (id === "reply") return composeFromCursor("reply")
