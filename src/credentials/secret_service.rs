@@ -341,7 +341,7 @@ async fn execute(
                 // Keep older grants intact until the current-scope item exists.
                 collection
                     .create_item(
-                        "Omamail",
+                        &key.label(),
                         attrs
                             .iter()
                             .map(|(k, v)| (k.as_str(), v.as_str()))

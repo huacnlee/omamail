@@ -476,6 +476,7 @@ pub async fn graph_token(account: &str) -> Result<String, &'static str> {
 /// Discard cached credentials without opening a second refresh lane.
 pub async fn invalidate(account: &str) -> Result<(), &'static str> {
     valid_account(graph_provider(account), account)?;
+    crate::credentials::invalidate_account(account);
     if let Some(accounts) = TOKENS.get() {
         let prefix = format!("{}:", account.to_lowercase());
         let locks: Vec<_> = accounts

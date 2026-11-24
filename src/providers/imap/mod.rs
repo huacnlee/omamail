@@ -546,13 +546,20 @@ pub async fn call(method: &str, p: &Value) -> Result<Value> {
 }
 async fn call_inner(method: &str, p: &Value) -> Result<Value> {
     let sent = std::sync::atomic::AtomicBool::new(false);
-    match tokio::time::timeout(CALL_BUDGET, async {
+    let outcome = tokio::time::timeout(CALL_BUDGET, async {
         let resolved = resolve_account(p, method).await?;
         execute(method, &resolved, &sent).await
     })
-    .await
-    {
-        Ok(result) => result,
+    .await;
+    match outcome {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err("mail_auth_failed")) => {
+            if let Some(account) = p.get("accountId").and_then(Value::as_str) {
+                crate::credentials::invalidate_account(account);
+            }
+            Err("mail_auth_failed")
+        }
+        Ok(Err(err)) => Err(err),
         Err(_) if sent.load(std::sync::atomic::Ordering::SeqCst) => Ok(
             json!({"sent":true,"warning":"Sent, but the copy for the Sent folder could not be saved"}),
         ),

@@ -38,5 +38,26 @@ if [ "$#" -eq 10 ] \
   secret-tool clear "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" || true
 fi
 
+LABEL="Omamail refresh token"
+is_refresh=0
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "kind" ] && [ "$arg" = "refresh-token" ]; then
+    is_refresh=1
+  fi
+  prev="$arg"
+done
+
+if [ "$is_refresh" -eq 0 ]; then
+  prev=""
+  for arg in "$@"; do
+    if [ "$prev" = "account" ] || [ "$prev" = "source" ]; then
+      LABEL="Omamail ($arg)"
+      break
+    fi
+    prev="$arg"
+  done
+fi
+
 printf '%s' "$refresh_token" | secret-tool store \
-  --label='Omamail refresh token' "$@"
+  --label="$LABEL" "$@"

@@ -1,6 +1,7 @@
 //! Native credential storage. Only metadata is normalized; secret bytes never
 //! enter child-process arguments or acquire a text/line-ending interpretation here.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use zeroize::Zeroizing;
 
 #[cfg(all(feature = "integration-test-credentials", not(debug_assertions)))]
@@ -21,7 +22,7 @@ use secret_service as platform;
 #[cfg(target_os = "windows")]
 use windows as platform;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CredentialKind {
     GoogleRefreshToken { client_id: String },
     OutlookRefreshToken { client_id: String },
@@ -31,7 +32,7 @@ pub enum CredentialKind {
     CalendarPassword,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CredentialKey {
     pub provider: String,
     /// Stable mailbox id, or the stable CalDAV source id for CalendarPassword.
@@ -75,10 +76,46 @@ pub trait CredentialStore: Send + Sync {
     fn delete(&self, key: &CredentialKey) -> Result<(), Error>;
 }
 
+static MEMORY_CACHE: OnceLock<Mutex<HashMap<BTreeMap<String, String>, Zeroizing<Vec<u8>>>>> =
+    OnceLock::new();
+
+fn memory_cache() -> &'static Mutex<HashMap<BTreeMap<String, String>, Zeroizing<Vec<u8>>>> {
+    MEMORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn locked_cache() -> MutexGuard<'static, HashMap<BTreeMap<String, String>, Zeroizing<Vec<u8>>>> {
+    memory_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn invalidate_account(account_or_source: &str) {
+    let target = account_or_source.to_lowercase();
+    locked_cache().retain(|attrs, _| {
+        if let Some(account) = attrs.get("account") {
+            account.to_lowercase() != target
+        } else if let Some(source) = attrs.get("source") {
+            source.to_lowercase() != target
+        } else {
+            true
+        }
+    });
+}
+
+pub fn invalidate_key(key: &CredentialKey) {
+    if let Ok(attrs) = key.attributes() {
+        locked_cache().remove(&attrs);
+    }
+}
+
+pub fn clear_cache() {
+    locked_cache().clear();
+}
+
 pub struct NativeStore;
 impl CredentialStore for NativeStore {
     fn get(&self, key: &CredentialKey) -> Result<Secret, Error> {
-        key.attributes()?;
+        let attrs = key.attributes()?;
         #[cfg(feature = "integration-test-credentials")]
         if let Some(result) = fixture_secret() {
             return result;
@@ -87,25 +124,34 @@ impl CredentialStore for NativeStore {
         if let Some(store) = tests::override_store() {
             return store.get(key);
         }
-        platform::get(key)
+        if let Some(cached) = locked_cache().get(&attrs) {
+            return Secret::new(cached.to_vec());
+        }
+        let secret = platform::get(key)?;
+        locked_cache().insert(attrs, Zeroizing::new(secret.as_slice().to_vec()));
+        Ok(secret)
     }
     fn put(&self, key: &CredentialKey, secret: &[u8]) -> Result<(), Error> {
-        key.attributes()?;
+        let attrs = key.attributes()?;
         validate_secret(secret)?;
         #[cfg(test)]
         if let Some(store) = tests::override_store() {
             return store.put(key, secret);
         }
         let temporary = Zeroizing::new(secret.to_vec());
-        platform::put(key, &temporary)
+        platform::put(key, &temporary)?;
+        locked_cache().insert(attrs, temporary);
+        Ok(())
     }
     fn delete(&self, key: &CredentialKey) -> Result<(), Error> {
-        key.attributes()?;
+        let attrs = key.attributes()?;
         #[cfg(test)]
         if let Some(store) = tests::override_store() {
             return store.delete(key);
         }
-        platform::delete(key)
+        platform::delete(key)?;
+        locked_cache().remove(&attrs);
+        Ok(())
     }
 }
 
@@ -139,6 +185,19 @@ fn validate_secret(bytes: &[u8]) -> Result<(), Error> {
 }
 
 impl CredentialKey {
+    pub fn label(&self) -> String {
+        match &self.kind {
+            CredentialKind::GoogleRefreshToken { .. } => {
+                if self.account_id.starts_with("gmail:") {
+                    format!("Omamail ({})", self.account_id)
+                } else {
+                    format!("Omamail (gmail:{})", self.account_id)
+                }
+            }
+            _ => format!("Omamail ({})", self.account_id),
+        }
+    }
+
     /// Keep Linux's historical libsecret attributes: a provider's credential
     /// kind is its namespace, OAuth also binds the client and current grant.
     fn attributes(&self) -> Result<BTreeMap<String, String>, Error> {
@@ -165,7 +224,7 @@ impl CredentialKey {
             ("kind".into(), kind.into()),
         ]);
         if provider == "caldav" {
-            attrs.insert("source".into(), self.account_id.clone());
+            attrs.insert("source".into(), self.account_id.to_lowercase());
         } else {
             if self.account_id.chars().any(char::is_whitespace)
                 || (provider != "gmail" && !self.account_id.starts_with(&format!("{provider}:")))

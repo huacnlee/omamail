@@ -337,3 +337,84 @@ fn m365_refresh_tokens_are_their_own_kind_bound_to_account_and_client() {
         );
     }
 }
+
+#[test]
+fn credential_key_labels_are_human_readable() {
+    let imap = key(
+        "imap",
+        "imap:user@example.org",
+        CredentialKind::ImapPassword,
+    );
+    assert_eq!(imap.label(), "Omamail (imap:user@example.org)");
+
+    let caldav = key("caldav", "caldav:work", CredentialKind::CalendarPassword);
+    assert_eq!(caldav.label(), "Omamail (caldav:work)");
+
+    let gmail = key(
+        "gmail",
+        "user@example.org",
+        CredentialKind::GoogleRefreshToken {
+            client_id: "client".into(),
+        },
+    );
+    assert_eq!(gmail.label(), "Omamail (gmail:user@example.org)");
+}
+
+#[test]
+fn in_memory_credential_cache_lifecycle() {
+    let test_key = key(
+        "imap",
+        "imap:cache-test@example.org",
+        CredentialKind::ImapPassword,
+    );
+    let attrs = test_key.attributes().unwrap();
+    super::clear_cache();
+
+    // Cache starts empty
+    assert!(super::locked_cache().get(&attrs).is_none());
+
+    // Populate memory cache
+    super::locked_cache().insert(
+        attrs.clone(),
+        zeroize::Zeroizing::new(b"initial-secret".to_vec()),
+    );
+
+    // Initial get hits the memory cache
+    let secret = NativeStore.get(&test_key).expect("cached secret");
+    assert_eq!(secret.as_slice(), b"initial-secret");
+
+    // Case normalization hits same cache entry
+    let mut upper_key = test_key.clone();
+    upper_key.account_id = "imap:CACHE-TEST@EXAMPLE.ORG".into();
+    assert_eq!(
+        NativeStore.get(&upper_key).unwrap().as_slice(),
+        b"initial-secret"
+    );
+
+    // Invalidation clears account
+    super::invalidate_account("imap:cache-test@example.org");
+    assert!(super::locked_cache().get(&attrs).is_none());
+
+    // CalDAV source caching and case-insensitive invalidation
+    let caldav_key = key("caldav", "caldav:Work-Calendar", CredentialKind::CalendarPassword);
+    let caldav_attrs = caldav_key.attributes().unwrap();
+    assert_eq!(caldav_attrs.get("source").unwrap(), "caldav:work-calendar");
+    super::locked_cache().insert(
+        caldav_attrs.clone(),
+        zeroize::Zeroizing::new(b"caldav-secret".to_vec()),
+    );
+    assert_eq!(
+        NativeStore.get(&caldav_key).unwrap().as_slice(),
+        b"caldav-secret"
+    );
+    super::invalidate_account("caldav:WORK-CALENDAR");
+    assert!(super::locked_cache().get(&caldav_attrs).is_none());
+
+    // Clear cache empties everything
+    super::locked_cache().insert(
+        attrs.clone(),
+        zeroize::Zeroizing::new(b"another-secret".to_vec()),
+    );
+    super::clear_cache();
+    assert!(super::locked_cache().get(&attrs).is_none());
+}

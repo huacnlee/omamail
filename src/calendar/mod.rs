@@ -432,7 +432,7 @@ where
         Some("list" | "lookup" | "instances")
     ) && !matches!(request.kind.as_str(), "caldav" | "icloud");
     let origin = request.url.clone();
-    let mut result = execute(
+    let res = execute(
         client()?,
         request,
         token,
@@ -442,7 +442,14 @@ where
             .transpose()
             .map_err(|_| "calendar_password_invalid")?,
     )
-    .await?;
+    .await;
+    if res == Err("calendar_auth_refused") {
+        let source_id = params["source"]["id"].as_str().unwrap_or("");
+        if !source_id.is_empty() {
+            crate::credentials::invalidate_account(source_id);
+        }
+    }
+    let mut result = res?;
     if !paginated {
         return Ok(result);
     }
