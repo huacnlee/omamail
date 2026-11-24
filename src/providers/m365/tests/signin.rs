@@ -892,3 +892,149 @@ async fn a_grant_cancelled_before_its_lane_is_admitted_keeps_no_token() {
         "cancelled grant must never reach the keyring"
     );
 }
+
+/// A free loopback port for one browser sign-in.
+async fn free_port() -> u16 {
+    let probe = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    probe.local_addr().unwrap().port()
+}
+
+async fn browser_callback(port: u16, query: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    socket
+        .write_all(
+            format!("GET /oauth2callback?{query} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut reply = String::new();
+    socket.read_to_string(&mut reply).await.unwrap();
+    reply
+}
+
+async fn settled(request: &Value) -> Value {
+    for _ in 0..100 {
+        let answer = poll(request).await;
+        if answer["state"] != "pending" {
+            return answer;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("browser sign-in never settled");
+}
+
+#[tokio::test]
+async fn a_browser_sign_in_exchanges_the_loopback_code_with_its_verifier_and_keeps_the_token() {
+    use sha2::{Digest, Sha256};
+    isolated!();
+    let world = World::signed_out().await;
+    let port = free_port().await;
+    let params = json!({"address": ADDRESS, "clientId": CLIENT, "port": port});
+    let started = world.call("m365.browserBegin", params).await.unwrap();
+    assert_eq!(started["requestId"].as_str().unwrap().len(), 32);
+    let url = reqwest::Url::parse(started["url"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (url.scheme(), url.host_str(), url.path()),
+        (
+            "https",
+            Some("login.microsoftonline.com"),
+            "/example.org/oauth2/v2.0/authorize"
+        )
+    );
+    let query: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+    assert_eq!(query["client_id"], CLIENT);
+    assert_eq!(query["response_type"], "code");
+    assert_eq!(query["scope"], SCOPE);
+    assert_eq!(query["login_hint"], ADDRESS);
+    assert_eq!(query["code_challenge_method"], "S256");
+    assert_eq!(
+        query["redirect_uri"],
+        format!("http://127.0.0.1:{port}/oauth2callback")
+    );
+    // Nothing goes to Microsoft before the browser comes back, and the sign-in waits for it.
+    assert!(world.fake.login().is_empty());
+    assert_eq!(poll(&started).await, json!({"state": "pending"}));
+
+    // A callback with another state is refused and the sign-in keeps waiting.
+    let forged = browser_callback(port, "code=forged&state=wrong").await;
+    assert!(forged.starts_with("HTTP/1.1 400"), "{forged}");
+    assert_eq!(poll(&started).await, json!({"state": "pending"}));
+    assert!(world.fake.login().is_empty());
+
+    let grant = (200, world.fake.state().issue(Some(ADDRESS)));
+    world.fake.state().device.push_back(grant);
+    let reply = browser_callback(
+        port,
+        &format!("code=synthetic-auth-code&state={}", query["state"]),
+    )
+    .await;
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    let done = settled(&started).await;
+    assert_eq!(done, json!({"state": "signedIn"}));
+    assert_no_secret(&done);
+    assert_eq!(world.store.token().as_deref(), Some("refresh-1"));
+    let exchange = world.fake.login().pop().unwrap();
+    assert_eq!(exchange.path, "/example.org/oauth2/v2.0/token");
+    assert_eq!(
+        exchange.field("grant_type").as_deref(),
+        Some("authorization_code")
+    );
+    assert_eq!(
+        exchange.field("code").as_deref(),
+        Some("synthetic-auth-code")
+    );
+    assert_eq!(
+        exchange.field("redirect_uri"),
+        Some(format!("http://127.0.0.1:{port}/oauth2callback"))
+    );
+    let verifier = exchange.field("code_verifier").unwrap();
+    assert_eq!(
+        base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            Sha256::digest(verifier.as_bytes())
+        ),
+        query["code_challenge"]
+    );
+    assert!(!started.to_string().contains(&verifier));
+    // The port is free again for the next sign-in.
+    assert!(
+        tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn a_newer_browser_sign_in_ends_the_older_and_a_wrong_account_keeps_nothing() {
+    isolated!();
+    let world = World::signed_out().await;
+    let port = free_port().await;
+    let params = json!({"address": ADDRESS, "clientId": CLIENT, "port": port});
+    let first = world
+        .call("m365.browserBegin", params.clone())
+        .await
+        .unwrap();
+    let second = world.call("m365.browserBegin", params).await.unwrap();
+    assert_eq!(poll(&first).await, json!({"state": "expired"}));
+    assert_eq!(poll(&second).await, json!({"state": "pending"}));
+    let url = reqwest::Url::parse(second["url"].as_str().unwrap()).unwrap();
+    let state = url
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    let grant = (200, world.fake.state().issue(Some("someone@example.org")));
+    world.fake.state().device.push_back(grant);
+    browser_callback(port, &format!("code=c&state={state}")).await;
+    let done = settled(&second).await;
+    assert_eq!(done["state"], "failed");
+    assert_eq!(done["error"], "m365_wrong_account");
+    assert!(world.store.token().is_none());
+}

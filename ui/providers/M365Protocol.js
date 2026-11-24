@@ -39,6 +39,7 @@ var SENTENCES = {
   auth_account_missing: "This mailbox is not set up on this computer",
   auth_keyring_failed: "The system keyring is locked or unavailable. Unlock it: the mailbox's sign-in is kept there",
   backend_needs_update: "Update the mail backend to use this mailbox",
+  m365_port_unavailable: "The sign-in callback port is in use. Close the other sign-in, or change the sign-in callback port, and try again",
   credential_store_unavailable: "The credential store is unavailable",
   m365_access_denied: "Microsoft refused access to this mailbox or message. Ask your administrator if it keeps happening",
   m365_attachment_not_found: "That attachment is no longer in the mailbox",
@@ -176,6 +177,27 @@ function beginResult(result) {
       || !/^[A-Za-z0-9-]{4,32}$/.test(code) || link === "") return null
   return { requestId: requestId, userCode: code, verificationUri: link,
     interval: interval > 0 ? Math.min(30, interval) : 5 }
+}
+
+// The API that added `m365.browserBegin`: the sign-in in the system browser by
+// authorization code, for organizations that refuse the device code.
+var BROWSER_API_VERSION = 10
+
+function canBrowserSignIn(backend) {
+  return !!backend && backend.ready === true && typeof backend.apiVersion === "number"
+    && backend.apiVersion >= BROWSER_API_VERSION
+}
+
+// What `m365.browserBegin` answered, or null when it cannot be used: a request to
+// follow with `m365.signInPoll` and Microsoft's own authorize page over HTTPS.
+function browserBeginResult(result) {
+  var value = isObject(result) ? result : {}
+  var requestId = trimmed(value.requestId)
+  var link = trimmed(value.url)
+  if (requestId === "" || requestId.length > 256 || /[\u0000-\u001f\u007f-\u009f]/.test(requestId)) return null
+  if (link.length > 4096 || /[\u0000-\u0020\u007f-\u009f]/.test(link)
+      || link.indexOf("https://login.microsoftonline.com/") !== 0) return null
+  return { requestId: requestId, url: link }
 }
 
 // What `m365.signInPoll` answered: `{ state, code, who }`. A state that is none

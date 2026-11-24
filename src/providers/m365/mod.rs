@@ -29,6 +29,7 @@ pub async fn call(method: &str, params: &Value) -> Result<Value, &'static str> {
     match method {
         "m365.signInBegin" => Box::pin(signin::begin(params)).await,
         "m365.signInPoll" => Box::pin(signin::poll(params)).await,
+        "m365.browserBegin" => Box::pin(signin::browser_begin(params)).await,
         "m365.signOut" => Box::pin(signin::sign_out(params)).await,
         "m365.verify" => Box::pin(verify::verify(params)).await,
         "m365.list" => Box::pin(read::list(params)).await,

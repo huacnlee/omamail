@@ -110,6 +110,90 @@ pub(crate) async fn login(
     .map_err(|_| "auth_timeout")?
 }
 
+/// A browser sign-in under way: authorization code with PKCE, answered on a loopback port. It is for
+/// organizations whose Conditional Access refuses the device-code flow. The verifier and state stay
+/// here; only the authorize URL, which carries the challenge, leaves Rust.
+pub(crate) struct BrowserLogin {
+    pub(crate) authority: String,
+    pub(crate) url: String,
+    listener: tokio::net::TcpListener,
+    state: String,
+    verifier: zeroize::Zeroizing<String>,
+    port: u16,
+}
+
+/// Binds `127.0.0.1:<port>` and makes the authorize URL of the address's tenant (the same authority
+/// the device-code flow asks first), so a single-tenant registration signs in through its own tenant.
+pub(crate) async fn browser_begin(
+    address: &str,
+    client_id: &str,
+    port: u16,
+) -> Result<BrowserLogin, &'static str> {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let authority = authority(address);
+    // The one place a login URL is made also judges the tenant; the authorize endpoint sits beside it.
+    let token =
+        destination(&json!({"provider":"outlook", "endpoint":"token", "tenant":authority}))?;
+    let base = token
+        .strip_suffix("/token")
+        .ok_or("auth_invalid_response")?;
+    let verifier = zeroize::Zeroizing::new(callback::random()?);
+    let state = callback::random()?;
+    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(Sha256::digest(verifier.as_bytes()));
+    let redirect = format!("http://127.0.0.1:{port}/oauth2callback");
+    let mut url =
+        reqwest::Url::parse(&format!("{base}/authorize")).map_err(|_| "auth_invalid_response")?;
+    url.query_pairs_mut().extend_pairs([
+        ("client_id", client_id),
+        ("response_type", "code"),
+        ("response_mode", "query"),
+        ("redirect_uri", redirect.as_str()),
+        ("scope", SCOPE),
+        ("state", state.as_str()),
+        ("code_challenge", challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("login_hint", address),
+        ("prompt", "select_account"),
+    ]);
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+        .await
+        .map_err(|_| "m365_port_unavailable")?;
+    Ok(BrowserLogin {
+        authority,
+        url: url.into(),
+        listener,
+        state,
+        verifier,
+        port,
+    })
+}
+
+/// Waits for the browser to come back with a code and exchanges it at the same authority: the token
+/// endpoint's status and JSON body, as `login_at` answers them.
+pub(crate) async fn browser_finish(
+    login: BrowserLogin,
+    client_id: &str,
+) -> Result<(u16, Value), &'static str> {
+    let code =
+        zeroize::Zeroizing::new(callback::receive(login.listener, &login.state, login.port).await?);
+    let redirect = format!("http://127.0.0.1:{}/oauth2callback", login.port);
+    login_at(
+        &login.authority,
+        "token",
+        &[
+            ("client_id", client_id),
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", redirect.as_str()),
+            ("code_verifier", login.verifier.as_str()),
+            ("scope", SCOPE),
+        ],
+    )
+    .await
+}
+
 /// A test build can send login requests to a local listener (`http://127.0.0.1:<port>`); nothing in
 /// a release build, a setting or the environment can name another host.
 #[cfg(test)]

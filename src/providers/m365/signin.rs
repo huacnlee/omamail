@@ -40,7 +40,8 @@ use zeroize::Zeroizing;
 
 use super::{ids, mailbox, params, read};
 use crate::auth::m365::{
-    SCOPE, change, consent_needed, login, login_at, permissions_granted, save_grant, tenant_unknown,
+    SCOPE, browser_begin as open_browser_login, browser_finish, change, consent_needed, login,
+    login_at, permissions_granted, save_grant, tenant_unknown,
 };
 
 const MAX_PENDING: usize = 4;
@@ -92,6 +93,11 @@ enum Entry {
 }
 
 static FLOWS: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
+
+/// The one browser sign-in that holds the loopback port: its request and the task waiting on it.
+static BROWSER: Mutex<Option<(String, String, tokio::task::JoinHandle<()>)>> = Mutex::new(None);
+/// How long a browser sign-in waits for the person before it gives the port back.
+const BROWSER_WAIT: Duration = Duration::from_secs(5 * 60);
 
 #[cfg(test)]
 /// Test builds: Microsoft's interval is replaced, so a test need not wait it out.
@@ -309,6 +315,99 @@ pub(super) async fn begin(request: &Value) -> Result<Value, &'static str> {
     }))
 }
 
+/// `m365.browserBegin {accountId, address, clientId, port}`: the same sign-in by authorization code
+/// with PKCE in the system browser, for an organization whose Conditional Access refuses the device
+/// code. The answer is a `requestId`, which `signInPoll` follows exactly as for a code, and the
+/// authorize `url` to open. One browser sign-in holds the port at a time: a newer one ends the older.
+pub(super) async fn browser_begin(request: &Value) -> Result<Value, &'static str> {
+    let map = params::object(request, &["accountId", "address", "clientId", "port"])?;
+    let account = params::account(map)?;
+    let address = params::text(map, "address")?.to_ascii_lowercase();
+    if format!("m365:{address}") != account {
+        return Err("invalid_params");
+    }
+    let client_id = ids::client_id(params::text(map, "clientId")?)?;
+    let port = map
+        .get("port")
+        .and_then(Value::as_u64)
+        .filter(|port| (1024..=65535).contains(port))
+        .ok_or("invalid_params")? as u16;
+    end_browser().await;
+    let login = open_browser_login(&address, &client_id, port).await?;
+    let url = login.url.clone();
+    let request_id = handle();
+    let now = Instant::now();
+    {
+        let mut map = flows();
+        tidy(&mut map);
+        map.insert(
+            request_id.clone(),
+            // Never polled: `polling` keeps `signInPoll` from asking for a device code, and the task
+            // below records the outcome.
+            Entry::Pending(Pending {
+                account: account.to_owned(),
+                address: address.clone(),
+                client_id: client_id.clone(),
+                authority: login.authority.clone(),
+                device_code: Zeroizing::new(String::new()),
+                expires: now + BROWSER_WAIT,
+                interval: Duration::from_secs(1),
+                next_poll: now + BROWSER_WAIT,
+                polling: true,
+            }),
+        );
+    }
+    let (id, owner, client) = (request_id.clone(), account.to_owned(), client_id.clone());
+    let task = tokio::spawn(async move {
+        let outcome = match tokio::time::timeout(BROWSER_WAIT, browser_finish(login, &client)).await
+        {
+            Err(_) => done("expired", None),
+            Ok(Err(code)) => done("failed", Some(link_error_browser(code))),
+            Ok(Ok((200, body))) => grant(&id, &owner, &address, &client, &body).await,
+            Ok(Ok((status, body))) => match body["error"].as_str().unwrap_or("") {
+                "access_denied" => done("declined", None),
+                _ => done("failed", Some(flow_error(status, &body))),
+            },
+        };
+        let mut map = flows();
+        if matches!(map.get(&id), Some(Entry::Pending(_))) {
+            map.insert(id, Entry::Done(outcome, Instant::now() + DONE_TTL));
+        }
+    });
+    *BROWSER.lock().unwrap_or_else(PoisonError::into_inner) =
+        Some((request_id.clone(), account.to_owned(), task));
+    Ok(json!({"requestId": request_id, "url": url, "expiresIn": BROWSER_WAIT.as_secs()}))
+}
+
+/// The code for a browser sign-in that ended before Microsoft answered a token request.
+fn link_error_browser(code: &'static str) -> &'static str {
+    match code {
+        "auth_invalid_callback" => "m365_access_denied",
+        "auth_listener_failed" => "m365_port_unavailable",
+        code => link_error(code),
+    }
+}
+
+/// Ends the browser sign-in holding the port, if any, and waits until its task has let the port go:
+/// its request reads `expired`.
+async fn end_browser() {
+    let previous = BROWSER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some((id, _, task)) = previous {
+        task.abort();
+        let _ = task.await;
+        let mut map = flows();
+        if matches!(map.get(&id), Some(Entry::Pending(_))) {
+            map.insert(
+                id,
+                Entry::Done(done("expired", None), Instant::now() + DONE_TTL),
+            );
+        }
+    }
+}
+
 /// What one token request of a sign-in came to.
 enum Step {
     /// Ask again after the interval; `warning` names a transient failure, `slower` a `slow_down`.
@@ -513,6 +612,17 @@ pub(super) fn claim_names(id_token: &str) -> Vec<String> {
 /// is being emptied. One of another application ID writes an item of its own and is left alone: the
 /// window signs out a cancelled sign-in of the ID typed before while one with the ID typed now waits.
 pub(super) fn end_flows(account: &str, client_id: &str) {
+    let browser = BROWSER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some((id, owner, task)) = browser {
+        if owner == account {
+            task.abort();
+        } else {
+            *BROWSER.lock().unwrap_or_else(PoisonError::into_inner) = Some((id, owner, task));
+        }
+    }
     flows().retain(|_, entry| {
         !matches!(entry, Entry::Pending(p) if p.account == account && p.client_id == client_id)
     });

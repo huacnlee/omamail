@@ -13,7 +13,7 @@ use tokio::{
 #[derive(Default)]
 pub(super) struct Flows(Mutex<HashMap<String, JoinHandle<Result<Value, &'static str>>>>);
 
-fn random() -> Result<String, &'static str> {
+pub(super) fn random() -> Result<String, &'static str> {
     let mut bytes = [0; 32];
     rustls::crypto::ring::default_provider()
         .secure_random
@@ -240,7 +240,11 @@ fn callback(request: &str, state: &str, port: u16) -> Result<String, &'static st
     Ok(codes[0].1.to_string())
 }
 
-async fn receive(listener: TcpListener, state: &str, port: u16) -> Result<String, &'static str> {
+pub(super) async fn receive(
+    listener: TcpListener,
+    state: &str,
+    port: u16,
+) -> Result<String, &'static str> {
     loop {
         let (mut socket, peer) = listener
             .accept()

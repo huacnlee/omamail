@@ -30,6 +30,8 @@ Item {
   property string accountId: ""
   property string address: ""
   property string clientId: ""
+  // The loopback port of a browser sign-in (the same default as Google's).
+  property int oauthPort: 9481
 
   readonly property string effectiveClientId: M365.clientId(clientId)
   readonly property bool configured: accountId !== "" && effectiveClientId !== ""
@@ -132,6 +134,10 @@ Item {
     if (!signInClients.some(function(known) {
       return known.accountId === asked.accountId && known.clientId === asked.clientId
     })) signInClients = signInClients.concat([asked])
+    if (M365.canBrowserSignIn(backend)) {
+      beginBrowserLogin(gen)
+      return
+    }
     backend.call("m365.signInBegin", { accountId: accountId, address: address, clientId: effectiveClientId },
       function(result, failure) {
         if (!root || gen !== root.generation) return
@@ -149,6 +155,28 @@ Item {
         // to do if the browser offers the wrong account.
         if (root.platform && typeof root.platform.openExternal === "function")
           root.platform.openExternal(begin.verificationUri)
+        pollTimer.restart()
+      })
+  }
+
+  // The sign-in in the system browser: no code to show, the same polling after.
+  function beginBrowserLogin(gen) {
+    backend.call("m365.browserBegin",
+      { accountId: accountId, address: address, clientId: effectiveClientId, port: oauthPort },
+      function(result, failure) {
+        if (!root || gen !== root.generation) return
+        var begin = failure ? null : M365.browserBeginResult(result)
+        if (!begin) {
+          root.failSignIn(failure ? M365.errorCode(failure) : "m365_invalid_response")
+          return
+        }
+        root.requestId = begin.requestId
+        root.userCode = ""
+        root.verificationUri = begin.url
+        root.signInStage = "waiting"
+        pollTimer.interval = Math.max(1, Math.round(1000 * root.timeScale))
+        if (root.platform && typeof root.platform.openExternal === "function")
+          root.platform.openExternal(begin.url)
         pollTimer.restart()
       })
   }

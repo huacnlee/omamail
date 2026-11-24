@@ -15,7 +15,7 @@ const CODES = ["auth_account_missing", "auth_keyring_failed", "backend_needs_upd
   "m365_consent_required", "m365_declined", "m365_draft_unconfirmed", "m365_expired", "m365_folder_unavailable",
   "m365_invalid_request",
   "m365_invalid_response", "m365_message_not_found", "m365_message_too_large",
-  "m365_network_failed", "m365_not_a_draft", "m365_request_limit", "m365_response_too_large", "m365_send_failed",
+  "m365_network_failed", "m365_not_a_draft", "m365_port_unavailable", "m365_request_limit", "m365_response_too_large", "m365_send_failed",
   "m365_send_not_attempted", "m365_send_rejected", "m365_server_error", "m365_signed_out", "m365_tenant_invalid",
   "m365_throttled", "m365_timeout", "m365_tls_failed", "m365_wrong_account", "request_timed_out"]
 {
@@ -228,3 +228,17 @@ assert.strictEqual(M365.clientId(" 11111111-AAAA-3333-4444-55555555555F "), "111
 for (const bad of ["", "not-a-guid", null, undefined, "11111111-2222-3333-4444-5555555555555"])
   assert.strictEqual(M365.clientId(bad), "", String(bad))
 console.log("m365 ok")
+
+// ------------------------------------------------- the browser sign-in (API 10)
+{
+  assert.strictEqual(M365.canBrowserSignIn({ ready: true, apiVersion: 10 }), true)
+  assert.strictEqual(M365.canBrowserSignIn({ ready: true, apiVersion: 9 }), false, "a released API 9 backend keeps the device code")
+  assert.strictEqual(M365.canBrowserSignIn({ ready: false, apiVersion: 10 }), false)
+  const good = { requestId: "0123456789abcdef0123456789abcdef",
+    url: "https://login.microsoftonline.com/example.org/oauth2/v2.0/authorize?client_id=x" }
+  deepEqual(M365.browserBeginResult(good), { requestId: good.requestId, url: good.url })
+  for (const url of ["http://login.microsoftonline.com/x", "https://login.microsoftonline.com.evil.example/x",
+                     "https://evil.example/https://login.microsoftonline.com/", "https://login.microsoftonline.com/a b", ""])
+    assert.strictEqual(M365.browserBeginResult({ requestId: good.requestId, url: url }), null, url)
+  assert.strictEqual(M365.browserBeginResult({ requestId: "", url: good.url }), null)
+}
