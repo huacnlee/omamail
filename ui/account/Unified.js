@@ -102,6 +102,17 @@ function unifiedId(accountId, messageId) {
   return account + ID_SEPARATOR + id
 }
 
+// The id a notification's message has in the list on screen. A notification
+// names a message the way its own mailbox does; a unified view addresses every
+// row as account + id, so there the bare id would find nothing.
+function notifiedId(unified, accountId, messageId) {
+  var id = String(messageId === undefined || messageId === null ? "" : messageId)
+  var account = String(accountId === undefined || accountId === null ? "" : accountId)
+  if (unified !== true || account === "" || id === "") return id
+  if (splitUnifiedId(id).accountId !== "") return id
+  return unifiedId(account, id)
+}
+
 function splitUnifiedId(value) {
   var text = String(value === undefined || value === null ? "" : value)
   var at = text.indexOf(ID_SEPARATOR)

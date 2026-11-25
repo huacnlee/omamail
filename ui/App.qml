@@ -10,6 +10,7 @@ import qs.Ui
 import "account/Model.js" as Model
 import "account" as Account
 import "account/Accounts.js" as Accounts
+import "account/Unified.js" as Unified
 import "account/Navigation.js" as Nav
 import "compose/Recovery.js" as Recovery
 import "compose" as Compose
@@ -114,7 +115,10 @@ Item {
   readonly property color accent: Commons.Color.accent
   readonly property color urgent: Commons.Color.urgent
   readonly property color danger: Commons.Color.urgent
-  readonly property color popupBackground: Commons.Color.popups.background
+  // Popups here draw inside the app window, where the compositor cannot blur
+  // what is behind them, so a theme's see-through popup color stays solid.
+  readonly property color popupBackground: Qt.rgba(Commons.Color.popups.background.r,
+    Commons.Color.popups.background.g, Commons.Color.popups.background.b, 1)
   readonly property color popupBorder: Commons.Color.popups.border
   // Shared themed border for mail and standalone window chrome.
   readonly property color borderColor: Style.normalBorderColor
@@ -491,9 +495,14 @@ Item {
     opened = true
     if (service) service.windowOpen = true
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
-    if (payload.accountId && service) service.switchTo(String(payload.accountId))
-    if (payload.messageId) Qt.callLater(function() {
-      root.openMessage(String(payload.messageId))
+    // A notification can outlive the account it names; Service.switchTo
+    // refuses one that is gone, and then there is no message to open either.
+    var accountKnown = true
+    if (payload.accountId && service) accountKnown = service.switchTo(String(payload.accountId)) !== false
+    if (payload.messageId && accountKnown) Qt.callLater(function() {
+      root.openMessage(Unified.notifiedId(!!service && service.unified === true,
+        payload.accountId, payload.messageId))
+      if (windowFocus.item) windowFocus.item.bringToFront()
     })
     if (payload.view === "calendar" && showCalendar()) {
       Qt.callLater(function() {
@@ -894,15 +903,10 @@ Item {
     if (cursorId === "") return false
     var acted = cursorId
     var row = service.messages[Model.indexById(service.messages, acted)]
-    // "Was open" is the conversation's: with the rail up the reader can be
-    // showing a member of the acted row rather than the row itself, and
-    // archiving from a member has to open the next row or go back rather than
-    // leave a message that has just moved on screen.
-    //
-    // And a preview is not open at all. It satisfies "is this the selected
-    // one" without having been opened, which made `e` on a previewed row call
-    // `openMessage` on the *next* one — an archive that reads a message, which
-    // is the fault this feature exists to avoid.
+    // "Was open" is the conversation's: with the rail up the reader can show a
+    // member of the acted row, so archiving from a member must open the next
+    // row or go back. A preview satisfies "selected" without being opened,
+    // which made `e` on a previewed row open the *next* message.
     var wasOpen = currentView === "reader" && !service.selectionIsPreview
       && (service.selectedId === acted || Model.rowHoldsMember(row, service.selectedId))
     // Worked out before the action, while the row still has neighbours.
@@ -1032,6 +1036,12 @@ Item {
     }
     if (id === "checkAll") return checkAll()
     if (id === "moveToLabel") return openLabelPicker()
+    if (id === "openInBrowser") {
+      var browserId = currentView === "reader" && service ? service.selectedId : cursorId
+      if (!service || browserId === "") return false
+      service.openInBrowser(browserId)
+      return true
+    }
     if (id === "markRead") return actOnCursor("markRead")
     if (id === "markUnread") return actOnCursor("markUnread")
     if (id === "reply") return composeFromCursor("reply")
@@ -1380,6 +1390,17 @@ Item {
     })
   }
 
+  // Hyprland only: the standalone host has no compositor to ask. The QML test
+  // runner clears HYPRLAND_INSTANCE_SIGNATURE so a test can never focus the
+  // developer's real windows. See hyprland/WindowFocus.qml.
+  Loader {
+    id: windowFocus
+    active: !root.standaloneWindowChrome
+      && !!Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
+    source: "hyprland/WindowFocus.qml"
+    onLoaded: item.windowTitle = Qt.binding(function() { return window.title })
+  }
+
   FloatingWindow {
     id: window
     title: "Omamail"
@@ -1532,22 +1553,12 @@ Item {
           anchors.verticalCenterOffset: calendarHeaderSlot.visible && calendarHeaderSlot.stacked ? (Style.space(48) - header.height) / 2 : 0
           spacing: Style.space(8)
 
-          ActionIcon {
-            anchors.verticalCenter: parent.verticalCenter
-            name: "gmail"
-            iconSize: Style.font.iconLarge
-            color: root.foreground
-            markColor: root.accent
-            brand: true
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: !root.compact
-            text: "Omamail"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
+          AppTitle {
+            y: Math.round((parent.height - height) / 2)
+            showsTitle: !root.compact
+            foreground: root.foreground
+            accent: root.accent
+            fontFamily: root.fontFamily
           }
 
           // Next to the mark: this is the window's own menu, not an action on

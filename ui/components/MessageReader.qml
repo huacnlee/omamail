@@ -686,14 +686,19 @@ Item {
         && !root.remoteImagesAllowed && root.remoteImages > 0
       text: (root.remoteImages === 1 ? "1 image is blocked" : root.remoteImages + " images are blocked")
         + ": loading them tells the sender this message was opened"
-      // What the button does is turn them on for every message, and Settings
-      // is where that is turned back off — so it says "always" rather than
-      // letting somebody find out afterwards.
+      // Two answers, narrowest first. "Show images" is this message only: the
+      // grant ends when another message opens, and nothing is remembered.
+      // "Always show" turns them on for every message, and Settings is where
+      // that is turned back off — so it says "always" rather than letting
+      // somebody find out afterwards.
+      objectName: "blockedImagesNotice"
+      secondaryLabel: "Show images"
       actionLabel: "Always show"
       textColor: root.textColor
       dimColor: root.dimColor
       accentColor: root.accentColor
       panelFontFamily: root.panelFontFamily
+      onSecondaryActivated: if (root.service) root.service.showMessageImages()
       onActivated: if (root.service) root.service.showRemoteImages()
     }
 
