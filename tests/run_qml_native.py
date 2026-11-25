@@ -21,7 +21,7 @@ def main():
         directory=Path(directory)
         env=dict(os.environ,HOME=str(directory/'home'),XDG_CONFIG_HOME=str(directory/'config'),
                  XDG_CACHE_HOME=str(directory/'cache'),XDG_DATA_HOME=str(directory/'data'),XDG_STATE_HOME=str(directory/'state'),
-                 QT_QPA_PLATFORM='offscreen',QT_QUICK_BACKEND='software',QT_QPA_PLATFORMTHEME='',GSETTINGS_BACKEND='memory')
+                 QT_QPA_PLATFORM='offscreen',HYPRLAND_INSTANCE_SIGNATURE='',QT_QUICK_BACKEND='software',QT_QPA_PLATFORMTHEME='',GSETTINGS_BACKEND='memory')
         for name in ['home','config','cache','data','state']:(directory/name).mkdir()
         backend=subprocess.Popen([str(ROOT/'target/debug/omamail'),'serve'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)
         lock=threading.Lock()

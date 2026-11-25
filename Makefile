@@ -40,6 +40,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/MenuActionRow.qml ui/components/MenuSeparatorLine.qml \
 	ui/components/KeyRouter.qml \
 	ui/components/WheelScroller.qml \
+	ui/hyprland/WindowFocus.qml \
 	ui/components/ActionIcon.qml \
 	ui/components/AppTitle.qml \
 	ui/components/IconButton.qml \
