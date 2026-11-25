@@ -85,6 +85,17 @@ o.bind("SUPER + SHIFT + G", "Omamail", "omarchy shell shell toggle omamail '{}'"
 
 Press `?` in Omamail for the shortcut sheet, or see the [keyboard guide](docs/KEYS.md).
 
+## Text size
+
+Omamail follows the Omarchy font settings, so the whole window (text, icons and spacing) scales with `base-size` in `~/.config/omarchy/shell.toml`:
+
+```toml
+[font]
+base-size = 14
+```
+
+The change applies without a restart. To enlarge only the message body, use `Ctrl+=` / `Ctrl+-` / `Ctrl+0` in the reader; the zoom is remembered. Prefer these over `QT_SCALE_FACTOR`, which scales the window like an image, halves the usable space at `2` and blurs at fractional values.
+
 ## Help and contributing
 
 - [Backend installation, updates, release flow, and recovery](docs/BACKEND-RUNTIME.md)
