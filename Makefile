@@ -46,6 +46,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/IconButton.qml \
 	ui/components/IconTextButton.qml \
 	ui/components/ImagePopover.qml \
+	ui/components/MessageImages.qml \
 	ui/components/AttachmentRow.qml \
   ui/components/KeyHints.qml \
 	ui/components/MessageReader.qml \
@@ -168,6 +169,7 @@ test-js:
 	node ui/tests/test_mailto.js
 	node ui/tests/test_html.js
 	node ui/tests/test_html_tables.js
+	node ui/tests/test_images.js
 	node ui/tests/test_direction.js
 	node ui/tests/test_appearance.js
 	node ui/tests/test_model.js

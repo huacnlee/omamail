@@ -417,6 +417,41 @@ impl Session {
         result
     }
 }
+/// One picture attachment prepared for the image viewer: sniffed, shrunk and
+/// refused exactly like a fetched picture, and returned as a data URI. With
+/// `data` the caller hands over bytes the provider already returned; with
+/// `accountId`, `id` and `attachmentId` the bytes come from the cached message
+/// resource and nothing touches the network. A resource that carries only the
+/// part's locator answers
+/// `attachment_image_unavailable`.
+pub(super) async fn attachment_image(params: &Value) -> Result<Value, &'static str> {
+    let fields = params.as_object().ok_or("invalid_params")?;
+    let bytes = if let Some(data) = fields.get("data") {
+        if fields.len() != 1 {
+            return Err("invalid_params");
+        }
+        let data = data.as_str().ok_or("invalid_params")?.to_owned();
+        tokio::task::spawn_blocking(move || crate::attachment::decode(&data))
+            .await
+            .map_err(|_| "worker_failed")??
+    } else {
+        if fields.len() != 3 {
+            return Err("invalid_params");
+        }
+        let account = field(params, "accountId")?.to_lowercase();
+        let id = field(params, "id")?.to_owned();
+        let wanted = field(params, "attachmentId")?.to_owned();
+        cache::validate_params(&json!({"accountId":account,"id":id}), true)?;
+        let resource = cache::resource::read(&account, &id)
+            .await?
+            .ok_or("attachment_image_unavailable")?;
+        tokio::task::spawn_blocking(move || message::content::attachment_bytes(&resource, &wanted))
+            .await
+            .map_err(|_| "worker_failed")?
+            .ok_or("attachment_image_unavailable")?
+    };
+    Ok(json!({"data":crate::public_http::embedded_image(bytes).await?}))
+}
 fn prepare(
     resource: &Value,
     id: &str,
@@ -1031,5 +1066,44 @@ mod tests {
             "the two that fit are drawn"
         );
         assert!(!text.contains("cid:"));
+    }
+
+    // The viewer draws an attachment only as the backend prepared it: a real
+    // picture comes back as checked raster data, anything else is refused, and
+    // the bytes are found in the downloaded message by the part's locator.
+    #[tokio::test]
+    async fn attachment_pictures_are_prepared_or_refused() {
+        let mut png = Vec::new();
+        image::RgbaImage::new(3, 2)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&png);
+        let prepared = attachment_image(&json!({"data":encoded})).await.unwrap();
+        assert!(message::html::is_raster_data_image(
+            prepared["data"].as_str().unwrap()
+        ));
+        assert_eq!(
+            attachment_image(&json!({"data":"PHN2Zz48L3N2Zz4"})).await,
+            Err("public_image_refused"),
+            "an SVG is not a picture this draws"
+        );
+        assert_eq!(
+            attachment_image(&json!({"data":encoded,"open":true})).await,
+            Err("invalid_params")
+        );
+        let resource = json!({"payload":{"parts":[
+            {"mimeType":"text/plain","body":{"data":"aGk"}},
+            {"mimeType":"image/png","filename":"a.png","body":{"attachmentId":"part:2","data":encoded}},
+            {"mimeType":"image/png","filename":"b.png","body":{"attachmentId":"part:3"}}
+        ]}});
+        assert_eq!(
+            message::content::attachment_bytes(&resource, "part:2"),
+            Some(png)
+        );
+        assert_eq!(
+            message::content::attachment_bytes(&resource, "part:3"),
+            None
+        );
+        assert_eq!(message::content::attachment_bytes(&resource, ""), None);
     }
 }

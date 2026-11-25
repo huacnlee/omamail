@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Ui
 import "../message/Direction.js" as Direction
 import "../message/Html.js" as Html
+import "../message/Images.js" as Images
 import "../message/Message.js" as Mail
 import "../message/Mailto.js" as Mailto
 import "../account/Model.js" as Model
@@ -103,20 +104,41 @@ Item {
       root.service.openExternal(opened)
   }
 
-  function openImageMarker(source) {
-    var wanted = String(source || "")
-    if (Html.isRasterDataImage(wanted)) {
-      imagePopover.show(wanted)
-      return
-    }
-    if (!root.service || typeof root.service.fetchDisplayImage !== "function") {
-      imagePopover.showPrepared(wanted, "")
-      return
-    }
-    root.service.fetchDisplayImage(wanted, function(data) {
-      if (!root) return
-      imagePopover.showPrepared(wanted, data)
-    })
+  // The pictures drawn in the body on screen, in the order its links number
+  // them. Plain text numbers its markers over the message's own list instead.
+  readonly property var shownImages: root.shownMode === "reader"
+    ? Images.documentImages(root.readerDocument)
+    : (root.shownMode === "original" ? Images.documentImages(root.bodyDocument) : [])
+
+  // The viewer, at the picture that was clicked, paging through the rest of
+  // this message's pictures: the body's first, then the picture attachments
+  // (only when the backend can prepare their bytes).
+  function openImages(bodySources, plain, at) {
+    var files = messageImages.available ? root.attachments : []
+    var entries = Images.gallery(bodySources, files, plain)
+    // The marker that was clicked is the one picture asked for; the viewer
+    // does not fetch a sender's other remote pictures by paging past them.
+    if (at >= 0 && at < entries.length) entries[at].consented = true
+    imagePopover.openGallery(entries, at)
+  }
+
+  function openImageMarker(number) {
+    var plain = root.shownMode === "plain"
+    var sources = plain ? root.imageSources : root.shownImages
+    if (number < 1 || number > sources.length) return
+    root.openImages(sources, plain, number - 1)
+  }
+
+  // A picture attachment opens in the viewer when this window can draw it;
+  // anything else, HEIC included, opens in another application as before.
+  function openAttachment(attachment) {
+    if (!root.service || !root.summary) return
+    var plain = root.shownMode === "plain"
+    var entries = messageImages.available && Images.viewable(attachment)
+      ? Images.gallery(plain ? root.imageSources : root.shownImages, root.attachments, plain) : []
+    var at = Images.attachmentIndex(entries, attachment)
+    if (at >= 0) imagePopover.openGallery(entries, at)
+    else root.service.openAttachment(root.selectedId, attachment)
   }
 
   function scrollBy(steps) {
@@ -153,6 +175,9 @@ Item {
   onSelectedIdChanged: {
     resetAttachments()
     headerBlock.contentY = 0
+    // The viewer pages through one message's pictures; another message's
+    // would be under a counter that no longer describes them.
+    imagePopover.close()
   }
   onServiceChanged: resetAttachments()
   onAttachmentsChanged: if (attachments.length === 0) resetAttachments()
@@ -800,7 +825,8 @@ Item {
             quote: root.dimColor,
             fontSize: root.bodyFontSize,
             maxImageWidth: root.imageWidth,
-            direction: root.bodyDirection
+            direction: root.bodyDirection,
+            linkImages: true
           }))
         : (root.shownMode === "original"
           ? Html.documentFor(root.bodyDocument, ({
@@ -811,7 +837,8 @@ Item {
               padding: 0,
               maxImageWidth: root.imageWidth,
               compact: root.narrowBody,
-              direction: root.bodyDirection
+              direction: root.bodyDirection,
+              linkImages: true
             }))
           : Html.plainTextDocument(root.service ? root.service.selectedBody.text : "",
               ({
@@ -833,10 +860,10 @@ Item {
       onLinkActivated: function(link) {
         var image = Html.imageLinkIndex(link)
         if (image > 0) {
-          var sources = root.imageSources
-          // The marker names the sender's src. Qt must not fetch that URL
-          // itself: the account prepares raster bytes, or the popover refuses.
-          if (image <= sources.length) root.openImageMarker(sources[image - 1])
+          // A plain-text marker names the sender's src. Qt must not fetch that
+          // URL itself: the account prepares raster bytes, or the viewer
+          // refuses. A picture in the other two modes is already prepared.
+          root.openImageMarker(image)
           return
         }
         root.openLink(link)
@@ -852,7 +879,10 @@ Item {
         cursorShape: bodyText.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor
         onPressed: function(mouse) {
           var scene = bodyText.mapToGlobal(mouse.x, mouse.y)
-          textMenu.openAt(bodyText, scene.x, scene.y, bodyText.linkAt(mouse.x, mouse.y))
+          var link = bodyText.linkAt(mouse.x, mouse.y)
+          // A picture's viewer link is not an address: nothing to open
+          // elsewhere or copy, so the menu offers the text actions only.
+          textMenu.openAt(bodyText, scene.x, scene.y, Html.imageLinkIndex(link) > 0 ? "" : link)
         }
         onWheel: function(wheel) {
           if (!(wheel.modifiers & Qt.ControlModifier)) {
@@ -967,10 +997,7 @@ Item {
             dimColor: root.dimColor
             dimmerColor: root.dimmerColor
             panelFontFamily: root.panelFontFamily
-            onOpenRequested: function(attachment) {
-              if (root.service && root.summary)
-                root.service.openAttachment(root.selectedId, attachment)
-            }
+            onOpenRequested: function(attachment) { root.openAttachment(attachment) }
             onSaveRequested: function(attachment) {
               // `selectedId`, like every other action on this message: `summary.id`
               // is the id the owning account issued, which reaches no mailbox in a
@@ -1248,12 +1275,49 @@ Item {
     }
   }
 
+  MessageImages {
+    id: messageImages
+    service: root.service
+  }
+
   ImagePopover {
     id: imagePopover
+    objectName: "imageViewer"
     textColor: root.textColor
     dimColor: root.dimColor
     popupBackgroundColor: root.popupBackgroundColor
     popupBorderColor: root.popupBorderColor
     panelFontFamily: root.panelFontFamily
+    onLoadRequested: function(entry, index) {
+      var generation = imagePopover.generation
+      function deliver(data, failure) {
+        // Only into the opening that asked: closing the viewer or opening it
+        // on other pictures in the meantime leaves the answer nowhere to go.
+        if (imagePopover.generation === generation) imagePopover.provide(index, data, failure)
+      }
+      if (entry.kind === "attachment") {
+        messageImages.attachmentImage(entry.attachment, true, deliver)
+      } else if (root.service && typeof root.service.fetchDisplayImage === "function") {
+        // A sender's server that does not answer and one that sends something
+        // that is not a picture look the same from here: both may be retried.
+        root.service.fetchDisplayImage(entry.requested, function(data) {
+          deliver(data, Html.isRasterDataImage(String(data || "")) ? "" : "download")
+        })
+      } else {
+        deliver("")
+      }
+    }
+    onSaveRequested: function(entry) {
+      messageImages.save(entry, function(text, detail) {
+        imagePopover.status = text
+        imagePopover.statusDetail = detail || ""
+      })
+    }
+    onOpenRequested: function(entry) {
+      messageImages.openExternally(entry, function(text, detail) {
+        imagePopover.status = text
+        imagePopover.statusDetail = detail || ""
+      })
+    }
   }
 }

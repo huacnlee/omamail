@@ -462,6 +462,30 @@ fn cid_references(html: &[u8]) -> std::collections::HashSet<String> {
     }
     found
 }
+/// The bytes of one attachment as the message resource carries them, found by
+/// its locator. `None` when the resource holds only the locator (the provider
+/// fetches those parts on request) or the part is larger than a picture may be.
+pub(crate) fn attachment_bytes(message: &Value, attachment_id: &str) -> Option<Vec<u8>> {
+    const MAX_PART_BYTES: usize = 16 * 1024 * 1024;
+    fn find<'a>(part: &'a Value, id: &str, depth: usize, left: &mut usize) -> Option<&'a str> {
+        if depth > 12 || *left == 0 {
+            return None;
+        }
+        *left -= 1;
+        if part["body"]["attachmentId"] == id {
+            return part["body"]["data"].as_str().filter(|d| !d.is_empty());
+        }
+        part["parts"]
+            .as_array()?
+            .iter()
+            .find_map(|p| find(p, id, depth + 1, left))
+    }
+    if attachment_id.is_empty() {
+        return None;
+    }
+    let data = find(&message["payload"], attachment_id, 0, &mut 4096)?;
+    (data.len() <= MAX_PART_BYTES * 4 / 3 + 4).then(|| bytes64(data))
+}
 /// A Content-ID header or a `cid:` reference reduced to the form both share.
 /// RFC 2392 percent-encodes the URL form; the header has angle brackets.
 pub(crate) fn content_id(value: &str) -> String {
