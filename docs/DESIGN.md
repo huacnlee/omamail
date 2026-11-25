@@ -153,9 +153,9 @@ Reading mode is what a message opens as. It is a rebuilt document, not a restyle
 
 The three are named rather than iconed, because no drawing distinguishes them and telling them apart is the point. The chosen one carries the selected surface and a border, not a colour alone. A message that cannot be drawn the chosen way — too heavy to lay out, or with nothing readable in it — falls through to one that can and says so in a notice; the choice itself does not move, because it still stands for the next message. The two notices are not the same sentence: a message arriving as text nobody asked for and a message arriving in a layout unlike every other are different questions, and a reader told neither is left to wonder what broke.
 
-Notices form a stack with one shared component contract. A notice explains a condition and may expose one immediate action. Structured content such as an invitation is a card because it adds actions and relationships not represented by ordinary prose; routine message metadata is not boxed merely to create visual variety.
+Notices form a stack with one shared component contract. A notice explains a condition and may expose one immediate action, or two when they are narrower and wider answers to the same question: the blocked-images notice offers "Show images" for this message before "Always show" for every message. Structured content such as an invitation is a card because it adds actions and relationships not represented by ordinary prose; routine message metadata is not boxed merely to create visual variety.
 
-Remote images remain blocked per message until requested. The visual treatment must make the blocked state and the scope of the action clear without making the notice compete with the message.
+Remote images remain blocked per message until requested. "Show images" loads them for the open message only and is forgotten when another message opens; "Always show" sets the standing preference that Settings revokes. The visual treatment must make the blocked state and the scope of each action clear without making the notice compete with the message.
 
 Bottom actions remain attached to the reader rather than the body scroll. They are available at a stable location and correspond to the current selected message. Destructive actions use the semantic danger role and an accurate label.
 
