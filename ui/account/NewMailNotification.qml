@@ -55,11 +55,16 @@ Item {
     }
     if (!pluginNotifications) return
     // Sender-authored text stays behind "--", never in options or shell code.
+    var messageId = String(list[0].id || "")
+    // The click target also rides on the notification itself, for a
+    // notification centre that runs it after this waiter has gone.
+    var target = messageId !== "" && root.accountId !== ""
+      ? ["--summon", JSON.stringify({ accountId: root.accountId, messageId: messageId })] : []
     var request = notificationProcessComponent.createObject(root, {
       targetAccountId: root.accountId,
-      messageId: String(list[0].id || ""),
-      command: ["python3", root.pluginDir + "/scripts/notify-mail.py",
-        root.notificationForeground, root.notificationAccent, "--", title, body]
+      messageId: messageId,
+      command: ["python3", root.pluginDir + "/scripts/notify-mail.py"].concat(target,
+        [root.notificationForeground, root.notificationAccent, "--", title, body])
     })
     if (request) request.running = true
     if (playSound) Quickshell.execDetached(["sh", root.pluginDir + "/scripts/notify-sound.sh"])

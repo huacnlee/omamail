@@ -536,6 +536,38 @@ Item {
       tryCompare(app, "composing", false)
     }
 
+    // The picture viewer owns the keys while it is open and gives them back
+    // when it closes: Escape closes the viewer and nothing else, the reader's
+    // own keys work again at once, and the next Escape is the reader's Back.
+    function test_escape_from_the_picture_viewer_returns_the_keys_to_the_reader() {
+      app.openMessage("message-1")
+      mailService.land()
+      var lines = []
+      for (var i = 0; i < 200; i++) lines.push("Line " + i + " of a long message")
+      mailService.selectedBody = ({ text: lines.join("\n"), source: "plain" })
+      waitForRendering(app)
+      compare(kinds(), "list,reader")
+      var reader = having(app, function(item) { return typeof item.openImages === "function" })
+      verify(reader, "the reader is on the page")
+      var png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="
+      // What a click on a picture in the body does.
+      reader.openImages([png], false, 0)
+      var viewer = named(reader, "imageViewer")
+      tryCompare(viewer, "opened", true)
+      keyClick(Qt.Key_Escape)
+      tryCompare(viewer, "opened", false)
+      compare(kinds(), "list,reader", "Escape closed the viewer, not the message")
+      var flick = having(reader, function(item) { return item.contentY !== undefined && item.contentHeight > item.height && item.visible })
+      verify(flick, "the long body scrolls")
+      var before = flick.contentY
+      keyClick(Qt.Key_J, Qt.ShiftModifier)
+      tryVerify(function() { return flick.contentY > before }, 1000, "Shift+J scrolls the reader")
+      keyClick(Qt.Key_Escape)
+      tryCompare(app, "currentView", "list")
+      compare(kinds(), "list", "the second Escape is the reader's Back")
+      mailService.selectedBody = ({ text: "Original body", source: "plain" })
+    }
+
     function test_the_shortcut_sheet_closes_before_the_page_under_it() {
       app.openMessage("message-1")
       app.runShortcut("help", "")

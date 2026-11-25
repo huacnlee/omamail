@@ -18,6 +18,10 @@ Item {
     property var cacheRequests: []
     property var requests: []
     property var cancellations: []
+    // Messages whose reader.render the fixture answers, and the picture
+    // requests made for each (the public fetch is the side effect to watch).
+    property var renderable: ({})
+    property var pictures: []
     function preparedResource(message, params) {
       return Native.readerProjection(message, params || {accountId:account.accountId})
     }
@@ -33,6 +37,11 @@ Item {
             callback(message ? preparedResource(message,params) : null,error ? {code:"read_failed"} : null)
           }
         }
+      } else if (method === "reader.render" && renderable[params.id]) {
+        callback({nativeRender: preparedResource(renderable[params.id], params).nativeRender}, null)
+      } else if (method === "public.image") {
+        pictures.push({url: params.url, selected: account.selectedId})
+        callback({data: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="}, null)
       } else if (method === "reader.cancel") {
         cancellations.push(params)
         callback({cancelled:true},null)
@@ -78,6 +87,9 @@ Item {
       backend.cacheRequests=[]
       backend.requests=[]
       backend.cancellations=[]
+      backend.ready=false
+      backend.renderable=({})
+      backend.pictures=[]
       account.alwaysShowImages=false
       account.readMarks=[]
     }
@@ -129,6 +141,46 @@ Item {
       var renders = backend.requests.filter(function(call) { return call.method === "reader.render" })
       compare(renders.length, 1)
       compare(renders[0].params.options.remoteImageData["https://example.org/picture"], png)
+    }
+
+    // "Show images" in the blocked-images notice answers for the open message
+    // only. The grant must not become the standing preference, and the next
+    // message must open blocked again: its pictures are not fetched at all,
+    // and neither are the first message's when it is opened again.
+    function test_one_message_image_grant_ends_with_that_message() {
+      var one = resource("one", "<p>Pictures</p><img src='https://one.example.org/picture'>")
+      one.payload.mimeType = "text/html"
+      var two = resource("two", "<p>More pictures</p><img src='https://two.example.org/picture'>")
+      two.payload.mimeType = "text/html"
+      backend.renderable = ({one: one, two: two})
+      backend.cached = one
+      account.select("one")
+      transport.pending.one(one, "")
+      compare(account.remoteImagesAllowed, false)
+      compare(backend.pictures.length, 0, "a blocked message fetches nothing")
+      backend.ready = true
+      account.showRemoteImages()
+      compare(account.remoteImagesAllowed, true)
+      compare(account.alwaysShowImages, false)
+      var renders = backend.requests.filter(function(call) { return call.method === "reader.render" })
+      verify(renders.length > 0, "the grant re-renders the open message")
+      compare(renders[renders.length - 1].params.options.allowRemoteImages, true)
+      tryVerify(function() { return backend.pictures.length > 0 }, 2000, "the granted message's picture is fetched")
+      compare(backend.pictures[0].url, "https://one.example.org/picture")
+      var fetched = backend.pictures.length
+      backend.cached = two
+      account.select("two")
+      transport.pending.two(two, "")
+      compare(account.remoteImagesAllowed, false, "the next message starts blocked")
+      compare(account.alwaysShowImages, false)
+      wait(50)
+      compare(backend.pictures.length, fetched, "nothing is fetched for the next message")
+      backend.cached = one
+      account.select("one")
+      transport.pending.one(one, "")
+      compare(account.remoteImagesAllowed, false, "the first message is blocked again too")
+      wait(50)
+      compare(backend.pictures.length, fetched, "and nothing more is fetched for it")
     }
 
     function test_background_failure_keeps_a_cached_body_without_skeleton() {

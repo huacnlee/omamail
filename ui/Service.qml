@@ -2136,9 +2136,8 @@ Item {
     }
     return current ? current.markPreviewRead(id) : false
   }
-  // The notice's own button, which is the switch: what it turns on is every
-  // message, and it says so.
   function showRemoteImages() { setAlwaysShowImages(true) }
+  function showMessageImages() { if (reading) reading.showRemoteImages() }
   function fetchDisplayImage(source, callback) {
     if (reading) return reading.fetchDisplayImage(source, callback)
     if (typeof callback === "function") callback("")

@@ -7,6 +7,7 @@ import "../.." as Omamail
 import "../../account" as Account
 import "BackendFixture.js" as BackendFixture
 import "../../account/Accounts.js" as Accounts
+import "../../account/Unified.js" as Unified
 
 Item {
   width: 900
@@ -122,6 +123,48 @@ Item {
       compare(host.opens, 1)
     }
 
+    // Unified mailboxes address every row as account + id. A notification
+    // carries the account's own id, and opening that bare id found nothing.
+    function test_click_opens_the_message_in_a_unified_view() {
+      service.setUnifiedMailboxes(true)
+      try {
+        tryCompare(service, "unified", true)
+        var process = notification(service.findAccount(second), [
+          { id: "message-7", subject: "Hello" }
+        ])
+        finish(process, "default\n")
+        tryCompare(service.findAccount(second), "selectedId", "message-7", 2000)
+        compare(app.cursorId, Unified.unifiedId(second, "message-7"))
+        compare(app.page, "reader")
+      } finally {
+        service.setUnifiedMailboxes(false)
+      }
+    }
+
+    // On Omarchy the notification centre runs the click command itself:
+    // summon with the ids, no "default" waiter involved.
+    function test_the_click_command_opens_the_message_in_a_unified_view() {
+      service.setUnifiedMailboxes(true)
+      try {
+        tryCompare(service, "unified", true)
+        host.summon("omamail", JSON.stringify({ accountId: second, messageId: "message-9" }))
+        tryCompare(service.findAccount(second), "selectedId", "message-9", 2000)
+        compare(app.cursorId, Unified.unifiedId(second, "message-9"))
+      } finally {
+        service.setUnifiedMailboxes(false)
+      }
+    }
+
+    // A notification that outlived its account opens nothing.
+    function test_the_click_command_for_a_removed_account_opens_nothing() {
+      var before = service.activeAccountId
+      host.summon("omamail", JSON.stringify({ accountId: "gone@example.org", messageId: "message-3" }))
+      wait(100)
+      compare(service.activeAccountId, before)
+      verify(app.cursorId !== "message-3")
+      verify(service.findAccount(first).selectedId !== "message-3")
+    }
+
     function test_concurrent_and_batch_notifications_keep_their_targets() {
       var account = service.findAccount(second)
       var earlier = notification(account, [{ id: "earlier" }])
@@ -138,14 +181,18 @@ Item {
     function test_new_notifications_follow_theme_without_bar_foreground() {
       var account = service.findAccount(second)
       var firstNotice = notification(account, [{ id: "one" }])
-      compare(firstNotice.command[2], String(Commons.Color.foreground))
-      compare(firstNotice.command[3], String(Commons.Color.accent))
+      compare(firstNotice.command[4], String(Commons.Color.foreground))
+      compare(firstNotice.command[5], String(Commons.Color.accent))
+      // The click target rides on the notification too, for the notification centre.
+      compare(firstNotice.command[2], "--summon")
+      compare(JSON.parse(firstNotice.command[3]).messageId, "one")
+      compare(JSON.parse(firstNotice.command[3]).accountId, account.accountId)
       var previous = Commons.Color.foreground
       try {
         Commons.Color.foreground = Qt.rgba(0.1, 0.2, 0.3, 1)
         var nextNotice = notification(account, [{ id: "two" }])
-        compare(nextNotice.command[2], String(Commons.Color.foreground))
-        verify(firstNotice.command[2] !== nextNotice.command[2])
+        compare(nextNotice.command[4], String(Commons.Color.foreground))
+        verify(firstNotice.command[4] !== nextNotice.command[4])
         finish(firstNotice, "")
         finish(nextNotice, "")
       } finally {

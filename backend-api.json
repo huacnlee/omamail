@@ -93,6 +93,7 @@
     "attachment.read",
     "attachment.store",
     "attachment.storeUpload",
+    "attachment.image",
     "public.image",
     "public.unsubscribe",
     "calendar.request",
@@ -1598,6 +1599,40 @@
       }
     },
     {
+      "name": "Attachment pictures are returned as checked raster data",
+      "method": "attachment.image",
+      "params": {
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8_x8AAwMCAO-aLa0AAAAASUVORK5CYII"
+      },
+      "equals": {
+        "data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII="
+      }
+    },
+    {
+      "name": "Attachment bytes that are not a picture are refused",
+      "method": "attachment.image",
+      "params": {
+        "data": "bm90IGEgcGljdHVyZQ"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "public_image_refused"
+      }
+    },
+    {
+      "name": "Attachment pictures absent from the message cache answer without the network",
+      "method": "attachment.image",
+      "params": {
+        "accountId": "imap:synthetic@example.invalid",
+        "id": "1:INBOX",
+        "attachmentId": "part:2"
+      },
+      "errorCode": -32000,
+      "equals": {
+        "message": "attachment_image_unavailable"
+      }
+    },
+    {
       "name": "outbox accepts the Microsoft 365 provider",
       "method": "outbox.enqueue",
       "params": {
@@ -1617,14 +1652,18 @@
   "unreleased": {
     "methods": [
       "calendar.verify",
-      "contacts.google"
+      "contacts.google",
+      "attachment.image"
     ],
     "cases": [
       "Calendar validation errors preserve safe context",
       "Calendar authentication errors preserve safe context",
       "CalDAV verification refuses a plain-http address before any request",
       "CalDAV verification requires the password it is to check",
-      "Google Contacts refuses an account that is not a Gmail address"
+      "Google Contacts refuses an account that is not a Gmail address",
+      "Attachment pictures are returned as checked raster data",
+      "Attachment bytes that are not a picture are refused",
+      "Attachment pictures absent from the message cache answer without the network"
     ]
   }
 }

@@ -65,8 +65,12 @@ Item {
     property bool canOpenOnWeb: false
     property var selectedAttachments: []
 
+    property int selectedReaderRemoteImages: 0
+    property int messageGrants: 0
+
     function getMessage() { fetches++ }
     function showRemoteImages() { renders++ }
+    function showMessageImages() { messageGrants++ }
   }
 
   Omamail.MessageReader {
@@ -355,6 +359,41 @@ Item {
       compare(reader.shownMode, "original", "the preference applies to the sender's document too")
       mailService.selectedReaderTooHeavy = false
       mailService.selectedTooHeavy = false
+    }
+
+    // Issue #318: the notice offers this message's pictures before the standing
+    // preference, and each button asks for only its own scope.
+    function test_blocked_images_offer_this_message_before_always() {
+      mailService.selectedReaderRemoteImages = 2
+      mailService.messageGrants = 0
+      var notice = named(reader, "blockedImagesNotice")
+      verify(notice && notice.visible, "two blocked images put the notice up")
+      var once = named(notice, "readerNoticeSecondary")
+      var always = named(notice, "readerNoticeAction")
+      compare(once.text, "Show images")
+      compare(always.text, "Always show")
+      verify(once.visible && always.visible)
+      verify(once.x + once.width <= always.x, "the narrower answer comes first")
+      once.clicked()
+      compare(mailService.messageGrants, 1)
+      compare(mailService.renders, 0, "this message only must not set the standing preference")
+      always.clicked()
+      compare(mailService.renders, 1)
+      compare(mailService.messageGrants, 1)
+      // The reason to choose is the explanation: in a reader pane as narrow as
+      // a 1100 px window's, it wraps beside the two buttons instead of being
+      // cut off.
+      reader.width = 550
+      waitForRendering(reader)
+      var explanation = null
+      for (var i = 0; i < notice.children.length; i++)
+        if (notice.children[i].text === "2 images are blocked: loading them tells the sender this message was opened")
+          explanation = notice.children[i]
+      verify(explanation, "the notice explains what loading does")
+      verify(!explanation.truncated, "the explanation is shown in full")
+      verify(explanation.x + explanation.width <= once.x, "beside the buttons, not under them")
+      reader.width = 900
+      mailService.selectedReaderRemoteImages = 0
     }
 
     function test_a_message_with_nothing_to_read_says_so() {

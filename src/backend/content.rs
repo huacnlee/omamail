@@ -105,6 +105,16 @@ pub(super) fn render(
     for field in ["accountId", "messageId", "html"] {
         object.remove(field);
     }
+    // A digest stands for the message's own pictures in the key: copying
+    // megabytes of them into every key would crowd out results, and leaving
+    // them out would let a render made without them answer one made with them.
+    if let Some(options) = object.get_mut("options").and_then(Value::as_object_mut)
+        && let Some(inline) = options.get_mut("inlineImageData")
+    {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(serde_json::to_vec(inline).map_err(|_| "invalid_params")?);
+        *inline = Value::String(format!("{digest:x}"));
+    }
     if !account.is_empty()
         && !id.is_empty()
         && let Some(value) = cache
@@ -156,6 +166,29 @@ mod tests {
         assert!(result["payload"]["parts"][1]["body"].get("data").is_none());
         assert!(result["payload"]["parts"][2]["body"]["data"].is_string());
         assert!(serde_json::to_vec(&result).unwrap().len() < 8192);
+    }
+
+    // The cache key carries a digest of the message's own pictures: a render
+    // made before they were known must not answer one made with them.
+    #[test]
+    fn render_cache_tells_apart_renders_with_different_inline_pictures() {
+        let cache = Arc::new(Mutex::new(RenderCache::default()));
+        let png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLa0AAAAASUVORK5CYII=";
+        let call = |inline: Value| {
+            render(
+                &json!({"accountId":"a","messageId":"m","html":"<img src=\"cid:a\">",
+                    "options":{"inlineImageData":inline}}),
+                &cache,
+                None,
+            )
+            .unwrap()["html"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert!(!call(json!({})).contains("<img"));
+        assert!(call(json!({"a":png})).contains(png));
+        assert!(!call(json!({})).contains("<img"));
     }
 
     #[test]
