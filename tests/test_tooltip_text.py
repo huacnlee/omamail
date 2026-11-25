@@ -146,8 +146,6 @@ def main():
             imports = Path(directory) / "imports"
             shutil.copytree(ROOT / "ui/tests/qml/imports/Quickshell", imports / "Quickshell")
             shutil.copytree(ROOT / "ui/tests/qml/imports/qs", imports / "qs", dirs_exist_ok=True)
-            color = imports / "qs/Commons/Color.qml"
-            color.write_text(color.read_text().replace("QtObject {", 'QtObject {\n  readonly property var popups: ({text: "#eeeeee", background: "#222222", border: "#555555"})', 1))
             style = imports / "qs/Commons/Style.qml"
             style.write_text(style.read_text().replace("QtObject {", "QtObject {\n  readonly property int tooltipDelay: 400", 1))
             source = QML.replace("@STYLE@", json.dumps((ROOT / "app/qml/styles/Omamail").as_uri()))

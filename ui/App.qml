@@ -559,16 +559,7 @@ Item {
     pushEntry("reader", { id: cursorId })
   }
 
-  // One member of the conversation the reader is inside, opened in the same
-  // reader. `openMessage` and nothing else: the header paints from the member's
-  // summary at once, the body from the cache or the network, and the navigation
-  // stack replaces a reader entry with a reader entry, so Back still lands on
-  // the list from any member.
-  //
-  // The one thing that does not happen is the cursor moving. `cursorId` is
-  // where the keyboard stands in the *list*, and a member is not a row — the
-  // list is one row per conversation — so leaving the cursor on a message the
-  // list has never drawn would send the next `j` back to the top of it.
+  // Open conversation members in the same reader while keeping the list cursor on the thread.
   function openMember(id) {
     var member = String(id || "")
     if (!service || member === "") return
@@ -1449,18 +1440,7 @@ Item {
         onActivated: root.goBack()
       }
 
-      // Where the window is, and the only thing that says what a key means.
-      // A page is a form before it is anything else, a draft beats reading, a
-      // query being typed beats the list underneath it.
-      // Holding Ctrl names every row on the rail, so the digits are read rather
-      // than remembered. A `Keys` handler, which bindings may not use — but a
-      // modifier on its own cannot be a `Shortcut`, so there is no binding to
-      // route and nothing for `KeyRouter` to own. It accepts nothing: whatever
-      // follows Ctrl still goes exactly where it went before.
-      //
-      // `activeFocus` is what clears it. Ctrl+Tab can leave the window with Ctrl
-      // down and the release can land somewhere else, so waiting for a release
-      // that is never coming would paint the numbers on permanently.
+      // Track Ctrl without consuming keys, and clear it when focus leaves the window.
       property bool ctrlDown: false
       readonly property bool ctrlHeld: ctrlDown && activeFocus
         && (keyContext === "list" || keyContext === "reader")
