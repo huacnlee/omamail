@@ -41,6 +41,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/KeyRouter.qml \
 	ui/components/WheelScroller.qml \
 	ui/components/ActionIcon.qml \
+	ui/components/AppTitle.qml \
 	ui/components/IconButton.qml \
 	ui/components/IconTextButton.qml \
 	ui/components/ImagePopover.qml \
