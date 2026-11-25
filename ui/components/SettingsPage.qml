@@ -32,6 +32,11 @@ Column {
   signal openCalendarRequested()
   signal calendarSignInRequested(int index)
 
+  readonly property var openingModes: [
+    { value: "Window", label: "Window" },
+    { value: "Drop-down", label: "Drop-down" }
+  ]
+
   readonly property var accounts: service ? service.accountSummaries : []
   // A separate list on purpose: accountSummaries carries live mailbox state and
   // is replaced on a poll, which would rebuild the field being typed in.
@@ -47,6 +52,8 @@ Column {
     var values = [{ key: "backend", title: "Mail backend", y: backendSetup.y }]
     if (!root.service || root.service.hasTray !== false)
       values.push({ key: "bar", title: "Bar", y: barHeading.y })
+    if (openingHeading.visible)
+      values.push({ key: "opening", title: "Opening behavior", y: openingHeading.y })
     if (root.service && root.service.hasMailto === true)
       values.push({ key: "mailClient", title: "Default mail client", y: mailClientHeading.y })
     values.push({ key: "reading", title: "Reading", y: readingHeading.y })
@@ -457,6 +464,73 @@ Column {
       accent: root.accentColor
       onToggled: if (root.service) root.service.setShowBarIcon(!root.service.showBarIcon)
     }
+  }
+
+  Text {
+    id: openingHeading
+    text: "OPENING BEHAVIOR"
+    visible: barHeading.visible || mailClientHeading.visible
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    font.letterSpacing: 1
+  }
+
+  Column {
+    visible: openingHeading.visible
+    width: parent.width
+    spacing: Style.space(12)
+
+    Dropdown {
+      id: barOpeningMode
+      objectName: "settings-omamail-bar-opening-mode"
+      visible: !root.service || root.service.hasTray !== false
+      width: parent.width
+      label: "Clicking the bar icon opens"
+      options: root.openingModes
+      readonly property string savedValue: root.service && root.service.settings
+        && root.service.settings.openOnClick === "Drop-down" ? "Drop-down" : "Window"
+      value: savedValue
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) {
+        if (root.service) root.service.setOpeningMode("bar", next)
+        value = Qt.binding(function() { return barOpeningMode.savedValue })
+      }
+    }
+
+    Dropdown {
+      id: shortcutOpeningMode
+      objectName: "settings-omamail-shortcut-opening-mode"
+      visible: mailClientRow.visible
+      width: parent.width
+      label: "Super+Shift+E opens"
+      enabled: mailClientRow.isDefault && !root.service.defaultMailClientBusy
+      opacity: enabled ? 1 : 0.75
+      options: root.openingModes
+      readonly property string savedValue: mailClientRow.isDefault && root.service.settings
+        && root.service.settings.openOnShortcut === "Drop-down" ? "Drop-down" : "Window"
+      value: savedValue
+      foreground: root.textColor
+      accent: root.accentColor
+      fontFamily: root.panelFontFamily
+      onChanged: function(next) {
+        if (enabled) root.service.setOpeningMode("shortcut", next)
+        value = Qt.binding(function() { return shortcutOpeningMode.savedValue })
+      }
+    }
+  }
+
+  Text {
+    width: parent.width
+    visible: shortcutOpeningMode.visible && !mailClientRow.isDefault
+    text: "Set Omamail as the default mail client to change its shortcut opening mode."
+    color: root.dimColor
+    font.family: root.panelFontFamily
+    font.pixelSize: Style.font.caption
+    wrapMode: Text.WordWrap
+    textFormat: Text.PlainText
   }
 
   // --------------------------------------------------- default mail client

@@ -104,8 +104,9 @@ BarWidget {
   function openWindow() {
     close()
     if (!bar || !bar.shell) return
-    if (typeof bar.shell.toggle === "function") bar.shell.toggle("omamail", "{}")
-    else if (typeof bar.shell.summon === "function") bar.shell.summon("omamail", "{}")
+    if (typeof bar.shell.summon === "function")
+      bar.shell.summon("omamail", JSON.stringify({ openSource: "bar" }))
+    else if (typeof bar.shell.toggle === "function") bar.shell.toggle("omamail", "{}")
   }
 
   function openMessage(accountId, messageId) {

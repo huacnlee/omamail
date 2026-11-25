@@ -49,6 +49,7 @@
       "calendarRemindersEnabled": true,
       "calendarSnoozeMinutes": 5,
       "openOnClick": "Window",
+      "openOnShortcut": "Window",
       "showBarIcon": true,
       "suggestEvents": false,
       "aiAgent": "System default",
@@ -194,10 +195,10 @@
         "label": "Clicking the bar icon opens",
         "options": [
           "Window",
-          "Quick preview"
+          "Drop-down"
         ],
         "defaultValue": "Window",
-        "description": "The full window, or a small card with the most recent unread mail."
+        "description": "A normal window or a drop-down."
       }
     ]
   }

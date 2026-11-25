@@ -237,18 +237,6 @@ grep -q 'windowOpen' BarWidget.qml \
 grep -q 'KeyboardPanel {' BarWidget.qml \
   || fail "the bar icon must open a mail and calendar preview"
 [ -f bar/BarPreview.qml ] || fail "the bar preview view is missing"
-python3 - <<'PY'
-from pathlib import Path
-
-widget = Path("BarWidget.qml").read_text()
-open_window = widget[widget.index("function openWindow()"):widget.index("function openMessage(")]
-if "shell.toggle" not in open_window or open_window.index("shell.toggle") > open_window.index("shell.summon"):
-    raise SystemExit("test_source.sh: the bar's main-window action must toggle an open window closed")
-pressed = widget[widget.index("onPressed: function(buttonCode)"):]
-pressed = pressed[:pressed.index("\n    }")]
-if "buttonCode === Qt.LeftButton" not in pressed or "root.openWindow()" not in pressed:
-    raise SystemExit("test_source.sh: left-clicking the bar icon must open Omamail")
-PY
 # The shell marks an open bar panel with a short accent line on the bar's inner
 # edge. Omamail's main window is not a bar popout, so its widget draws the same
 # indicator itself instead of substituting an unrelated grey square.

@@ -3,6 +3,7 @@
 #
 #   default-mail.sh on <plugin-dir>   claim mailto: and SUPER+SHIFT+E
 #   default-mail.sh off               restore Omarchy's own email bindings
+#   default-mail.sh upgrade-shortcut  migrate the managed inbox binding
 #   default-mail.sh status            print `default` or `not-default`
 #
 # Two things decide "which mail client" on Omarchy, and a switch that moved
@@ -28,7 +29,7 @@ fail() {
 }
 
 usage() {
-  fail 'usage: default-mail.sh on <plugin-dir> | off | status'
+  fail 'usage: default-mail.sh on <plugin-dir> | off | upgrade-shortcut | status'
 }
 
 bindings_block() {
@@ -36,7 +37,7 @@ bindings_block() {
 $BLOCK_BEGIN
 hl.unbind("SUPER + SHIFT + E")
 hl.unbind("SUPER + SHIFT + ALT + E")
-o.bind("SUPER + SHIFT + E", "Email", "omarchy-shell shell summon omamail '{}'")
+o.bind("SUPER + SHIFT + E", "Email", "omarchy-shell shell summon omamail '{\"openSource\":\"shortcut\"}'")
 o.bind("SUPER + SHIFT + ALT + E", "New email", "omarchy-shell shell summon omamail '{\"compose\":true}'")
 $BLOCK_END
 EOF
@@ -67,6 +68,53 @@ add_block() {
   printf '\n%s\n' "$(bindings_block)" >> "$BINDINGS_FILE"
 }
 
+upgrade_shortcut() {
+  has_block || fail 'Omamail does not manage the email shortcut.'
+  legacy=$(cat <<'EOF'
+o.bind("SUPER + SHIFT + E", "Email", "omarchy-shell shell summon omamail '{}'")
+EOF
+)
+  current=$(bindings_block | sed -n '4p')
+  python3 - "$BINDINGS_FILE" "$BLOCK_BEGIN" "$BLOCK_END" "$legacy" "$current" <<'PY_BINDING'
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+path = Path(sys.argv[1]).resolve(strict=True)
+begin, end, legacy, current = (value.encode() for value in sys.argv[2:])
+original = path.read_bytes()
+lines = original.splitlines(keepends=True)
+markers = [i for i, line in enumerate(lines) if line.rstrip(b"\r\n") in (begin, end)]
+if len(markers) != 2 or [lines[i].rstrip(b"\r\n") for i in markers] != [begin, end]:
+    sys.exit("The managed email shortcut block is incomplete or duplicated.")
+bindings = [i for i in range(markers[0] + 1, markers[1])
+            if lines[i].rstrip(b"\r\n") in (legacy, current)]
+if len(bindings) != 1:
+    sys.exit("Could not identify the managed email shortcut.")
+index = bindings[0]
+if lines[index].rstrip(b"\r\n") == current:
+    sys.exit(0)
+lines[index] = current + lines[index][len(legacy):]
+mode = stat.S_IMODE(path.stat().st_mode)
+with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as replacement:
+    temporary = Path(replacement.name)
+    try:
+        replacement.write(b"".join(lines))
+        replacement.close()
+        temporary.chmod(mode)
+        if path.read_bytes() != original:
+            sys.exit("The bindings file changed while updating the email shortcut.")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+PY_BINDING
+  if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+    hyprctl reload >/dev/null 2>&1 || fail 'Could not reload the email shortcut in Hyprland. Try again.'
+  fi
+}
+
 reload_hyprland() {
   if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v hyprctl >/dev/null 2>&1; then
     hyprctl reload >/dev/null 2>&1 || true
@@ -93,6 +141,10 @@ case "${1:-}" in
     remove_block
     reload_hyprland
     printf '%s\n' "SUPER+SHIFT+E is Omarchy's own email binding again."
+    ;;
+  upgrade-shortcut)
+    [ "$#" -eq 1 ] || usage
+    upgrade_shortcut
     ;;
   status)
     [ "$#" -eq 1 ] || usage

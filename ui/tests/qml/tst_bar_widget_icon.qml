@@ -152,6 +152,14 @@ Item {
       compare(widget.gmail, null, "no stale session survives service shutdown")
     }
 
+    function test_primary_click_summons_the_bar_opening_mode() {
+      fakeBar.shell = startingShell
+      startingShell.lastPayload = ""
+      button().pressed(Qt.LeftButton)
+      compare(JSON.parse(startingShell.lastPayload).openSource, "bar")
+      compare(widget.previewOpen, false)
+    }
+
     function test_the_icon_is_drawn_by_default() {
       compare(widget.drawsIcon, true)
       compare(widget.visible, true)

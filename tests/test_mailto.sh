@@ -22,7 +22,7 @@ echo "$quoted" | grep -q '"mailto":"mailto:jane@example.com?subject=Say \\"hi\\"
   || fail "a quote in the URL must be JSON-escaped, got: $quoted"
 
 blank=$(OMAMAIL_MAILTO_PRINT=1 sh "$script")
-[ "$blank" = 'omarchy-shell shell summon omamail {}' ] \
+[ "$blank" = 'omarchy-shell shell summon omamail {"openSource":"launcher"}' ] \
   || fail "no URL must still summon the window, got: $blank"
 
 printf 'test_mailto.sh ok\n'

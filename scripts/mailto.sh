@@ -20,7 +20,7 @@ json_string() {
 }
 
 if [ "$#" -eq 0 ] || [ -z "${1:-}" ]; then
-  payload='{}'
+  payload='{"openSource":"launcher"}'
 else
   payload="{\"mailto\":$(json_string "$1")}"
 fi

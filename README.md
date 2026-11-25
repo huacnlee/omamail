@@ -75,6 +75,8 @@ Omarchy opens HEY's web app on `SUPER+SHIFT+E`. Choose **Settings → Default ma
 
 The key bindings go in a clearly marked block in `~/.config/hypr/bindings.lua`; Omarchy's own files are never changed. **Undo** removes the block and leaves the file as it was.
 
+In **Settings → Opening behavior**, choose whether clicking the envelope opens a window or a drop-down. The same section shows the independent `SUPER+SHIFT+E` preference, which can be changed when Omamail is the default mail client. The drop-down opens on the active monitor and leaves the bar visible. Dismiss it with Escape from the inbox, or press the shortcut again if it is set to drop-down.
+
 ## Open the Omarchy plugin from the keyboard
 
 To use another key, add this to `~/.config/hypr/bindings.lua`:

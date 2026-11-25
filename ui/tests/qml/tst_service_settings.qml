@@ -65,6 +65,32 @@ Item {
         "only a stored false hides the icon")
     }
 
+    function test_bar_and_shortcut_opening_modes_persist_independently() {
+      mailService.applySettings({})
+      compare(mailService.settings.openOnClick, "Window")
+      compare(mailService.settings.openOnShortcut, "Window")
+
+      var process = findChild(mailService, "default-mail-client-process")
+      process.running = false
+      mailService.defaultMailClient = "default"
+      shellStore.updatedEntry = null
+      mailService.setOpeningMode("shortcut", "Drop-down")
+      compare(process.command[1], "upgrade-shortcut")
+      compare(shellStore.updatedEntry, null)
+      process.running = false
+      process.exited(0)
+      compare(shellStore.updatedEntry.openOnClick, "Window")
+      compare(shellStore.updatedEntry.openOnShortcut, "Drop-down")
+
+      mailService.setOpeningMode("bar", "Drop-down")
+      mailService.setOpeningMode("shortcut", "Window")
+      var saved = shellStore.updatedEntry
+      mailService.applySettings({})
+      mailService.applySettings(BarBridge.settings(saved, mailService.defaultSettingValues))
+      compare(mailService.settings.openOnClick, "Drop-down")
+      compare(mailService.settings.openOnShortcut, "Window")
+    }
+
     function test_hiding_the_bar_icon_persists() {
       mailService.applySettings({})
       mailService.setShowBarIcon(false)

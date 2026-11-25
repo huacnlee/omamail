@@ -54,6 +54,10 @@ Item {
     property bool sendPending: false
     property bool sending: false
     property bool windowOpen: false
+    property bool hasMailto: false
+    property string defaultMailClient: "not-default"
+    property var settings: ({})
+    property var openingChoice: null
     property bool sidebarCollapsed: false
     property bool alwaysShowImages: false
     property bool unifiedCalendarView: false
@@ -184,6 +188,7 @@ Item {
       record("saveDraft")
       callback("draft-1", "")
     }
+    function setOpeningMode(source, value) { openingChoice = [source, value] }
     function refresh() {}
     function fail(text) { lastError = String(text || "") }
     function note(text) { actionStatus = String(text || "") }
@@ -235,6 +240,10 @@ Item {
     }
 
     function init() {
+      mailService.hasMailto = false
+      mailService.defaultMailClient = "not-default"
+      mailService.openingChoice = null
+      mailService.settings = ({})
       mailService.anyAccountReady = true
       mailService.hasSavedAccounts = true
       app.opened = true
@@ -243,6 +252,81 @@ Item {
       app.resetNavigation()
       app.openSettings()
       waitForRendering(app)
+    }
+
+    function test_settings_group_both_opening_modes_and_lock_the_shortcut_until_default() {
+      var barControl = named(app, "settings-omamail-bar-opening-mode")
+      var shortcutControl = named(app, "settings-omamail-shortcut-opening-mode")
+      verify(barControl.visible)
+      verify(!shortcutControl.visible)
+      compare(barControl.parent, shortcutControl.parent)
+
+      mailService.hasMailto = true
+      mailService.settings = ({ openOnShortcut: "Drop-down" })
+      verify(shortcutControl.visible)
+      tryVerify(function() { return shortcutControl.y > barControl.y })
+      compare(shortcutControl.x, barControl.x)
+      verify(!shortcutControl.enabled)
+      compare(shortcutControl.value, "Window")
+      shortcutControl.changed("Drop-down")
+      compare(mailService.openingChoice, null)
+
+      mailService.defaultMailClient = "default"
+      verify(shortcutControl.enabled)
+      compare(shortcutControl.value, "Drop-down")
+
+      // The shell's Dropdown writes its own value before emitting changed.
+      barControl.value = "Drop-down"
+      barControl.changed("Drop-down")
+      compare(mailService.openingChoice, ["bar", "Drop-down"])
+      shortcutControl.value = "Window"
+      shortcutControl.changed("Window")
+      compare(mailService.openingChoice, ["shortcut", "Window"])
+      compare(shortcutControl.value, "Drop-down", "keep the saved value until persistence succeeds")
+      mailService.defaultMailClient = "not-default"
+      verify(!shortcutControl.enabled)
+      compare(shortcutControl.value, "Window")
+    }
+
+    function test_shortcut_opens_a_window_if_omamail_is_not_default() {
+      app.close()
+      mailService.settings = ({ openOnShortcut: "Drop-down" })
+      app.open(JSON.stringify({ openSource: "shortcut" }))
+      compare(app.opened, true)
+      compare(window().visible, true)
+    }
+
+    function test_custom_empty_summon_keeps_the_normal_window() {
+      app.close()
+      fakeShell.hidden = []
+      mailService.defaultMailClient = "default"
+      mailService.settings = ({ openOnShortcut: "Drop-down" })
+      app.open("{}")
+      compare(window().visible, true)
+      app.open("{}")
+      compare(window().visible, true)
+      compare(fakeShell.hidden, [])
+    }
+
+    function test_dismissal_disables_mail_shortcuts_until_reopened() {
+      app.backToList()
+      var router = named(app, "key-router")
+      verify(router.context !== "")
+      app.dropDownClosing = true
+      compare(router.context, "")
+      app.open(JSON.stringify({ openSource: "bar" }))
+      verify(router.context !== "")
+    }
+
+    function test_bar_opening_toggles_the_normal_window() {
+      app.close()
+      fakeShell.hidden = []
+      var payload = JSON.stringify({ openSource: "bar" })
+      app.open(payload)
+      compare(app.opened, true)
+      compare(window().visible, true)
+      app.open(payload)
+      compare(fakeShell.hidden, ["omamail"])
     }
 
     // The rail names the sections in the page's order, and the page reports
@@ -278,7 +362,15 @@ Item {
       verify(rail && rail.visible, "a wide window has a rail")
       var page = named(app, "settings-page")
       var keys = page.sections.map(function(s) { return s.key })
-      compare(keys.join(","), "backend,bar,reading,notifications,writing,mailboxes,calendars,oauth")
+      compare(keys.join(","), "backend,bar,opening,reading,notifications,writing,mailboxes,calendars,oauth")
+      mailService.hasMailto = true
+      tryVerify(function() {
+        page.forceLayout()
+        return sectionY(page, "opening") < sectionY(page, "mailClient")
+          && sectionY(page, "mailClient") < sectionY(page, "reading")
+      })
+      keys = page.sections.map(function(s) { return s.key })
+      compare(keys.join(","), "backend,bar,opening,mailClient,reading,notifications,writing,mailboxes,calendars,oauth")
       for (var i = 1; i < page.sections.length; i++)
         verify(page.sections[i].y > page.sections[i - 1].y, "sections are laid out top to bottom")
       for (var j = 0; j < keys.length; j++)

@@ -34,10 +34,10 @@ Item {
   property bool standaloneWindowChrome: false
   property bool opened: false
   property bool closingFromHost: false
-  function syncWindowVisibility() {
-    window.visible = root.opened
-  }
-  onOpenedChanged: Qt.callLater(syncWindowVisibility)
+  property bool dropDown: false
+  property bool dropDownClosing: false
+  readonly property bool dropDownAvailable: dropDown && dropDownLoader.status !== Loader.Error
+
   property string draftSavedToast: ""
   property string composeRecoveryNotice: ""
   property bool composeRecoveryUpdateNoticePending: false
@@ -173,12 +173,12 @@ Item {
   readonly property bool assistantOpen: agentPrompt.opened || composeAgent.opened
   readonly property var activeAssistant: composeAgent.opened ? composeAgent : (agentPrompt.opened ? agentPrompt : null)
   property real preferredAssistantWidth: 0
-  readonly property real assistantMaxWidth: Math.max(0, Math.min(window.width * 0.65, window.width - Style.space(320)))
+  readonly property real assistantMaxWidth: Math.max(0, Math.min(mailSurface.width * 0.65, mailSurface.width - Style.space(320)))
   readonly property real assistantMinWidth: Math.min(Style.space(280), assistantMaxWidth)
   readonly property real assistantWidth: assistantOpen ? Math.max(assistantMinWidth, Math.min(assistantMaxWidth,
-    preferredAssistantWidth > 0 ? preferredAssistantWidth : Math.min(Style.space(420), window.width * 0.45))) : 0
+    preferredAssistantWidth > 0 ? preferredAssistantWidth : Math.min(Style.space(420), mailSurface.width * 0.45))) : 0
   property bool assistantEditing: false
-  readonly property real mailWidth: window.width - assistantWidth
+  readonly property real mailWidth: mailSurface.width - assistantWidth
   readonly property bool wide: mailWidth >= Style.space(1000)
   readonly property bool compact: mailWidth < Style.space(760)
 
@@ -491,6 +491,20 @@ Item {
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(String(payloadJson || "{}")) || ({}) } catch (e) {}
+    var source = payload.openSource
+    var barClick = source === "bar"
+    var shortcut = source === "shortcut"
+    if (!standaloneWindowChrome && (barClick || shortcut)) {
+      var settings = service ? service.settings : null
+      var nextDropDown = !!settings && (barClick || service.defaultMailClient === "default")
+        && settings[barClick ? "openOnClick" : "openOnShortcut"] === "Drop-down"
+      if (opened && !dropDownClosing && nextDropDown === dropDown && (barClick || nextDropDown)) {
+        requestClose()
+        return
+      }
+      dropDown = nextDropDown
+    } else dropDown = false
+    dropDownClosing = false
     closingFromHost = false
     opened = true
     if (service) service.windowOpen = true
@@ -523,7 +537,12 @@ Item {
     }
     // Jobs finish while the window is shut; the rows say so as soon as it opens.
     if (service && typeof service.refreshAgentJobs === "function") service.refreshAgentJobs()
-    Qt.callLater(function() { focusScope.applyContextFocus() })
+    Qt.callLater(root.focusMail)
+  }
+
+  function focusMail() {
+    if (!opened) return
+    focusScope.applyContextFocus()
   }
 
   function close() {
@@ -535,11 +554,20 @@ Item {
     if (service && service.selectionIsPreview) service.clearSelection()
     if (compose.opened || compose.parkedForSend) saveComposeRecovery()
     opened = false
+    dropDownClosing = false
+    dropDown = false
     if (service) service.windowOpen = false
     closingFromHost = false
   }
 
   function requestClose() {
+    if (dropDownClosing) return
+    if (opened && dropDownAvailable && dropDownLoader.item
+        && dropDownLoader.item.beginClose()) return
+    finishClose()
+  }
+
+  function finishClose() {
     if (shell && typeof shell.hide === "function") shell.hide(pluginId)
     else close()
   }
@@ -559,16 +587,7 @@ Item {
     pushEntry("reader", { id: cursorId })
   }
 
-  // One member of the conversation the reader is inside, opened in the same
-  // reader. `openMessage` and nothing else: the header paints from the member's
-  // summary at once, the body from the cache or the network, and the navigation
-  // stack replaces a reader entry with a reader entry, so Back still lands on
-  // the list from any member.
-  //
-  // The one thing that does not happen is the cursor moving. `cursorId` is
-  // where the keyboard stands in the *list*, and a member is not a row — the
-  // list is one row per conversation — so leaving the cursor on a message the
-  // list has never drawn would send the next `j` back to the top of it.
+  // Open conversation members in the same reader while keeping the list cursor on the thread.
   function openMember(id) {
     var member = String(id || "")
     if (!service || member === "") return
@@ -1395,7 +1414,7 @@ Item {
   // developer's real windows. See hyprland/WindowFocus.qml.
   Loader {
     id: windowFocus
-    active: !root.standaloneWindowChrome
+    active: !root.standaloneWindowChrome && !root.dropDownAvailable
       && !!Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
     source: "hyprland/WindowFocus.qml"
     onLoaded: item.windowTitle = Qt.binding(function() { return window.title })
@@ -1409,11 +1428,35 @@ Item {
     implicitHeight: Style.space(720)
     minimumSize: Qt.size(Style.space(760), Style.space(520))
 
-    Component.onCompleted: root.syncWindowVisibility()
+    visible: root.opened && !root.dropDownAvailable
 
     onVisibleChanged: {
-      if (!visible && root.opened && !root.closingFromHost) root.requestClose()
+      if (!visible && root.opened && !root.dropDownAvailable && !root.closingFromHost)
+        root.requestClose()
     }
+
+    Item {
+      id: floatingContent
+      anchors.fill: parent
+    }
+  }
+
+  Loader {
+    id: dropDownLoader
+    active: root.dropDown
+    source: "hyprland/DropDownWindow.qml"
+    onLoaded: {
+      item.app = root
+    }
+  }
+
+  Rectangle {
+    id: mailSurface
+    parent: root.dropDownAvailable && dropDownLoader.item
+      ? dropDownLoader.item.mount : floatingContent
+    anchors.fill: parent
+    enabled: !root.dropDownClosing
+    color: root.background
 
     Rectangle {
       anchors.fill: parent
@@ -1449,18 +1492,7 @@ Item {
         onActivated: root.goBack()
       }
 
-      // Where the window is, and the only thing that says what a key means.
-      // A page is a form before it is anything else, a draft beats reading, a
-      // query being typed beats the list underneath it.
-      // Holding Ctrl names every row on the rail, so the digits are read rather
-      // than remembered. A `Keys` handler, which bindings may not use — but a
-      // modifier on its own cannot be a `Shortcut`, so there is no binding to
-      // route and nothing for `KeyRouter` to own. It accepts nothing: whatever
-      // follows Ctrl still goes exactly where it went before.
-      //
-      // `activeFocus` is what clears it. Ctrl+Tab can leave the window with Ctrl
-      // down and the release can land somewhere else, so waiting for a release
-      // that is never coming would paint the numbers on permanently.
+      // Track Ctrl without consuming keys, and clear it when focus leaves the window.
       property bool ctrlDown: false
       readonly property bool ctrlHeld: ctrlDown && activeFocus
         && (keyContext === "list" || keyContext === "reader")
@@ -2029,14 +2061,7 @@ Item {
           }
           onActionRequested: function(action) {
             if (!root.service || root.service.selectedId === "") return
-            // The toolbar acts on the message it is under, which is normally
-            // the row the cursor is on — but with the rail up the reader can be
-            // showing a *member*, and the list has no row for one. Moving the
-            // cursor onto it would leave `j` unable to find where it stands, so
-            // the cursor is only followed to a message the list actually drew;
-            // from a member the action lands on the row the conversation was
-            // opened from, which is where the reader came from. Which members
-            // an action reaches from there is "Actions on a conversation row".
+            // Keep the list cursor on a visible row when acting on a conversation member.
             var outside = root.checkedIds.indexOf(root.service.selectedId) < 0
             // A star stays on the open member unless it belongs to the visible
             // selection. It never moves the list's independent cursor.
@@ -2157,13 +2182,7 @@ Item {
           }
         }
 
-        // The one Back for every page the window goes into — settings, the
-        // chooser, a form. Always at the same height, and always on the left
-        // edge of the page's own block — the rail's edge on Settings, the
-        // form's on the rest — so it belongs to the page rather than to the
-        // window's corner, and going a level deeper never moves it up or
-        // down. A page that is the root (first run's chooser) has nothing
-        // behind it and shows none.
+        // Align Back with the current page and hide it at the navigation root.
         BackBar {
           id: pageBack
           objectName: "page-back"
@@ -2467,13 +2486,7 @@ Item {
           anchors.leftMargin: railToggle.visible
             ? Style.space(9) - (railToggle.size - railToggle.iconSize) / 2
             : Style.space(14)
-          // The address runs to the end of the line and the hints take what it
-          // leaves. Stopping at the hints instead asked a question with no
-          // answer: the slot wanted to know how much the hints had left over
-          // while the hints wanted to know whether the address had left them
-          // room. A notice is the one thing that does push the address over,
-          // because a notice is what the window most needs to say and it says
-          // it only while there is something wrong.
+          // Only a notice limits the address width. Hints use the remaining space.
           anchors.right: statusBar.hasNotice ? notice.left : parent.right
           anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
@@ -2483,14 +2496,7 @@ Item {
             id: accountControl
             objectName: "status-account-button"
             property bool selected: accountSwitcher.opened
-            // One inset, counted twice, rather than asked for again as its own
-            // double. `Style.space` rounds, and a theme whose spacing follows
-            // the font does not round the two the same way: at `base-size 14`
-            // the scale is 7/6, which makes `space(4)` 5 a side while
-            // `space(8)` is 9 — a box a pixel narrower than the text it holds.
-            // The text was then elided at every window width, which is what put
-            // "just n..." on the line and why it looked like a fixed width: the
-            // cut had nothing to do with how much room there was.
+            // Double the scaled inset after rounding so the address fits.
             readonly property real inset: Style.space(4)
             width: Math.min(parent.width, accountText.implicitWidth + inset * 2)
             height: parent.height
@@ -2592,7 +2598,7 @@ Item {
           ToolTip {
             visible: notice.visible && noticeHover.hovered && notice.truncated
             delay: 500
-            width: Math.min(Style.space(600), window.width - Style.space(32))
+            width: Math.min(Style.space(600), mailSurface.width - Style.space(32))
             contentItem: Text {
               text: notice.text
               textFormat: Text.PlainText
@@ -2918,7 +2924,7 @@ Item {
       KeyRouter {
         id: keyRouter
         objectName: "key-router"
-        context: root.backendUnavailable ? "" : focusScope.keyContext
+        context: root.backendUnavailable || root.dropDownClosing ? "" : focusScope.keyContext
         overlay: root.shortcutHelpVisible
         onTriggered: function(id, sequence) { root.runShortcut(id, sequence) }
       }

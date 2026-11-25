@@ -121,11 +121,7 @@ Item {
   // Helpers live at the plugin root, one level above the UI components.
   readonly property string pluginDir: decodeURIComponent(String(Qt.resolvedUrl(".."))
     .replace(/^file:\/\//, "")).replace(/\/$/, "")
-  // Shown in the empty reader, so a screenshot in a bug report says which build
-  // it came from. The shell's manifest validation requires both fields, so a
-  // loaded plugin always has them; the fallbacks are for a harness that
-  // constructs the service with a stub manifest, and an empty version makes the
-  // interface say nothing rather than guess a number.
+  // Include the plugin version in the empty reader for bug reports.
   readonly property string pluginName: manifest && manifest.name
     ? String(manifest.name) : "Omamail"
   readonly property string version: manifest && manifest.version
@@ -145,6 +141,8 @@ Item {
     calendarRemindersEnabled: true,
     calendarSnoozeMinutes: 5,
     showBarIcon: true,
+    openOnClick: "Window",
+    openOnShortcut: "Window",
     unifiedMailboxes: false,
     suggestEvents: false,
     aiAgent: "System default",
@@ -431,15 +429,7 @@ Item {
   readonly property bool unifiedMailboxes: !!settings
     && settings.unifiedMailboxes === true
 
-  // Whether the bar draws an envelope for this.
-  //
-  // A settings file written before this existed keeps its icon because
-  // `applySettings` lays every default down first, so a missing key is
-  // already the manifest's `true` — the same way `unifiedCalendarView` gets
-  // its `false`. What "anything but a stored false" buys instead is the
-  // hand-edited `shell.json`: a `"false"` or a `0` in there is somebody's
-  // typo rather than an answer given in the interface, and a typo should not
-  // be what takes the icon away.
+  // Only an explicit boolean false hides the icon, including in older settings files.
   readonly property bool showBarIcon: !settings || settings.showBarIcon !== false
 
   // Local address books and Google Contacts; see account/ContactBook.qml.
@@ -702,6 +692,20 @@ Item {
   }
 
   // The default agent's command line, from Settings. Empty is no agent.
+
+  function setOpeningMode(source, value) {
+    if (source !== "bar" && source !== "shortcut") return
+    if (source === "shortcut" && value === "Drop-down") {
+      if (defaultMailClient !== "default" || defaultMailClientProcess.running) return
+      defaultMailClientBusy = true
+      defaultMailClientError = ""
+      defaultMailClientProcess.command = [pluginDir + "/scripts/default-mail.sh", "upgrade-shortcut"]
+      defaultMailClientProcess.running = true
+      return
+    }
+    persistSetting(source === "bar" ? "openOnClick" : "openOnShortcut",
+      value === "Drop-down" ? "Drop-down" : "Window")
+  }
 
   function setShowBarIcon(value) {
     persistSetting("showBarIcon", value === true)
@@ -1278,15 +1282,11 @@ Item {
       restoreTimer.start()
       return
     }
-    var ok = shell.summon(pluginId, "{}")
+    var ok = shell.summon(pluginId, JSON.stringify({ openSource: "restore" }))
     if (!ok) restoreTimer.start()
   }
 
-  // A toggle is written the moment it is made; a zoom is dragged, and Ctrl and
-  // the wheel walk through a dozen values in a second. So the first change goes
-  // out immediately and anything arriving while that write is still running
-  // waits for the scrolling to stop — dropping those, which is what a bare
-  // `running` guard does, loses the one value the user settled on.
+  // Coalesce changes that arrive while the previous write is in flight.
   function saveWindowPrefs() {
     if (!windowPrefsLoaded) return
     if (windowWriting) {
@@ -2892,13 +2892,17 @@ Item {
 
   Process {
     id: defaultMailClientProcess
+    objectName: "default-mail-client-process"
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
       if (root.defaultMailClientBusy) {
         root.defaultMailClientBusy = false
+        var upgradingShortcut = command[1] === "upgrade-shortcut"
         if (exitCode !== 0) root.defaultMailClientError =
-          String(stderr.text || "").trim() || "Could not change the default mail client"
+          String(stderr.text || "").trim() || (upgradingShortcut
+            ? "Could not update the email shortcut" : "Could not change the default mail client")
+        else if (upgradingShortcut) root.persistSetting("openOnShortcut", "Drop-down")
         // The status read cannot start from inside this process's own exit.
         Qt.callLater(root.refreshDefaultMailClient)
         return
