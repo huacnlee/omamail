@@ -232,6 +232,15 @@ async fn every_message_of_a_full_read_has_a_clock_of_its_own() {
     isolated!();
     let world = World::new().await;
     inbox(&world, 3);
+    let ids: Vec<String> = (1..=3).map(super::oid).collect();
+    // A first read under the default clocks fetches the token and opens the connection, so what
+    // follows times only the reads. On a busy machine that setup alone can outlast 400 ms.
+    assert!(
+        world
+            .call("m365.messages", json!({"ids": ids, "full": true}))
+            .await
+            .is_ok()
+    );
     // Two bodies at a time, each slower than a request's clock: the third message's requests start
     // after that clock has run out for the first two, and still have their own.
     world.deadlines(400, 8000);
@@ -245,13 +254,19 @@ async fn every_message_of_a_full_read_has_a_clock_of_its_own() {
             )
         })
     });
-    let ids: Vec<String> = (1..=3).map(super::oid).collect();
     let read = world
         .call("m365.messages", json!({"ids": ids, "full": true}))
         .await
         .unwrap();
     assert_eq!(read["warning"], Value::Null);
     assert_eq!(read["messages"].as_array().unwrap().len(), 3);
+    let bodies = world
+        .fake
+        .graph()
+        .iter()
+        .filter(|r| r.path.ends_with("/$value"))
+        .count();
+    assert_eq!(bodies, 6, "the timed read fetches every body again");
 }
 
 #[tokio::test]
