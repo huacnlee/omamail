@@ -1,6 +1,6 @@
 {
   "apiVersion": 10,
-  "releasedApiVersion": 9,
+  "releasedApiVersion": 10,
   "protocolVersion": 1,
   "methods": [
     "system.info",
@@ -1650,20 +1650,7 @@
     }
   ],
   "unreleased": {
-    "methods": [
-      "calendar.verify",
-      "contacts.google",
-      "attachment.image"
-    ],
-    "cases": [
-      "Calendar validation errors preserve safe context",
-      "Calendar authentication errors preserve safe context",
-      "CalDAV verification refuses a plain-http address before any request",
-      "CalDAV verification requires the password it is to check",
-      "Google Contacts refuses an account that is not a Gmail address",
-      "Attachment pictures are returned as checked raster data",
-      "Attachment bytes that are not a picture are refused",
-      "Attachment pictures absent from the message cache answer without the network"
-    ]
+    "methods": [],
+    "cases": []
   }
 }
