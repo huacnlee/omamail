@@ -1,24 +1,21 @@
 //! Accounts and the system mailboxes, with the inbox's unread count.
 
-use nsh_base::theme;
 use nsh_core::prelude::*;
+use nsh_omarchy::{self as om, IconName, tokens};
 
-use crate::{
-    store::{MailStore, Mailbox},
-    ui::{Icon, sidebar_item},
-};
+use crate::store::{MailStore, Mailbox};
 
-fn mailbox_icon(mailbox: Mailbox) -> Icon {
-    match mailbox {
-        Mailbox::Inbox => Icon::Inbox,
-        Mailbox::Unread => Icon::Unread,
-        Mailbox::Starred => Icon::Star,
-        Mailbox::Sent => Icon::Send,
-        Mailbox::Drafts => Icon::Draft,
-        Mailbox::Archive => Icon::Archive,
-        Mailbox::Spam => Icon::Spam,
-        Mailbox::Trash => Icon::Trash,
-    }
+fn mailbox_icon(mailbox: Mailbox) -> Option<IconName> {
+    Some(match mailbox {
+        Mailbox::Inbox => IconName::Inbox,
+        Mailbox::Unread => IconName::Eye,
+        Mailbox::Starred => IconName::Star,
+        Mailbox::Sent => IconName::Upload,
+        Mailbox::Drafts => IconName::Pencil,
+        Mailbox::Archive => IconName::Folder,
+        Mailbox::Spam => IconName::TriangleAlert,
+        Mailbox::Trash => IconName::Trash,
+    })
 }
 
 pub fn sidebar(store: MailStore) -> impl IntoElement {
@@ -35,36 +32,32 @@ pub fn sidebar(store: MailStore) -> impl IntoElement {
             })
             .unwrap_or_default()
     };
-    let mut items = view().gap(px(2.0)).role(AccessibilityRole::List);
+    let mut section = om::sidebar_section(account);
     for mailbox in Mailbox::ALL {
-        items = items.child(sidebar_item(
-            mailbox_icon(mailbox),
-            mailbox.label(),
-            move || store.mailbox() == mailbox,
-            move || {
-                if mailbox == Mailbox::Inbox {
-                    store.inbox_unread()
-                } else {
-                    0
-                }
-            },
-            move || store.select_mailbox(mailbox),
-        ));
+        let mut item = om::sidebar_item(mailbox.id(), mailbox.label());
+        if let Some(glyph) = mailbox_icon(mailbox) {
+            item = item.icon(glyph);
+        }
+        if mailbox == Mailbox::Inbox {
+            item = item.suffix(when(
+                move || store.inbox_unread() > 0,
+                move || {
+                    text(move || SharedString::from(store.inbox_unread().to_string()))
+                        .font_family(tokens::font_mono())
+                        .text_size(px(tokens::TEXT_SM))
+                        .text_color(move || tokens::secondary())
+                },
+            ));
+        }
+        section = section.child(item);
     }
-    view()
-        .flex_1()
-        .px_2()
-        .py_3()
-        .gap_3()
-        .bg(move || theme().sidebar)
-        .text_color(move || theme().sidebar_foreground)
-        .child(
-            text(account)
-                .px_2()
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .number_of_lines(1)
-                .text_color(move || theme().muted_foreground),
-        )
-        .child(items)
+    om::sidebar()
+        .value(move || SharedString::from(store.mailbox().id()))
+        .on_change(move |id: &SharedString| {
+            if let Some(mailbox) = Mailbox::ALL.into_iter().find(|m| m.id() == id.as_ref()) {
+                store.select_mailbox(mailbox);
+            }
+        })
+        .accessibility_label("Mailboxes")
+        .child(section)
 }

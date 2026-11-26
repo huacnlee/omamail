@@ -1,7 +1,7 @@
 //! Omamail's NSH client: the mail UI over the `omamail serve` backend.
 //!
 //! `backend` speaks the backend's protocol, `store` holds the mail state,
-//! `ui` is the styled component layer and `screens` the three columns.
+//! `ui` holds layout constants (components come from `nsh-omarchy`), and `screens` the three columns.
 
 pub mod backend;
 pub mod reader_html;
@@ -11,9 +11,9 @@ pub mod ui;
 
 use std::rc::Rc;
 
-use nsh_base::{nav_page, nav_stack, split_view, theme};
 use nsh_core::element::desktop::window as app_window;
 use nsh_core::prelude::*;
+use nsh_omarchy::{self as om, tokens};
 
 use crate::{
     backend::{Backend, FakeBackend},
@@ -57,15 +57,17 @@ pub fn Mail(props: MailProps) -> impl IntoElement {
     }
 }
 
-/// The three columns over `backend`.
+/// The title bar and the three columns over `backend`.
 pub fn mail_window(backend: Rc<dyn Backend>) -> impl IntoElement {
+    om::init();
     let store = MailStore::new(backend);
     store.start();
     let connected = move || store.connection() == Connection::Ready;
     view()
         .flex_1()
-        .bg(move || theme().background)
-        .text_color(move || theme().foreground)
+        .bg(move || tokens::background())
+        .text_color(move || tokens::foreground())
+        .child(om::title_bar().title("Omamail"))
         .child(when(
             move || !connected(),
             move || {
@@ -75,28 +77,33 @@ pub fn mail_window(backend: Rc<dyn Backend>) -> impl IntoElement {
                     }
                     _ => "Connecting…".into(),
                 };
-                view().flex_1().items_center().justify_center().child(
-                    text(message)
-                        .text_sm()
-                        .text_color(move || theme().muted_foreground),
-                )
+                view()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .child(om::empty_state(message))
             },
         ))
         .child(when(connected, move || {
-            split_view()
+            view()
                 .flex_1()
-                .sidebar(
-                    nav_stack().child(nav_page().title("Mailboxes").child(screens::sidebar(store))),
-                )
-                .content(
-                    nav_stack().child(
-                        nav_page()
-                            .title("Messages")
-                            .child(screens::message_list(store)),
-                    ),
-                )
-                .detail(
-                    nav_stack().child(nav_page().title("Message").child(screens::reader(store))),
+                .flex_row()
+                .min_h(px(0.0))
+                .child(screens::sidebar(store))
+                .child(
+                    om::resizable_panel_group()
+                        .flex_1()
+                        .child(
+                            om::resizable_panel()
+                                .size(ui::LIST_WIDTH)
+                                .min_size(260.0)
+                                .child(screens::message_list(store)),
+                        )
+                        .child(
+                            om::resizable_panel()
+                                .min_size(320.0)
+                                .child(screens::reader(store)),
+                        ),
                 )
         }))
 }
@@ -106,12 +113,8 @@ fn failed(message: SharedString) -> impl IntoElement {
         .flex_1()
         .items_center()
         .justify_center()
-        .bg(move || theme().background)
-        .child(
-            text(SharedString::from(format!(
-                "Cannot start the mail backend ({message})"
-            )))
-            .text_sm()
-            .text_color(move || theme().muted_foreground),
-        )
+        .bg(move || tokens::background())
+        .child(om::empty_state(SharedString::from(format!(
+            "Cannot start the mail backend ({message})"
+        ))))
 }

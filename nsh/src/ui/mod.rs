@@ -1,21 +1,12 @@
-//! Omamail's styled components. Screens build from these only; a look a
-//! screen needs and this layer lacks becomes a variant here first.
+//! Omamail's few layout constants. Every component, color and size comes
+//! from `nsh-omarchy` (`om::*`, `tokens::*`), so the app looks like the rest
+//! of Omarchy and follows the system theme as it changes.
 
-mod badge;
-mod button;
-mod icon;
-mod input;
-mod list_row;
-mod menu;
-mod segmented;
-mod sidebar_item;
-pub mod theme;
-
-pub use badge::badge;
-pub use button::{ButtonSize, ButtonVariant, button, icon_button};
-pub use icon::{Icon, icon};
-pub use input::search_input;
-pub use list_row::{ListRowProps, list_row};
-pub use menu::{MenuEntry, menu};
-pub use segmented::segmented;
-pub use sidebar_item::sidebar_item;
+/// A message row: sender line, subject line, snippet line.
+pub const MESSAGE_ROW: f32 = 60.0;
+/// The message list's width when the window opens.
+pub const LIST_WIDTH: f32 = 360.0;
+/// The reader's text column.
+pub const READER_MAX_WIDTH: f32 = 720.0;
+/// The bar over each column, as tall as the title bar.
+pub const BAR_HEIGHT: f32 = 36.0;

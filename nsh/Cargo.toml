@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 nsh-core = "0.7.1"
 nsh-base = "0.7.1"
+nsh-omarchy = "0.2.0"
 env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

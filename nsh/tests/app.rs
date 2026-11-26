@@ -45,7 +45,7 @@ fn selecting_a_message_shows_its_body() -> Result<(), String> {
 fn another_mailbox_lists_its_own_messages() -> Result<(), String> {
     let mut app = start();
     app.wait_for("text:周五的发布安排")?;
-    app.press("id:Unread")?;
+    app.press("text:Unread")?;
     app.wait_for("text:Design review notes")?;
     app.wait_for_gone("text:周五的发布安排", std::time::Duration::from_secs(5))?;
     Ok(())

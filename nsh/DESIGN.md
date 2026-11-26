@@ -12,68 +12,50 @@ request as the code it describes.
 Desktop first: macOS, Linux (Omarchy) and Windows, pointer and keyboard,
 compact density. Mobile, web and TUI are not targets yet.
 
+## Look
+
+The client looks like the rest of Omarchy and like nsvim: square corners, one
+accent, foreground-tinted state fills, compact desktop type, mono figures, and
+an app-drawn title bar. It does not have a look of its own.
+
+- **Components come from [`nsh-omarchy`](https://github.com/huacnlee/nsh-omarchy)**
+  (`om::*`). Screens never build a button, list row, sidebar row, menu or input
+  themselves. If a screen needs something nsh-omarchy lacks, add it there first.
+- **Colors and sizes come from `nsh_omarchy::tokens`**, read in closures so they
+  follow a theme change. The colors are the system's Omarchy theme, switched
+  live; without Omarchy, Tokyo Night (dark) or Flexoki Light.
+- `src/ui/mod.rs` only holds Omamail's layout sizes (row height, column widths).
+
 ## Layout
 
-Three columns in a `SplitView`:
+An `om::title_bar` over three columns:
 
 | Column | Width | Content |
 |---|---|---|
-| Sidebar | 220 pt | Account, system mailboxes, unread count of the inbox |
-| Message list | 340 pt | The mailbox's messages, virtualized |
-| Reader | the rest, text at most 720 pt wide | Subject, sender, the reading-mode body in a `TextView` |
+| Sidebar (`om::sidebar`) | 208 pt, fixed | Account as the section title, system mailboxes, inbox unread count in mono |
+| Message list (`om::list` + `om::scrollbar`) | 360 pt, resizable, at least 260 | A 36 pt bar (mailbox, count, refresh), then 60 pt rows: square accent marker, sender and time, subject, snippet |
+| Reader | the rest, at least 320; text at most 720 pt wide | Subject, sender in mono, the reading-mode body in a `TextView` |
 
-In a narrow window the split view shows one column at a time.
-
-## Tokens
-
-Colors come from the theme's semantic roles (`theme()`): `background`,
-`foreground`, `muted`, `muted_foreground`, `accent`, `border`, `ring`,
-`primary`, and the `sidebar_*` family. Omamail's own roles are read by name
-and fall back to a standard role:
-
-| Token | Use | Fallback |
-|---|---|---|
-| `unread` | The unread dot | `primary` |
-
-Sizes live in `src/ui/theme.rs`: sidebar rows 30 pt, controls 28 pt,
-message rows at least 72 pt. Corners use the theme's `radius`. No screen
-writes a color, radius or size of its own.
-
-## Components (`src/ui/`)
-
-Screens use only these. If a screen needs a look that is missing, add a
-variant here first.
-
-| Component | Variants and states |
-|---|---|
-| `button` | Primary, Secondary, Ghost; Small, Regular; hover, pressed, focus ring, disabled |
-| `icon_button` | Ghost; hover, pressed, focus ring; always has an accessibility label |
-| `list_row` | Message row: unread dot and weight, selected, hover, pressed, focus ring |
-| `sidebar_item` | Icon, label, count; selected, hover, pressed, focus ring |
-| `segmented` | One of a few options; selected segment raised |
-| `badge` | A count, hidden at zero |
-| `menu` | Popover-colored popup with a border and shadow; items with hover |
-| `search_input` | Muted field with a search icon; focus ring on the field |
-| `icon` | Line icons drawn with `currentColor`, so they follow the text color |
+The list and reader sit in an `om::resizable_panel_group`. Empty and loading
+states use `om::empty_state`.
 
 ## Motion
 
-Tokens live in `src/ui/theme.rs`, `motion`: `FAST` 120 ms (hover and press),
-`STANDARD` 200 ms (selection, content changes), pressed opacity 0.72. When the
-system asks for reduced motion, all motion becomes an instant change.
+Motion is nsh-omarchy's: `tokens::DURATION_FAST` 90 ms for hover and press
+fills, `DURATION_BASE` 140 ms, `DURATION_SLOW` 220 ms, `PRESS_SCALE`. Reduced
+motion makes every change instant.
 
 ### Motion inventory: main window
 
 | State change | Tool | Tokens | Status |
 |---|---|---|---|
-| Pointer over a row, sidebar item or button: background wash | Native `hover` state style | `FAST` | Done (P0) |
-| Press on any control: opacity drop | Native `active` state style | `PRESSED_OPACITY` | Done (P0) |
-| Focus by keyboard: ring | Native `focus_visible` state style | — | Done (P0) |
-| Selecting a mailbox: highlight moves to the new item | Native `selected` state; P1 slides one highlight with `LayoutAnimation` | `STANDARD` | Highlight done; slide in P1 |
-| Selecting a message: reader content fades in | `AnimatedValue` opacity, 0 → 1 | `STANDARD` | P1 |
-| Pushed `mail.updated`: new rows insert at the top | `virtual_list` keyed by message id, `LayoutAnimation` | `STANDARD` | Keys done; insert animation in P1 |
-| Narrow window: column change | `SplitView` / `NavStack` native transition | Platform | Done (platform) |
-| Menu opens from its trigger | `menu` popup's native presentation | Platform | Done (platform) |
+| Pointer over a row, sidebar item or button: fill | nsh-omarchy hover fill | `DURATION_FAST` | Done (P0) |
+| Press on any control | nsh-omarchy pressed fill | `DURATION_FAST` | Done (P0) |
+| Focus by keyboard: accent border | nsh-omarchy focus border | — | Done (P0) |
+| Selecting a mailbox or message: selected fill moves | nsh-omarchy selected fill | `DURATION_FAST` | Done (P0) |
+| Selecting a message: reader content fades in | `AnimatedValue` opacity, 0 → 1 | `DURATION_BASE` | P1 |
+| Pushed `mail.updated`: new rows insert at the top | list keyed by message id, `LayoutAnimation` | `DURATION_BASE` | Keys done; insert animation in P1 |
+| Dragging the list/reader divider | `om::resizable_panel_group` | — | Done (P0) |
 
 ## Reader
 
@@ -85,6 +67,6 @@ the system browser. Remote images are off until the user allows them (P1).
 
 ## Keyboard
 
-Every control is a `button` or `input`, so Tab reaches it and Enter or
+Every control is an nsh-omarchy control, so Tab reaches it and Enter or
 Space activates it. The full shortcut table from `docs/KEYS.md` moves into
 the client in P1.

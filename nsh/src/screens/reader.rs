@@ -1,12 +1,13 @@
 //! The open message: its header and the backend's reading-mode HTML in a
 //! `TextView`. Links open in the system browser.
 
-use nsh_base::{TextViewLinkPressEvent, text_view, theme};
+use nsh_base::{TextViewLinkPressEvent, text_view};
 use nsh_core::prelude::*;
+use nsh_omarchy::{self as om, IconName, tokens};
 
 use crate::{
     store::{MailStore, Reader},
-    ui::theme::READER_MAX_WIDTH,
+    ui::READER_MAX_WIDTH,
 };
 
 pub fn reader(store: MailStore) -> impl IntoElement {
@@ -34,15 +35,15 @@ pub fn reader(store: MailStore) -> impl IntoElement {
     };
     view()
         .flex_1()
-        .bg(move || theme().background)
+        .bg(move || tokens::background())
         .child(when(
             move || !ready(),
             move || {
-                view().flex_1().items_center().justify_center().child(
-                    text(placeholder)
-                        .text_sm()
-                        .text_color(move || theme().muted_foreground),
-                )
+                view()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .child(om::empty_state(placeholder).icon(IconName::Inbox))
             },
         ))
         .child(when(ready, move || {
@@ -51,21 +52,23 @@ pub fn reader(store: MailStore) -> impl IntoElement {
                     .w_full()
                     .max_w(px(READER_MAX_WIDTH))
                     .self_center()
-                    .px_8()
-                    .py_6()
-                    .gap_4()
+                    .px(px(tokens::SPACE_6))
+                    .py(px(tokens::SPACE_4))
+                    .gap(px(tokens::SPACE_3))
                     .child(
                         text(subject)
-                            .text_xl()
+                            .text_size(px(tokens::TEXT_XL))
                             .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(move || tokens::bright())
                             .selectable(true),
                     )
                     .child(
                         text(sender)
-                            .text_sm()
-                            .text_color(move || theme().muted_foreground),
+                            .font_family(tokens::font_mono())
+                            .text_size(px(tokens::TEXT_SM))
+                            .text_color(move || tokens::secondary()),
                     )
-                    .child(view().h(px(1.0)).bg(move || theme().border))
+                    .child(view().h(px(1.0)).bg(move || tokens::divider()))
                     .child(
                         text_view()
                             .html(html)
@@ -77,10 +80,10 @@ pub fn reader(store: MailStore) -> impl IntoElement {
                                 }
                             })
                             .test_id("reader-body")
-                            .gap_3()
-                            .text_size(px(15.0))
-                            .line_height(px(23.0))
-                            .text_color(move || theme().foreground),
+                            .gap(px(tokens::SPACE_3))
+                            .text_size(px(tokens::TEXT_LG))
+                            .line_height(px(22.0))
+                            .text_color(move || tokens::foreground()),
                     ),
             )
         }))
