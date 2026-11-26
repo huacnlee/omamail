@@ -113,14 +113,43 @@ impl MessageBody {
             })
             .unwrap_or_default();
         Self {
-            text: message["nativeContent"]["body"]["text"]
-                .as_str()
-                .unwrap_or_default()
-                .trim()
-                .to_owned(),
+            text: readable(
+                message["nativeContent"]["body"]["text"]
+                    .as_str()
+                    .unwrap_or_default(),
+            ),
             attachments,
         }
     }
+}
+
+/// `text` without the invisible preheader padding newsletters add (lines of
+/// zero-width joiners and spaces), and with blank runs folded to one line.
+fn readable(text: &str) -> String {
+    let invisible = |c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '\u{200b}'..='\u{200f}' | '\u{2060}' | '\u{feff}' | '\u{034f}' | '\u{00ad}'
+            )
+    };
+    let mut out = String::new();
+    let mut blank = false;
+    for line in text.trim().lines() {
+        if line.chars().all(invisible) {
+            blank = !out.is_empty();
+            continue;
+        }
+        if blank {
+            out.push('\n');
+            blank = false;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line.trim_end());
+    }
+    out
 }
 
 /// A new message for [`Mail::send`].
@@ -217,6 +246,12 @@ mod tests {
         let body = MessageBody::from_reply(&value);
         assert_eq!(body.text, "Hello");
         assert_eq!(body.attachments, ["a.pdf"]);
+    }
+
+    #[test]
+    fn drops_preheader_padding_and_folds_blank_lines() {
+        let text = "Title\n\n\u{200c} \u{200c} \u{200c}\n\u{200c} \u{200c}\n\n\nBody  \nEnd\n";
+        assert_eq!(readable(text), "Title\n\nBody\nEnd");
     }
 
     #[test]
