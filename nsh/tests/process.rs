@@ -126,3 +126,38 @@ fn a_backend_that_exits_fails_its_pending_calls() {
         );
     });
 }
+
+/// The real backend, when `OMAMAIL_BIN` names a build of this checkout:
+/// the handshake is accepted and an empty profile lists no accounts.
+/// Skipped otherwise. Run with
+/// `OMAMAIL_BIN=../target/debug/omamail cargo test --test process`.
+#[test]
+fn the_real_backend_accepts_the_handshake() {
+    let Some(binary) = std::env::var_os("OMAMAIL_BIN") else {
+        eprintln!("OMAMAIL_BIN is not set: skipped");
+        return;
+    };
+    let home = std::env::temp_dir().join(format!("omamail-nsh-real-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    // An empty profile: the test never reads the user's accounts.
+    // SAFETY: set before the child starts, and no other test reads these.
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", home.join("config"));
+        std::env::set_var("XDG_DATA_HOME", home.join("data"));
+        std::env::set_var("XDG_CACHE_HOME", home.join("cache"));
+        std::env::set_var("XDG_STATE_HOME", home.join("state"));
+    }
+    let backend = ProcessBackend::spawn(std::path::Path::new(&binary)).expect("the backend starts");
+    block_on(async {
+        let info = handshake(&backend, &Pins::compiled())
+            .await
+            .expect("the handshake is accepted");
+        assert!(info.methods.iter().any(|m| m == "mail.list"));
+        let accounts = backend
+            .call("accounts.list", json!({}))
+            .await
+            .expect("accounts are listed");
+        assert_eq!(accounts["accounts"], json!([]));
+    });
+    backend.shutdown();
+}
