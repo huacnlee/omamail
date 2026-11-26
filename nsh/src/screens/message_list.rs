@@ -23,9 +23,7 @@ fn row(store: MailStore, at: Position) -> impl IntoElement {
             tokens::foreground()
         }
     };
-    let line = |content: Box<dyn Fn() -> SharedString>| {
-        text(move || content()).number_of_lines(1).flex_1()
-    };
+    let line = |content: Box<dyn Fn() -> SharedString>| text(content).number_of_lines(1).flex_1();
     om::list_item()
         .selected(move || id().is_some() && store.selected() == id())
         .on_press(move || {
@@ -47,9 +45,10 @@ fn row(store: MailStore, at: Position) -> impl IntoElement {
                         .gap(px(tokens::SPACE_2))
                         .child(
                             // The unread marker: the accent, square as Omarchy draws it.
-                            view().w(px(6.0)).h(px(6.0)).child(when(unread, || {
-                                view().size_full().bg(move || tokens::accent())
-                            })),
+                            view()
+                                .w(px(6.0))
+                                .h(px(6.0))
+                                .child(when(unread, || view().size_full().bg(tokens::accent))),
                         )
                         .child(
                             line(Box::new(field(|m| m.sender.clone())))
@@ -61,7 +60,7 @@ fn row(store: MailStore, at: Position) -> impl IntoElement {
                             text(field(|m| m.time.clone()))
                                 .font_family(tokens::font_mono())
                                 .text_size(px(tokens::TEXT_SM))
-                                .text_color(move || tokens::secondary()),
+                                .text_color(tokens::secondary),
                         ),
                 )
                 .child(
@@ -74,7 +73,7 @@ fn row(store: MailStore, at: Position) -> impl IntoElement {
                     line(Box::new(field(|m| m.snippet.clone())))
                         .pl(px(6.0 + tokens::SPACE_2))
                         .text_size(px(tokens::TEXT_SM))
-                        .text_color(move || tokens::secondary()),
+                        .text_color(tokens::secondary),
                 ),
         )
 }
@@ -106,7 +105,7 @@ pub fn message_list(store: MailStore) -> impl IntoElement {
         .flex_1();
     view()
         .flex_1()
-        .bg(move || tokens::background())
+        .bg(tokens::background)
         .child(
             view()
                 .flex_row()
@@ -116,19 +115,19 @@ pub fn message_list(store: MailStore) -> impl IntoElement {
                 .pr(px(tokens::SPACE_1))
                 .gap(px(tokens::SPACE_2))
                 .border_b_1()
-                .border_color(move || tokens::border())
+                .border_color(tokens::border)
                 .child(
                     text(move || store.mailbox().label())
                         .flex_1()
                         .text_size(px(tokens::TEXT_MD))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(move || tokens::bright()),
+                        .text_color(tokens::bright),
                 )
                 .child(
                     text(move || SharedString::from(store.message_count().to_string()))
                         .font_family(tokens::font_mono())
                         .text_size(px(tokens::TEXT_SM))
-                        .text_color(move || tokens::secondary()),
+                        .text_color(tokens::secondary),
                 )
                 .child(
                     om::icon_button(IconName::Download, "Refresh")

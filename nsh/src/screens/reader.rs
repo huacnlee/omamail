@@ -35,7 +35,7 @@ pub fn reader(store: MailStore) -> impl IntoElement {
     };
     view()
         .flex_1()
-        .bg(move || tokens::background())
+        .bg(tokens::background)
         .child(when(
             move || !ready(),
             move || {
@@ -59,16 +59,16 @@ pub fn reader(store: MailStore) -> impl IntoElement {
                         text(subject)
                             .text_size(px(tokens::TEXT_XL))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(move || tokens::bright())
+                            .text_color(tokens::bright)
                             .selectable(true),
                     )
                     .child(
                         text(sender)
                             .font_family(tokens::font_mono())
                             .text_size(px(tokens::TEXT_SM))
-                            .text_color(move || tokens::secondary()),
+                            .text_color(tokens::secondary),
                     )
-                    .child(view().h(px(1.0)).bg(move || tokens::divider()))
+                    .child(view().h(px(1.0)).bg(tokens::divider))
                     .child(
                         text_view()
                             .html(html)
@@ -83,7 +83,7 @@ pub fn reader(store: MailStore) -> impl IntoElement {
                             .gap(px(tokens::SPACE_3))
                             .text_size(px(tokens::TEXT_LG))
                             .line_height(px(22.0))
-                            .text_color(move || tokens::foreground()),
+                            .text_color(tokens::foreground),
                     ),
             )
         }))

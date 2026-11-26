@@ -65,8 +65,8 @@ pub fn mail_window(backend: Rc<dyn Backend>) -> impl IntoElement {
     let connected = move || store.connection() == Connection::Ready;
     view()
         .flex_1()
-        .bg(move || tokens::background())
-        .text_color(move || tokens::foreground())
+        .bg(tokens::background)
+        .text_color(tokens::foreground)
         .child(om::title_bar().title("Omamail"))
         .child(when(
             move || !connected(),
@@ -113,7 +113,7 @@ fn failed(message: SharedString) -> impl IntoElement {
         .flex_1()
         .items_center()
         .justify_center()
-        .bg(move || tokens::background())
+        .bg(tokens::background)
         .child(om::empty_state(SharedString::from(format!(
             "Cannot start the mail backend ({message})"
         ))))

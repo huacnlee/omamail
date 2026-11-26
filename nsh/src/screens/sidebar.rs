@@ -45,7 +45,7 @@ pub fn sidebar(store: MailStore) -> impl IntoElement {
                     text(move || SharedString::from(store.inbox_unread().to_string()))
                         .font_family(tokens::font_mono())
                         .text_size(px(tokens::TEXT_SM))
-                        .text_color(move || tokens::secondary())
+                        .text_color(tokens::secondary)
                 },
             ));
         }
