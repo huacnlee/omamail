@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "packages": [
+    {
+      "name": "nsh-omarchy",
+      "version": "0.2.0",
+      "source": "crates.io",
+      "checksum": "sha256-37d1743c20d5a3bed636655848610482be9928d47838de4ea511dfd938e3c799",
+      "dir": "nsh-omarchy/0.2.0",
+      "module": "nsh-omarchy"
+    },
+    {
+      "name": "omamail-native",
+      "version": "0.1.0",
+      "path": "ext/omamail-native",
+      "module": "omamail-native"
+    }
+  ]
+}

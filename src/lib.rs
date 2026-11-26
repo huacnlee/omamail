@@ -1,4 +1,5 @@
 pub mod account;
+pub mod api;
 // Detached assistant workers re-launch the current executable and rely on
 // Linux pidfds or a Darwin control socket. iOS and Android apps cannot spawn
 // workers, so there the build reports `capabilities.agent = false` and every
