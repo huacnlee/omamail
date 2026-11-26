@@ -317,7 +317,14 @@ fn send(
     if let Ok(mut pending) = shared.pending.lock() {
         pending.insert(id.clone(), (deadline, reply));
     }
-    if let Err(error) = shared.write(&line)
+    // The reader may have failed everything pending just before this
+    // request joined; a closed backend answers it here instead.
+    let refused = if shared.closed.load(Ordering::Acquire) {
+        Err(RpcError::new(-32099, "backend_exited"))
+    } else {
+        shared.write(&line)
+    };
+    if let Err(error) = refused
         && let Some((_, reply)) = shared.pending.lock().ok().and_then(|mut p| p.remove(&id))
     {
         let _ = reply.send(Err(error));
