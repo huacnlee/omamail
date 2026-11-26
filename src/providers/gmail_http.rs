@@ -60,7 +60,7 @@ fn client() -> Result<&'static reqwest::Client, &'static str> {
 fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .https_only(true)
-        .hickory_dns(true)
+        .hickory_dns(crate::platform::dns::HICKORY)
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .connect_timeout(Duration::from_secs(10))

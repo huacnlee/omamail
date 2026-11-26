@@ -18,7 +18,7 @@ fn client() -> Result<&'static Client, &'static str> {
         .get_or_init(|| {
             Client::builder()
                 .https_only(true)
-                .hickory_dns(true)
+                .hickory_dns(crate::platform::dns::HICKORY)
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(Duration::from_secs(10))

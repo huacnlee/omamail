@@ -99,7 +99,7 @@ pub(super) enum Mode {
 /// never sent anywhere a server points. Tests add nothing and drop only the HTTPS requirement.
 pub(super) fn builder() -> reqwest::ClientBuilder {
     Client::builder()
-        .hickory_dns(true)
+        .hickory_dns(crate::platform::dns::HICKORY)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))

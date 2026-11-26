@@ -17,7 +17,7 @@ static CLIENT: OnceLock<Result<Client, &'static str>> = OnceLock::new();
 fn client_builder() -> reqwest::ClientBuilder {
     Client::builder()
         .https_only(true)
-        .hickory_dns(true)
+        .hickory_dns(crate::platform::dns::HICKORY)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
