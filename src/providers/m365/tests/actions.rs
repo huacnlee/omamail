@@ -652,14 +652,15 @@ fn sized(size: usize) -> String {
 async fn a_large_message_is_given_longer_to_upload_and_a_small_one_is_not() {
     isolated!();
     let world = World::new().await;
-    world.deadlines(300, 5000);
-    // The token is fetched first, so what follows times only the upload.
+    // A first send under the default clocks fetches the token and opens the connection, so what
+    // follows times only the upload. On a busy machine that setup alone can outlast 300 ms.
     assert!(
         world
             .call("m365.send", json!({"raw": sized(10)}))
             .await
             .is_ok()
     );
+    world.deadlines(300, 5000);
     world.fake.hook(|req| {
         req.path
             .ends_with("sendMail")
