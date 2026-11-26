@@ -68,3 +68,39 @@ fn oversized_and_truncated_input_is_rejected() {
     assert_eq!(run(b"{}")[0]["error"]["code"], -32700);
     assert!(run(b"").is_empty());
 }
+
+/// iOS and Android hosts call the backend in-process. The same frames must get
+/// the same replies there as through `omamail serve`.
+#[test]
+fn in_process_requests_match_serve() {
+    let frames = [
+        r#"{"jsonrpc":"2.0","id":1,"method":"system.info"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":"providers","method":"providers.list","params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":3,"method":"unknown"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":4,"method":"system.info","params":{"secret":"x"}}"#.to_owned(),
+        r#"{"jsonrpc":"1.0","id":5,"method":"system.info"}"#.to_owned(),
+        "not json".to_owned(),
+        json!([
+            {"jsonrpc":"2.0","method":"system.info"},
+            {"jsonrpc":"2.0","id":"batch","method":"system.info"},
+            3
+        ])
+        .to_string(),
+        r#"{"jsonrpc":"2.0","method":"system.info"}"#.to_owned(),
+    ];
+    let runtime = omamail::backend::runtime().unwrap();
+    let session = omamail::backend::Session::default();
+    for frame in frames {
+        let served = run(format!("{frame}\n").as_bytes());
+        let direct = runtime.block_on(session.request(frame.as_bytes()));
+        assert_eq!(served, direct.into_iter().collect::<Vec<_>>(), "{frame}");
+    }
+    let info = runtime
+        .block_on(session.dispatch("system.info", &json!({})))
+        .unwrap();
+    assert_eq!(
+        run(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"system.info\"}\n")[0]["result"],
+        info
+    );
+    runtime.block_on(session.shutdown()).unwrap();
+}

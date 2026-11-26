@@ -1,6 +1,6 @@
 //! Optional GUI binding to the same executable and signed-in identity it displays.
 use serde_json::Value;
-#[cfg(unix)]
+#[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
 use std::os::unix::fs::PermissionsExt;
 use std::{path::PathBuf, time::Duration};
 
@@ -58,7 +58,7 @@ pub async fn checked_params(params: &Value) -> Result<Value, &'static str> {
     Ok(Value::Object(fields))
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
 fn resolve_program() -> Option<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let fallback = std::env::var_os("HOME")
@@ -87,7 +87,9 @@ pub fn program() -> Result<String, &'static str> {
 
 // The official HEY client is not a Windows provider dependency. Never fall back
 // to a private API or an unrelated executable with the same name.
-#[cfg(not(unix))]
+// Mobile apps cannot run a command-line client either; HEY reports
+// hey_unavailable there.
+#[cfg(any(not(unix), target_os = "ios", target_os = "android"))]
 fn resolve_program() -> Option<PathBuf> {
     None
 }

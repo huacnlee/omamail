@@ -69,6 +69,14 @@ Standalone credentials use the native store through typed backend RPC: Keychain 
 
 For source development, `make app-build` builds the backend with `--no-default-features --features standalone` and then builds the Qt host. `make app-run` performs that build and launches the host from source resources. These targets require Rust, CMake 3.21 or newer, and Qt 6.5 or newer; the Linux host also needs Qt DBus.
 
+## In-process backend on iOS and Android
+
+iOS apps cannot start child processes, so a mobile host cannot run `omamail serve`. It links the `omamail` library instead and calls the same code in its own process. `omamail::backend::runtime()` builds the runtime `serve` uses; inside it the host creates one `Session`, subscribes with `Session::subscribe()` before its first request, sends JSON-RPC frames to `Session::request()` (or calls `Session::dispatch()` with a method and parameters), and calls `Session::shutdown()` once when it exits. `serve` is built on these same calls, so replies, notifications (`mail.updated`, outbox changes, `gmail.settled`) and the shutdown drain are identical; `tests/protocol.rs` checks the replies match frame for frame.
+
+Some desktop features do not exist on phones, and they say so instead of failing quietly. The AI assistant re-launches the backend executable as a worker, so mobile builds report `capabilities.agent = false` and answer `agent.*` with `unknown_method`, as a build without the `agent` feature does. The outbox has no cross-process socket there, because the app is the only process that can own it; a lease conflict answers `outbox_ipc_unsupported`. HEY needs its command-line client and answers `hey_unavailable`. Credentials use the iOS keychain through the same Security framework code as macOS. Android has no secure store yet (it needs the Android Keystore), so every credential call fails as unavailable and nothing is stored. On Android the host sets `HOME` to the app's files directory before the first call; data directories then follow the Linux layout. On iOS they follow the macOS layout inside the app container, with downloads in `Documents`.
+
+CI runs `cargo check --lib` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and `aarch64-linux-android`.
+
 ## Stable API and old plugins
 
 `backend-version` belongs to the installed plugin revision. A plugin that has not

@@ -99,6 +99,13 @@ impl LocalEndpoint {
         ))
         .map_err(|_| "outbox_owner_unavailable")
     }
+    /// iOS and Android run the backend inside the app process, which is the
+    /// only process that can hold the outbox lease, so there is no peer to
+    /// serve or reach. The outbox does not listen there; reaching this is a bug.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    fn with_path<T>(&self, _: impl FnOnce(&str) -> std::io::Result<T>) -> Result<T> {
+        Err("outbox_ipc_unsupported")
+    }
     #[cfg(target_os = "macos")]
     fn with_path<T>(&self, operation: impl FnOnce(&str) -> std::io::Result<T>) -> Result<T> {
         // Darwin provides per-thread cwd precisely for descriptor-anchored

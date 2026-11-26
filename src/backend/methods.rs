@@ -208,6 +208,12 @@ pub const ALL: &[&str] = &[
 pub fn available() -> Vec<&'static str> {
     ALL.iter()
         .copied()
-        .filter(|method| !method.starts_with("agent.") || cfg!(all(feature = "agent", unix)))
+        .filter(|method| {
+            !method.starts_with("agent.")
+                || cfg!(all(
+                    feature = "agent",
+                    any(target_os = "macos", target_os = "linux")
+                ))
+        })
         .collect()
 }
