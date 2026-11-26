@@ -25,6 +25,7 @@ fn row(store: MailStore, at: Position) -> impl IntoElement {
     };
     let line = |content: Box<dyn Fn() -> SharedString>| text(content).number_of_lines(1).flex_1();
     om::list_item()
+        .h(px(MESSAGE_ROW))
         .selected(move || id().is_some() && store.selected() == id())
         .on_press(move || {
             if let Some(id) = id() {
@@ -34,8 +35,8 @@ fn row(store: MailStore, at: Position) -> impl IntoElement {
         .accessibility_label(field(|m| m.subject.clone()))
         .child(
             view()
-                .h(px(MESSAGE_ROW))
-                .w_full()
+                .flex_1()
+                .min_w(px(0.0))
                 .justify_center()
                 .gap(px(2.0))
                 .child(
