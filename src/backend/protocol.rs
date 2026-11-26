@@ -12,7 +12,7 @@ const RESPONSE_CHUNK: usize = 64 * 1024;
 static NEXT_TRANSFER: AtomicU64 = AtomicU64::new(1);
 
 const MAX_IN_FLIGHT: usize = 32;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(25);
 
 struct Frame {
     bytes: Vec<u8>,
@@ -81,9 +81,7 @@ async fn process_frames(
 ) -> io::Result<()> {
     // Subscribe before accepting frames: the initial watch check may finish
     // before its RPC response, but its notification must still reach the writer.
-    let mut notifications = session.mail.subscribe();
-    let mut outbox_notifications = session.outbox.subscribe();
-    let mut gmail_notifications = session.gmail.subscribe();
+    let mut events = session.subscribe();
     let scheduler = schedule(receiver, responses.clone(), |frame| async move {
         super::rpc::handle(&frame.bytes, session, frame.deadline)
             .await
@@ -93,34 +91,15 @@ async fn process_frames(
     let result = loop {
         tokio::select! {
             result = &mut scheduler => break result,
-            event = outbox_notifications.recv() => {
-                if let Ok(event) = event
-                    && responses.send(event).await.is_err() {
-                    break Err(io::Error::other("output closed"));
-                }
-            }
-            event = gmail_notifications.recv() => {
-                if let Ok(event) = event
-                    && responses.send(event).await.is_err() {
-                    break Err(io::Error::other("output closed"));
-                }
-            }
-            event = notifications.recv() => {
-                if let Ok(event) = event
-                    && session.mail.is_current(&event)
-                    && responses.send(event.value).await.is_err() {
+            Some(event) = events.recv() => {
+                if responses.send(event).await.is_err() {
                     break Err(io::Error::other("output closed"));
                 }
             }
         }
     };
-    // No watch can write after the accepted requests drain or after quit.
-    session.mail.shutdown().await;
-    session.gmail.shutdown();
-    let outbox_result = session.outbox.shutdown().await;
-    let cache_result = session.queries.shutdown().await;
-    outbox_result.map_err(io::Error::other)?;
-    cache_result.map_err(io::Error::other)?;
+    drop(events);
+    session.shutdown().await?;
     result
 }
 
@@ -449,6 +428,44 @@ mod scheduling_tests {
         };
         let (result, ()) = tokio::join!(dispatcher, client);
         result.unwrap();
+        assert_eq!(
+            session
+                .mail
+                .call("mail.snapshot", &serde_json::json!({"accountId":"one"}))
+                .await,
+            Err("mail_watch_unknown")
+        );
+    }
+
+    #[tokio::test]
+    async fn in_process_events_deliver_watch_notifications_and_shutdown_stops_watches() {
+        let gate = Arc::new(Semaphore::new(0));
+        let mail = crate::sync::Sync::for_test(Arc::new({
+            let gate = gate.clone();
+            move |_, _| {
+                let gate = gate.clone();
+                Box::pin(async move {
+                    gate.acquire().await.unwrap().forget();
+                    Ok(serde_json::json!({"estimate":3,"messages":[]}))
+                })
+            }
+        }));
+        let session = super::super::Session {
+            mail,
+            ..Default::default()
+        };
+        session.mail.watch_for_test("one").await;
+        let mut events = session.subscribe();
+        gate.add_permits(1);
+        let notification = tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(notification["jsonrpc"], "2.0");
+        assert_eq!(notification["method"], "mail.updated");
+        assert_eq!(notification["params"]["estimate"], 3);
+        drop(events);
+        session.shutdown().await.unwrap();
         assert_eq!(
             session
                 .mail

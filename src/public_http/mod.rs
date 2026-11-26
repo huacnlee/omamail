@@ -1,7 +1,6 @@
 //! Sender-selected HTTP destinations: validate every DNS answer, then hand the
 //! checked numeric sockets directly to the connector. Never follow redirects.
 use base64::{Engine, engine::general_purpose::STANDARD};
-use hickory_resolver::{TokioResolver, config::LookupIpStrategy};
 use reqwest::{
     Client, Method, Url,
     dns::{Addrs, Name, Resolve, Resolving},
@@ -24,11 +23,9 @@ struct PublicResolver;
 impl Resolve for PublicResolver {
     fn resolve(&self, name: Name) -> Resolving {
         Box::pin(async move {
-            let mut builder = TokioResolver::builder_tokio()?;
-            builder.options_mut().ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
-            let resolver = builder.build();
-            let answer = resolver.lookup_ip(name.as_str()).await?;
-            let ips: Vec<_> = answer.iter().collect();
+            // Every answer is checked before reqwest may connect, whichever
+            // resolver the platform uses.
+            let ips = crate::platform::dns::lookup_ips(name.as_str()).await?;
             let addresses = checked_addresses(ips).map_err(std::io::Error::other)?;
             Ok(Box::new(addresses.into_iter()) as Addrs)
         })

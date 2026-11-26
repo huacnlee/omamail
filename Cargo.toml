@@ -43,8 +43,15 @@ flate2 = "1"
 jpeg-encoder = "0.7"
 tokio = { version = "1", features = ["test-util"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 security-framework = { version = "3", features = ["OSX_10_15"] }
+
+# iOS keychain items need an explicit accessibility class, which the
+# security-framework password helpers cannot set. Both crates are already in
+# the tree through security-framework.
+[target.'cfg(target_os = "ios")'.dependencies]
+core-foundation = "0.10"
+security-framework-sys = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 secret-service = { version = "5", features = ["rt-tokio-crypto-rust"] }

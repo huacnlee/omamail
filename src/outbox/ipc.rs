@@ -12,6 +12,11 @@ const MAX_REPLY: usize = 128 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) fn listen(inner: &Arc<Inner>) -> Result<(), &'static str> {
+    // A mobile app is a single process: no CLI or second backend can submit
+    // to its outbox, so there is nothing to listen for.
+    if cfg!(any(target_os = "ios", target_os = "android")) {
+        return Ok(());
+    }
     // The caller holds the exclusive lease and the state mutex. No successor
     // can replace this socket until every in-flight durable write releases it.
     let root = inner.root.clone().map(Ok).unwrap_or_else(storage::home)?;
@@ -74,6 +79,10 @@ pub(super) async fn request(
     method: &str,
     params: &Value,
 ) -> Result<Value, &'static str> {
+    // See listen: a mobile app never has another lease owner to reach.
+    if cfg!(any(target_os = "ios", target_os = "android")) {
+        return Err("outbox_ipc_unsupported");
+    }
     tokio::time::timeout(TIMEOUT, async {
         let endpoint = LocalEndpoint::outbox(root)?;
         let mut stream = endpoint.connect().await?;

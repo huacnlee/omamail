@@ -99,7 +99,7 @@ impl Session {
 fn client_builder() -> reqwest::ClientBuilder {
     Client::builder()
         .no_proxy()
-        .hickory_dns(true)
+        .hickory_dns(crate::platform::dns::HICKORY)
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
         .pool_idle_timeout(Duration::from_secs(90))

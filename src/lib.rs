@@ -1,6 +1,9 @@
 pub mod account;
-// Detached assistant workers currently rely on Linux pidfds and private storage.
-#[cfg(all(feature = "agent", unix))]
+// Detached assistant workers re-launch the current executable and rely on
+// Linux pidfds or a Darwin control socket. iOS and Android apps cannot spawn
+// workers, so there the build reports `capabilities.agent = false` and every
+// `agent.*` method answers `unknown_method`, like a build without the feature.
+#[cfg(all(feature = "agent", any(target_os = "macos", target_os = "linux")))]
 pub mod agent;
 pub mod attachment;
 pub mod auth;

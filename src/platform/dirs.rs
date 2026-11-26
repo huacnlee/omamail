@@ -68,8 +68,11 @@ impl AppDirs {
         #[cfg(all(windows, feature = "integration-test-credentials"))]
         if let Some(root) = integration_root()? {
             return Self::from_roots(
-                root.join("config"), root.join("cache"), root.join("state"),
-                root.join("runtime"), root.join("downloads"),
+                root.join("config"),
+                root.join("cache"),
+                root.join("state"),
+                root.join("runtime"),
+                root.join("downloads"),
             );
         }
         Self::discover_with(|name| std::env::var_os(name), &std::env::temp_dir())
@@ -127,7 +130,16 @@ impl AppDirs {
                     .map(PathBuf::from)
                     .ok_or("home_missing")?,
             )?;
-            #[cfg(target_os = "macos")]
+            // A phone app's HOME is its OS-assigned container, reached
+            // through system symlinks (Android /data/user/0 -> /data/data,
+            // iOS /var -> /private/var). Storage walks refuse symlinks and
+            // start at the canonical container (private_fs::sandbox_root),
+            // so every root below must use the canonical spelling.
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            let home = home.canonicalize().map_err(|_| "home_invalid")?;
+            // iOS apps get the same Library layout inside their sandbox
+            // container, which is HOME there.
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             let (config, cache, state, runtime, downloads) = {
                 let support = home.join("Library/Application Support");
                 // Darwin's system temporary directory commonly uses /var, a
@@ -139,10 +151,18 @@ impl AppDirs {
                     home.join("Library/Caches"),
                     support,
                     runtime,
+                    // The iOS container has no Downloads folder. Documents is
+                    // the user-visible one (Files app, when the app opts in).
+                    #[cfg(target_os = "macos")]
                     home.join("Downloads"),
+                    #[cfg(target_os = "ios")]
+                    home.join("Documents"),
                 )
             };
-            #[cfg(not(target_os = "macos"))]
+            // Android follows the Linux layout. Its app process has no HOME by
+            // default, so an embedding host sets HOME to the app's files
+            // directory before the first backend call.
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
             let (config, cache, state, runtime, downloads) = {
                 let root = |key, fallback| {
                     env(key)
@@ -156,7 +176,7 @@ impl AppDirs {
                     config,
                     root("XDG_CACHE_HOME", home.join(".cache")),
                     root("XDG_STATE_HOME", home.join(".local/state")),
-                    root("XDG_RUNTIME_DIR", temporary.to_owned()),
+                    root("XDG_RUNTIME_DIR", runtime_fallback(&home, temporary)),
                     downloads,
                 )
             };
@@ -194,6 +214,21 @@ fn integration_root() -> Result<Option<PathBuf>, &'static str> {
         .transpose()
 }
 
+/// Android's default temporary directory (`/data/local/tmp`) belongs to the
+/// shell user, not to apps. Keep runtime files inside the app container, as
+/// iOS does with its `tmp/`.
+#[cfg(target_os = "android")]
+fn runtime_fallback(home: &Path, _: &Path) -> PathBuf {
+    home.join("tmp")
+}
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+fn runtime_fallback(_: &Path, temporary: &Path) -> PathBuf {
+    temporary.to_owned()
+}
+
 fn absolute(path: PathBuf) -> Result<PathBuf, &'static str> {
     if !path.is_absolute()
         || path
@@ -205,7 +240,7 @@ fn absolute(path: PathBuf) -> Result<PathBuf, &'static str> {
     }
     Ok(path)
 }
-#[cfg(any(target_os = "linux", all(test, unix)))]
+#[cfg(any(target_os = "linux", target_os = "android", all(test, unix)))]
 fn linux_downloads(home: &Path, config: &Path) -> PathBuf {
     use std::{io::Read, os::unix::fs::OpenOptionsExt};
     const LIMIT: u64 = 64 * 1024;
@@ -246,7 +281,7 @@ fn linux_downloads(home: &Path, config: &Path) -> PathBuf {
     home.join("Downloads")
 }
 
-#[cfg(any(target_os = "linux", all(test, unix)))]
+#[cfg(any(target_os = "linux", target_os = "android", all(test, unix)))]
 fn download_root(env: &impl Fn(&str) -> Option<OsString>, home: &Path, config: &Path) -> PathBuf {
     env("XDG_DOWNLOAD_DIR")
         .filter(|p| !p.is_empty())
