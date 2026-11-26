@@ -67,7 +67,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/compose/RecoveryContr
 	ui/components/SearchBar.qml \
 	ui/components/AppMenu.qml \
 	ui/components/AccountSwitcher.qml \
-	ui/components/AgentPrompt.qml ui/agent/PendingMessages.qml \
+	ui/components/AgentPrompt.qml ui/components/AssistantDock.qml ui/agent/PendingMessages.qml \
 	ui/components/LabelMenu.qml \
 	ui/components/LabelMovePicker.qml \
 	ui/components/NamePrompt.qml \

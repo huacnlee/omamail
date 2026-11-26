@@ -145,8 +145,8 @@ Item {
       ? service.copyText(String(text || "")) : false
   }
 
-  readonly property var agentPrompt: agentPromptLoader.item || inactiveAgentPrompt
-  readonly property var composeAgent: composeAgentLoader.item || inactiveComposeAgent
+  readonly property var agentPrompt: assistantDock.agentPrompt || inactiveAgentPrompt
+  readonly property var composeAgent: assistantDock.composeAgent || inactiveComposeAgent
   QtObject {
     id: inactiveAgentPrompt
     property bool opened: false
@@ -2693,93 +2693,15 @@ Item {
         }
       }
 
-      Item {
+      AssistantDock {
         id: assistantDock
-        objectName: "assistant-dock"
         anchors.right: parent.right
         anchors.top: root.composing ? composeAiSlot.bottom : header.bottom
         anchors.bottom: statusBar.top
-        width: root.assistantWidth
-        visible: root.assistantOpen
-        MouseArea {
-          objectName: "assistant-splitter"
-          anchors.left: parent.left
-          anchors.top: parent.top
-          anchors.bottom: parent.bottom
-          width: Style.space(5)
-          z: 100
-          cursorShape: Qt.SplitHCursor
-          property real grabbedAt: 0
-          property real grabbedWidth: 0
-          onPressed: function(mouse) {
-            grabbedAt = mapToItem(focusScope, mouse.x, mouse.y).x
-            grabbedWidth = root.assistantWidth
-          }
-          onPositionChanged: function(mouse) {
-            if (!pressed) return
-            var moved = mapToItem(focusScope, mouse.x, mouse.y).x - grabbedAt
-            root.preferredAssistantWidth = Math.max(root.assistantMinWidth,
-              Math.min(root.assistantMaxWidth, grabbedWidth - moved))
-          }
-          onDoubleClicked: root.preferredAssistantWidth = 0
-        }
-        Loader {
-          id: agentPromptLoader
-          active: !!root.service && root.service.hasAgent !== false
-          anchors.fill: parent
-          sourceComponent: Component {
-            AgentPrompt {
-              proposalComposer: compose
-              onApplyProposalRequested: function(envelope, parentId) {
-                compose.beginProposal(envelope, parentId)
-                // Keep the conversation alongside the draft, with typing in the editor.
-                Qt.callLater(function() {
-                  focusScope.applyContextFocus()
-                  root.composeAgent.open(false)
-                })
-              }
-              onOpenedChanged: if (opened) root.composeAgent.close()
-              objectName: "agent-prompt"
-              service: root.service
-              textColor: root.foreground
-              accentColor: root.accent
-              urgentColor: root.urgent
-              dimColor: root.dim
-              popupBackgroundColor: root.popupBackground
-              popupBorderColor: root.popupBorder
-              panelFontFamily: root.fontFamily
-              onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
-              onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
-              onEditingChanged: function(editing) { root.assistantEditing = editing }
-              onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
-            }
-          }
-        }
-
-        Loader {
-          id: composeAgentLoader
-          active: !!root.service && root.service.hasAgent !== false
-          anchors.fill: parent
-          sourceComponent: Component {
-            ComposeAgent {
-              onOpenedChanged: if (opened) root.agentPrompt.close()
-              objectName: "compose-agent"
-              service: root.service
-              composer: compose
-              textColor: root.foreground
-              accentColor: root.accent
-              urgentColor: root.urgent
-              dimColor: root.dim
-              popupBackgroundColor: root.popupBackground
-              popupBorderColor: root.popupBorder
-              panelFontFamily: root.fontFamily
-              onFocusRequested: { root.assistantEditing = true; Qt.callLater(focusScope.applyContextFocus) }
-              onKeyPressed: function(event) { keyRouter.routeKeyEvent(event) }
-              onEditingChanged: function(editing) { root.assistantEditing = editing }
-              onDismissed: { root.assistantEditing = false; Qt.callLater(focusScope.applyContextFocus) }
-            }
-          }
-        }
+        app: root
+        composer: compose
+        router: keyRouter
+        focusTarget: focusScope
       }
 
       LabelMenu {
