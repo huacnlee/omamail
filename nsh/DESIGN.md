@@ -22,8 +22,10 @@ an app-drawn title bar. It does not have a look of its own.
   (`om::*`). Screens never build a button, list row, sidebar row, menu or input
   themselves. If a screen needs something nsh-omarchy lacks, add it there first.
 - **Colors and sizes come from `nsh_omarchy::tokens`**, read in closures so they
-  follow a theme change. The colors are the system's Omarchy theme, switched
-  live; without Omarchy, Tokyo Night (dark) or Flexoki Light.
+  follow a theme change. The colors are NsVim's default palettes
+  (`src/theme.rs`): "NsVim dark" (bg `#0E1016`, chrome `#0A0C11`, picked row
+  `#151925`, accent `#6C9EFF`) or "NsVim light" (bg `#FAFAF7`, chrome `#F0F0EB`,
+  accent `#2F5FD0`), picked from the system appearance at launch.
 - `src/ui/mod.rs` only holds Omamail's layout sizes (row height, column widths).
 
 ## Layout

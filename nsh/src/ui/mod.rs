@@ -1,6 +1,6 @@
 //! Omamail's few layout constants. Every component, color and size comes
 //! from `nsh-omarchy` (`om::*`, `tokens::*`), so the app looks like the rest
-//! of Omarchy and follows the system theme as it changes.
+//! of Omarchy and NsVim; the colors are NsVim's palettes (`crate::theme`).
 
 /// A message row: sender line, subject line, snippet line.
 pub const MESSAGE_ROW: f32 = 60.0;

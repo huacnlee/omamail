@@ -1,12 +1,13 @@
 //! Omamail's NSH client: the mail UI over the `omamail serve` backend.
 //!
 //! `backend` speaks the backend's protocol, `store` holds the mail state,
-//! `ui` holds layout constants (components come from `nsh-omarchy`), and `screens` the three columns.
+//! `theme` holds the NsVim palettes, `ui` layout constants (components come from `nsh-omarchy`), and `screens` the three columns.
 
 pub mod backend;
 pub mod reader_html;
 mod screens;
 pub mod store;
+pub mod theme;
 pub mod ui;
 
 use std::rc::Rc;
@@ -59,7 +60,8 @@ pub fn Mail(props: MailProps) -> impl IntoElement {
 
 /// The title bar and the three columns over `backend`.
 pub fn mail_window(backend: Rc<dyn Backend>) -> impl IntoElement {
-    om::init();
+    // NsVim's default palette for the system appearance at launch.
+    theme::palette(dark()).apply();
     let store = MailStore::new(backend);
     store.start();
     let connected = move || store.connection() == Connection::Ready;
