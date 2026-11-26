@@ -93,10 +93,48 @@ impl ListQuery {
     }
 }
 
+/// The readable parts of one message (`mail.read`): plain text only,
+/// never the HTML.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageBody {
+    pub text: String,
+    pub attachments: Vec<String>,
+}
+
+impl MessageBody {
+    fn from_reply(value: &serde_json::Value) -> Self {
+        let message = &value["message"];
+        let attachments = message["attachments"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|a| a["filename"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            text: message["nativeContent"]["body"]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
+            attachments,
+        }
+    }
+}
+
 impl Mail {
     /// One page of `query.mailbox`, as `omamail list` prints it.
     pub async fn messages(&self, query: &ListQuery) -> Result<MessagePage, Error> {
         self.call("mail.list", query.params()).await
+    }
+
+    /// The plain-text body of message `id` in `account`.
+    pub async fn read(&self, account: &str, id: &str) -> Result<MessageBody, Error> {
+        let value: serde_json::Value = self
+            .call("mail.read", json!({"account": account, "id": id}))
+            .await?;
+        Ok(MessageBody::from_reply(&value))
     }
 }
 
@@ -122,6 +160,16 @@ mod tests {
             query.params(),
             json!({"account":"a@x.org","mailbox":"sent","limit":10,"query":"q","pageToken":"t"})
         );
+    }
+
+    #[test]
+    fn reads_the_plain_text_body() {
+        let value = json!({"message":{
+            "nativeContent":{"body":{"text":"  Hello\n"}},
+            "attachments":[{"filename":"a.pdf"}]}});
+        let body = MessageBody::from_reply(&value);
+        assert_eq!(body.text, "Hello");
+        assert_eq!(body.attachments, ["a.pdf"]);
     }
 
     #[test]

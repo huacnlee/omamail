@@ -1,5 +1,6 @@
-import { Text, View } from "nsh";
+import { View } from "nsh";
 import { IconButton, type IconName, Select, Sidebar, SidebarItem, SidebarSection } from "nsh-omarchy";
+import { Caption, Title } from "./ui/type";
 import { Mail, type Account } from "omamail-native";
 
 /** The icon for each system mailbox. */
@@ -34,7 +35,7 @@ export function MailSidebar(props: {
       onChange={({ value }) => props.onMailbox(value)}
       header={
         <View class="gap-2 px-3 pt-3 pb-1">
-          <Text class="font-semibold text-bright">Omamail</Text>
+          <Title>Omamail</Title>
           <If when={props.accounts.length > 1}>
             <Select
               accessibilityLabel="Account"
@@ -44,7 +45,7 @@ export function MailSidebar(props: {
             />
           </If>
           <If when={props.accounts.length === 1}>
-            <Text class="text-[12px] text-text-secondary">{props.accounts[0]?.email ?? ""}</Text>
+            <Caption class="truncate">{props.accounts[0]?.email ?? ""}</Caption>
           </If>
         </View>
       }

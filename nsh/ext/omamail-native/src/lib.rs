@@ -67,6 +67,15 @@ pub struct MessagePage {
     pub next_page_token: String,
 }
 
+/// The readable parts of one message.
+#[derive(Clone, Debug, JsObject)]
+pub struct Body {
+    /// Plain text; HTML-only messages come back empty.
+    pub text: String,
+    /// Attachment file names.
+    pub attachments: Vec<String>,
+}
+
 /// The mail library: accounts, mailboxes and messages.
 #[module]
 pub struct Mail;
@@ -143,6 +152,15 @@ impl Mail {
                     starred: m.starred,
                 })
                 .collect(),
+        })
+    }
+
+    /// The plain-text body of message `id` in `account`.
+    pub async fn read(account: String, id: String) -> Result<Body, String> {
+        let body = worker::run(move |mail| async move { mail.read(&account, &id).await }).await?;
+        Ok(Body {
+            text: body.text,
+            attachments: body.attachments,
         })
     }
 }

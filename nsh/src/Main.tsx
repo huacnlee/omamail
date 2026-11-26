@@ -2,12 +2,13 @@ import { signal, View } from "nsh";
 import { Look, Mail, type Account, type MessagePage } from "omamail-native";
 import { MailSidebar } from "./MailSidebar";
 import { MessageList } from "./MessageList";
-import { Reader } from "./Reader";
+import { type BodyState, Reader } from "./Reader";
 
 /** What the list pane shows: loading, an error code, or a page. */
 export type ListState = { kind: "loading" } | { kind: "error"; code: string } | { kind: "page"; page: MessagePage };
 
 const PAGE_SIZE = 50;
+const MAILBOXES = Mail.mailboxes();
 
 /** The three panes: mailboxes, the message list and the reader. */
 export function Main() {
@@ -19,7 +20,21 @@ export function Main() {
   const mailbox = signal("inbox");
   const list = signal<ListState>({ kind: "loading" });
   const selected = signal<string | null>(null);
+  const body = signal<BodyState>({ kind: "loading" });
   let serial = 0;
+  let reading = 0;
+
+  const select = (id: string) => {
+    const from = account();
+    if (!from || id === selected()) return;
+    selected.set(id);
+    const ticket = ++reading;
+    body.set({ kind: "loading" });
+    Mail.read(from, id).then(
+      (b) => ticket === reading && body.set({ kind: "body", body: b }),
+      (e) => ticket === reading && body.set({ kind: "error", code: String((e as Error).message ?? e) }),
+    );
+  };
 
   const load = () => {
     const id = account();
@@ -73,8 +88,14 @@ export function Main() {
           Look.apply(dark());
         }}
       />
-      <MessageList state={list()} selected={selected()} onSelect={(id) => selected.set(id)} onRetry={load} />
-      <Reader message={message()} />
+      <MessageList
+        title={MAILBOXES.find((m) => m.id === mailbox())?.title ?? ""}
+        state={list()}
+        selected={selected()}
+        onSelect={select}
+        onRetry={load}
+      />
+      <Reader message={message()} body={body()} />
     </View>
   );
 }
