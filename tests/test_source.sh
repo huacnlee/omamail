@@ -946,6 +946,11 @@ awk '
 #    has to be in the tree or the card falls back to a placeholder. It gets a
 #    ceiling of its own instead of none: a card image that grew to a megabyte
 #    would still be a megabyte every user clones.
+#
+#    nsh/Cargo.lock is named for a different reason: it is the NSH client's
+#    own lockfile (nsh/ is not a workspace member), and on iOS and Android
+#    that client links the whole backend, so it pins both dependency trees.
+#    It is text that compresses well, and --locked builds need it in the tree.
 limit=$((128 * 1024))
 preview_limit=$((384 * 1024))
 oversized=$(cd ..
@@ -955,6 +960,7 @@ oversized=$(cd ..
         (preview.png) ceiling=$preview_limit ;;
         (app/assets/fonts/SymbolsNerdFontMono-Regular.ttf) ceiling=2610012 ;;
         (app/resources/macos/omamail.icns) ceiling=111809 ;;
+        (nsh/Cargo.lock) ceiling=$((192 * 1024)) ;;
         (*) ceiling=$limit ;;
       esac
       size=$(wc -c < "$file")
