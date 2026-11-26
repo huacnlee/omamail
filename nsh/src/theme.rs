@@ -47,7 +47,11 @@ blue = "#2F5FD0"
 
 /// The palette for a dark or light appearance.
 pub fn palette(dark: bool) -> Theme {
-    let (text, name) = if dark { (DARK, "NsVim dark") } else { (LIGHT, "NsVim light") };
+    let (text, name) = if dark {
+        (DARK, "NsVim dark")
+    } else {
+        (LIGHT, "NsVim light")
+    };
     Theme::from_colors_toml(text, name).expect("built-in palette is valid")
 }
 
