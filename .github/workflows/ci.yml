@@ -33,6 +33,36 @@ jobs:
       - run: cargo test --locked --no-default-features --features standalone process
       - run: cargo test --locked --no-default-features --test cli agent_disabled_build_has_no_worker_or_agent_rpc
 
+  nsh-client:
+    name: NSH client (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: nsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: nsh
+      - name: Install the NSH Linux host's libraries
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev pkg-config libgtk-4-dev libwebkitgtk-6.0-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
   standalone-app-macos:
     name: Standalone app (macOS arm64)
     runs-on: macos-15

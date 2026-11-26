@@ -1,0 +1,8 @@
+{
+  "name": "Omamail",
+  "id": "com.huacnlee.omamail",
+  "version": "0.12.0",
+  "build": 1,
+  "rust": ".",
+  "root": "App"
+}
