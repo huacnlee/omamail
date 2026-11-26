@@ -403,8 +403,10 @@ fn process_handle(v: &Value) -> Option<OwnedFd> {
 // executable/script path supplied by job metadata.
 fn legacy_worker_args(args: &[u8], executable: &std::path::Path, id: &str) -> bool {
     use std::os::unix::fs::MetadataExt;
-    let mut candidates =
-        vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../omarchy/scripts/agent-job.py")];
+    let mut candidates = vec![
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../omarchy/scripts/agent-job.py"),
+    ];
     if let Some(bin) = executable.parent()
         && bin.file_name().is_some_and(|name| name == "bin")
         && let Some(runtime) = bin.parent()

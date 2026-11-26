@@ -49,20 +49,34 @@ fn windows_process_command_line_query_reads_live_child_arguments() {
 #[test]
 fn production_directories_ignore_integration_root_hint_without_writes() {
     use omamail::platform::dirs::AppDirs;
-    let root = std::env::temp_dir().canonicalize().unwrap()
-        .join(format!("omamail-forbidden-integration-root-{}", std::process::id()));
+    let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "omamail-forbidden-integration-root-{}",
+        std::process::id()
+    ));
     if std::env::var_os("OMAMAIL_DIRECTORY_PROBE_CHILD").is_some() {
         let hint = std::path::PathBuf::from(std::env::var_os("OMAMAIL_INTEGRATION_HOME").unwrap());
         assert!(!AppDirs::discover().unwrap().config.starts_with(&hint));
         assert!(!AppDirs::home().unwrap().starts_with(&hint));
-        assert!(!hint.exists(), "the production directory lookup must not write to the hint");
+        assert!(
+            !hint.exists(),
+            "the production directory lookup must not write to the hint"
+        );
         return;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "production_directories_ignore_integration_root_hint_without_writes"])
+        .args([
+            "--exact",
+            "production_directories_ignore_integration_root_hint_without_writes",
+        ])
         .env("OMAMAIL_DIRECTORY_PROBE_CHILD", "1")
         .env("OMAMAIL_INTEGRATION_HOME", &root)
-        .output().unwrap();
-    assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(!root.exists());
 }

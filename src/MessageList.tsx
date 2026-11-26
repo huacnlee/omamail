@@ -1,5 +1,5 @@
 import { List, View } from "nsh";
-import { Button, EmptyState, Icon, ListItem } from "nsh-omarchy";
+import { Button, EmptyState, Icon, Input, ListItem } from "nsh-omarchy";
 import { Body, Caption, Title } from "./ui/type";
 import type { ListState } from "./Main";
 
@@ -15,6 +15,11 @@ export function MessageList(props: {
   title: string;
   state: ListState;
   selected: string | null;
+  query: string;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onMore: () => void;
+  onSearch: (query: string) => void;
   onSelect: (id: string) => void;
   onRetry: () => void;
 }) {
@@ -26,6 +31,15 @@ export function MessageList(props: {
         <If when={count() > 0}>
           <Caption>{`${count()} unread`}</Caption>
         </If>
+      </View>
+      <View class="border-b border-border px-3 py-2">
+        <Input
+          accessibilityLabel="Search mail"
+          placeholder="Search mail"
+          size="small"
+          value={props.query}
+          onSubmit={({ value }) => props.onSearch(value.trim())}
+        />
       </View>
       <If when={props.state.kind === "loading"}>
         <EmptyState class="flex-1 border-0" title="Loading" icon="loader-circle" />
@@ -41,7 +55,16 @@ export function MessageList(props: {
         </EmptyState>
       </If>
       <If when={props.state.kind === "page" && props.state.page.messages.length === 0}>
-        <EmptyState class="flex-1 border-0" title="No messages" icon="inbox" />
+        <EmptyState
+          class="flex-1 border-0"
+          title={props.query ? "No matches" : "No messages"}
+          icon={props.query ? "search" : "inbox"}
+          description={props.query ? `Nothing in ${props.title} matches “${props.query}”.` : ""}
+        >
+          <If when={props.query !== ""}>
+            <Button label="Clear search" onPress={() => props.onSearch("")} />
+          </If>
+        </EmptyState>
       </If>
       <If when={props.state.kind === "page" && props.state.page.messages.length > 0}>
         <List
@@ -77,6 +100,11 @@ export function MessageList(props: {
             </View>
           )}
         </List>
+        <If when={props.hasMore}>
+          <View class="border-t border-border px-3 py-2">
+            <Button label="Load more" variant="ghost" loading={props.loadingMore} onPress={props.onMore} />
+          </View>
+        </If>
       </If>
     </View>
   );

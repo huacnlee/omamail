@@ -116,9 +116,10 @@ async fn peer(socket: TcpStream, state: Arc<Mutex<State>>) {
                         Some(set.split(',').map(|s| s.parse().unwrap()).collect())
                     };
                     for (uid, _) in &state.folders[&folder] {
-                        if wanted.as_ref().is_none_or(|uids| {
-                            uids.contains(uid) && !state.missing.contains(uid)
-                        }) {
+                        if wanted
+                            .as_ref()
+                            .is_none_or(|uids| uids.contains(uid) && !state.missing.contains(uid))
+                        {
                             data.push_str(&format!("* 1 FETCH (UID {uid})\r\n"));
                         }
                     }

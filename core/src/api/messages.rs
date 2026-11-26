@@ -123,7 +123,54 @@ impl MessageBody {
     }
 }
 
+/// A new message for [`Mail::send`].
+#[derive(Clone, Debug, Default)]
+pub struct Draft {
+    pub account: Option<String>,
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+    pub subject: String,
+    pub body: String,
+}
+
+/// What [`Mail::act`] changed: the ids it reached and the ones that failed.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ActResult {
+    pub succeeded_ids: Vec<String>,
+    pub failed_ids: Vec<String>,
+}
+
 impl Mail {
+    /// Runs `operation` (`read`, `unread`, `star`, `unstar`, `archive`,
+    /// `trash` or `spam`) on messages `ids` of `account`, as `omamail act`.
+    pub async fn act(
+        &self,
+        account: &str,
+        operation: &str,
+        ids: &[String],
+    ) -> Result<ActResult, Error> {
+        self.call(
+            "mail.act",
+            json!({"account": account, "operation": operation, "ids": ids, "execute": true}),
+        )
+        .await
+    }
+
+    /// Sends `draft` now, as `omamail send --execute`.
+    pub async fn send(&self, draft: &Draft) -> Result<(), Error> {
+        let mut params =
+            json!({"to": draft.to, "subject": draft.subject, "body": draft.body, "execute": true});
+        if !draft.cc.is_empty() {
+            params["cc"] = json!(draft.cc);
+        }
+        if let Some(account) = &draft.account {
+            params["account"] = json!(account);
+        }
+        let _: serde_json::Value = self.call("mail.send", params).await?;
+        Ok(())
+    }
+
     /// One page of `query.mailbox`, as `omamail list` prints it.
     pub async fn messages(&self, query: &ListQuery) -> Result<MessagePage, Error> {
         self.call("mail.list", query.params()).await

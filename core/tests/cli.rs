@@ -303,10 +303,20 @@ fn set_mode(path: &Path, _: u32) {
     } else {
         format!("{user}:F")
     };
-    for arguments in [vec!["/setowner".to_owned(), user.clone()],
-        vec!["/inheritance:r".to_owned(), "/grant:r".to_owned(), grant]] {
-        let output = Command::new("icacls").arg(path).args(arguments).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    for arguments in [
+        vec!["/setowner".to_owned(), user.clone()],
+        vec!["/inheritance:r".to_owned(), "/grant:r".to_owned(), grant],
+    ] {
+        let output = Command::new("icacls")
+            .arg(path)
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 
@@ -323,7 +333,9 @@ fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
 fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
     use std::hash::{Hash, Hasher};
     use std::os::windows::{ffi::OsStrExt, fs::MetadataExt};
-    use windows_sys::Win32::Security::{GetFileSecurityW, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GetFileSecurityW, OWNER_SECURITY_INFORMATION,
+    };
     let metadata = fs::metadata(path).unwrap();
     let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let flags = DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION;
@@ -331,16 +343,32 @@ fn metadata(path: &Path) -> (u64, (i64, i64), (i64, i64)) {
     unsafe { GetFileSecurityW(name.as_ptr(), flags, std::ptr::null_mut(), 0, &mut needed) };
     assert!(needed > 0);
     let mut descriptor = vec![0u8; needed as usize];
-    assert_ne!(unsafe { GetFileSecurityW(name.as_ptr(), flags, descriptor.as_mut_ptr().cast(), needed, &mut needed) }, 0);
+    assert_ne!(
+        unsafe {
+            GetFileSecurityW(
+                name.as_ptr(),
+                flags,
+                descriptor.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            )
+        },
+        0
+    );
     descriptor.truncate(needed as usize);
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     descriptor.hash(&mut hash);
     // Capture bytes separately in fixture_snapshot, and here preserve native
     // timestamps, attributes, owner and DACL: a same-size write or permission
     // repair must not pass a read-only regression merely because length stayed put.
-    (metadata.len(),
-        (metadata.last_write_time() as i64, metadata.creation_time() as i64),
-        (metadata.file_attributes() as i64, hash.finish() as i64))
+    (
+        metadata.len(),
+        (
+            metadata.last_write_time() as i64,
+            metadata.creation_time() as i64,
+        ),
+        (metadata.file_attributes() as i64, hash.finish() as i64),
+    )
 }
 
 type FixtureSnapshot = Vec<(
@@ -445,10 +473,10 @@ async fn malformed_final_imap_action_id_prevents_all_network_and_cache_changes()
         loop {
             let mut line = String::new();
             if match reader.read_line(&mut line).await {
-                            Ok(n) => n == 0,
-                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
-                            Err(error) => panic!("synthetic IMAP read failed: {error}"),
-                        } {
+                Ok(n) => n == 0,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                Err(error) => panic!("synthetic IMAP read failed: {error}"),
+            } {
                 break;
             }
             let response = if line.starts_with("O1 LOGIN ") {
@@ -1585,7 +1613,9 @@ async fn imap_action_preview_requires_discovered_destinations_and_execution_uses
                         let mut line = String::new();
                         if match reader.read_line(&mut line).await {
                             Ok(n) => n == 0,
-                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {
+                                true
+                            }
                             Err(error) => panic!("synthetic IMAP read failed: {error}"),
                         } {
                             break;
@@ -1706,10 +1736,10 @@ async fn imap_archive_keeps_confirmed_folder_results_when_later_select_refuses()
         loop {
             let mut line = String::new();
             if match reader.read_line(&mut line).await {
-                            Ok(n) => n == 0,
-                            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
-                            Err(error) => panic!("synthetic IMAP read failed: {error}"),
-                        } {
+                Ok(n) => n == 0,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+                Err(error) => panic!("synthetic IMAP read failed: {error}"),
+            } {
                 break;
             }
             let response = if line.starts_with("O1 LOGIN ") {

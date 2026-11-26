@@ -551,7 +551,9 @@ fn credentials_native_linux_silently_unlocks_a_locked_item() {
         let service = SecretService::connect_with_existing(EncryptionType::Dh, connection)
             .await
             .unwrap();
-        find(&service, &attrs, Operation::Get).await.map(|item| item.is_some())
+        find(&service, &attrs, Operation::Get)
+            .await
+            .map(|item| item.is_some())
     });
 
     assert!(matches!(found, Ok(true)));
@@ -632,7 +634,9 @@ fn credentials_native_linux_unlocked_target_reads_with_unrelated_locked_collecti
         let service = SecretService::connect_with_existing(EncryptionType::Dh, connection)
             .await
             .unwrap();
-        find(&service, &attrs, Operation::Get).await.map(|item| item.is_some())
+        find(&service, &attrs, Operation::Get)
+            .await
+            .map(|item| item.is_some())
     });
 
     assert!(matches!(found, Ok(true)));

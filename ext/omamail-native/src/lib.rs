@@ -120,11 +120,12 @@ impl Mail {
         mailbox: String,
         limit: u32,
         page_token: Option<String>,
+        query: Option<String>,
     ) -> Result<MessagePage, String> {
         let query = omamail::api::ListQuery {
             account: Some(account),
             mailbox,
-            query: String::new(),
+            query: query.unwrap_or_default(),
             limit: limit.clamp(1, 100) as u16,
             page_token: page_token.unwrap_or_default(),
         };
@@ -153,6 +154,48 @@ impl Mail {
                 })
                 .collect(),
         })
+    }
+
+    /// Runs `operation` (`read`, `unread`, `star`, `unstar`, `archive`,
+    /// `trash`, `spam`) on messages `ids`; the ids that failed.
+    pub async fn act(
+        account: String,
+        operation: String,
+        ids: Vec<String>,
+    ) -> Result<Vec<String>, String> {
+        let result =
+            worker::run(move |mail| async move { mail.act(&account, &operation, &ids).await })
+                .await?;
+        Ok(result.failed_ids)
+    }
+
+    /// Sends a plain-text message from `account` now. `to` and `cc` are
+    /// comma-separated addresses.
+    pub async fn send(
+        account: String,
+        to: String,
+        cc: String,
+        subject: String,
+        body: String,
+    ) -> Result<(), String> {
+        let split = |list: &str| {
+            list.split([',', ';'])
+                .map(str::trim)
+                .filter(|a| !a.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let draft = omamail::api::Draft {
+            account: Some(account),
+            to: split(&to),
+            cc: split(&cc),
+            subject,
+            body,
+        };
+        if draft.to.is_empty() {
+            return Err("recipient_required".into());
+        }
+        worker::run(move |mail| async move { mail.send(&draft).await }).await
     }
 
     /// The plain-text body of message `id` in `account`.

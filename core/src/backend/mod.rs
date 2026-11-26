@@ -670,8 +670,10 @@ mod api_contract_tests {
             .unwrap()
             .iter()
             .filter(|method| {
-                cfg!(all(feature = "agent", any(target_os = "macos", target_os = "linux")))
-                    || !method.as_str().unwrap().starts_with("agent.")
+                cfg!(all(
+                    feature = "agent",
+                    any(target_os = "macos", target_os = "linux")
+                )) || !method.as_str().unwrap().starts_with("agent.")
             })
             .collect();
         assert_eq!(info["methods"], json!(expected));

@@ -15,7 +15,9 @@ use serde_json::Value;
 
 pub use accounts::{Account, Accounts};
 pub use mailboxes::Mailbox;
-pub use messages::{Address, ListQuery, MessageBody, MessagePage, MessageSummary};
+pub use messages::{
+    ActResult, Address, Draft, ListQuery, MessageBody, MessagePage, MessageSummary,
+};
 
 /// A backend error: the stable code the RPC replies carry
 /// (`mail_account_unknown`, `auth_required`, ...).

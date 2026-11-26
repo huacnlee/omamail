@@ -79,12 +79,9 @@ async fn request(
 
 pub fn validate(params: &Value) -> Result<(), &'static str> {
     let fields = params.as_object().ok_or("invalid_params")?;
-    if fields
-        .keys()
-        .any(|key| {
-            !["accountId", "uid", "organizer", "originalStart", "response"].contains(&key.as_str())
-        })
-    {
+    if fields.keys().any(|key| {
+        !["accountId", "uid", "organizer", "originalStart", "response"].contains(&key.as_str())
+    }) {
         return Err("invalid_params");
     }
     let account = super::text(params, "accountId")?;

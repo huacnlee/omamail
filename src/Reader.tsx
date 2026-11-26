@@ -1,16 +1,51 @@
 import { Scroll, View } from "nsh";
-import { EmptyState, Icon, Separator } from "nsh-omarchy";
+import { EmptyState, Icon, IconButton, Separator } from "nsh-omarchy";
 import { Body, Caption, Heading } from "./ui/type";
 import type { Body as MessageBody, Message } from "omamail-native";
+import type { Action } from "./Main";
 
 /** What the reader shows under the header: loading, an error code, or the text. */
 export type BodyState = { kind: "loading" } | { kind: "error"; code: string } | { kind: "body"; body: MessageBody };
 
 /** The right pane: the selected message's header and plain-text body. */
-export function Reader(props: { message: Message | undefined; body: BodyState }) {
+export function Reader(props: {
+  message: Message | undefined;
+  body: BodyState;
+  mailbox: string;
+  onAction: (action: Action) => void;
+  onReply: () => void;
+  onForward: () => void;
+}) {
+  const open = () => props.message !== undefined;
   return (
     <View class="flex-1">
-      <View class="h-[44px] border-b border-border" />
+      <View class="h-[44px] flex-row items-center gap-1 border-b border-border px-3">
+        <If when={open()}>
+          <IconButton icon="arrow-left" label="Reply" onPress={props.onReply} />
+          <IconButton icon="arrow-right" label="Forward" onPress={props.onForward} />
+          <View class="mx-1 h-4 w-px bg-border" />
+          <If when={props.mailbox !== "archive"}>
+            <IconButton icon="folder" label="Archive" onPress={() => props.onAction("archive")} />
+          </If>
+          <If when={props.mailbox !== "trash"}>
+            <IconButton icon="trash" label="Delete" onPress={() => props.onAction("trash")} />
+          </If>
+          <If when={props.mailbox !== "spam"}>
+            <IconButton icon="triangle-alert" label="Report spam" onPress={() => props.onAction("spam")} />
+          </If>
+          <View class="flex-1" />
+          <IconButton
+            icon={"star"}
+            label={props.message?.starred ? "Unstar" : "Star"}
+            onPress={() => props.onAction(props.message?.starred ? "unstar" : "star")}
+          />
+          <IconButton
+            icon={props.message?.unread ? "check" : "eye"}
+            label={props.message?.unread ? "Mark as read" : "Mark as unread"}
+            onPress={() => props.onAction(props.message?.unread ? "read" : "unread")}
+          />
+        </If>
+      </View>
       <If when={props.message} else={<EmptyState class="flex-1 border-0" title="No message selected" icon="inbox" />}>
         <Scroll class="flex-1" testID="reader">
           <View selectable class="gap-4 px-8 py-6">

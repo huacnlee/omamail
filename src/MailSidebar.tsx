@@ -1,5 +1,5 @@
 import { View } from "nsh";
-import { IconButton, type IconName, Select, Sidebar, SidebarItem, SidebarSection } from "nsh-omarchy";
+import { Button, IconButton, type IconName, Select, Sidebar, SidebarItem, SidebarSection } from "nsh-omarchy";
 import { Caption, Title } from "./ui/type";
 import { Mail, type Account } from "omamail-native";
 
@@ -23,6 +23,7 @@ export function MailSidebar(props: {
   account: string | null;
   mailbox: string;
   dark: boolean;
+  onCompose: () => void;
   onAccount: (id: string) => void;
   onMailbox: (id: string) => void;
   onToggleDark: () => void;
@@ -36,6 +37,7 @@ export function MailSidebar(props: {
       header={
         <View class="gap-2 px-3 pt-3 pb-1">
           <Title>Omamail</Title>
+          <Button label="New message" variant="primary" icon="pencil" onPress={props.onCompose} />
           <If when={props.accounts.length > 1}>
             <Select
               accessibilityLabel="Account"
