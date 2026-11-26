@@ -1,0 +1,12 @@
+{
+  "name": "Omamail",
+  "id": "dev.omamail.app",
+  "version": "0.13.0",
+  "build": 1,
+  "nsh": ">=0.7.1",
+  "theme": "theme.json",
+  "dependencies": {
+    "omamail-native": { "path": "ext/omamail-native" },
+    "nsh-omarchy": "0.2.0"
+  }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "omamail-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+nsh-core = "0.7.1"
+# The mail backend, linked into the app: no `omamail serve` child process.
+# The AI assistant's worker relaunches the backend executable, so its feature
+# stays off until the assistant gets an in-process worker.
+omamail = { path = "../../..", default-features = false }
+serde_json = "1"
+tokio = { version = "1", default-features = false, features = ["rt", "sync"] }

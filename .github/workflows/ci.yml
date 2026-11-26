@@ -33,6 +33,30 @@ jobs:
       - run: cargo test --locked --no-default-features --features standalone process
       - run: cargo test --locked --no-default-features --test cli agent_disabled_build_has_no_worker_or_agent_rpc
 
+  # The NSH client's mail core: an nshm that links the backend into the app.
+  nsh-native:
+    name: NSH mail core (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: nsh/ext/omamail-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: nsh/ext/omamail-native
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
   # iOS and Android apps run the backend in-process (no `omamail serve`
   # child). Keep the library building there so desktop-only code paths stay
   # behind explicit platform branches.
