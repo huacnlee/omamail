@@ -7,8 +7,8 @@ publish = false
 [workspace]
 
 [dependencies]
-nsh-core = "0.6.0"
-nsh-base = "0.6.0"
+nsh-core = "0.7.1"
+nsh-base = "0.7.1"
 env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -16,14 +16,14 @@ log = "0.4"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [dev-dependencies]
-nsh-engine = { version = "0.6.0", default-features = false }
-nsh-testing = { version = "0.6.0", default-features = false }
+nsh-engine = { version = "0.7.1", default-features = false }
+nsh-testing = { version = "0.7.1", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nsh-platform-linux = { version = "0.6.0", default-features = false, features = ["svg", "net"] }
+nsh-platform-linux = { version = "0.7.1", default-features = false, features = ["svg", "net"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-nsh-platform-macos = { version = "0.6.0", default-features = false, features = ["svg"] }
+nsh-platform-macos = { version = "0.7.1", default-features = false, features = ["svg"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-nsh-platform-windows = { version = "0.6.0", default-features = false, features = ["svg", "net"] }
+nsh-platform-windows = { version = "0.7.1", default-features = false, features = ["svg", "net"] }
