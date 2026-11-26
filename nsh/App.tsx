@@ -1,7 +1,7 @@
 // Omamail: three panes, mailboxes, the list and the reader.
 import { keymap, mount, View } from "nsh";
 import { Window } from "nsh/desktop";
-import { ResizablePanel, ResizablePanelGroup, TitleBar } from "nsh-omarchy";
+import { TitleBar } from "nsh-omarchy";
 import { MessageList } from "./src/screens/MessageList";
 import { Reader } from "./src/screens/Reader";
 import { Sidebar } from "./src/screens/Sidebar";
@@ -20,17 +20,20 @@ function App() {
   return (
     <View class="flex-1 bg-background">
       <TitleBar title="Omamail" />
-      <ResizablePanelGroup class="flex-1">
-        <ResizablePanel size={200} minSize={160} maxSize={320}>
+      {/* Fixed widths, not nsh-omarchy's ResizablePanelGroup: on the Linux
+          host its later panels do not get presses (the message rows never
+          opened). Go back to it once that is fixed in NSH. */}
+      <View class="flex-1 flex-row">
+        <View class="w-[200px] border-r border-border">
           <Sidebar />
-        </ResizablePanel>
-        <ResizablePanel size={360} minSize={260}>
+        </View>
+        <View class="w-[360px] border-r border-border">
           <MessageList />
-        </ResizablePanel>
-        <ResizablePanel minSize={360}>
+        </View>
+        <View class="flex-1">
           <Reader />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        </View>
+      </View>
     </View>
   );
 }
