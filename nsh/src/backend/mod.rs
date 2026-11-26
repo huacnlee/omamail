@@ -2,7 +2,9 @@
 //! see the process, and tests use [`FakeBackend`].
 
 pub mod fake;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(test, target_os = "ios", target_os = "android"))]
+pub mod in_process;
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios", target_os = "android")))]
 pub mod process;
 pub mod wire;
 
@@ -45,12 +47,17 @@ pub async fn handshake(backend: &dyn Backend, pins: &Pins) -> Result<BackendInfo
 }
 
 /// The backend the app uses: the fake one when `OMAMAIL_NSH_BACKEND=fake`
-/// (screenshots, demos), else `omamail serve`.
+/// (screenshots, demos), else `omamail serve`. Phones cannot start a child
+/// process, so iOS and Android run the backend library in this process.
 pub fn connect_default() -> Result<Rc<dyn Backend>, RpcError> {
     if std::env::var("OMAMAIL_NSH_BACKEND").as_deref() == Ok("fake") {
         return Ok(Rc::new(FakeBackend::sample()));
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        Ok(Rc::new(in_process::InProcessBackend::start()?))
+    }
+    #[cfg(not(any(target_arch = "wasm32", target_os = "ios", target_os = "android")))]
     {
         let backend = process::ProcessBackend::spawn(&process::backend_path())?;
         Ok(Rc::new(backend))

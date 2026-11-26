@@ -16,7 +16,13 @@ serde_json = "1"
 log = "0.4"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+omamail = { path = ".." }
+tokio = { version = "1", default-features = false, features = ["rt"] }
+
 [dev-dependencies]
+omamail = { path = ".." }
+tokio = { version = "1", default-features = false, features = ["rt"] }
 nsh-engine = { version = "0.7.1", default-features = false }
 nsh-testing = { version = "0.7.1", default-features = false }
 

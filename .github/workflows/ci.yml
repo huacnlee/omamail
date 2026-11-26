@@ -90,6 +90,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: mobile-${{ matrix.name }}
+          workspaces: |
+            .
+            nsh
       - name: Use the Android NDK toolchain
         if: matrix.name == 'Android'
         run: |
@@ -100,6 +103,13 @@ jobs:
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang"
           } >> "$GITHUB_ENV"
       - name: cargo check --lib
+        run: |
+          for target in ${{ matrix.targets }}; do
+            cargo check --locked --lib --target "$target"
+          done
+      # The NSH client links the backend there (nsh/src/backend/in_process.rs).
+      - name: cargo check --lib (NSH client)
+        working-directory: nsh
         run: |
           for target in ${{ matrix.targets }}; do
             cargo check --locked --lib --target "$target"
