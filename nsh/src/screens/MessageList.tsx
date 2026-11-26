@@ -2,7 +2,7 @@
 import { List, Text, View } from "nsh";
 import { EmptyState } from "nsh-omarchy";
 import { MessageRow } from "../ui/MessageRow";
-import { page, selectedId } from "../store/mail";
+import { loadMore, page, rows, selectedId } from "../store/mail";
 
 export function MessageList() {
   return (
@@ -10,15 +10,16 @@ export function MessageList() {
       <If when={page.error()}>
         <Text class="p-3 text-sm text-danger">Could not load this mailbox: {String(page.error())}</Text>
       </If>
-      <If when={page.state() === "ready" && (page()?.messages.length ?? 0) === 0}>
+      <If when={page.state() === "ready" && rows().length === 0}>
         <EmptyState title="No messages" icon="inbox" />
       </If>
       <List
-        each={page()?.messages ?? []}
+        each={rows()}
         keyExtractor={(row) => row.id}
         estimatedItemSize={64}
         refreshing={page.state() === "refreshing"}
         onRefresh={page.refetch}
+        onLoadMore={loadMore}
         class="flex-1"
       >
         {(row) => (

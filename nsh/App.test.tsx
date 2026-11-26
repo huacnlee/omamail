@@ -31,7 +31,7 @@ const modules = {
 };
 
 test("opens a message from the inbox", async () => {
-  const app = await open("./App.tsx", { modules });
+  const app = await open("./App.tsx", { modules, width: 1280, height: 800 });
   await app.waitFor("Engine notes");
   await app.press("Engine notes");
   await app.waitFor("The engine weaves algebraic patterns.");
