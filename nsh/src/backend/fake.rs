@@ -98,7 +98,7 @@ impl FakeBackend {
             bodies: Rc::new(
                 SAMPLE
                     .iter()
-                    .map(|m| (m.0.to_owned(), m.6.to_owned()))
+                    .map(|m| (m.id.to_owned(), m.html.to_owned()))
                     .collect(),
             ),
             state: Rc::default(),

@@ -2279,6 +2279,7 @@ name = "omamail-nsh"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "log",
  "nsh-base",
  "nsh-core",
  "nsh-engine",
@@ -2288,6 +2289,7 @@ dependencies = [
  "nsh-testing",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
