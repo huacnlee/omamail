@@ -96,14 +96,8 @@ async fn owner_bridge_rejects_unbounded_frames_unkeyed_mutations_and_payload_rea
     for (method, params) in [
         ("outbox.flush", json!({"accountId":"a@example.org"})),
         ("outbox.snapshot", json!({"accountId":"a@example.org"})),
-        (
-            "outbox.snapshot",
-            json!({"accountId":"a@example.org","sendId":"one","includePayloads":true}),
-        ),
-        (
-            "outbox.enqueue",
-            json!({"accountId":"a@example.org","provider":"gmail","payload":{"raw":"private"}}),
-        ),
+        ("outbox.snapshot", json!({"accountId":"a@example.org","sendId":"one","includePayloads":true})),
+        ("outbox.enqueue", json!({"accountId":"a@example.org","provider":"gmail","payload":{"raw":"private"}})),
     ] {
         assert_eq!(submitter.call(method, &params).await, Err("outbox_in_use"));
     }
