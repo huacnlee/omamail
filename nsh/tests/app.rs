@@ -2,7 +2,6 @@
 
 use nsh_core::{
     Size,
-    element::Root,
     platform::{Idiom, Os},
     prelude::*,
 };
@@ -13,7 +12,9 @@ use omamail_nsh::{Mail, MailProps};
 fn start() -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(1200.0), px(780.0)),
-        ..EngineConfig::new(Root::new::<Mail>(|| MailProps { fake: true }))
+        ..EngineConfig::new(nsh_testing::windowed_root_with::<Mail>(|| MailProps {
+            fake: true,
+        }))
     };
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
