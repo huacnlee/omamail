@@ -36,7 +36,7 @@ fn selecting_a_message_shows_its_body() -> Result<(), String> {
     app.wait_for("text:Design review notes")?;
     app.press("text:Design review notes")?;
     app.wait_for("id:reader-body")?;
-    app.wait_for("text:/Keep the/")?;
+    app.wait_for("text:Thanks for the walkthrough. A few notes on the reader before Friday:")?;
     Ok(())
 }
 

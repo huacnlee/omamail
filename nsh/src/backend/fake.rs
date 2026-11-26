@@ -24,47 +24,56 @@ pub struct FakeBackend {
     state: Rc<RefCell<State>>,
 }
 
-/// A message of the sample account: id, sender, subject, snippet, time,
-/// unread, and its body as HTML.
-const SAMPLE: &[(&str, &str, &str, &str, &str, bool, &str)] = &[
-    (
-        "m1",
-        "Mira Chen",
-        "Design review notes",
-        "Thanks for the walkthrough. A few notes on the reader before Friday.",
-        "09:41",
-        true,
-        "<p>Hi,</p><p>Thanks for the walkthrough. A few notes on the reader before Friday:</p>\
+/// A message of the sample account.
+struct Sample {
+    id: &'static str,
+    from: &'static str,
+    subject: &'static str,
+    snippet: &'static str,
+    time: &'static str,
+    unread: bool,
+    html: &'static str,
+}
+
+const SAMPLE: &[Sample] = &[
+    Sample {
+        id: "m1",
+        from: "Mira Chen",
+        subject: "Design review notes",
+        snippet: "Thanks for the walkthrough. A few notes on the reader before Friday.",
+        time: "09:41",
+        unread: true,
+        html: "<p>Hi,</p><p>Thanks for the walkthrough. A few notes on the reader before Friday:</p>\
          <ul><li>Keep the <strong>sender row</strong> compact.</li><li>Links open in the browser.</li></ul>\
          <p>See the <a href=\"https://example.com/spec\">spec</a> for details.</p><p>Mira</p>",
-    ),
-    (
-        "m2",
-        "GitHub",
-        "[omamail] CI passed on main",
-        "All checks have passed for the latest commit.",
-        "08:12",
-        true,
-        "<p>All checks have passed for <code>9610347</code>.</p><blockquote><p>Release v0.12.0</p></blockquote>",
-    ),
-    (
-        "m3",
-        "李雷",
-        "周五的发布安排",
-        "发布前请再确认一次日历同步。",
-        "Yesterday",
-        false,
-        "<p>你好，</p><p>发布前请再确认一次日历同步，谢谢。</p>",
-    ),
-    (
-        "m4",
-        "Billing",
-        "Your invoice for November",
-        "Invoice #2026-11 is ready.",
-        "Nov 24",
-        false,
-        "<h2>Invoice #2026-11</h2><table><tr><td>Service</td><td>$12.00</td></tr></table>",
-    ),
+    },
+    Sample {
+        id: "m2",
+        from: "GitHub",
+        subject: "[omamail] CI passed on main",
+        snippet: "All checks have passed for the latest commit.",
+        time: "08:12",
+        unread: true,
+        html: "<p>All checks have passed for <code>9610347</code>.</p><blockquote><p>Release v0.12.0</p></blockquote>",
+    },
+    Sample {
+        id: "m3",
+        from: "李雷",
+        subject: "周五的发布安排",
+        snippet: "发布前请再确认一次日历同步。",
+        time: "Yesterday",
+        unread: false,
+        html: "<p>你好，</p><p>发布前请再确认一次日历同步，谢谢。</p>",
+    },
+    Sample {
+        id: "m4",
+        from: "Billing",
+        subject: "Your invoice for November",
+        snippet: "Invoice #2026-11 is ready.",
+        time: "Nov 24",
+        unread: false,
+        html: "<h2>Invoice #2026-11</h2><table><tr><td>Service</td><td>$12.00</td></tr></table>",
+    },
 ];
 
 impl FakeBackend {
@@ -73,9 +82,9 @@ impl FakeBackend {
         let pins = super::Pins::compiled();
         let messages: Vec<Value> = SAMPLE
             .iter()
-            .map(|(id, from, subject, snippet, time, unread, _)| {
-                json!({"id": id, "threadId": id, "from": {"name": from, "email": format!("{}@example.org", id)},
-                       "subject": subject, "snippet": snippet, "time": time, "unread": unread, "starred": false})
+            .map(|m| {
+                json!({"id": m.id, "threadId": m.id, "from": {"name": m.from, "email": format!("{}@example.org", m.id)},
+                       "subject": m.subject, "snippet": m.snippet, "time": m.time, "unread": m.unread, "starred": false})
             })
             .collect();
         Self {
