@@ -20,7 +20,7 @@ const LIMIT: usize = 256 * 1024;
 
 fn builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
-        .hickory_dns(true)
+        .hickory_dns(crate::platform::dns::HICKORY)
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))

@@ -68,8 +68,11 @@ impl AppDirs {
         #[cfg(all(windows, feature = "integration-test-credentials"))]
         if let Some(root) = integration_root()? {
             return Self::from_roots(
-                root.join("config"), root.join("cache"), root.join("state"),
-                root.join("runtime"), root.join("downloads"),
+                root.join("config"),
+                root.join("cache"),
+                root.join("state"),
+                root.join("runtime"),
+                root.join("downloads"),
             );
         }
         Self::discover_with(|name| std::env::var_os(name), &std::env::temp_dir())
@@ -127,6 +130,13 @@ impl AppDirs {
                     .map(PathBuf::from)
                     .ok_or("home_missing")?,
             )?;
+            // A phone app's HOME is its OS-assigned container, reached
+            // through system symlinks (Android /data/user/0 -> /data/data,
+            // iOS /var -> /private/var). Storage walks refuse symlinks and
+            // start at the canonical container (private_fs::sandbox_root),
+            // so every root below must use the canonical spelling.
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            let home = home.canonicalize().map_err(|_| "home_invalid")?;
             // iOS apps get the same Library layout inside their sandbox
             // container, which is HOME there.
             #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -166,7 +176,7 @@ impl AppDirs {
                     config,
                     root("XDG_CACHE_HOME", home.join(".cache")),
                     root("XDG_STATE_HOME", home.join(".local/state")),
-                    root("XDG_RUNTIME_DIR", temporary.to_owned()),
+                    root("XDG_RUNTIME_DIR", runtime_fallback(&home, temporary)),
                     downloads,
                 )
             };
@@ -202,6 +212,21 @@ fn integration_root() -> Result<Option<PathBuf>, &'static str> {
     std::env::var_os("OMAMAIL_INTEGRATION_HOME")
         .map(|root| absolute(PathBuf::from(root)))
         .transpose()
+}
+
+/// Android's default temporary directory (`/data/local/tmp`) belongs to the
+/// shell user, not to apps. Keep runtime files inside the app container, as
+/// iOS does with its `tmp/`.
+#[cfg(target_os = "android")]
+fn runtime_fallback(home: &Path, _: &Path) -> PathBuf {
+    home.join("tmp")
+}
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+fn runtime_fallback(_: &Path, temporary: &Path) -> PathBuf {
+    temporary.to_owned()
 }
 
 fn absolute(path: PathBuf) -> Result<PathBuf, &'static str> {

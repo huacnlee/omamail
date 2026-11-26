@@ -259,15 +259,9 @@ async fn dial_host(host: &str, port: u16) -> Result<TcpStream> {
         if let Ok(ip) = host.parse::<std::net::IpAddr>() {
             return Ok(vec![ip]);
         }
-        let resolver = hickory_resolver::TokioResolver::builder_tokio()
-            .map_err(|_| "mail_dns_failed")?
-            .build();
-        Ok(resolver
-            .lookup_ip(host)
+        crate::platform::dns::lookup_ips(host)
             .await
-            .map_err(|_| "mail_dns_failed")?
-            .iter()
-            .collect::<Vec<_>>())
+            .map_err(|_| "mail_dns_failed")
     };
     dial_resolved(addresses, port).await
 }

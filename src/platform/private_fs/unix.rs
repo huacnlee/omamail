@@ -94,12 +94,85 @@ fn open_dir_readonly(parent: &File, name: &std::ffi::OsStr, private: bool) -> Re
     Ok(Some(file))
 }
 
-pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<Option<File>> {
+/// The OS-assigned app container on iOS and Android: the canonical HOME.
+///
+/// Its ancestors belong to system users, not to root or to the app, and the
+/// app may not even be able to open them: Android's `/data` is 0771
+/// system:system and `/data/user/0` is a symlink to `/data/data`; an iOS
+/// device container sits under `/var` (a symlink to `/private/var`) in
+/// directories owned by `mobile` or root that the sandbox will not let the app
+/// read. The OS, not another local user, controls that chain, so the walk
+/// trusts it and starts at the container itself. Desktop keeps walking from
+/// `/` and checking every ancestor.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn sandbox_root() -> Option<&'static Path> {
+    static ROOT: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        let home = std::env::var_os("HOME").filter(|home| !home.is_empty())?;
+        std::fs::canonicalize(home).ok()
+    })
+    .as_deref()
+}
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn sandbox_root() -> Option<&'static Path> {
+    None
+}
+
+/// The directory a descriptor walk to `root` starts from, and the rest of the
+/// path below it. With a sandbox anchor that is a prefix of `root`, the walk
+/// starts there; otherwise it starts at `/`.
+fn walk_start<'a>(root: &'a Path, anchor: Option<&Path>) -> Result<(File, &'a Path)> {
     if !root.is_absolute() {
         return Err("cache_home_invalid");
     }
-    let mut dir = File::open("/").map_err(|_| "cache_unavailable")?;
-    for component in root.components() {
+    if let Some(anchor) = anchor
+        && let Ok(rest) = root.strip_prefix(anchor)
+    {
+        return Ok((open_anchor(anchor)?, rest));
+    }
+    let rest = root.strip_prefix("/").map_err(|_| "cache_home_invalid")?;
+    Ok((File::open("/").map_err(|_| "cache_unavailable")?, rest))
+}
+
+/// The anchor is the app's own container: it must be owned by this user and
+/// not writable by others. Group write is allowed only for the app's own
+/// group, since Android creates `files/` as 0771 with the app's uid and gid.
+fn open_anchor(anchor: &Path) -> Result<File> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = CString::new(anchor.as_os_str().as_bytes()).map_err(|_| "cache_home_invalid")?;
+    // SAFETY: NUL-terminated absolute path. The anchor is canonical, so there
+    // is no symlink left to follow; O_NOFOLLOW refuses a swapped last part.
+    let fd = unsafe {
+        libc::open(
+            path.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err("cache_unsafe_path");
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    let metadata = file.metadata().map_err(|_| "cache_unavailable")?;
+    let group_ok = metadata.mode() & 0o020 == 0 || metadata.gid() == unsafe { libc::getegid() };
+    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o002 != 0 || !group_ok {
+        return Err("cache_unsafe_path");
+    }
+    validate_acl(&file, false)?;
+    Ok(file)
+}
+
+pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<Option<File>> {
+    directories_in(root, suffix, create, sandbox_root())
+}
+
+fn directories_in(
+    root: &Path,
+    suffix: &[&str],
+    create: bool,
+    anchor: Option<&Path>,
+) -> Result<Option<File>> {
+    let (mut dir, rest) = walk_start(root, anchor)?;
+    for component in rest.components() {
         match component {
             Component::RootDir => (),
             Component::Normal(name) => {
@@ -129,11 +202,8 @@ pub(crate) fn directories(root: &Path, suffix: &[&str], create: bool) -> Result<
 }
 
 pub(crate) fn directories_readonly(root: &Path, suffix: &[&str]) -> Result<Option<File>> {
-    if !root.is_absolute() {
-        return Err("cache_home_invalid");
-    }
-    let mut dir = File::open("/").map_err(|_| "cache_unavailable")?;
-    for component in root.components() {
+    let (mut dir, rest) = walk_start(root, sandbox_root())?;
+    for component in rest.components() {
         match component {
             Component::RootDir => (),
             Component::Normal(name) => {
@@ -588,5 +658,79 @@ fn validate_acl(file: &File, private: bool) -> Result<()> {
                 return Err("cache_unsafe_path");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::*;
+    use std::{fs, os::unix::fs::symlink, path::PathBuf};
+    struct Temp(PathBuf);
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    fn temp(tag: &str) -> Temp {
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "omamail-sandbox-{tag}-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        Temp(root)
+    }
+    fn walk(root: &Path, anchor: Option<&Path>) -> Result<File> {
+        directories_in(root, &["omamail"], true, anchor)?.ok_or("cache_unavailable")
+    }
+
+    #[test]
+    fn a_sandbox_anchor_skips_ancestors_the_app_does_not_own() {
+        // Stand-in for Android's /data/user/0 -> /data/data: a symlinked
+        // ancestor the walk from / must refuse.
+        let outer = temp("anchor");
+        let real = outer.0.join("data");
+        fs::create_dir(&real).unwrap();
+        symlink(&real, outer.0.join("user0")).unwrap();
+        let container = real.join("app");
+        fs::create_dir(&container).unwrap();
+        fs::set_permissions(&container, fs::Permissions::from_mode(0o700)).unwrap();
+        let linked = outer.0.join("user0/app/cache");
+        assert_eq!(walk(&linked, None).err(), Some("cache_unsafe_path"));
+
+        let anchor = outer.0.join("user0/app").canonicalize().unwrap();
+        let root = anchor.join("cache");
+        let dir = walk(&root, Some(&anchor)).unwrap();
+        assert_eq!(
+            dir.metadata().unwrap().ino(),
+            fs::metadata(root.join("omamail")).unwrap().ino()
+        );
+        // A root outside the anchor still walks from /.
+        assert_eq!(
+            walk(&linked, Some(&anchor)).err(),
+            Some("cache_unsafe_path")
+        );
+    }
+
+    #[test]
+    fn a_sandbox_anchor_must_be_private_to_the_app() {
+        let anchor = temp("perm");
+        let root = anchor.0.join("cache");
+        // Android files/ is 0771 with the app's own uid and gid.
+        fs::set_permissions(&anchor.0, fs::Permissions::from_mode(0o771)).unwrap();
+        let group = fs::metadata(&anchor.0).unwrap().gid() == unsafe { libc::getegid() };
+        assert_eq!(walk(&root, Some(&anchor.0)).is_ok(), group);
+        fs::set_permissions(&anchor.0, fs::Permissions::from_mode(0o707)).unwrap();
+        assert_eq!(
+            walk(&root, Some(&anchor.0)).err(),
+            Some("cache_unsafe_path")
+        );
+        let missing = anchor.0.join("missing");
+        assert_eq!(
+            walk(&missing.join("cache"), Some(&missing)).err(),
+            Some("cache_unsafe_path")
+        );
     }
 }
