@@ -1,6 +1,6 @@
 //! Line icons drawn with `currentColor`, so they follow the text color.
 
-use nsh_core::prelude::*;
+use nsh_core::{element::ImageSrc, prelude::*};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {

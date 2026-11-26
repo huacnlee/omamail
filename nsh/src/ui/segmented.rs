@@ -17,7 +17,7 @@ pub fn segmented(
         .gap(px(2.0))
         .rounded(move || radius())
         .bg(move || theme().muted)
-        .role(AccessibilityRole::RadioGroup);
+        .role(AccessibilityRole::Radiogroup);
     for (index, label) in options.iter().enumerate() {
         row = row.child(
             nsh_base::button()

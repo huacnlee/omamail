@@ -56,7 +56,6 @@ pub fn message_list(store: MailStore) -> impl IntoElement {
             .text_color(move || theme().muted_foreground),
         ),
     )
-    .test_id("messages")
     .flex_1();
     view()
         .flex_1()

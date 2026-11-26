@@ -71,7 +71,10 @@ pub fn reader(store: MailStore) -> impl IntoElement {
                             .html(html)
                             .selectable(true)
                             .on_link_press(|event: &TextViewLinkPressEvent| {
-                                drop(open_url(event.url.to_string()));
+                                // In-document anchors stay in the reader.
+                                if !event.url.starts_with('#') {
+                                    drop(open_url(event.url.to_string()));
+                                }
                             })
                             .test_id("reader-body")
                             .gap_3()
