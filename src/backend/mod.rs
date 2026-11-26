@@ -11,7 +11,7 @@ use crate::{account, message};
 pub struct Session {
     uploads: std::sync::Mutex<upload::Uploads>,
     reader: std::sync::Arc<std::sync::Mutex<reader::ReaderStore>>,
-    #[cfg(all(feature = "agent", unix))]
+    #[cfg(all(feature = "agent", any(target_os = "macos", target_os = "linux")))]
     agent_context: crate::agent::context::Contexts,
     upload_jobs: tokio::sync::Semaphore,
     pub(crate) gmail: std::sync::Arc<crate::providers::gmail::Session>,
@@ -39,7 +39,7 @@ impl Default for Session {
         Self {
             uploads: Default::default(),
             reader: Default::default(),
-            #[cfg(all(feature = "agent", unix))]
+            #[cfg(all(feature = "agent", any(target_os = "macos", target_os = "linux")))]
             agent_context: Default::default(),
             upload_jobs: tokio::sync::Semaphore::new(2),
             mail: crate::sync::Sync::new(gmail.clone(), jmap.clone(), queries.clone()),
@@ -59,7 +59,7 @@ impl Session {
     // re-enter this dispatcher; embedding every provider future here overflowed
     // the worker stack in the real Quickshell large-request integration test.
     pub async fn dispatch(&self, method: &str, params: &Value) -> Result<Value, &'static str> {
-        #[cfg(not(all(feature = "agent", unix)))]
+        #[cfg(not(all(feature = "agent", any(target_os = "macos", target_os = "linux"))))]
         if method.starts_with("agent.") {
             return Err("unknown_method");
         }
@@ -75,7 +75,7 @@ impl Session {
         if matches!(method, "reader.open" | "reader.render" | "reader.cancel") {
             return Box::pin(self.reader_call(method, params)).await;
         }
-        #[cfg(all(feature = "agent", unix))]
+        #[cfg(all(feature = "agent", any(target_os = "macos", target_os = "linux")))]
         if matches!(method, "agent.context" | "agent.contextCancel") {
             return Box::pin(self.agent_context.call(method, params, self)).await;
         }
@@ -101,7 +101,7 @@ impl Session {
             }
             return Ok(crate::providers::domain::snapshot());
         }
-        #[cfg(all(feature = "agent", unix))]
+        #[cfg(all(feature = "agent", any(target_os = "macos", target_os = "linux")))]
         if matches!(
             method,
             "agent.jobsList"
@@ -525,12 +525,111 @@ impl Session {
     }
 }
 
-pub(crate) fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
+/// The runtime `serve` uses. An in-process host (the iOS and Android apps,
+/// which cannot start `omamail serve`) builds one with this, creates one
+/// [`Session`] inside it, and calls [`Session::request`] or
+/// [`Session::dispatch`], [`Session::subscribe`] and [`Session::shutdown`].
+pub fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .max_blocking_threads(8)
         .enable_all()
         .build()
+}
+
+/// In-process surface. `serve` is built on the same three calls, so a host
+/// that calls them gets the same replies, notifications and shutdown order.
+impl Session {
+    /// Handles one JSON-RPC frame (a request, notification or batch) exactly
+    /// as `serve` does, with the same per-request deadline. Returns the reply
+    /// `serve` would write, or None for notifications. `system.quit` only
+    /// answers `quitReady`; the host then calls [`Session::shutdown`]. Unlike
+    /// `serve`, this does not cap concurrent requests (serve allows 32); the
+    /// host bounds its own calls and stops issuing them before shutdown.
+    pub async fn request(&self, frame: &[u8]) -> Option<Value> {
+        let deadline = tokio::time::Instant::now() + protocol::REQUEST_TIMEOUT;
+        rpc::handle(frame, self, deadline).await.0
+    }
+
+    /// Subscribes to the notifications `serve` forwards: `mail.updated`,
+    /// outbox changes and `gmail.settled`. Subscribe before the first request
+    /// so a watch that settles before its reply is not missed. Must be called
+    /// inside the backend runtime.
+    pub fn subscribe(&self) -> Events<'_> {
+        Events {
+            session: self,
+            mail: Some(self.mail.subscribe()),
+            outbox: Some(self.outbox.subscribe()),
+            gmail: Some(self.gmail.subscribe()),
+        }
+    }
+
+    /// Stops watches and Gmail queues, then drains the outbox and the query
+    /// cache. `serve` runs this after the last accepted request has replied;
+    /// a host runs it once when it exits, after its own requests finish.
+    pub async fn shutdown(&self) -> std::io::Result<()> {
+        // No watch can write after the accepted requests drain or after quit.
+        self.mail.shutdown().await;
+        self.gmail.shutdown();
+        let outbox_result = self.outbox.shutdown().await;
+        let cache_result = self.queries.shutdown().await;
+        outbox_result.map_err(std::io::Error::other)?;
+        cache_result.map_err(std::io::Error::other)?;
+        Ok(())
+    }
+}
+
+/// Backend notifications, each a complete JSON-RPC notification object.
+pub struct Events<'a> {
+    session: &'a Session,
+    mail: Option<tokio::sync::broadcast::Receiver<crate::sync::Event>>,
+    outbox: Option<tokio::sync::broadcast::Receiver<Value>>,
+    gmail: Option<tokio::sync::broadcast::Receiver<Value>>,
+}
+
+impl Events<'_> {
+    /// Waits for the next notification. A subscriber that falls behind a
+    /// channel's buffer skips the oldest events, as `serve` does; mail and
+    /// outbox notifications carry a full snapshot, so the next one brings the
+    /// host up to date. Cancel safe.
+    pub async fn recv(&mut self) -> Option<Value> {
+        use tokio::sync::broadcast::error::RecvError;
+        fn next<T: Clone>(
+            receiver: &mut Option<tokio::sync::broadcast::Receiver<T>>,
+            event: Result<T, RecvError>,
+        ) -> Option<T> {
+            match event {
+                Ok(event) => Some(event),
+                Err(RecvError::Lagged(_)) => None,
+                Err(RecvError::Closed) => {
+                    *receiver = None;
+                    None
+                }
+            }
+        }
+        loop {
+            tokio::select! {
+                event = async { self.outbox.as_mut().unwrap().recv().await }, if self.outbox.is_some() => {
+                    if let Some(event) = next(&mut self.outbox, event) {
+                        return Some(event);
+                    }
+                }
+                event = async { self.gmail.as_mut().unwrap().recv().await }, if self.gmail.is_some() => {
+                    if let Some(event) = next(&mut self.gmail, event) {
+                        return Some(event);
+                    }
+                }
+                event = async { self.mail.as_mut().unwrap().recv().await }, if self.mail.is_some() => {
+                    if let Some(event) = next(&mut self.mail, event)
+                        && self.session.mail.is_current(&event)
+                    {
+                        return Some(event.value);
+                    }
+                }
+                else => return None,
+            }
+        }
+    }
 }
 
 use serde_json::{Value, json};
@@ -547,7 +646,7 @@ pub fn dispatch(method: &str, params: &Value) -> Result<Value, &'static str> {
         "system.info" => Ok(json!({
             "name": "omamail", "version": env!("CARGO_PKG_VERSION"),
             "protocol": 1, "apiVersion": 10, "methods": methods::available(),
-            "capabilities": {"agent": cfg!(all(feature = "agent", unix))}
+            "capabilities": {"agent": cfg!(all(feature = "agent", any(target_os = "macos", target_os = "linux")))}
         })),
         "system.quit" => Ok(json!({"quitReady": true})),
         "accounts.list" => account::list(),
@@ -571,7 +670,7 @@ mod api_contract_tests {
             .unwrap()
             .iter()
             .filter(|method| {
-                cfg!(all(feature = "agent", unix))
+                cfg!(all(feature = "agent", any(target_os = "macos", target_os = "linux")))
                     || !method.as_str().unwrap().starts_with("agent.")
             })
             .collect();

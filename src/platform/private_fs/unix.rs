@@ -291,7 +291,11 @@ pub(crate) fn names(dir: &File) -> Result<Vec<String>> {
 fn errno_location() -> *mut libc::c_int {
     unsafe { libc::__errno_location() }
 }
-#[cfg(target_os = "macos")]
+#[cfg(target_os = "android")]
+fn errno_location() -> *mut libc::c_int {
+    unsafe { libc::__errno() }
+}
+#[cfg(target_vendor = "apple")]
 fn errno_location() -> *mut libc::c_int {
     unsafe { libc::__error() }
 }

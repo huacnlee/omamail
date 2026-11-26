@@ -43,7 +43,7 @@ flate2 = "1"
 jpeg-encoder = "0.7"
 tokio = { version = "1", features = ["test-util"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 security-framework = { version = "3", features = ["OSX_10_15"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

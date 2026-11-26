@@ -33,6 +33,48 @@ jobs:
       - run: cargo test --locked --no-default-features --features standalone process
       - run: cargo test --locked --no-default-features --test cli agent_disabled_build_has_no_worker_or_agent_rpc
 
+  # iOS and Android apps run the backend in-process (no `omamail serve`
+  # child). Keep the library building there so desktop-only code paths stay
+  # behind explicit platform branches.
+  mobile-backend:
+    name: Mobile backend (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: iOS
+            os: macos-latest
+            targets: aarch64-apple-ios aarch64-apple-ios-sim
+          - name: Android
+            os: ubuntu-latest
+            targets: aarch64-linux-android
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: mobile-${{ matrix.name }}
+      - name: Use the Android NDK toolchain
+        if: matrix.name == 'Android'
+        run: |
+          bin="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          {
+            echo "CC_aarch64_linux_android=$bin/aarch64-linux-android26-clang"
+            echo "AR_aarch64_linux_android=$bin/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang"
+          } >> "$GITHUB_ENV"
+      - name: cargo check --lib
+        run: |
+          for target in ${{ matrix.targets }}; do
+            cargo check --locked --lib --target "$target"
+          done
+
   standalone-app-macos:
     name: Standalone app (macOS arm64)
     runs-on: macos-15

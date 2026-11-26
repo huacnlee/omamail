@@ -1887,7 +1887,7 @@ async fn root_list_and_read_use_active_account_and_safe_provider_results() {
     }
 }
 
-#[cfg(not(all(feature = "agent", unix)))]
+#[cfg(not(all(feature = "agent", any(target_os = "macos", target_os = "linux"))))]
 #[test]
 fn agent_disabled_build_has_no_worker_or_agent_rpc() {
     let worker = omamail(&["agent-worker", "synthetic-job"]);

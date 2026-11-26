@@ -269,6 +269,10 @@ pub(crate) fn validate_message_id(id: &str) -> Result<(), &'static str> {
 
 impl Session {
     /// Internal, read-only thread context. Never accepts a caller-selected URL.
+    #[cfg_attr(
+        not(all(feature = "agent", any(target_os = "macos", target_os = "linux"))),
+        allow(dead_code)
+    )]
     pub(crate) async fn thread_resources(
         &self,
         account: &str,

@@ -127,7 +127,9 @@ impl AppDirs {
                     .map(PathBuf::from)
                     .ok_or("home_missing")?,
             )?;
-            #[cfg(target_os = "macos")]
+            // iOS apps get the same Library layout inside their sandbox
+            // container, which is HOME there.
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             let (config, cache, state, runtime, downloads) = {
                 let support = home.join("Library/Application Support");
                 // Darwin's system temporary directory commonly uses /var, a
@@ -139,10 +141,18 @@ impl AppDirs {
                     home.join("Library/Caches"),
                     support,
                     runtime,
+                    // The iOS container has no Downloads folder. Documents is
+                    // the user-visible one (Files app, when the app opts in).
+                    #[cfg(target_os = "macos")]
                     home.join("Downloads"),
+                    #[cfg(target_os = "ios")]
+                    home.join("Documents"),
                 )
             };
-            #[cfg(not(target_os = "macos"))]
+            // Android follows the Linux layout. Its app process has no HOME by
+            // default, so an embedding host sets HOME to the app's files
+            // directory before the first backend call.
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
             let (config, cache, state, runtime, downloads) = {
                 let root = |key, fallback| {
                     env(key)
@@ -205,7 +215,7 @@ fn absolute(path: PathBuf) -> Result<PathBuf, &'static str> {
     }
     Ok(path)
 }
-#[cfg(any(target_os = "linux", all(test, unix)))]
+#[cfg(any(target_os = "linux", target_os = "android", all(test, unix)))]
 fn linux_downloads(home: &Path, config: &Path) -> PathBuf {
     use std::{io::Read, os::unix::fs::OpenOptionsExt};
     const LIMIT: u64 = 64 * 1024;
@@ -246,7 +256,7 @@ fn linux_downloads(home: &Path, config: &Path) -> PathBuf {
     home.join("Downloads")
 }
 
-#[cfg(any(target_os = "linux", all(test, unix)))]
+#[cfg(any(target_os = "linux", target_os = "android", all(test, unix)))]
 fn download_root(env: &impl Fn(&str) -> Option<OsString>, home: &Path, config: &Path) -> PathBuf {
     env("XDG_DOWNLOAD_DIR")
         .filter(|p| !p.is_empty())
