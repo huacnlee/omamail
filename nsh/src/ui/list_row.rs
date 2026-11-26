@@ -57,7 +57,7 @@ where
                     view()
                         .size(px(8.0))
                         .rounded_full()
-                        .bg(move || unread())
+                        .bg(unread)
                         .style_when(move || !is_unread(), |s| s.opacity(0.0)),
                 )
                 .child(

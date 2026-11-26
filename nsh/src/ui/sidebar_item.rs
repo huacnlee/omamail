@@ -26,7 +26,7 @@ pub fn sidebar_item(
         .gap_2()
         .flex_row()
         .items_center()
-        .rounded(move || radius())
+        .rounded(radius)
         .text_color(move || theme().sidebar_foreground)
         .hover(|s| s.bg(move || theme().sidebar_accent))
         .active(|s| s.opacity(motion::PRESSED_OPACITY))

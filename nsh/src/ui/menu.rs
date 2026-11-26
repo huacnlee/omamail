@@ -18,7 +18,7 @@ pub fn menu(trigger: impl IntoElement, entries: Vec<MenuEntry>) -> impl IntoElem
         .popup_style(|s| {
             s.p_1()
                 .min_w(px(180.0))
-                .rounded(move || radius())
+                .rounded(radius)
                 .bg(move || theme().popover)
                 .border_1()
                 .border_color(move || theme().border)
@@ -29,10 +29,10 @@ pub fn menu(trigger: impl IntoElement, entries: Vec<MenuEntry>) -> impl IntoElem
         let on_select = entry.on_select;
         menu = menu.child(
             menu_item()
-                .on_select(move || on_select())
+                .on_select(on_select)
                 .px_2()
                 .py(px(6.0))
-                .rounded(move || radius())
+                .rounded(radius)
                 .text_color(move || theme().popover_foreground)
                 .hover(|s| s.bg(move || theme().accent))
                 .child(text(entry.label).text_sm()),

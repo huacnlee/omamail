@@ -15,7 +15,7 @@ pub fn segmented(
         .flex_row()
         .p(px(2.0))
         .gap(px(2.0))
-        .rounded(move || radius())
+        .rounded(radius)
         .bg(move || theme().muted)
         .role(AccessibilityRole::Radiogroup);
     for (index, label) in options.iter().enumerate() {
@@ -28,7 +28,7 @@ pub fn segmented(
                 .px_3()
                 .items_center()
                 .justify_center()
-                .rounded(move || radius())
+                .rounded(radius)
                 .text_color(move || theme().muted_foreground)
                 .hover(|s| s.text_color(move || theme().foreground))
                 .active(|s| s.opacity(motion::PRESSED_OPACITY))

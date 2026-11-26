@@ -20,7 +20,7 @@ pub fn search_input(
         .gap_2()
         .h(px(CONTROL_HEIGHT))
         .px_2()
-        .rounded(move || radius())
+        .rounded(radius)
         .bg(move || theme().muted)
         .text_color(move || theme().muted_foreground)
         .focus_within(|s| s.outline(px(2.0)).outline_color(move || theme().ring))

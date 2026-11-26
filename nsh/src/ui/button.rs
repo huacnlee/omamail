@@ -43,7 +43,7 @@ pub fn button(
         .flex_row()
         .items_center()
         .justify_center()
-        .rounded(move || radius())
+        .rounded(radius)
         .focus_visible(|s| s.outline(px(2.0)).outline_color(move || theme().ring))
         .disabled_style(|s| s.opacity(0.5))
         .active(|s| s.opacity(motion::PRESSED_OPACITY));
@@ -76,7 +76,7 @@ pub fn icon_button(
         .size(px(CONTROL_HEIGHT))
         .items_center()
         .justify_center()
-        .rounded(move || radius())
+        .rounded(radius)
         .text_color(move || theme().muted_foreground)
         .hover(|s| {
             s.bg(move || theme().accent)
