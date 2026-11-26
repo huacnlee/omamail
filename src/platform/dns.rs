@@ -58,3 +58,32 @@ mod tests {
         assert!(!local.is_empty() && local.iter().all(|ip| ip.is_loopback()));
     }
 }
+
+/// Run on an iOS simulator or device (not in CI): the phone code paths for
+/// DNS and the sandbox storage walk, against the real OS. Run it with HOME
+/// and TMPDIR set to an app container, e.g. `SIMCTL_CHILD_HOME=<container>
+/// SIMCTL_CHILD_TMPDIR=<container>/tmp/ xcrun simctl spawn booted <test binary>
+/// --ignored ios_native`.
+#[cfg(all(test, target_os = "ios"))]
+mod ios_native {
+    #[tokio::test]
+    #[ignore = "requires an iOS simulator or device and network access"]
+    async fn ios_native_dns_and_storage() {
+        // DNS through getaddrinfo, then a TCP connection to an IMAP server.
+        let ips = super::lookup_ips("imap.gmail.com").await.unwrap();
+        assert!(!ips.is_empty());
+        let address = std::net::SocketAddr::new(ips[0], 993);
+        tokio::net::TcpStream::connect(address).await.unwrap();
+
+        // Private storage below the canonical HOME.
+        let dirs = crate::platform::dirs::AppDirs::discover().unwrap();
+        let home = std::fs::canonicalize(std::env::var_os("HOME").unwrap()).unwrap();
+        for root in [&dirs.config, &dirs.cache, &dirs.state, &dirs.runtime] {
+            assert!(root.starts_with(&home), "{root:?} outside {home:?}");
+            crate::platform::private_fs::directories(root, &["omamail"], true)
+                .unwrap()
+                .unwrap();
+        }
+        println!("HOME {home:?}, cache {:?}", dirs.cache);
+    }
+}

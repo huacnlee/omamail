@@ -136,4 +136,22 @@ mod tests {
         );
         assert_eq!(error(failure), Error::Unavailable);
     }
+
+    #[test]
+    #[cfg(target_os = "ios")]
+    #[ignore = "requires a signed iOS app process; simctl spawn has no keychain entitlement"]
+    fn credentials_native_ios_put_updates_in_place() {
+        let key = CredentialKey {
+            provider: "imap".into(),
+            account_id: "imap:smoke@example.org".into(),
+            kind: CredentialKind::ImapPassword,
+        };
+        let _ = delete(&key);
+        assert_eq!(get(&key).err(), Some(Error::Missing));
+        put(&key, b"first").unwrap();
+        put(&key, b"second").unwrap();
+        assert_eq!(get(&key).unwrap().as_slice(), b"second");
+        delete(&key).unwrap();
+        assert_eq!(get(&key).err(), Some(Error::Missing));
+    }
 }
