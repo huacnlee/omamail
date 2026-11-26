@@ -1,4 +1,4 @@
-import { signal, View } from "nsh";
+import { keymap, signal, View } from "nsh";
 import { Toaster, toast } from "nsh-omarchy";
 import { Look, Mail, type Account, type Message, type MessagePage } from "omamail-native";
 import { Compose, type DraftState } from "./Compose";
@@ -211,6 +211,46 @@ export function Main() {
       },
     );
   };
+
+  /** Moves the selection one row down (1) or up (-1). */
+  const step = (by: number) => {
+    const rows = page()?.messages ?? [];
+    if (rows.length === 0) return;
+    const at = rows.findIndex((m) => m.id === selected());
+    const next = rows[Math.max(0, Math.min(rows.length - 1, at < 0 ? 0 : at + by))];
+    if (next) select(next.id);
+  };
+  const onSelected = (action: Action) => () => {
+    const m = message();
+    if (m) act(action, m.id);
+  };
+
+  // The shortcuts of the old Omamail, outside text fields.
+  keymap.bind(
+    {
+      j: () => step(1),
+      down: () => step(1),
+      k: () => step(-1),
+      up: () => step(-1),
+      e: onSelected("archive"),
+      "shift+3": onSelected("trash"),
+      delete: onSelected("trash"),
+      "shift+1": onSelected("spam"),
+      s: () => {
+        const m = message();
+        if (m) act(m.starred ? "unstar" : "star", m.id);
+      },
+      "shift+u": () => {
+        const m = message();
+        if (m) act(m.unread ? "read" : "unread", m.id);
+      },
+      r: () => respond("reply"),
+      f: () => respond("forward"),
+      c: () => compose(EMPTY_DRAFT),
+      "shift+r": load,
+    },
+    { when: "notEditing" },
+  );
 
   const fromLabel = () => {
     const a = accounts().find((x) => x.id === account());
