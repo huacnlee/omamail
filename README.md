@@ -1,6 +1,6 @@
 # Omamail
 
-Omamail is a native email and calendar app with multiple accounts and keyboard navigation. It runs either as an Omarchy shell plugin or as a standalone Qt desktop application.
+Omamail is a native email and calendar app with multiple accounts and keyboard navigation. It runs as an NSH app on desktop and mobile, or as an Omarchy shell plugin.
 
 <img width="800" alt="Omamail — reading mail with AI assistance" src="docs/images/full-mail.webp" />
 
@@ -24,33 +24,28 @@ omarchy plugin update omamail
 
 Click the envelope in the bar, install the pinned backend when prompted, and add your mailbox. Prebuilt plugin backends are available for Linux x86_64 and aarch64.
 
-### Standalone desktop app
+### Desktop and mobile app
 
-The standalone app includes mail, calendar, and native desktop notifications. It has no system tray, AI assistance, or operating-system `mailto:` registration in this release.
+The app is built with [NSH](https://nsh.dev): the interface is TSX in `src/`, and the mail library runs in-process through the `ext/omamail-native` Rust module. No separate backend process is needed. Release packages for the NSH app are not published yet; run it from source.
 
-macOS & Linux:
+## Repository layout
 
-```bash
-curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh
-```
-
-Windows (PowerShell):
-
-```powershell
-irm https://huacnlee.github.io/omamail/install.ps1 | iex
-```
-
-Each installer verifies the release package before replacing an existing version. The macOS app and Windows executable are unsigned. The macOS installer removes quarantine only after verifying the downloaded archive. See [standalone runtime and release details](docs/BACKEND-RUNTIME.md#standalone-bundled-backend) for package layout, platform integration, installer behavior, and security checks.
+| Path | What it is |
+|---|---|
+| `App.tsx`, `src/`, `nsh.json`, `theme.json` | The NSH app |
+| `ext/omamail-native/` | The app's Rust module, linking the mail library |
+| `core/` | The mail library and `omamail` CLI (Rust) |
+| `omarchy/` | The Omarchy shell plugin (QML bar widget and panel) |
 
 ## Run from source
 
-Install Rust, CMake 3.21 or newer, and Qt 6.5 or newer, then use the repository Make targets:
+Install Rust and the [NSH CLI](https://nsh.dev), then run from the repository root:
 
 ```bash
-make app-run
+nsh dev
 ```
 
-`make app-run` builds the standalone backend and Qt host, then launches from the source resources. Current source builds enable AI assistance on Linux and macOS with an installed Claude, Codex or OpenCode CLI; choose the agent in Settings. Windows AI support remains deferred. See [Contributing](CONTRIBUTING.md) for validation commands.
+Library tests run from `core/`: `cargo test --lib`.
 
 ## Features
 

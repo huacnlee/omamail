@@ -1,3 +1,0 @@
-module Omamail.Native
-singleton NativeHost 1.0 NativeHost.qml
-singleton NativeFileStore 1.0 NativeFileStore.qml
