@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/agent-job.py'
+SCRIPT = Path(__file__).resolve().parent / 'fixtures/agent-job.py'
 SESSION = '11111111-2222-3333-4444-555555555555'
 PRELUDE = '''import os,sys,json,time,subprocess
 from pathlib import Path

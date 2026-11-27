@@ -762,43 +762,6 @@ else:
         # The flag is one message and one ask: no selection, no draft.
         self.assertEqual(self.call('new', value={'messageId':'', 'messages':[{'messageId':'1','message':'m'}], 'prompt':'p', 'events':True}, ok=False), 'agent_invalid_events')
 
-    @unittest.skipUnless(sys.platform == 'linux', 'historical Python worker was Linux-only')
-    def test_legacy_python_worker_is_adopted_and_cancelled(self):
-        self.agent('time.sleep(30)')
-        payload = dict(accountId='imap:ada@example.test', account='ada@example.test',
-                       messageId='1:INBOX', subject='Upgrade', prompt='Synthetic prompt',
-                       message='Synthetic legacy mail')
-        started = subprocess.run(['python3', str(legacy.SCRIPT), 'new'],
-                                 input=json.dumps(payload), text=True, capture_output=True,
-                                 env=self.env, timeout=8)
-        self.assertEqual(started.returncode, 0, started.stderr)
-        ident = json.loads(started.stdout)['id']
-        self.ids.append(ident)
-        # Also clean up through the original bridge if native adoption regresses.
-        self.addCleanup(lambda: subprocess.run(
-            ['python3', str(legacy.SCRIPT), 'cancel', ident],
-            env=self.env, capture_output=True, timeout=8))
-        for _ in range(100):
-            if (self.artifacts/ident/'child.pid').exists():
-                break
-            time.sleep(.04)
-        child_pid = int((self.artifacts/ident/'child.pid').read_text())
-        saved = json.loads((self.store/ident/'job.json').read_text())
-        worker_pid = saved['pid']
-        self.assertEqual(Path('/proc/%d/cmdline'%worker_pid).read_bytes().split(b'\0')[1:-1],
-                         [os.fsencode(legacy.SCRIPT), b'run', ident.encode()])
-        self.assertEqual(self.call('show', ident)['job']['state'], 'running')
-        listed = self.call('list')
-        self.assertTrue(any(job['id'] == ident and job['state'] == 'running'
-                            for job in listed), listed)
-        for _ in range(3):
-            self.new()
-        self.assertEqual(self.call('new', value=payload, ok=False), 'agent_active_limit')
-        self.assertTrue(Path('/proc/%d'%child_pid).exists())
-        self.call('cancel', ident)
-        self.assertEqual(self.wait(ident)['job']['state'], 'cancelled')
-        self.assertFalse(Path('/proc/%d'%child_pid).exists())
-
     def test_retention_metadata_identity(self):
         ident=self.new();self.wait(ident)
         template=json.loads((self.store/ident/'job.json').read_text())

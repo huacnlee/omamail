@@ -12,7 +12,6 @@ import subprocess
 import tempfile
 import time
 from corpus import corpus
-from qml_runner import source as qml_source
 from report import render
 
 HERE=Path(__file__).resolve().parent
@@ -25,13 +24,10 @@ def run_process(command, payload, directory, name):
     start=time.perf_counter()
     with result_file.open('wb') as out:
         completed=subprocess.run(['python3',str(HERE/'measure_process.py'),str(memory_file),*command],
-            input=json.dumps(payload).encode(),stdout=out,stderr=subprocess.PIPE,check=False,env=dict(os.environ,QT_QPA_PLATFORM='offscreen',QT_QUICK_BACKEND='software',QT_FORCE_STDERR_LOGGING='1',QT_QPA_PLATFORMTHEME='',GSETTINGS_BACKEND='memory'))
+            input=json.dumps(payload).encode(),stdout=out,stderr=subprocess.PIPE,check=False)
     if completed.returncode:
         raise RuntimeError(f'{name} failed: '+completed.stderr.decode(errors='replace')[-2500:])
-    text=result_file.read_text()
-    if name=='qml':
-        text=next(line.split('OMAMAIL_BENCH_RESULT ',1)[1] for line in completed.stderr.decode().splitlines() if 'OMAMAIL_BENCH_RESULT ' in line)
-    return json.loads(text),dict(processWallSeconds=time.perf_counter()-start,
+    return json.loads(result_file.read_text()),dict(processWallSeconds=time.perf_counter()-start,
         peakRssKiB=json.loads(memory_file.read_text())['peakRssKiB'])
 
 
@@ -98,7 +94,6 @@ def main():
     parser.add_argument('--phases',nargs='+',choices=['mime','html','readprep'],default=['mime','html','readprep'])
     parser.add_argument('--attachment-mib',type=int,choices=[2,10],default=2,help='Synthetic attachment size; does not change application limits')
     parser.add_argument('--cases',nargs='+',choices=['small_plain','newsletter_html','nested_mime','large_attachment','unicode'])
-    parser.add_argument('--qml',action='store_true',help='Include production Qt QML JavaScript engine')
     parser.add_argument('--conditions',default='Shared desktop machine; no exclusive CPU affinity or machine isolation.')
     parser.add_argument('--output',type=Path,default=HERE/'results.json')
     args=parser.parse_args()
@@ -118,43 +113,30 @@ def main():
         directory=Path(directory)
         js,js_process=run_process(['node',str(HERE/'node.cjs')],payload,directory,'node')
         native,native_process=run_process([str(ROOT/'target/release/examples/mail_bench')],payload,directory,'rust')
-        qml=None
-        qml_process=None
-        if args.qml:
-            qml_file=directory/'benchmark.qml'
-            qml_file.write_text(qml_source(payload,HERE/'baseline/ui'))
-            qml,qml_process=run_process(['/usr/lib/qt6/bin/qml',str(qml_file)],{},directory,'qml')
         expected=len(payload['cases'])*len(payload['phases'])
-        for measured in [js,native]+([qml] if qml else []):
+        for measured in [js,native]:
             if len(measured['cases'])!=expected:raise RuntimeError('Missing benchmark operations')
         results=[]
-        for index,(old,new) in enumerate(zip(js['cases'],native['cases'],strict=True)):
+        for old,new in zip(js['cases'],native['cases'],strict=True):
             assert(old['name'],old['phase'])==(new['name'],new['phase'])
             canonical=mime_semantics if old['phase']=='mime' else html_semantics
             a,b=canonical(old['result']),canonical(new['result'])
             results.append(dict(name=old['name'],phase=old['phase'],semanticMatch=a==b,
                 semanticDifference=difference(a,b),jsDigest=digest(a),rustDigest=digest(b),
                 node=stats(old),rust=stats(new),speedup=statistics.median(old['samplesUs'])/statistics.median(new['samplesUs'])))
-            if qml:
-                actual=qml['cases'][index]
-                assert(actual['name'],actual['phase'])==(old['name'],old['phase'])
-                results[-1]['qml']=stats(actual)
-                results[-1]['qml']['batch']=actual['batch']
-                results[-1]['qmlSemanticMatch']=canonical(actual['result'])==a
-                results[-1]['qmlSpeedup']=statistics.median(actual['samplesUs'])/statistics.median(new['samplesUs'])
     cpu=next((line.split(':',1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines() if line.startswith('model name')),'unknown')
     report=dict(date=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),machine=dict(cpu=cpu,platform=platform.platform(),logicalCpus=os.cpu_count(),loadAverageBefore=load_before,loadAverageAfter=os.getloadavg()),
-        versions=dict(qml=subprocess.check_output(['/usr/lib/qt6/bin/qml','--version'],text=True,env=dict(os.environ,QT_QPA_PLATFORMTHEME='',GSETTINGS_BACKEND='memory'),stderr=subprocess.DEVNULL).strip() if args.qml else None,node=js['engine'],rust=subprocess.check_output(['rustc','--version'],text=True).strip()),
+        versions=dict(node=js['engine'],rust=subprocess.check_output(['rustc','--version'],text=True).strip()),
         conditions=args.conditions,commandWallSeconds=time.perf_counter()-command_started,buildWallSeconds=build_seconds,
         baseline=manifest,nativeBinarySha256=hashlib.sha256((ROOT/"target/release/examples/mail_bench").read_bytes()).hexdigest(),
         nativeSourceSha256={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((ROOT/"src/message").rglob("*.rs"))},
         samples=args.samples,batch=args.batch,warmupOperations=5,attachmentMiB=args.attachment_mib,
         corpus=[{k:v for k,v in c.items() if k not in ('raw','html')} for c in payload['cases']],
-        nodeProcess=js_process,rustProcess=native_process,qmlProcess=qml_process,results=results)
+        nodeProcess=js_process,rustProcess=native_process,results=results)
     args.output.write_text(json.dumps(report,indent=2)+'\n')
     args.output.with_suffix('.md').write_text(render(report))
     for row in results:print(f"{row['name']:18s} {row['phase']:6s} Node {row['node']['medianUs']:10.2f} us Rust {row['rust']['medianUs']:10.2f} us {row['speedup']:7.2f}x parity={row['semanticMatch']} {row['semanticDifference']}")
     print('Report:',args.output)
-    if any(not row['semanticMatch'] or row.get('qmlSemanticMatch',True) is False for row in results):raise SystemExit('Semantic differences: timings are not equivalent-work speedup evidence')
+    if any(not row['semanticMatch'] for row in results):raise SystemExit('Semantic differences: timings are not equivalent-work speedup evidence')
 
 if __name__=='__main__':main()
