@@ -61,6 +61,7 @@ jobs:
       - name: Release tooling and installer tests
         run: |
           set -euo pipefail
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-cryptography shellcheck
           make -C omarchy test lint
@@ -110,6 +111,7 @@ jobs:
       - name: Linux build dependencies (GTK 4, WebKitGTK 6.0)
         if: runner.os == 'Linux'
         run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev
       - name: Install nsh ${{ env.NSH_VERSION }}
@@ -238,6 +240,7 @@ jobs:
           echo "cb087e1e6afeb4ce4c2e70d8f803ccffe376b0a73d48605e492ec50fbbd45bec  $work/nsh.tar.gz" | sha256sum -c -
           tar -xzf "$work/nsh.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/nsh/bin" >> "$GITHUB_PATH"
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-cryptography
       - uses: actions/download-artifact@v4

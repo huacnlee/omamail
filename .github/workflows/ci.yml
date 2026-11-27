@@ -175,5 +175,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # test_release.py verifies a signed update manifest with cryptography.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-cryptography shellcheck
+      - run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-cryptography shellcheck
       - run: make -C omarchy test lint
