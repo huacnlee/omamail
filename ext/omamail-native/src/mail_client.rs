@@ -458,9 +458,15 @@ mod tests {
         let mailto = format!("{MAILTO_ID}.desktop");
         assert!(is_legacy_default(&qt_block, &mailto), "the Qt block");
         assert!(is_legacy_default("", LEGACY_MAILTO), "the Qt mailto entry");
-        assert!(is_legacy_default(&ours, LEGACY_MAILTO), "ours, mailto still Qt's");
+        assert!(
+            is_legacy_default(&ours, LEGACY_MAILTO),
+            "ours, mailto still Qt's"
+        );
         assert!(!is_legacy_default(&ours, &mailto), "already moved");
-        assert!(!is_legacy_default("-- mine\n", "hey.desktop"), "never chosen");
+        assert!(
+            !is_legacy_default("-- mine\n", "hey.desktop"),
+            "never chosen"
+        );
         assert!(!is_legacy_default("-- mine\n", ""), "no mailto default");
     }
 
