@@ -18,13 +18,13 @@ A test that cannot answer these questions should be improved, consolidated or re
 
 | Risk or behavior | Useful evidence in this repository |
 | --- | --- |
-| Parsing and decision rules | Call the production Rust or JavaScript rule with representative valid inputs, meaningful invalid classes and boundary values; assert the intended result. |
+| Parsing and decision rules | Call the production Rust or TypeScript rule with representative valid inputs, meaningful invalid classes and boundary values; assert the intended result. |
 | Mail, drafts, outbox and account ownership | Assert recipients, account identity, durable records, rollback and retry effects. For a failed save followed by retry, verify that no second message is sent. |
-| UI interaction | Instantiate production QML components; drive the relevant key, pointer or signal transition and assert focus, selection, visibility, content or emitted action. Use an App/Service test when wiring between components is the risk. |
+| UI interaction | Open production TSX components in a window with `nsh/test` (`open`, `app.press`, `app.type`, `app.waitFor`); drive the relevant key, pointer or signal transition and assert focus, selection, visibility, content or the action taken. Open the whole shell (`src/shell/fixtures/`) when wiring between features is the risk. |
 | Async work | Control response order and completion; verify stale results are ignored, cancellation finishes, queues drain and the latest account/selection wins. Use bounded condition waits rather than sleeps that merely hope work finished. |
 | Security boundaries | Exercise the actual consuming boundary and assert the forbidden request, process, disclosure or file write never happened, alongside valid-input controls. Follow [SECURITY-BOUNDARIES.md](SECURITY-BOUNDARIES.md). |
 | Provider, process and native-platform integration | Use controlled peers, private storage and real codecs/transports where their behavior matters. A fake provider is suitable for UI state, not proof of provider acceptance, TLS or native credential behavior. |
-| Release compatibility and packaging | Exercise the current frontend against the pinned binary and inspect actual built/package outputs. Source inventories establish registration, not runtime compatibility. |
+| Release compatibility and packaging | Inspect actual built and packaged outputs. The app links `core/` in process, so there is no app-to-backend version to test; the standalone `omamail` binary's API contract is checked against `core/backend-api.json`. Source inventories establish registration, not runtime compatibility. |
 | Performance and resource limits | Assert a meaningful budget or bounded work on a representative workload. Counts of network requests, parses or repaints can be contracts when they protect a concrete cost. Keep timing benchmarks separate from fragile wall-clock unit assertions. |
 | Repository policy | Narrow static checks may enforce a deliberate rule such as forbidden network APIs, unsafe text formats, missing lint inputs or artifact size. State that these are static checks and retain runtime evidence for behavior. |
 
@@ -44,14 +44,15 @@ Use representative equivalence classes and boundary values instead of every comb
 
 | Test | Location and runner |
 | --- | --- |
-| Rust rules and state | `src/` beside the module; `cargo test --locked --features integration-test-credentials` (`make test-rust`) |
-| Rust process/CLI integration | `tests/*.rs`; Cargo discovers integration entry points |
-| QML JavaScript rules | `ui/tests/test_*.js`, using `ui/tests/load.js` to load production module paths; `make test-js` |
-| QML components and flows | `ui/tests/qml/tst_*.qml`; `make test-qml` supplies the native fixture and discovers QML cases |
-| Scripts and repository contracts | `tests/test_*.py` / `tests/test_*.sh`; explicit Makefile or CI registration |
-| Standalone host and packaging | `app/tests/`; `make test-app-qml`, CMake/CTest and the native CI jobs |
+| TypeScript rules, components and flows | `*.test.ts` / `*.test.tsx` beside the module under `src/`; `nsh test` (`make test`) discovers them and runs headless |
+| Behavior that needs the real platform (focus traversal, input methods, screenshots) | `*-macos.test.tsx` beside the module; `nsh test <file> --target macos`. Headless runs reach these too, so each returns early when no real platform is present |
+| Rust rules and state | Unit tests in the module under `core/src/`; `cargo test` in `core/` |
+| Rust process/CLI integration | `core/tests/*.rs`; Cargo discovers integration entry points |
+| The native module (`ext/omamail-native`) | Unit tests in its modules; `cargo test` in `ext/omamail-native` |
+| Repository checks: the key table and native-module members | `scripts/check-keys.ts` and `scripts/check-native-members.ts`, run by `make check` |
+| The Omarchy notice widget and release tooling | `omarchy/tests/`; `make -C omarchy test lint` |
 
-Inspect the Makefile, CMake and workflow registrations rather than assuming a filename runs automatically. Include new explicit registrations in the same change. Keep fixtures small and synthetic; isolate HOME/XDG, credentials, external processes and local servers. Do not depend on a developer's mailbox, desktop session or network availability. Report the platform and dependencies actually exercised.
+Inspect the Makefiles and workflow registrations rather than assuming a file runs automatically. Include new explicit registrations in the same change. Keep fixtures small and synthetic; isolate HOME/XDG, credentials, external processes and local servers. Do not depend on a developer's mailbox, desktop session or network availability. Report the platform and dependencies actually exercised.
 
 ## Adding, changing and removing tests
 
@@ -72,6 +73,6 @@ These are project standards informed by published testing principles, not a clai
 - [ISTQB Foundation syllabus v4.0.1, §§1.3 and 5.2](https://istqb.org/wp-content/uploads/2024/11/ISTQB_CTFL_Syllabus_v4.0.1.pdf): exhaustive testing is infeasible, testing is context-dependent, and risk should guide effort. Passing tests cannot prove absence of defects or product usefulness.
 - [Software Engineering at Google, chapter 12](https://abseil.io/resources/swe-book/html/ch12.html): test behavior through suitable public boundaries; tests should survive internal refactoring and make failures easy to understand.
 - [Google: Change-Detector Tests Considered Harmful](https://testing.googleblog.com/2015/01/testing-on-toilet-change-detector-tests.html): mechanically restating the implementation creates maintenance work without independently checking correctness.
-- [Testing Library's guiding principles](https://testing-library.com/docs/guiding-principles/): tests gain confidence by resembling use. For Omamail this means actual QML interactions where Qt behavior matters, not adopting a web-specific test framework.
+- [Testing Library's guiding principles](https://testing-library.com/docs/guiding-principles/): tests gain confidence by resembling use. For Omamail this means real NSH window interactions through `nsh/test`, not adopting a web-specific test framework.
 - [Google: Code Coverage Best Practices](https://testing.googleblog.com/2020/08/code-coverage-best-practices.html): coverage helps locate untested code but is an indirect metric, not proof of good assertions or a reason for a universal percentage target.
 - [Google: Mutation Testing](https://testing.googleblog.com/2021/04/mutation-testing.html): injected faults can expose weak assertions, but unproductive mutations and score-chasing can themselves produce low-value tests.

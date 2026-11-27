@@ -55,31 +55,29 @@ Discuss large features, new providers, and substantial architectural changes wit
 
 ## Project boundary
 
-Omamail has two hosts over one shared mail and calendar implementation: a [Quickshell plugin hosted by `omarchy-shell`][omarchy-shell], and the Qt host under `app/`. A shared behavior belongs under `ui/` or in the Rust backend; `ui/Service.qml`, `ui/BarWidget.qml`, and `ui/App.qml` remain the Omarchy entry points, while `app/qml/Main.qml` supplies the standalone composition and adapters.
+Omamail is one NSH app over one Rust mail library. The interface is TSX at the repository root (`App.tsx`, `src/`). The mail library is `core/`, linked into the same process through the native module `ext/omamail-native`; the app reaches it only through `src/backend/client.ts`. Mail and calendar logic belongs in `core/`; presentation and interaction state belong in `src/`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Helper scripts and the plugin's private Rust backend belong here. The same executable exposes CLI commands over its shared business modules, and both hosts use its persistent stdio RPC service. The standalone release bundles the exact backend beside its host. Separate daemons, SDKs, and automatic system-wide integrations remain outside this boundary. The plugin must not install commands or integrations into global user paths when it loads. Omarchy's plugin installer deliberately [clones and validates plugins, and can enable them, without running installation hooks][plugin-installation].
+The same library also builds the standalone `omamail` CLI, whose `omamail serve` speaks the same JSON-RPC over stdio. Separate daemons, SDKs, and automatic system-wide integrations remain outside this boundary. The app changes desktop settings only when the person asks: on Linux, Settings > Default mail client registers the app for `mailto:` links and adds a managed block to Hyprland's bindings, and turning it off removes the block. Keep platform differences behind the native module and the platform code in `core/src/platform/`; do not branch feature code by operating system where a native interface can answer.
 
-The first standalone scope includes mail, calendar, and native notifications. It deliberately exposes no tray, AI, or operating-system `mailto:` registration. Keep platform integration behind the native interfaces in `app/src/`; do not branch the shared UI by operating system.
+`omarchy/` holds only the Omarchy bar notice widget (`omarchy/notice/`), which opens or offers to install the app, and the release tooling. It runs no backend and reads no mail.
 
-Programmatic access to mail may be useful, but it needs an integration boundary designed independently from the Quickshell plugin. Omarchy defines [IPC as the standard boundary for commands that communicate with the running shell][shell-ipc]; proposals that need a different lifecycle or ownership model should begin with a design discussion.
+Programmatic access to mail may be useful, but it needs an integration boundary designed on its own. Omarchy defines [IPC as the standard boundary for commands that communicate with the running shell][shell-ipc]; proposals that need a different lifecycle or ownership model should begin with a design discussion.
 
-[omarchy-shell]: https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md
-[plugin-installation]: https://github.com/omacom/omarchy/blob/quattro/manual/32-shell-plugins.md#adding-a-plugin-from-git
 [shell-ipc]: https://github.com/omacom/omarchy/blob/quattro/docs/omarchy-shell.md#ipc
 
 ```bash
-./dev backend    # build the private backend for development
-./dev run        # build and print shell environment/start instructions
-make app-build   # build the standalone backend and Qt host
-make app-run     # build and launch the standalone app from source resources
-make validate    # node tests, source regressions, QML tests, qmllint, manifest
+make check      # nsh check, then the key-table and native-module drift checks
+make build      # nsh build
+make test       # nsh test: the TSX tests, headless
+make validate   # check, build and test: what a change must pass
+make run        # nsh run: build and launch the app
 ```
 
-`make app-build` needs Rust, CMake 3.21 or newer, and Qt 6.5 or newer. On Linux, the Qt DBus development component is also required. It builds the backend with `--no-default-features --features standalone`, so the resulting process has no AI worker surface. `make app-run` sets only the development resource and bundled-backend overrides needed to run that build.
+You need Rust and the [NSH CLI](https://nsh.dev); the two check scripts need Node 23.6 or newer, which runs them as TypeScript. Rust changes also need `cargo test` in `core/` (and in `ext/omamail-native` when you touch the native module). Changes under `omarchy/` need `make -C omarchy test lint`, which uses `sh`, `bash`, `python3` and `shellcheck`.
 
-`make validate` needs `node`, `python3`, Qt 6 QML test tooling (`qt6-declarative` on Arch, `qt6-declarative-dev-tools` and `qml6-module-qttest` on Debian and Ubuntu) and the `omarchy` CLI. It has to be green before you open the pull request, and green on your machine — nothing in CI runs it for you. Standalone changes must also pass `make test-app-qml` locally.
+`make validate` has to be green on your machine before you open the pull request. CI runs the checks and tests too, but it is not a substitute for running them yourself.
 
-Linux verification satisfies contributor and reviewer platform-testing requirements. Testing on macOS or Windows is optional; reviewers must not request it as a prerequisite or block a PR because those local or hands-on results are absent. Required automated CI still needs to pass, including its native platform jobs described in [Backend runtime](docs/BACKEND-RUNTIME.md#standalone-security-gates). Report the platform actually tested without claiming verification on others.
+Linux verification satisfies contributor and reviewer platform-testing requirements. Testing on macOS or Windows is optional; reviewers must not request it as a prerequisite or block a PR because those local or hands-on results are absent. Required automated CI still needs to pass, including its native platform jobs described in [Backend runtime](docs/BACKEND-RUNTIME.md#standalone-security-gates). Tests that need a real platform (`*-macos.test.tsx`, run with `nsh test <file> --target macos`) are optional evidence on the same terms. Report the platform actually tested without claiming verification on others.
 
 Contributors are not required to test anything by hand. Use reproducible automated checks and generated visual evidence appropriate to the changed behavior. If verification is missing, the review comment must identify the specific behavior, expected result and automated test or evidence to add, so the contributor's agent can address it.
 
@@ -104,14 +102,14 @@ A test earns its place by catching a meaningful failure, not by accompanying eve
 
 | What you changed | Where the test goes |
 |------------------|---------------------|
-| Rust rules or process/CLI behavior | Module tests in `src/` or integration tests in `tests/*.rs`, run by Cargo |
-| Parsing, formatting, or a decision rule in `.js` | `ui/tests/test_*.js`, run by `node` — no compositor needed |
-| A script in `scripts/` | `tests/test_*.sh` or `tests/test_*.py` |
-| Focus, key routing, layout, or anything needing the QML engine | `ui/tests/qml/tst_*.qml`, run offscreen |
-| Standalone host, adapter, packaging, or installer behavior | `app/tests/`, run locally on Linux |
-| A rule that grep can enforce — no literal colours, no `LayoutMirroring` | `tests/test_source.sh` |
+| Rust rules or process/CLI behavior | Module tests in `core/src/` or integration tests in `core/tests/*.rs`, run by Cargo |
+| Parsing, formatting, or a decision rule in TypeScript | `*.test.ts` beside the module in `src/`, run by `nsh test` |
+| Focus, key routing, layout, or a component's behavior | `*.test.tsx` beside the component, run headless by `nsh test`; `*-macos.test.tsx` when it needs the real platform (`nsh test <file> --target macos`) |
+| The native module (`ext/omamail-native`) | Module tests in its `src/`, run by `cargo test` there |
+| The Omarchy notice widget or release tooling | `omarchy/tests/`, run by `make -C omarchy test` |
+| A rule a script can enforce — the key table, the native module's members | `scripts/check-keys.ts`, `scripts/check-native-members.ts`, run by `make check` |
 
-Verify that the runner discovers the new test, or register it in the Makefile, CMake or CI in the same commit. Assert the fault, not the spelling of the fix: for a bug regression, run it against the old behavior and report the observed failure in the pull request. Coverage counts and source-text matches do not establish behavioral correctness.
+Verify that the runner discovers the new test, or register it in the Makefile or CI in the same commit. Assert the fault, not the spelling of the fix: for a bug regression, run it against the old behavior and report the observed failure in the pull request. Coverage counts and source-text matches do not establish behavioral correctness.
 
 ## If you touched the interface
 
@@ -121,11 +119,11 @@ Verify that the runner discovers the new test, or register it in the Makefile, C
   components as the specification and change nothing about the visual language
   that the change did not require. [AGENTS.md's UI section](AGENTS.md#ui)
   gives the same rules where they are specific to this
-  codebase, and `tests/test_source.sh` enforces the part of them that grep can.
-- **Automate verification of the changed interaction.** Exercise the applicable mouse, keyboard, focus and state transitions with QML or host integration checks. Use generated captures to inspect layout in the relevant light/dark themes and compact/wide sizes. Component harnesses using production components are valid evidence for the behavior they exercise; request broader integration coverage only for a concrete gap they leave. Hands-on testing is optional.
+  codebase.
+- **Automate verification of the changed interaction.** Exercise the applicable mouse, keyboard, focus and state transitions with `nsh/test` component or whole-app tests, headless or with `--target macos` where the platform matters. Use generated captures to inspect layout in the relevant light/dark themes and compact/wide sizes. Component harnesses using production components are valid evidence for the behavior they exercise; request broader integration coverage only for a concrete gap they leave. Hands-on testing is optional.
 - **Every UI change requires clear, detailed visual evidence.** Attach labeled before-and-after screenshots of every changed view and relevant state, captured at matching window dimensions, theme, and scale. Explain what changed and identify the platforms, themes, and sizes tested. Screenshots must be legible enough to evaluate the actual layout, labels, and states; update them whenever the UI changes.
 - **Multi-stage or stateful workflows also require a detailed screen recording, including bug fixes to existing workflows.** Show the complete path from entry to result, including the relevant keyboard and mouse interactions and loading, empty, error, cancellation, or recovery states. Show observable side effects and retry invariants rather than only the final status: for an invitation-calendar change, record invitation import, update of the same existing event, and a failed save followed by calendar-only retry, with evidence that retry sends no second RSVP. Add steps or timestamps and expected results so maintainers can assess the interaction without installing or running the app. Screenshots alone are not sufficient for these changes.
-- Identify the capture's host (Omarchy plugin, standalone app, or component/test harness), platform, UI commit, theme, dimensions and scale, plus the backend version, API revision and source commit when built locally. For mocked backends, identify the fixture contract/API revision and explicitly say that no real backend/provider ran. Label synthetic component recordings and any fixture-only controls or side-effect counters; distinguish UI-flow evidence from real backend/provider verification. Automated screenshots and recordings are acceptable. Refresh affected recordings after interaction changes and verify uploaded attachments are accessible and decodable before requesting review or re-review.
+- Identify the capture's source (the app or a component/test fixture), platform, commit, theme, dimensions and scale. For a fixture with a preview backend (`usePreviewBackend` in `src/backend/client.ts`), say so explicitly and that no real backend or provider ran. Label synthetic component recordings and any fixture-only controls or side-effect counters; distinguish UI-flow evidence from real backend/provider verification. Automated screenshots and recordings are acceptable. Refresh affected recordings after interaction changes and verify uploaded attachments are accessible and decodable before requesting review or re-review.
 - Use synthetic or redacted data in screenshots and recordings. Upload the evidence as PR attachments rather than committing it to the repository. Visual evidence complements regression tests; neither requires a contributor to operate the app by hand.
 
 ## The pull request
@@ -149,7 +147,7 @@ Fix Exchange junk folder lookup using its declared name
 Add an action to save an attachment
 ```
 
-Not `fix imap bug`, not `Update ImapClient.qml`.
+Not `fix imap bug`, not `Update imap.ts`.
 
 Commit and PR titles name the concrete machinery and action: use `Fix ` for bugs, `Add ` for features, otherwise an accurate imperative. Choose a scope prefix from the final change: `ai: ` for AI changes, `docs: ` for repository documentation, `website: ` for the website, and `chore: ` for repository maintenance such as release workflows, CI, builds, dependency upkeep and developer tooling. Other changes have no scope prefix. For mixed changes, choose one prefix from the primary outcome: a release-flow PR with README cleanup uses `chore: `, for example `chore: Fix backend release ordering with a single release PR`. These rules also apply to individual commit subjects.
 
@@ -163,8 +161,8 @@ Then:
 ````markdown
 ## Verification
 
-`make validate` green. `tests/test_message.js` covers the 8-bit body with an
-accent in it, and fails with the change reverted. An automated rendering
+`make validate` green. `core/tests/message_charset.rs` covers the 8-bit body
+with an accent in it, and fails with the change reverted. An automated rendering
 fixture confirms the French subject displays correctly.
 
 ## Release Notes
@@ -183,7 +181,7 @@ missing:
 - That a fresh agent reviewed the diff, and what it found. "Nothing" is an
   answer; not having asked is not.
 
-`## Release Notes` is lifted verbatim by `scripts/release-notes.sh` into the
+`## Release Notes` is lifted verbatim by `omarchy/scripts/release-notes.sh` into the
 GitHub release for the version that ships it — the heading is matched exactly,
 so spell it that way. Write the bullets for somebody reading a changelog, in
 terms of their mail, not the code: what they could not do before and can now.
