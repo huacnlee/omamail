@@ -1,80 +1,22 @@
 # Synthetic mail performance benchmarks
 
-## Cached reader including QML transport
-
-[reader-pipeline-results.md](reader-pipeline-results.md) measures the current
-reader from a persisted synthetic message ID to the completed QML display-data
-callback. It compares the older full-resource bridge, the previous prepared-cache
-bridge, and `reader.open`. All paths use the same release backend and production
-QML transport. A separate before/after table isolates the latest native reader
-optimization; both runs must have matching corpus, harness and display results.
-
-```sh
-python3 benchmarks/mail/reader_pipeline.py
-```
-
-This includes resource disk reads, preparation, rendering and full RPC transport.
-It excludes initial cache seeding, network/image downloads, subsequent model
-updates, layout and painting. Warm-cache medians and first-call results are
-separate; the first call does not mean cold operating-system disk cache. These
-are Rust pipeline comparisons, not speedups over the original JavaScript app.
-See the report for exact boundaries, raw samples, hashes and reproduction of
-the before/after comparison.
-
-## Reader concurrency and bridge decoding
-
-[reader-concurrency-results.md](reader-concurrency-results.md) measures 1, 2, 4
-and 8 outstanding cached-reader requests. It compares the old bridge with the
-single-decode bridge using the same frozen Rust binary, with every returned
-display projection checked. This is separate from the projection optimization
-above, which was measured before changing the bridge.
-
-```sh
-python3 benchmarks/mail/reader_concurrency.py --binary target/release/omamail
-```
-
-Each level uses the same eight message IDs and 16 operations per round, for
-seven timed rounds after warmup. The report includes throughput and individual
-callback median/p95, not just aggregate completion time. The renderer is warm;
-network/image downloads and QML painting are excluded. Increasing concurrency
-can improve throughput while worsening per-message latency. This test does not
-establish network concurrency gains or an ideal limit for every workload.
-
-## Processing including QML ↔ Rust transport
-
-[roundtrip-results.md](roundtrip-results.md) retains the independent-stage comparison: the
-previous Qt JavaScript implementation versus the release backend, timed from
-QML request to completed callback. It includes parameter encoding, uploads,
-Rust processing, response serialization, pipe transfer and QML decoding.
-
-```sh
-python3 benchmarks/mail/roundtrip.py
-```
-
-The same five synthetic cases and three independent stages are checked for
-output equivalence. Each uses five warmups and 31 samples. Inputs start in QML;
-network, disk, startup and drawing are excluded. This measures QML-requested
-processing, not the provider/cache pipeline that keeps source data in Rust.
-Small operations use batches because QML has a millisecond clock. Raw samples,
-source/binary hashes and runtime details are in `roundtrip-results.json`.
-The archived September 11 run predates recording the current `ui/message`
-encoding dependency and independent HTML input hashes. Its raw samples remain
-unchanged; subsequent runs record those hashes and the harness as well.
-Regressions remain in the table: native CPU improvements do not necessarily
-outweigh encoding and transport costs. Do not add synthetic response timings to
-CPU measurements to estimate a full operation.
+These compare the native Rust message pipeline with a frozen copy of the
+former production JavaScript under Node. The Qt-era runners that measured the
+QML transport and Qt's JavaScript engine were removed with the Qt interface;
+their archived reports went with them. `baseline/ui` stays: the Rust parity
+tests in `src/message` load it as their oracle.
 
 ## CPU-only diagnostic
 
-Run from the repository root after builds/tests have stopped:
+Run from `core/` after builds/tests have stopped (Linux: it reads
+`/proc/cpuinfo`):
 
 ```sh
-python3 benchmarks/mail/run.py --samples 31 --batch 3 --qml
+python3 benchmarks/mail/run.py --samples 31 --batch 3
 ```
 
 The runner builds an optimized, locked Rust example and compares it with an
-immutable copy of the former production JavaScript in both Node and Qt's QML
-JavaScript engine. `baseline/manifest.json` hashes are verified before each run.
+immutable copy of the former production JavaScript under Node. `baseline/manifest.json` hashes are verified before each run.
 The generated corpus uses only synthetic addresses, bodies and attachments.
 It covers a small plain message, a large newsletter, eight nested MIME levels,
 a 2 MiB binary attachment and multilingual Unicode. The report records exact
@@ -92,9 +34,7 @@ network/disk access are outside core timing. Each stage records its first call
 (`coldUs`), five warmups, then 31 batch samples, with median and nearest-rank p95
 per operation. “Cold” means the first invocation for that case, not a fresh
 engine/library for each case. Node uses `hrtime.bigint`, Rust uses `Instant`.
-Qt uses millisecond `Date.now` and calibrates its batch to at least 20 ms (with
-a 2048-operation cap); a zero cold value means below timer resolution. Large
-cases are processed sequentially. GC remains part of JS measurements.
+Large cases are processed sequentially. GC remains part of JS measurements.
 
 Every measured operation must succeed. MIME equivalence compares decoded body
 bytes by SHA-256, header names/values, MIME types, names and recursive structure;
@@ -114,8 +54,8 @@ These measurements describe local CPU work on this corpus. They do not measure
 mail-server latency, account synchronization, rendering, IPC or perceived inbox
 loading, and do not establish production end-to-end speedups.
 
-The checked-in run was made on a shared active desktop, without exclusive CPU
-pinning. Broad builds and tests were paused, but brief unrelated shell tests
+The checked-in runs predate the Qt removal and still carry its Qt column. They
+were made on a shared active desktop, without exclusive CPU pinning. Broad builds and tests were paused, but brief unrelated shell tests
 overlapped part of the Qt run. It was not a dedicated idle host. The JSON and
 rendered report retain the observed before/after load averages; p95 variation
 can include scheduling and garbage collection. Use `--conditions` to describe
@@ -129,7 +69,7 @@ the current 16 MiB parser limit. Run this case separately so its process RSS
 is not conflated with the original five-case report:
 
 ```sh
-python3 benchmarks/mail/run.py --attachment-mib 10 --cases large_attachment --phases mime --samples 31 --batch 1 --qml --output benchmarks/mail/results-10m.json
+python3 benchmarks/mail/run.py --attachment-mib 10 --cases large_attachment --phases mime --samples 31 --batch 1 --output benchmarks/mail/results-10m.json
 ```
 
 The default corpus still uses a 2 MiB attachment. The larger case can use

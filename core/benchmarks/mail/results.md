@@ -1,6 +1,6 @@
 # Mail CPU benchmark results
 
-CPU-only diagnostic. For measured processing including QML ↔ Rust transport, see [roundtrip-results.md](roundtrip-results.md). These ratios are not application speedups.
+CPU-only diagnostic. These ratios are not application speedups.
 
 Measured 2026-09-11T16:43:14Z on 13th Gen Intel(R) Core(TM) i7-13700KF.
 rustc 1.98.1 (48a229cea 2026-09-01); Node v26.8.1; Qml Runtime 6.11.2.

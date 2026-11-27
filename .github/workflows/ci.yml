@@ -164,6 +164,11 @@ jobs:
       # The integration tests (tests/*.rs, cli included), as main ran them:
       # integration-test-credentials keeps them off the runner's keyring.
       - run: cargo test --locked --no-default-features --features standalone,integration-test-credentials --tests
+      # The assistant's job bridge against fake agent CLIs, driving the native
+      # worker the binary runs (target/debug/omamail, built here with default
+      # features).
+      - run: cargo build --locked
+      - run: python3 tests/test_agent_native_bridge.py
 
   # What existing Omarchy installs read from this checkout after the NSH
   # cutover: the root manifest (the notice bar widget) and its one helper.

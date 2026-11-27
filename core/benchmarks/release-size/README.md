@@ -21,13 +21,9 @@ projections passed parity checks. See the adjacent raw reports for samples,
 first-call timings, machine details and binary hashes. Network and UI painting
 are excluded. Build jobs were idle during measurements.
 
-Reproduce each profile with `cargo build --release --locked --bin omamail`, freeze
-the resulting executable, then run:
+Reproduce the sizes with `cargo build --release --locked --bin omamail` for each
+profile. The reader timings came from the Qt-era QML bridge harness
+(`benchmarks/mail/reader_pipeline.py`), which was removed with the Qt interface;
+the timing column cannot be re-measured as recorded.
 
-```sh
-python3 benchmarks/mail/reader_pipeline.py --binary /path/to/frozen/omamail \
-  --samples 15 --cases newsletter_html nested_mime --output /tmp/profile.json
-```
-
-Use `--before /tmp/speed.json` for subsequent profiles to verify output parity.
 Do not use panic=abort: outbox delivery catches panics to preserve failure recovery.

@@ -126,7 +126,7 @@ Omamail is a compact, keyboard-capable desktop mail client. It should feel like 
 - predictable under keyboard, pointer, and window resizing;
 - native to the active Omarchy theme.
 
-The screenshots in `preview.png` express the visual baseline: a narrow mailbox rail, a dense list, a generous reader, monospace typography, restrained rules, and controls that appear where their actions belong.
+The visual baseline is a narrow mailbox rail, a dense list, a generous reader, monospace typography, restrained rules, and controls that appear where their actions belong.
 
 ## What comes from Omarchy
 

@@ -393,59 +393,10 @@ fn process_handle(v: &Value) -> Option<OwnedFd> {
         b"",
     ]
     .join(&0);
-    if args != expected && !legacy_worker_args(&args, &executable, v["id"].as_str()?) {
+    if args != expected {
         return None;
     }
     Some(fd)
-}
-/// The Qt plugin's worker as a source checkout ran it. The plugin's scripts
-/// left this repository with the NSH cutover, so outside tests the path no
-/// longer exists and never matches; tests read a vendored copy.
-#[cfg(not(test))]
-fn checkout_worker_script() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../omarchy/scripts/agent-job.py")
-}
-#[cfg(test)]
-fn checkout_worker_script() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agent-job.py")
-}
-
-// Upgrade compatibility only: recognize an already-running worker from this
-// checkout or this installed plugin. Never launch Python and never accept an
-// executable/script path supplied by job metadata.
-fn legacy_worker_args(args: &[u8], executable: &std::path::Path, id: &str) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    let mut candidates = vec![checkout_worker_script()];
-    if let Some(bin) = executable.parent()
-        && bin.file_name().is_some_and(|name| name == "bin")
-        && let Some(runtime) = bin.parent()
-        && runtime.file_name().is_some_and(|name| name == "runtime")
-        && let Some(plugin) = runtime.parent()
-    {
-        candidates.push(plugin.join("scripts/agent-job.py"));
-    }
-    candidates.into_iter().any(|candidate| {
-        let Ok(metadata) = std::fs::symlink_metadata(&candidate) else {
-            return false;
-        };
-        if !metadata.is_file()
-            || metadata.uid() != unsafe { libc::geteuid() }
-            || metadata.mode() & 0o022 != 0
-        {
-            return false;
-        }
-        let Ok(path) = candidate.canonicalize() else {
-            return false;
-        };
-        args == [
-            b"python3".as_slice(),
-            path.as_os_str().as_encoded_bytes(),
-            b"run",
-            id.as_bytes(),
-            b"",
-        ]
-        .join(&0)
-    })
 }
 pub(super) fn refresh(store: &Store, id: &str) -> Result<Value> {
     let mut job = read_job(store, id)?;
@@ -1429,52 +1380,6 @@ mod tests {
             expected["draft"]["cc"] = json!("");
             expected["draft"]["bcc"] = json!("");
             assert_eq!(draft_payload(&input).unwrap(), expected);
-        }
-    }
-    #[test]
-    fn legacy_worker_compatibility_accepts_only_known_exact_script_argv() {
-        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/agent-job.py")
-            .canonicalize()
-            .unwrap();
-        let exe = std::env::current_exe().unwrap();
-        let id = "a".repeat(32);
-        let valid = [
-            b"python3".as_slice(),
-            script.as_os_str().as_encoded_bytes(),
-            b"run",
-            id.as_bytes(),
-            b"",
-        ]
-        .join(&0);
-        assert!(legacy_worker_args(&valid, &exe, &id));
-        for args in [
-            [
-                b"python3".as_slice(),
-                b"/tmp/attacker/agent-job.py",
-                b"run",
-                id.as_bytes(),
-                b"",
-            ]
-            .join(&0),
-            [
-                b"python3".as_slice(),
-                script.as_os_str().as_encoded_bytes(),
-                b"run",
-                b"other-id",
-                b"",
-            ]
-            .join(&0),
-            [
-                b"python3".as_slice(),
-                script.as_os_str().as_encoded_bytes(),
-                b"-c",
-                id.as_bytes(),
-                b"",
-            ]
-            .join(&0),
-        ] {
-            assert!(!legacy_worker_args(&args, &exe, &id));
         }
     }
     #[test]
