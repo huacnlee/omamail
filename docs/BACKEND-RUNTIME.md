@@ -1,77 +1,28 @@
 # Backend runtimes and releases
 
-## Omarchy plugin-owned backend
+## The app links the backend
 
-Omarchy's Plugin Marketplace owns the checkout and its UI. Omamail keeps exactly
-one executable at `${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`. Keeping
-the mutable runtime outside the recursively watched plugin tree prevents an
-installation or CLI operation from reloading the interface. The root `backend-version`
-file requires an exact version, independent of PATH and system packages. Service
-starts one persistent `omamail serve` process over stdin/stdout and checks its
-exact binary version, protocol and API revision before dispatching migrated calls.
-The plugin-local `backend-api.json` describes its required API; it is not fetched
-from main or from a latest-release endpoint.
+The NSH app has no backend process to install, start or check. `ext/omamail-native` links the `omamail` library in `core/` into the app, and the app and the library always build together (`nsh build`). There is no binary pin and no version, protocol or API handshake between them.
 
-On a missing or mismatched runtime, the UI explains what is needed. Installation
-is explicit; simply loading the plugin never starts a download. From the plugin
-directory, `scripts/install-backend.sh` requests the same installation and
-`python3 scripts/backend-runtime.py status` reports local state without network
-access. Linux x86_64 and aarch64 are supported. Installation downloads only from
-the pinned release in `huacnlee/omamail`, verifies SHA256SUMS and the strict archive
-layout, checks the candidate executable's version and atomically replaces the
-old executable. The download itself follows the standard `HTTPS_PROXY` and
-`NO_PROXY` environment variables through urllib's default proxy discovery, so
-networks that require an outbound HTTP proxy can install the backend; the
-release URLs are always HTTPS, the proxy only carries the encrypted transport,
-proxy credentials are presented only to the proxy itself and never to a release
-host even across redirects, and SOCKS-style proxies are not supported. A
-failed installation preserves the working runtime. Checksums protect
-integrity, not against a compromised publisher.
+`ext/omamail-native/src/worker.rs` builds the runtime `omamail::backend::runtime()` returns and starts one thread, `omamail-backend`, that owns one `Session`. It subscribes to notifications before the first request, hands each JSON-RPC frame to `Session::request()` and forwards every notification. The TSX reaches it only through `src/backend/client.ts`: `call(method, params)` resolves with the `result` or throws a `BackendError`, `on(method, fn)` hears notifications such as `mail.updated`, outbox changes and `gmail.settled`, and `shutdown()` runs once at quit. Shutdown waits for the requests already in flight, then calls `Session::shutdown()`, which stops the watches and Gmail queues and saves the outbox and the query cache. Like `serve`, the session owns the outbox and listens on its private socket, so `omamail send` from a terminal hands mail to the running app ([BACKEND.md](BACKEND.md#mail-commands)). If the runtime cannot start, every call fails with code -32010 ("Backend unavailable"); nothing falls back to another path.
 
-`python3 scripts/backend-runtime.py enable-cli` explicitly creates
-`~/.local/bin/omamail` as a symlink to that same private executable; it refuses
-an unrelated file or link. An owned link into a previous Omamail plugin checkout's
-runtime is repointed without modifying that watched directory. Nothing edits PATH. Run `disable-cli` before removing
-the plugin, since Omarchy has no verified uninstall hook for that external link.
-`scripts/uninstall-backend.sh` removes the runtime only. Neither operation deletes
-accounts, drafts, caches or keyring entries. Marketplace checkouts contain no
-symlinks; the optional CLI link is outside the checkout.
+The AI assistant still runs its jobs as separate processes. The library starts them by running the current executable again with a hidden subcommand. Inside the app that executable is the app itself, so `ext/omamail-native/src/entry.rs` recognizes those subcommands before NSH starts and runs the library's own worker instead. No second binary is packaged or located.
 
-For development, `./dev backend` builds the binary and `./dev run` builds then
-prints environment and launch instructions. It does not open or restart the
-shell. `OMAMAIL_BIN` is an explicit development
-path; the installer must never replace that file. Environment changes in your
-terminal do not change an already running shell: follow the printed instructions
-to make the override available when the shell constructs the plugin, restarting
-the shell with that environment when needed. This is not a second Quickshell
-application. Rust mail migration remains incomplete; see [BACKEND.md](BACKEND.md).
+The app uses the same state directories as the `omamail` CLI and the old Omarchy plugin (`core/src/platform/dirs.rs`): accounts, drafts, the outbox, caches and AI jobs need no migration. Credentials use the native store through the library: Keychain on macOS, Secret Service on Linux and Credential Manager on Windows. No secret is placed in process arguments.
 
 ### Forcing a clean reconnect
 
-The running `omamail serve` process holds its Secret Service session, its
-account hosts and their sign-in state for the life of the Quickshell process
-that started it — a credential store that was locked at startup, an API a
-Cloud project only just enabled, or an OAuth grant that changed underneath it
-are not re-checked on their own. `omarchy plugin disable omamail` followed by
-`omarchy plugin enable omamail` reloads the plugin's QML context and opens a
-fresh backend connection without restarting the shell itself, which is enough
-to pick up a state change made outside the plugin's own knowledge. This is
-the fastest way to confirm whether a failure is a stale connection or a real
-one: if disable/enable clears it, it was the former.
+The app's backend session lives as long as the app. It keeps its Secret Service session, its account connections and their sign-in state, so a credential store that was locked at startup, an API a Cloud project only just enabled, or an OAuth grant that changed elsewhere is not re-checked on its own. Quit Omamail and open it again to start a fresh session. If that clears a failure, the old session was stale; if not, the failure is real.
 
-## Standalone bundled backend
+## The standalone `omamail` binary
 
-The standalone Qt host under `app/` uses the same `ui/` composition and Rust business modules through small Quickshell compatibility adapters. A production archive places one exact-version `omamail` backend beside `omamail-app`, together with the QML, manifest, Qt libraries, and platform plugin. Production resource lookup accepts that bundled backend only; it does not search PATH, resolve `latest`, or use `OMAMAIL_BIN`. The environment override and source-resource lookup are enabled only when `OMAMAIL_DEVELOPMENT_RESOURCES=1`, which is what `make app-run` sets for a checkout build.
+The same library also builds the standalone `omamail` executable: the CLI described in [BACKEND.md](BACKEND.md), and `omamail serve`, which speaks the same JSON-RPC over stdin and stdout for a client that runs it as a child process. The NSH app does not use it.
 
-The host starts one persistent bundled `omamail serve` process and performs the protocol, version, and API handshake before mail or calendar calls. Normal shutdown asks the service to quit, drains bounded output, and then terminates the process tree on deadline. `omamail-app --check-resources` verifies the packaged entry points, platform plugin, manifest version, backend architecture, and backend version without opening the UI. `omamail-app --smoke-test READY_FILE` additionally starts the bundled backend, completes the handshake, requests shutdown, and writes readiness metadata only after a clean exit.
-
-Standalone credentials use the native store through typed backend RPC: Keychain on macOS, Secret Service on Linux, and Credential Manager on Windows. Account metadata, cache, state, runtime endpoints, and downloads use the platform directories selected by `src/platform/dirs.rs`; private files and outbox IPC are protected by the platform implementations under `src/platform/`. The host never places a secret in its process arguments. The standalone capability object disables AI, the tray, and operating-system `mailto:` registration while retaining native notifications.
-
-For source development, `make app-build` builds the backend with `--no-default-features --features standalone` and then builds the Qt host. `make app-run` performs that build and launches the host from source resources. These targets require Rust, CMake 3.21 or newer, and Qt 6.5 or newer; the Linux host also needs Qt DBus.
+`core/backend-version` and `core/backend-api.json` belong to that binary's release flow. The app does not read them. Until that flow is ported to NSH packaging, do not bump them, and keep API changes to `core/` behind contract fixtures as before.
 
 ## In-process backend on iOS and Android
 
-iOS apps cannot start child processes, so a mobile host cannot run `omamail serve`. It links the `omamail` library instead and calls the same code in its own process. `omamail::backend::runtime()` builds the runtime `serve` uses; inside it the host creates one `Session`, subscribes with `Session::subscribe()` before its first request, sends JSON-RPC frames to `Session::request()` (or calls `Session::dispatch()` with a method and parameters), and calls `Session::shutdown()` once when it exits. `serve` is built on these same calls, so replies, notifications (`mail.updated`, outbox changes, `gmail.settled`) and the shutdown drain are identical; `tests/protocol.rs` checks the replies match frame for frame.
+The NSH desktop app and the mobile hosts all run the backend in their own process. iOS apps cannot start child processes at all, so a phone could never run `omamail serve`. `omamail::backend::runtime()` builds the runtime `serve` uses; inside it the host creates one `Session`, subscribes with `Session::subscribe()` before its first request, sends JSON-RPC frames to `Session::request()` (or calls `Session::dispatch()` with a method and parameters), and calls `Session::shutdown()` once when it exits. `serve` is built on these same calls, so replies, notifications (`mail.updated`, outbox changes, `gmail.settled`) and the shutdown drain are identical; `core/tests/protocol.rs` checks the replies match frame for frame.
 
 Some desktop features do not exist on phones, and they say so instead of failing quietly. The AI assistant re-launches the backend executable as a worker, so mobile builds report `capabilities.agent = false` and answer `agent.*` with `unknown_method`, as a build without the `agent` feature does. The outbox has no cross-process socket there, because the app is the only process that can own it; a lease conflict answers `outbox_ipc_unsupported`. HEY needs its command-line client and answers `hey_unavailable`. Credentials use the iOS keychain through the same Security framework code as macOS. Android has no secure store yet (it needs the Android Keystore), so every credential call fails as unavailable and nothing is stored. On Android the host sets `HOME` to the app's files directory before the first call; data directories then follow the Linux layout. On iOS they follow the macOS layout inside the app container, with downloads in `Documents`.
 
@@ -85,38 +36,19 @@ CI runs `cargo check --lib` for `aarch64-apple-ios`, `aarch64-apple-ios-sim` and
 
 ## Stable API and old plugins
 
-`backend-version` belongs to the installed plugin revision. A plugin that has not
-been updated continues using that exact private binary, even after main and newer
-plugins move on. Neither the app nor Install CLI selects a global or latest backend.
-Install CLI only links to the plugin's own executable. Old release tags, binaries,
-checksums and API contract assets must remain available and immutable: an old
-plugin must also be able to reinstall its pinned version years later. This preserves
-the plugin/backend pairing; it cannot guarantee that external mail providers will
-never change their services.
+Omarchy plugin releases from before the NSH app pinned one exact `omamail` release and downloaded it from this repository. An installation that has not been updated keeps using that exact private binary. Old release tags, binaries, checksums and API contract assets must therefore remain available and immutable, so an old plugin can still reinstall its pinned version. This keeps each old plugin paired with its backend; it cannot promise that mail providers never change their services.
 
-There are three independent versions: the plugin manifest version, the exact
-backend binary release in `backend-version`, and the integer API revision in
-`backend-api.json`. JSON-RPC framing has its own `protocolVersion`. Internal Rust
-fixes or optimizations can merge without changing the binary pin or API revision;
-users receive those fixes when a later backend release is explicitly pinned.
-QML presentation changes can likewise reuse the existing backend.
+The standalone binary has three version numbers of its own: the release in `core/backend-version`, the integer API revision in `core/backend-api.json`, and the JSON-RPC framing's `protocolVersion`. Internal Rust fixes can merge without changing the API revision.
 
-The contract records the public method inventory and representative request/response
-fixtures. Changes to methods, accepted parameters, returned fields, errors or their
-meaning require contract review, updated fixtures and a higher API revision.
-`system.info.apiVersion` states the API revision. The initial published binary 0.9.0
-predates this field; only that exact version is recognized as legacy API 1. Missing
-revision information from any other version is refused.
+The contract records the public method inventory and representative request and response fixtures. Changes to methods, accepted parameters, returned fields, errors or their meaning require contract review, updated fixtures and a higher API revision. `system.info.apiVersion` states the API revision. The first published binary, 0.9.0, predates that field; only that exact version is read as API 1, and missing revision information from any other version is refused.
+
+The API sections below record when each method or behavior appeared. The TSX still carries the revision checks it inherited from the Qt client (for example `src/mail/mailboxes.ts` and `src/mail/calendar/invitations.ts`), but the linked backend always speaks this checkout's revision, so in the app those checks always pass. `src/features/calendar/controller.ts` states this directly with its `BACKEND` constant.
 
 ## Native AI conversations (API 6)
 
-Settings → AI follows the Omarchy system default or selects Claude, Codex or OpenCode V2, with an optional model override. `agent.providerStatus` resolves the supported provider without starting an agent or creating a job. An unsupported default leaves the AI action visible but disabled; Settings explains the supported choices. Availability checks require API 6 and are repeated while following the system default. Explicit choices bypass the system-default lookup. CLI installation and authentication are still checked when a request starts. Standalone Linux/macOS builds default to OpenCode; Windows does not advertise AI.
+Settings → AI follows the Omarchy system default or selects Claude, Codex or OpenCode V2, with an optional model override. `agent.providerStatus` resolves the supported provider without starting an agent or creating a job. An unsupported default leaves the AI action visible but disabled; Settings explains the supported choices. Availability checks are repeated while following the system default. Explicit choices bypass the system-default lookup. CLI installation and authentication are still checked when a request starts. The AI worker exists only on Linux and macOS; other builds do not offer the `agent.*` methods.
 
-Until the published pin advances from API 5, the plugin retains its existing Claude chat with System default and no model override. The old backend checks Omarchy's default when a job starts; it cannot preflight availability. Reader and composer requests, plain-text insertion and follow-ups remain available. Legacy follow-ups use their original context snapshot; start a new chat to include draft edits. Agent/model selection, current-context updates, proposal cards and paged history remain gated on API 6. The release workflow publishes the new backend before advancing the exact pin.
-
-`make test-agent-published PUBLISHED_BACKEND=/path/to/verified/omamail` exercises that API-5 user flow with production Service/App/AgentRunner components and the actual published binary: reader/composer entry, four jobs, two continuations and insertion. Only the Claude CLI and mail-context loading are synthetic; it asserts no send occurs. Use a checksum-verified download matching `backend-version`, not a source build.
-
-Each conversation retains one native provider session, serializes follow-ups and leaves compaction to that provider. Durable jobs retain per-turn public transcripts and proposal records; API-6 history pages and a rebuildable head index keep polling bounded. Interrupted turns preserve their session and mail context when safe to continue; crashed or unconfirmed workers require a fresh chat. Agent/model changes start new chats, preserve unsent input and retain prior chats as read-only history.
+Each conversation retains one native provider session, serializes follow-ups and leaves compaction to that provider. Durable jobs retain per-turn public transcripts and proposal records; history pages and a rebuildable head index keep polling bounded. Interrupted turns preserve their session and mail context when safe to continue; crashed or unconfirmed workers require a fresh chat. Agent/model changes start new chats, preserve unsent input and retain prior chats as read-only history.
 
 The isolated provider launch preserves model/authentication configuration while excluding unrelated tools, plugins and hooks. The only mail-writing tool records a content-only draft proposal: account, recipients, threading and attachment ownership come from app-owned snapshots. Applying or sending a proposal requires a human action and uses the normal composer/outbox path. Delivery labels follow outbox receipts; the standard send toast provides Undo. Codex advertises the proposal namespace directly even for code-mode-only models, without general tool discovery.
 
@@ -124,11 +56,11 @@ Proposal cards show their saved From, To and optional Cc, Bcc and Reply-To. If r
 
 ## API 7 sender name for IMAP and Outlook
 
-An IMAP or Outlook account entry may carry a top-level `senderName`. `mail.send` uses it, trimmed, as the display name of the mailbox's own address in the From header; aliases keep their own names. An empty or missing value sends the bare address, as before. Starting at API 7 the UI offers the name as "Your name" in Settings → Mailboxes and on the IMAP and Outlook setup pages, and the composer names the From address with it. On an older backend the fields are hidden and the composer leaves the stored value unused, so composer and agent sends both carry the bare address rather than disagreeing.
+An IMAP or Outlook account entry may carry a top-level `senderName`. `mail.send` uses it, trimmed, as the display name of the mailbox's own address in the From header; aliases keep their own names. An empty or missing value sends the bare address, as before. The app offers the name as "Your name" in Settings → Mailboxes (`src/features/settings/mailboxes.tsx`), and the composer names the From address with it.
 
 ## API 6 account-wide IMAP search
 
-IMAP and Outlook text searches, and IMAP address searches, resolve to `search:<criteria>`. IMAP All mail resolves to `search:ALL`; folder queries remain folder-scoped. The IMAP UI keeps Archive on API 5 and exposes All mail starting at API 6. Microsoft 365 text searches resolve to `text:<words>` (see its API 8 section below).
+IMAP and Outlook text searches, and IMAP address searches, resolve to `search:<criteria>`. IMAP All mail resolves to `search:ALL`; folder queries remain folder-scoped. Microsoft 365 text searches resolve to `text:<words>` (see its API 8 section below).
 
 `imap.list` and `imap.listContinue` return an empty `page` plus an opaque work `continuation` until the scan and page assembly have finished. Continue with the same account, query, request token and original `pageToken`, including when a later page needs a new scan. Partial scans are not a globally newest-first page. Expired or mismatched work continuations return `imap_search_expired`; refresh starts a new search.
 
@@ -142,7 +74,7 @@ Search includes aggregate All Mail destinations and excludes Trash/Junk membersh
 
 ## Microsoft 365 mailboxes (API 8)
 
-The `m365.*` methods are the unreleased API 8 step: `m365.signInBegin`, `m365.signInPoll`, `m365.signOut`, `m365.verify`, `m365.list`, `m365.messages`, `m365.read`, `m365.attachment`, `m365.modify`, `m365.trash`, `m365.untrash`, `m365.send`, `m365.saveDraft`, `m365.deleteDraft`, `m365.sendAs`, `m365.invalidate` and `m365.cancel`. A feature gates on API 8 or newer; an older backend answers `backend_needs_update`.
+The `m365.*` methods arrived in API 8: `m365.signInBegin`, `m365.signInPoll`, `m365.signOut`, `m365.verify`, `m365.list`, `m365.messages`, `m365.read`, `m365.attachment`, `m365.modify`, `m365.trash`, `m365.untrash`, `m365.send`, `m365.saveDraft`, `m365.deleteDraft`, `m365.sendAs`, `m365.invalidate` and `m365.cancel`.
 
 Queries are `role:<inbox|sent|drafts|archive|junk|trash> [unseen] [flagged]` or `text:<words>`, which Graph's `$search` reads as words (a text search leaves Trash and Junk out); a Flagged or Unread view lists the Inbox only. `m365.signInBegin` and `m365.signOut` take the Application (client) ID as `clientId`: the backend has no default. `m365.signInBegin` signs in at the tenant the address's domain names and, if Microsoft does not know the domain as a tenant, once more at `organizations`; refreshes ask the same way. `m365.signInPoll` asks Microsoft at most once per interval whatever its caller's rhythm, answers `pending`, `signedIn`, `declined`, `expired` or `failed`, and has stored the refresh token in the keyring before it says `signedIn`; no token or device code is ever returned. A poll whose token request or keyring save outlasts its 24 seconds answers `pending` with the warning `m365_exchange_running` while the exchange goes on, and the same `requestId` answers the outcome afterwards. `m365.signOut` ends the sign-ins under way of that account and `clientId` only. It and `m365.invalidate` wait at most 20 seconds for the mailbox's refresh lane, which a refresh holds while its keyring save waits to be unlocked, and then answer `m365_timeout`: a sign-out so answered may not have been done. `m365.list` answers `{page, rows}` (the rows are the header-only resources of the page, which `m365.messages` serves from memory for a minute) and `m365.cancel` ends a call made with its `requestToken`. `m365.saveDraft {accountId, raw, draftId?}` answers `{saved, warning, id}` like `imap.saveDraft` (plus the new draft's `id`), or fails with `m365_draft_unconfirmed` when Graph may have made the draft without saying so, and `m365.deleteDraft {accountId, id}` answers `{}` or refuses anything that is not a draft with `m365_not_a_draft`. Calendar requests for an `m365:` account take their Graph token from the same sign-in.
 
@@ -150,7 +82,7 @@ Queries are `role:<inbox|sent|drafts|archive|junk|trash> [unseen] [flagged]` or 
 
 Release backends compile in a Google desktop OAuth client from the repository secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The release workflow passes them as `OMAMAIL_GOOGLE_CLIENT_ID` and `OMAMAIL_GOOGLE_CLIENT_SECRET` only to the `cargo build --release` steps; test steps, CI and development builds never receive them and ship no client. Every release contract run passes `--shipped-google-client`, so a missing or malformed secret fails the release instead of publishing a build without the client. Google treats a desktop client's secret as not confidential: this keeps the values out of the source tree and logs, not out of the binary.
 
-`auth.builtinClient {}` answers `{clientId, clientSecret}`, both empty strings when the build ships none. The UI asks once per account manager on API 9 or newer and validates the answer itself. The user's own client in `credentials.json` always wins, then a client shared from another account, then the shipped one; the backend's Gmail token refresh resolves the same order. Only an absent file, or one naming no usable client, falls back to the shipped client: an unsafe, oversized or malformed file stays an error.
+`auth.builtinClient {}` answers `{clientId, clientSecret}`, both empty strings when the build ships none. The app asks for it in `builtinClient()` (`src/features/accounts/flows.ts`) and validates the answer itself (`src/mail/providers/google.ts`). The user's own client in `credentials.json` always wins, then a client shared from another account, then the shipped one; the backend's Gmail token refresh resolves the same order. Only an absent file, or one naming no usable client, falls back to the shipped client: an unsafe, oversized or malformed file stays an error.
 
 ## Calendar error diagnostics (API 10)
 
@@ -158,7 +90,7 @@ Calendar RPC errors retain their existing `code` and `message` and may add `data
 
 Only fixed provider/operation/stage names, an integer HTTP status, exact allowlisted Google/Graph reason codes and known field names cross the RPC boundary. Google field hints come from an allowlisted `location` or an exact known fixed message (for example an invalid start time zone maps to `start.timeZone`). Raw error messages, response headers, URLs, account/event IDs, tokens and mail content are excluded. Error bodies are read only up to 16 KiB with a one-second diagnostic deadline; oversized, malformed, truncated or stalled bodies preserve the original status/error without a reason. Each RPC owns an async-local capture scope, including uploaded calls, so concurrent requests and cancelled scopes cannot share error context. Direct Rust library callers retain string errors.
 
-The invitation card uses these details only on API 10 or newer, with a generic fallback on older backends. It distinguishes authentication, refused access, invalid requests, conflicts, throttling and temporary failures; uncertain saves advise refreshing before retrying. A failure also exposes the existing status-bar diagnosis action. Retry remains explicit and calendar-only, without sending another RSVP. Diagnostic recording and report regeneration independently allowlist the structured fields, so an edited or older log cannot inject provider text into a report.
+The invitation card (`failure()` in `src/mail/calendar/invitations.ts`) uses these details. It distinguishes authentication, refused access, invalid requests, conflicts, throttling and temporary failures; uncertain saves advise refreshing before retrying. A failure also exposes the existing status-bar diagnosis action. Retry remains explicit and calendar-only, without sending another RSVP. Diagnostic recording and report regeneration independently allowlist the structured fields, so an edited or older log cannot inject provider text into a report.
 
 One-off invitation exports (including individual recurring occurrences) send their already-resolved UTC timestamps without the original ICS `TZID`. Inline `VTIMEZONE` names may be Windows/custom identifiers rather than Google-compatible IANA zones; omitting that redundant label preserves the exact start/end instants. Recurring series still require a named zone so future occurrences retain daylight-saving behavior; unresolved times remain refused. This payload correction also works with API 9.
 
@@ -166,212 +98,54 @@ Google private imports require the destination calendar to be the organizer or a
 
 ## CalDAV password checks (API 10)
 
-`calendar.verify` is the API 10 method. It takes `{source: {kind: "caldav", url, username}, password}` and tries that password once against the calendar, a `PROPFIND` at depth 0 under the same HTTPS-only, no-redirect client and 24-second deadline as every other CalDAV request. It answers `{verified: true}` or refuses with `calendar_auth_refused`, `calendar_not_found`, `calendar_redirected`, `calendar_request_failed`, `calendar_network_failed` or `calendar_timeout`, with the usual `error.data` context; input that fails the address or password rules is refused before any connection. The backend neither reads nor writes the keyring here: the password travels only to the configured origin, and the frontend stores it, with the calendar, only after this answer. The frontend gates on `CalendarController.backendCanVerifyCalendars()` (API 10 or newer). An older backend keeps the earlier unchecked save, since the plugin pins its binary and would otherwise lose the feature until the next release, and the success message says the password was not checked.
+`calendar.verify` is the API 10 method. It takes `{source: {kind: "caldav", url, username}, password}` and tries that password once against the calendar, a `PROPFIND` at depth 0 under the same HTTPS-only, no-redirect client and 24-second deadline as every other CalDAV request. It answers `{verified: true}` or refuses with `calendar_auth_refused`, `calendar_not_found`, `calendar_redirected`, `calendar_request_failed`, `calendar_network_failed` or `calendar_timeout`, with the usual `error.data` context; input that fails the address or password rules is refused before any connection. The backend neither reads nor writes the keyring here: the password travels only to the configured origin, and the frontend stores it, with the calendar, only after this answer. The app calls it from `verifyCalDavPassword` in `src/features/calendar/controller.ts`.
 
 ## Gmail grant refusals (API 10)
 
-When Google's token endpoint refuses a Gmail refresh with HTTP 400 `invalid_grant`, the backend answers `gmail_signed_out` (API 9 answered `gmail_http_failed`), from `auth.token` and from every Gmail method that refreshes on its own. Methods and parameters are unchanged. The contract has no case for it, because only Google's token endpoint produces it; the Rust runtime tests cover it against a local server. The plugin treats a `gmail_signed_out` from `auth.token` as a revoked grant only from API 10 on: it signs the mailbox out and asks to sign in again, and keeps the grant in the keyring, so the next launch hears the same refusal rather than a missing entry. Signing in replaces the grant and signing out deletes it; no refusal deletes one. A Gmail method that hears it mid-session reports the error and leaves the session as it is until the next `auth.token`. A missing or unreadable keyring entry is not a revocation: a Secret Service whose default collection does not exist yet reads every entry as missing, so the plugin retries.
+When Google's token endpoint refuses a Gmail refresh with HTTP 400 `invalid_grant`, the backend answers `gmail_signed_out` (API 9 answered `gmail_http_failed`), from `auth.token` and from every Gmail method that refreshes on its own. Methods and parameters are unchanged. The contract has no case for it, because only Google's token endpoint produces it; the Rust runtime tests cover it against a local server. Signing in replaces the grant and signing out deletes it; no refusal deletes one. A Gmail method that hears it mid-session reports the error and leaves the session as it is until the next `auth.token`. In the app, `gmailSignedIn` in `src/features/accounts/flows.ts` reads `gmail_signed_out` and `credential_missing` from `auth.token` as signed out and anything else as unknown; it does not delete the grant.
 
 ## Released and unreleased: one step ahead of the pin
 
-Backends ship in batches, not per merge, so `main` may implement an API the pinned
-binary does not have yet. The contract names that difference and nothing more:
+Backends ship in batches, not per merge, so `main` may implement an API that the last published binary does not have yet. `core/backend-api.json` names that difference and nothing more:
 
-- `releasedApiVersion` is the API the pinned, published binary speaks; the runtime
-  handshake accepts exactly that. `apiVersion` is what this checkout's Rust
-  implements, equal to it or **one step ahead** — a second step is refused by
-  `check-api` until the first is released, which is what makes releases batches.
-- `unreleased.methods` and `unreleased.cases` name what the step adds: methods
-  only the step has, and contract cases only a binary from this checkout passes.
-  A case on an unreleased method is itself unreleased. With `apiVersion` equal to
-  `releasedApiVersion` both lists are empty.
-- CI runs two gates on every revision, and the required check needs both. The
-  **Released backend gate** downloads the pinned release and checks that its
-  contract equals the checkout's released view (`check-api --published`), then
-  runs the released view of the fixtures against that binary
-  (`test_backend_api.py --released`). The **Unreleased API gate** builds the
-  backend from the revision and runs the whole contract and the native agent
-  bridge against it. A merge into `main` can therefore carry an unreleased step
-  and still leave every fresh install working. A failed gate leaves a note,
-  and `ci-report.yml` — run after CI, with the one write permission the CI run
-  of a fork cannot have — posts it on the PR as a comment saying which gate
-  failed and what to do, updating the same comment on every push.
-- The plugin's runtime status reports `latestApiVersion` and `unreleasedMethods`
-  beside the required revision. `Backend` exposes `needsUpdate` when the
-  connected binary lacks the step, and refuses a call to an unreleased method on
-  it with `backend_needs_update` (code -32012) — so a feature that forgot to
-  look before asking fails the way it already handles, never as a request the old
-  binary would misread. `Service.backendNeedsUpdate` is an overall update indicator, not a per-feature gate. A feature checks the connected backend against the fixed API revision that introduced it: event suggestions use `Service.backendCanSuggestEvents`, true only for a ready backend with API 2 or newer. That requirement remains correct before release, after the pin advances, and when a later unrelated API is introduced.
-- `tests/test_source.sh` permits calls only to declared backend methods. QML regression tests exercise fixed feature requirements across connected API versions and changing release metadata; a release must not require deleting compatibility checks from QML.
-- The pin commit made by a release folds the step: `releasedApiVersion` becomes
-  `apiVersion`, both `unreleased` lists empty. Published contracts from before
-  the split are read as all released.
+- `releasedApiVersion` is the API the published binary in `core/backend-version` speaks. `apiVersion` is what this checkout's Rust implements: equal to it, or **one step ahead**. `check-api` in `omarchy/scripts/package-backend.py` refuses a second step until the first is released, which is what makes releases batches.
+- `unreleased.methods` and `unreleased.cases` name what the step adds: methods only the step has, and contract cases only a binary from this checkout passes. A case on an unreleased method is itself unreleased. With `apiVersion` equal to `releasedApiVersion` both lists are empty.
+- The release folds the step: `releasedApiVersion` becomes `apiVersion` and both `unreleased` lists empty. Published contracts from before the split are read as all released.
+
+The NSH app is not part of this: it links the checkout's backend, so it always has the newest step. CI on this branch no longer runs the released and unreleased contract gates; the contract runner `core/tests/test_backend_api.py` and `check-api` run in the release workflow only.
+
+For a change that needs a new API step: raise `apiVersion` one step past `releasedApiVersion` and name the new methods and cases under `unreleased`. The contract runner exercises the contract's cases and checks the advertised inventory. It covers representative mail processing and cached reader behavior, not every provider operation. Reviewers must extend fixtures for newly used behavior; passing them does not prove complete semantic compatibility. Contract fixtures, API revisions, workflows and repository policy changes require trusted review.
 
 ## Release before pin
 
-Run `make publish VERSION=MAJOR.MINOR.PATCH` on a clean main synchronized with origin. Without `VERSION`, it prepares the next patch version. The command creates `release/X.Y.Z`, prepares Cargo.toml, the omamail Cargo.lock record and manifest.json, and opens one PR targeting main. It pushes only that release branch, then follows its exact Release run. It never pushes main or a tag. `backend-version` and the released API contract stay unchanged during preparation.
+Releasing is pending NSH packaging. The app is to be released as NSH packages; the release workflow (`.github/workflows/release.yml`), the installers (`omarchy/install.sh`, `omarchy/install.ps1`) and `omarchy/scripts/publish.sh` still describe the Qt-era release, in which the standalone binary was published and then pinned in `core/backend-version`. They are not expected to work on this branch and are being rewritten in their own pull request, which will document the new flow here.
 
-A push to `release/**` starts the authoritative Release workflow. Only the exact `release/X.Y.Z` branch matching Cargo's version is accepted; dispatching on main, a feature branch or a tag is refused. The workflow builds both plugin backends and all three standalone archives, creates `vX.Y.Z`, publishes the complete asset set and installers, verifies the public downloads, then commits `backend-version` and the folded API contract on the same release branch. The pin commit changes only those two files, both excluded from the publication push trigger, so it starts PR checks without another publication.
-
-The required **Published backend merge gate** refuses a release PR until its pin equals the prepared version, then verifies the actual released binaries and contract as usual. Once the pin commit and required checks pass, review and merge that PR once: main receives the version metadata and working backend dependency together. The command does not merge automatically. Features wait until the connected backend meets their fixed minimum API revision, independently of whether that revision is currently labelled released or unreleased.
-
-The repository's active main ruleset requires a PR and the Published backend merge gate and prohibits deletion and force pushes. Administrators currently have a pull-request-only bypass: direct pushes remain blocked, but an administrator can explicitly bypass checks when merging a PR. Never enable an always-on bypass or use the PR bypass for routine releases; neither a local push nor CI should advance main directly.
-
-The workflow tests and builds locked native musl binaries on Linux x86_64 and
-aarch64, executes each version probe, rejects dynamic ELF dependencies, and
-packages `omamail-linux-x86_64.tar.gz` and `omamail-linux-aarch64.tar.gz`. Each
-contains exactly one regular executable named `omamail`. A combined SHA256SUMS
-and `backend-build.json` plus `backend-api.json` are published with both assets only
-after both build jobs pass. The release checks the new contract against the pinned
-release: a changed contract requires a higher API revision. Each native binary
-must also pass the contract runner before packaging.
-Both native build jobs produce identical source fingerprints before publication. The new draft
-release is completed, made public, downloaded again and verified before a
-follow-up commit updates backend-version and folds backend-api.json on the release branch.
-
-The same workflow builds `omamail-app-macos-aarch64.tar.gz` on macOS 15, `omamail-app-linux-x86_64.tar.gz` on Ubuntu 22.04 (the glibc 2.35 floor), and `omamail-app-windows-x86_64.zip` on Windows Server 2022. Each native job runs the standalone Rust suite, its platform credential contract, the Qt C++ tests, the standalone QML suite, the backend API contract, package validation, installer rollback tests, resource checks, and a live bundled-backend smoke test before uploading its archive. `publish-and-pin` depends on all five build jobs, creates one combined `SHA256SUMS`, publishes `install.sh` and `install.ps1` with the archives, downloads every public asset again, and only then advances the plugin backend pin.
-
-The Linux standalone release is tar.gz only; no AppImage is built or published. Standalone archives are currently unsigned. The macOS app is not notarized, so `install.sh` clears `com.apple.quarantine` recursively from the exact verified staging bundle before the transactional replacement; an `xattr` failure aborts without replacing an existing install. The Windows binaries are not code signed, so its platform publisher warning remains a release limitation rather than a property the validation jobs can clear.
-
-Publication is serialized. Existing releases and tags are never overwritten;
-remote lookup errors fail closed. The branch must still equal the dispatch
-revision before publication and before the pin commit. A normal fast-forward
-push rejects concurrent movement; there is no force push or branch-protection
-bypass. If publication succeeds but the branch moves or rejects the pin push,
-the release remains published and the pin stays unchanged. Inspect that failure
-and verify the already-published assets before preparing a reviewed pin-only change on the same release PR; rerunning publication refuses the existing version. If the branch push succeeded but PR creation failed, open the PR for that existing branch instead of invoking publish again. If tag creation succeeded but publication failed, inspect the retained tag and any draft; never delete or reuse a published version. Prepare a new release version when the existing attempt cannot be safely completed.
-
-Repository setup must provide `RELEASE_TOKEN`, an appropriately scoped GitHub App token or fine-grained token with contents write permission for this repo, permitted to push release branches and create tags and releases. Local `gh` needs permission to push the branch and open its PR. The default GITHUB_TOKEN cannot be used for the pin push because it suppresses subsequent workflow triggers. See [GitHub's workflow triggering rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow). Release runs only on versioned release branches, by push or explicit dispatch; restrict who can push these trusted branches and tags. PR CI has read-only permissions and never
-receives that secret. Require **Published backend merge gate** in branch
-protection. That check reads the plugin's exact pin independently of Cargo's
-current development version, verifies both published native archives, compares the
-published API contract with the PR's contract, and runs `tests/test_backend_api.py`
-against each actual published binary using the PR's production QML Wire/Chunks
-codecs. It also checks that Rust's public method inventory matches the contract.
-A PR cannot satisfy this check merely by building a newer local executable.
-
-Source fingerprints in `backend-build.json` remain release provenance. They bind
-both release builds to the same Rust sources, resources and build inputs; they do
-not require future PRs to contain identical Rust source. Cargo and Cargo.lock must
-still agree for builds, but their development version need not equal the pinned
-published binary.
-
-For a combined QML/Rust PR requiring an API change: raise `apiVersion` one step
-past `releasedApiVersion`, name the new methods and cases under `unreleased`, and
-let the feature wait until the connected backend reaches that feature's fixed minimum API revision. Both gates run on the PR and
-it merges into `main` without a release; the next release from `main` publishes
-the binary and its pin commit folds the step. Runtime handshake still requires the
-exact plugin-local binary pin, even when a newer release reports the same API; at
-that version it accepts the released API or the one unreleased step, so a local
-build of the checkout (`make install`) runs the step in the desktop while the
-published binary of the same version keeps working without it.
-
-The contract runner exercises the contract's cases and checks the advertised
-inventory — the released view against the pinned binary, everything against a
-binary built from the checkout. It covers representative mail processing and cached reader behavior,
-not every provider operation or every possible QML argument. API reviewers must
-extend fixtures for newly used behavior; passing these tests is not a proof of
-complete semantic compatibility. Contract fixtures, API revisions, workflows and
-repository policy changes require trusted review. These scripts do not change
-repository settings.
-
-Bootstrap status: v0.9.0 contains the optimized x86_64 and aarch64 static
-backends. The published packages were checked against the successful native CI
-artifacts from f38c2ac; its source fingerprint was added and downloaded again
-before advancing the pin. v0.8.2 remains unchanged. The first CI publication
-attempt failed because RELEASE_TOKEN lacked permission to create a release;
-the release was completed separately. Future automated publication still requires
-a contents-write token as described above.
+Until then, never push `main` directly and never tag by hand; tags alone do not publish. Keep `omarchy/scripts/release-notes.sh` aggregating the `## Release Notes` sections of merged pull requests.
 
 ## Standalone security gates
 
-A standalone release requires successful automated native CI for macOS arm64, Linux x86_64, and Windows x64. Those jobs provide evidence for a scoped security assessment; a green job does not itself establish a security verdict or prove that every boundary below was exercised. Assess the actual coverage, including fixture limitations, before reporting **PASS**, **BLOCK** or **NOT VERIFIED** for an affected boundary. A demonstrated failure blocks publication. Contributor and reviewer checks follow [CONTRIBUTING.md](../CONTRIBUTING.md#before-you-write-anything), which requires neither contributor hands-on testing nor local macOS/Windows runs.
+Every build of the app and the standalone binary must hold these boundaries. CI jobs provide evidence for a scoped security assessment; a green job does not itself establish a security verdict or prove that every boundary was exercised. Assess the actual coverage, including fixture limitations, before reporting **PASS**, **BLOCK** or **NOT VERIFIED** for an affected boundary. A demonstrated failure blocks a release. Contributor and reviewer checks follow [CONTRIBUTING.md](../CONTRIBUTING.md#before-you-write-anything), which requires neither hands-on testing nor local macOS or Windows runs.
 
-| Boundary | Evidence to assess in native CI results |
+| Boundary | Evidence to assess |
 | --- | --- |
-| Credentials | Native Keychain, Secret Service, or Credential Manager success, missing-item, denial, validation, and bounded-prompt cases; secrets absent from argv, settings, and diagnostics. |
-| Untrusted mail and URLs | Plain-text metadata, HTML/resource sanitization, public-address DNS pinning, HTTPS/TLS, redirect, proxy, deadline, and response-size cases using controlled targets. |
-| Process argv and stdin | Hostile arguments preserved as one argument, exact stdin bytes including NUL, bounded stdout/stderr, timeout, cancellation, and descendant termination. |
-| Private files and outbox IPC | Platform directory resolution, unsafe ancestor/link/reparse refusal, ownership and ACL checks, atomic replacement/rollback, locks, peer identity, and oversized IPC frames. |
-| Archive installation | SHA-256 verification before extraction, strict single-root layout and architecture/version checks, traversal/link/special-file and size refusal, transactional upgrade rollback, and uninstall preserving user data. |
-| Notifications | Plain-text or escaped markup handling, NUL refusal, bounded private activation routes, stale/forged route refusal, cold and warm activation, and no secret or route token in process arguments. |
-| Network requests | Every mail/calendar request keeps credentials on the configured origin or validated public target, validates bytes before process start, applies TLS/protocol/redirect/proxy policy, and has a deadline and response bound. |
+| Credentials | Native Keychain, Secret Service or Credential Manager success, missing-item, denial, validation and bounded-prompt cases; secrets absent from argv, settings and diagnostics. |
+| Untrusted mail and URLs | Plain-text metadata, HTML and resource sanitization, public-address DNS pinning, HTTPS/TLS, redirect, proxy, deadline and response-size cases using controlled targets. |
+| Process argv and stdin | Hostile arguments preserved as one argument, exact stdin bytes including NUL, bounded stdout and stderr, timeout, cancellation and descendant termination. |
+| Private files and outbox IPC | Platform directory resolution, unsafe ancestor, link and reparse refusal, ownership and ACL checks, atomic replacement and rollback, locks, peer identity and oversized IPC frames. |
+| Opening files | Only files the backend stored to open, or saved downloads, are opened; other folders, links out of them and types the desktop would run are refused (`ext/omamail-native/src/lib.rs`). |
+| Network requests | Every mail and calendar request keeps credentials on the configured origin or a validated public target, validates bytes before a process starts, applies TLS, protocol, redirect and proxy policy, and has a deadline and a response bound. |
 
-The native standalone job runs this platform gate before its archive can become an artifact. It must run `cargo test --locked --no-default-features --features standalone`, the ignored native credential contract, CTest, the standalone QML tests, package and installer tests, `--check-resources`, `--smoke-test`, and the packaged backend API contract. The release's `publish-and-pin` job depends on all three platform jobs; missing or failed native evidence cannot be replaced by manually uploading an archive.
+CI (`.github/workflows/ci.yml`) runs the evidence on every pull request:
 
-Current integrated-checkout audit on 2026-09-14: macOS arm64, Linux x86_64, and Windows x64 are **NOT VERIFIED** until the corresponding `release/**` native jobs complete for this exact commit. Local macOS results may establish part of the boundary evidence, but they do not exercise Linux Secret Service/DBus, Windows Credential Manager/named pipes/ACLs, or clean hosted-runner install and notification activation on those systems. Do not treat this documentation commit or the presence of workflow definitions as a hosted-runner result.
+- **Standalone backend** on Linux, macOS and Windows: the native platform tests (`core/tests/platform_native.rs`), the process tests, and a check that a build without the `agent` feature has no AI worker or `agent.*` methods.
+- **Native credential contracts** (`.github/workflows/native-credentials.yml`) on Ubuntu 22.04, macOS 15 and Windows Server 2022.
+- **Mail core (Linux)**: the library's unit tests and the integration tests in `core/tests/`.
+- **NSH app module**: `cargo fmt`, `clippy` and `cargo test` in `ext/omamail-native`.
+- **NSH app (check and tests)**: `nsh check`, `scripts/check-keys.ts`, `scripts/check-native-members.ts` and the headless `nsh test` suite.
+- **Mobile backend**: `cargo check --lib` for iOS and Android.
+
+The CI jobs run on Linux, macOS and Windows hosted runners, but only the backend and credential jobs run on all three; the app's TSX suite runs headless on Linux. Package and installer checks for the NSH app do not exist yet; they belong to the packaging work.
 
 ## Local verification
 
-For the standalone host, run `make app-build` to build and `make app-run` to launch from source resources. Linux and macOS builds include the native AI feature; Windows continues to omit its runtime capability. `make test-app-qml` builds the host and runs its composition test. A fuller local native check is:
-
-```sh
-cargo test --locked --no-default-features --features standalone
-cmake -S app -B build/app -DOMAMAIL_BACKEND="$PWD/target/debug/omamail"
-cmake --build build/app --parallel
-ctest --test-dir build/app --output-on-failure
-QT_QPA_PLATFORM=offscreen qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import ui
-```
-
-Run the applicable local checks on Linux, following [CONTRIBUTING.md](../CONTRIBUTING.md#before-you-write-anything). These commands establish evidence only for the operating system that ran them. Automated package and installer acceptance uses the archive produced on its native release runner; macOS and Linux use `app/scripts/package-release.sh`, while Windows uses `app/scripts/package-release.ps1`.
-
-`make install-plugin` removes the old private backend and its local-build marker,
-then links and reloads only the plugin. It does not compile or download a backend.
-Accounts, drafts and caches are preserved. Use it to test a fresh backend setup:
-
-```sh
-make install-plugin
-```
-
-Then open Omamail and choose Install backend. Any optional CLI symlink still points
-to the same private binary location and works again after installation. Ensure the
-shell has no `OMAMAIL_BIN` development override, which would otherwise select that
-binary instead of testing the missing-runtime screen.
-
-To try the latest checkout in the desktop, run `make install`. It first builds
-with `cargo build --locked --release` into this checkout's `target/` directory,
-regardless of `CARGO_TARGET_DIR`, then stages and verifies that binary before
-atomically replacing `${XDG_DATA_HOME:-~/.local/share}/omamail/bin/omamail`. When its version is ahead of the
-release pin, it must match the Git checkout's Cargo package version. The explicit
-local installation records a private
-`${XDG_DATA_HOME:-~/.local/share}/omamail/local-build.json` marker binding
-that version, the current release pin and the installed binary's SHA-256.
-Status and CLI activation accept this local version only while the checkout,
-Cargo version, pin and binary bytes still match. No tracked pin is changed.
-Only after
-that succeeds does it link the plugin and restart the shell. It does not need
-published backend assets. Failed builds or version checks preserve the old runtime.
-
-`make install-backend-local` performs only the build and local runtime replacement.
-Restart the shell afterwards to replace an already running backend process.
-Unset `OMAMAIL_BIN` in the shell's startup environment to use the private runtime.
-The separate `scripts/install-backend.sh` command remains the release downloader:
-it always uses `backend-version`, ignores the local override when selecting a
-release, and clears the marker after verification as part of installation.
-Uninstall also removes the marker. Local version overrides require Python 3.11
-or newer for Cargo TOML parsing; normal pinned installations do not.
-
-Run `make test-local` on a machine with Rust, Qt 6 test tooling and Quickshell.
-It runs the existing Rust, JavaScript, transport/security and offscreen QML
-suites, then `make test-backend-process` builds the development executable and
-tests the production QML bridge against it using real Quickshell pipes.
-The integration test uses temporary HOME/XDG directories and synthetic account
-settings. It checks version/protocol handshake, concurrent request correlation,
-error responses, credential-free account summaries, a binary message larger
-than 1 MiB through upload and response chunks, and confirmed process shutdown.
-It does not open the desktop plugin or contact mail providers.
-
-`make test-backend-process` can also be run on its own. These local checks do
-not verify live mailbox compatibility, graphical plugin installation, or release
-availability. `make qml-check` additionally needs the installed Omarchy shell's
-QML imports; inspect its diagnostics even when qmllint returns success.
-
-Local synthetic tests cover archive shape, checksum corruption, version drift,
-preparation without pin advancement, pin-only commits and moved-branch refusal.
-Historical pre-release checks: a native aarch64 Debian Bookworm container with Rust 1.100.0-nightly
-(2026-09-03) passed locked musl tests and a release build; its version probe
-returned 0.8.2 and ELF inspection found no interpreter or dynamic section.
-The local x86_64 musl test process crashed under Docker emulation. Subsequent
-v0.9.0 native Actions builds and published-asset verification supersede that
-architecture gap, as recorded above. Future releases still require their own
-hosted checks; passing local tests alone is not release availability.
+Run `make validate` (`nsh check`, the key and native-member drift checks, `nsh build` and `nsh test`) after TSX or behavior changes, and `make run` to launch the app from the checkout. Run `cargo test` in `core/` for mail-library changes and in `ext/omamail-native` for the native module. These commands establish evidence only for the operating system that ran them. They do not verify live mailbox compatibility or release availability.

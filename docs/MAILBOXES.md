@@ -47,7 +47,7 @@ Before signing in, enable IMAP in Outlook.com: **Settings > Mail > Forwarding an
 
 Then choose **Add mailbox**, **Microsoft 365**, enter the work address and the Application (client) ID and press **Sign in with Microsoft...**. The window shows a code and opens Microsoft's page; enter the code there and sign in with the work account. Omamail signs in at the organization whose domain is the one after the `@` of your address, which is what a single-tenant registration needs; where that domain is not a domain of the organization (a vanity address, say), it asks once more without naming one, which only a multitenant registration answers. The account you sign in as may have another name than your address (an alias or a hybrid account): it is accepted when its email, preferred user name or UPN is the address you typed. If your organization does not let people approve apps themselves, an administrator has to approve the registration first (*Grant admin consent* on its API permissions page). A browser already signed in to another Microsoft account may offer that one: open the page in a private window instead, using the address shown beside the code.
 
-The rail is Outlook's: Inbox, Unread, Flagged, Drafts, Sent and, where the mailbox has the folders, Archive, Junk and Trash; Unread and Flagged list the Inbox only. Archive moves a message out of the Inbox into the Archive folder. What Microsoft 365 does not have here, the panel does not offer: no labels or folders of your own, no conversations and no "report spam". A saved draft goes to the mailbox's Drafts folder; one opened from there replaces its old copy when it is saved again, and is deleted once it is sent. Microsoft files the sent copy itself, and the calendar is the Microsoft one. Signing out, or removing the mailbox once you have confirmed it, deletes the saved sign-in from the keyring.
+The rail is Outlook's: Inbox, Unread, Flagged, Drafts, Sent and, where the mailbox has the folders, Archive, Junk and Trash; Unread and Flagged list the Inbox only. Archive moves a message out of the Inbox into the Archive folder. What Microsoft 365 does not have here, Omamail does not offer: no labels or folders of your own, no conversations and no "report spam". A saved draft goes to the mailbox's Drafts folder; one opened from there replaces its old copy when it is saved again, and is deleted once it is sent. Microsoft files the sent copy itself, and the calendar is the Microsoft one. Signing out, or removing the mailbox once you have confirmed it, deletes the saved sign-in from the keyring.
 
 **HEY** needs no address and no password. HEY publishes no IMAP, no POP and no
 public API, so Omamail reads it through the [HEY CLI][hey-cli] client 37signals
@@ -72,7 +72,7 @@ Paper Trail. **No Sent** — HEY's API has one, but `hey` does not serve it yet:
 there is no `hey box sent`, and search only scopes to the Imbox, the Feed, Paper
 Trail and Trash. When the client gains it, it is one more line in the rail.
 
-What HEY does not have, the panel does not offer: **no star** and **no
+What HEY does not have, Omamail does not offer: **no star** and **no
 archive**, because HEY moves a thread to one of those boxes instead, and a key
 that quietly meant "file this in Paper Trail" would be a promise this could not
 keep — `e` and `s` say so rather than pretending. Reading, marking read,
@@ -92,12 +92,12 @@ expose — so they stay in HEY's own app, which the setup page links to.
 
 Where a server offers JMAP and IMAP alike, this is the better of the two. A JMAP row is a *conversation* rather than a single message, and the reader draws a rail of that conversation's other messages down its side — `n` and `p` walk it. Mail also arrives when the server sends it rather than when the next check comes round: every signed-in JMAP mailbox holds one event stream open whether or not the window is, so a message that lands on the server is in the list about a second later.
 
-What your particular server does not have, the panel does not offer — and here that is a fact about your account rather than about the protocol. A server with no Archive mailbox has no Archive row and no `e`; one whose Junk folder trains nothing has no "report spam"; a credential that cannot submit mail makes the mailbox read-only. Each of them says which it is instead of failing after you have pressed it.
+What your particular server does not have, Omamail does not offer — and here that is a fact about your account rather than about the protocol. A server with no Archive mailbox has no Archive row and no `e`; one whose Junk folder trains nothing has no "report spam"; a credential that cannot submit mail makes the mailbox read-only. Each of them says which it is instead of failing after you have pressed it.
 
 
 **IMAP** is an address and a password. Fastmail, iCloud, Zoho, GMX, Proton via its Bridge, or a server of your own: the servers are filled in from the address for the ones this knows, and shown behind a disclosure so they can be corrected for the ones it does not. Most providers want an *app password* rather than the one you sign in to their website with, and the form says so before you find out the hard way.
 
-What IMAP does not have, the panel does not offer: no labels, no server-side
+What IMAP does not have, Omamail does not offer: no labels, no server-side
 conversations, no "report spam" — moving a message to a Junk folder teaches a
 server nothing, and a button that quietly meant that would be a promise this
 could not keep. Archive appears only when the server has an archive folder to
@@ -106,29 +106,26 @@ server is set.
 
 The sent copy is filed by Omamail rather than left to the server: a message handed to SMTP submission lands nowhere on its own. It goes to the server's own Sent folder, named by the server rather than guessed, and arrives already marked read; a server that reports no Sent folder holds no copy, and the status row says so. One thing worth knowing: a Gmail account read over IMAP has Google file its own copy of anything sent through Gmail's SMTP, so those accounts hold two.
 
-If you enabled the optional CLI link, first run
-`python3 scripts/backend-runtime.py disable-cli` from the plugin directory.
-Omarchy has no verified uninstall hook to remove that external link for you.
-Then remove the plugin:
+## Removing Omamail
+
+Turn off Settings > Default mail client first if you turned it on: that removes the managed block from `~/.config/hypr/bindings.lua`. The mailto default stays with Omamail's own entry, because Omarchy ships no handler to give it back to. Then remove the app the way you installed it. If the Omarchy bar widget from the old plugin is still installed, remove it too:
 
 ```bash
 omarchy plugin remove omamail
 ```
 
-That removes the plugin and its private runtime. Account data, caches, drafts
-and keyring entries stay in place. Removing those is separate and up to you:
+Account data, caches, drafts and keyring entries stay in place. Removing those is separate and up to you:
 
 ```bash
 secret-tool clear service omamail    # refresh tokens and JMAP and IMAP passwords
 hey auth logout                      # the HEY session, if you added one
 rm -rf ~/.config/omamail             # the OAuth client and account list
 rm -rf ~/.cache/omamail              # cached mail
-rm ~/.local/share/applications/omamail.desktop
+rm -rf ~/.local/state/omamail        # the outbox and other app state
+rm ~/.local/share/applications/dev.huacnlee.omamail.mailto.desktop
 ```
 
-Signing out from inside the app clears the keyring entry on its own. The plugin
-never edits your shell, Hyprland or theme configuration. The keybinding above
-and the mailto desktop file are yours to add and yours to remove.
+Signing out from inside the app clears the keyring entry on its own. Omamail never edits your shell or theme configuration, and edits your Hyprland bindings only through the Default mail client setting.
 
 
 [Back to installation](../README.md#install)

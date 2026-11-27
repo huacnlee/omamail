@@ -1,8 +1,8 @@
 # Omamail Interface Design
 
-Omamail follows the Omarchy visual language and uses GPUI and GPUI Component as its default product and interaction design model. Their principles apply unless a mail-specific, Qt, or shell constraint gives a concrete reason to adapt them. This document defines that translation and the detailed behavior of the window; it does not make the application look like GPUI Component.
+Omamail follows the Omarchy visual language and uses GPUI and GPUI Component as its default product and interaction design model. Their principles apply unless a mail-specific, NSH, or shell constraint gives a concrete reason to adapt them. This document defines that translation and the detailed behavior of the window; it does not make the application look like GPUI Component.
 
-The upstream reference is [GPUI Component Design Guides](http://longbridge.github.io/gpui-component/docs/design-guides). Read it as the general design standard; this document records Omamail's mail-specific application, Qt and shell constraints, and Omarchy visual boundary. Do not duplicate the entire upstream guide here: keep shared principles there and document only the interpretation or exception that future Omamail work needs.
+The upstream reference is [GPUI Component Design Guides](http://longbridge.github.io/gpui-component/docs/design-guides). Read it as the general design standard; this document records Omamail's mail-specific application, NSH and shell constraints, and Omarchy visual boundary. Do not duplicate the entire upstream guide here: keep shared principles there and document only the interpretation or exception that future Omamail work needs.
 
 ## Visual language v2: after NsVim
 
@@ -69,7 +69,7 @@ v1 was too compact. Spacing follows a 4/8 scale with these defaults at base 14:
   semibold weight. **No leading-edge bar or one-sided border** (NSH Design Guides,
   "Interaction states": a bar is a web habit and adds a competing edge). Hover is
   `surface-raised`. Selected wins over hover. The keyboard cursor in a list is the selection
-  (Qt: the cursor row is the selected row).
+  (the cursor row draws the selected fill, `src/features/list/Row.tsx`).
 - **Titled-border panels** (NsVim `Titled`): a 1px border with its title set on the top edge
   over a background knockout, offset 12, in caption size, muted text. Use them for grouped
   content that floats in a pane:
@@ -138,7 +138,7 @@ All visual tokens come from the active Omarchy theme:
 - corner radius;
 - normal, hovered, pressed, and selected fills.
 
-Semantic colors originate in `App.qml` and travel through required component properties. Muted text mixes foreground toward background. Derived fills use the shared `Style` helpers or alpha from an inherited semantic color.
+Semantic colors are theme roles. `src/ui/theme.ts` defines every role for each palette and fills the roles an Omarchy palette lacks from its nearest one; `src/ui/tokens.ts` names the classes features draw with (`FILL`, `LINE`, `TEXT`). Muted and faint text are roles of their own (`text-secondary`, `text-faint`), not colors a component mixes.
 
 Do not import GPUI Component colors, shadows, radii, typography, sidebar width, or control decoration. A GPUI example may demonstrate an interaction contract; its pixels are not a design token for this application.
 
@@ -157,7 +157,7 @@ In particular:
 - stable identity keeps transient state attached to the same logical element;
 - compound controls keep trigger, surface, state, and dismissal behavior coherent.
 
-QML components should express those contracts in QML terms: properties, signals, bindings, and small JavaScript decision functions. A fluent Rust builder is not itself a pattern the interface needs to copy.
+TSX components should express those contracts in NSH terms: props, signals, effects, and small pure decision functions (in `src/mail/` or beside the feature) that tests reach without rendering. A fluent Rust builder is not itself a pattern the interface needs to copy.
 
 ## Window regions
 
@@ -391,7 +391,7 @@ Controls describe their role through semantic state:
 
 Selected and pressed are not synonyms. A menu trigger stays selected from open until close even after the press has ended. A toggle uses selected for its value. A momentary action returns to normal.
 
-Icon-only actions require tooltips. The tooltip describes the action and may include the shortcut when the shortcut comes from `Keymap.js`; it must not create a second hand-maintained binding description.
+Icon-only actions require tooltips. The tooltip describes the action and may include the shortcut when the shortcut comes from `src/keys/keymap.ts`; it must not create a second hand-maintained binding description.
 
 A control that opens another surface uses `...` in its label. An action that completes immediately does not. An external destination that is already unambiguous uses its proper name plus the suffix—`GitHub...`, not `Open GitHub...`—and may carry an external-link icon when space permits. Use a verb only when the destination name alone does not predict the result, such as `View invoice in browser...`.
 
@@ -450,9 +450,9 @@ Use the lightest surface already supported by the application that preserves the
 - page: a substantial workflow that replaces the mail chrome while preserving the window;
 - plain overlay: non-control content such as shortcut help where application actions remain meaningful.
 
-Opening a text-entry surface changes the application key context, and that context focuses the meaningful field. A command popup focuses its content when it implements popup-local navigation under Qt Quick Controls.
+Opening a text-entry surface changes the application key context, and the surface focuses its meaningful field (a draft: the body for a reply, otherwise the first empty line). A command popup that walks its own rows takes those keys through a key layer (`pushKeyLayer` in `src/keys/commands.ts`) while it is open.
 
-Closing a non-popup surface lets the application's resulting key context choose focus. A `QQC.Popup` owns its Escape behavior because Qt consumes that key before the window shortcut map. The two paths must not duplicate each other.
+A ui popup or dialog binds Escape itself while it is the topmost overlay (`src/ui/overlays-stack.ts`), so a popover open inside a dialog closes first. Otherwise Escape is the window's and goes back (`goBack` in `src/keys/router.ts`). The two paths must not duplicate each other.
 
 Only the top visible surface receives pointer interaction. Non-modal popups dismiss on outside press. A plain overlay explicitly blocks or forwards pointer input according to its purpose.
 
@@ -518,9 +518,9 @@ When designing or reviewing a component, ask in order:
 4. Which context receives keyboard actions?
 5. What happens when it opens, closes, resizes, or loses its anchor?
 6. How does it behave in wide, medium, and compact modes?
-7. Which theme tokens does it receive from `App.qml`?
+7. Which theme tokens from `src/ui/tokens.ts` does it draw with?
 8. Is every sender-controlled string plain text?
-9. Can its decisions be tested without rendering, and which Qt behavior still needs a QML test?
+9. Can its decisions be tested without rendering, and which behavior still needs a rendered `nsh test`?
 
 A design that cannot answer these questions is not ready to become a reusable primitive. A feature-specific view may remain specific; clarity is more useful than an abstraction whose name is generic but whose contract knows one caller.
 
@@ -535,7 +535,7 @@ key hints as `Kbd` caps at the right), and the overlay layer (the shortcut
 sheet, toasts, the `ConfirmHost` where ui `confirm()` asks). The body follows
 `src/shell/layout.ts`: wide from 1000 points of mail area (the window less the
 assistant dock), compact below 760, medium between; the breakpoints and the
-pane widths are base-14 points scaled by `uiScale()`, as Qt's `Style.space`.
+pane widths are base-14 points scaled by `uiScale()`.
 The sidebar column (184 at base 14, least 140, most 360, rail 44) sits on
 `muted`; its one hairline is the split separator, which the shell owns. It shows beside the list, the split and the calendar, never in
 compact mode, on a page or over a draft; its one toggle sits in the header
@@ -545,7 +545,7 @@ Back bar that takes the same step as Escape. Pane widths and the folded
 sidebar are stored in NSH Storage (`shell.panes.v1`); 0 means the proportional
 default, and a double click on a separator restores it.
 
-Keys come from one table (`src/keys/keymap.ts`, the port of `Keymap.js`): the
+Keys come from one table (`src/keys/keymap.ts`, docs/KEYS.md): the
 router binds only what is live in the current context, the status-line hints
 and the shortcut sheet read the same rows, and on macOS `Ctrl` in the table is
 written and bound as Command.
@@ -575,7 +575,7 @@ header pass.
 
 The AI dock (`src/features/assistant/`) sits at the body's trailing edge,
 beside whatever page is open, and is about one message, a ticked selection or
-the open draft. It is as wide as App.qml made it: at most 65% of the window
+the open draft. Its width keeps the Qt client's limits: at most 65% of the window
 and never so wide that less than 320 points remain, at least 280 points (less
 only when the window cannot spare them), 420 points (or 45% of the window) by
 default. The width is the owner's choice once dragged, stored as

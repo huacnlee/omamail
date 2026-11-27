@@ -1,10 +1,14 @@
 # The NSH port: ownership and contracts
 
 The app is an NSH TSX app (`App.tsx`) with Rust in `ext/omamail-native` (an nshm)
-over the `omamail` library in `core/`. The Qt/QML client under `omarchy/ui/` is
-the behavioral specification: every feature, design detail and interaction it
-has must exist here (100% parity), improved where NSH allows. `omarchy/` itself
-shrinks to an install entry (see "Omarchy plugin").
+over the `omamail` library in `core/`. The Qt/QML client that lived under
+`omarchy/ui/` was the behavioral specification: every feature, design detail
+and interaction it had must exist here (100% parity), improved where NSH
+allows. It was removed at the cutover below, and `omarchy/` is now only the bar
+notice widget and release tooling (see "Omarchy plugin").
+
+This document is the record of the port. Its references to Qt and QML files
+are historical; the current design is in ARCHITECTURE.md.
 
 ## Layers
 
@@ -305,13 +309,7 @@ the port does instead.
 - The agent-job checkout path in `core/src/agent/jobs.rs` now names a file
   that is gone outside tests; it only ever recognised a running worker, so a
   missing file matches nothing.
-- Left for their owners: `core/tests/test_*.{sh,py}` that drove the removed
-  scripts (no workflow on this branch runs them), and docs that describe the
-  Qt plugin's scripts (`docs/NETWORK-MIGRATION.md`, `docs/BACKEND-RUNTIME.md`,
-  `docs/SECURITY-BOUNDARIES.md`, `docs/MESSAGE-RENDERING.md`,
-  `docs/providers/{jmap,imap}.md`, `docs/MAILBOXES.md`, `docs/SPEC.md`,
-  `docs/ARCHITECTURE.md`), plus the `ui/` lines in AGENTS.md's "Structure
-  and boundaries", which predate this branch.
+- Left for their owners: `core/tests/test_*.{sh,py}` that drove the removed scripts (no workflow on this branch runs them). The docs that described the Qt plugin's scripts have since been rewritten for NSH.
 
 ## Plugin cutover, step 4 follow-ups (shell)
 
@@ -354,13 +352,7 @@ the port does instead.
 
 ### Follow-up doc work
 
-These still describe the Qt plugin's scripts and need rewriting for NSH:
-`docs/NETWORK-MIGRATION.md`, `docs/BACKEND-RUNTIME.md`,
-`docs/SECURITY-BOUNDARIES.md`, `docs/MESSAGE-RENDERING.md`,
-`docs/providers/jmap.md`, `docs/providers/imap.md`, `docs/MAILBOXES.md`,
-`docs/SPEC.md`, `docs/ARCHITECTURE.md`, and CONTRIBUTING.md's
-`tests/test_source.sh` rows. AGENTS.md's QML lint and `Service.qml` bullets
-are stale too.
+The docs now describe the NSH app. What is left waits for NSH packaging: CONTRIBUTING.md's "Releasing" section and README.md's install section still describe the Qt-era release, and `docs/BACKEND-RUNTIME.md` says only that releasing is pending.
 
 ## NSH issue: title-bar presses lost while a field is focused
 

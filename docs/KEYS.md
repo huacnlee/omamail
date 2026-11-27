@@ -11,29 +11,28 @@ by the app, and scoped to the contexts where it means something.
 
 Everything follows from that:
 
-- Every binding lives in one table, `ui/keys/Keymap.js`. Nothing else describes a
-  key. The shortcut sheet and the status-bar hints render from that table.
-- `ui/components/KeyRouter.qml` turns the table into `Shortcut` objects and reports
-  what was pressed by id. `App.qml` answers with one `runShortcut` function.
-- `Escape` is a binding like any other, not a `Keys.onEscapePressed` handler, so
-  it does not depend on who holds the focus.
+- Every binding lives in one table, `BINDINGS` in `src/keys/keymap.ts`. Nothing else describes a key. The shortcut sheet (`src/shell/ShortcutHelp.tsx`) and the status-bar hints render from that table.
+- `src/keys/router.ts` binds the keys that are live in the current context through NSH's `keymap.bind`, and runs what was pressed by id. Features answer an id with `registerCommand` from `src/keys/commands.ts`; the router itself answers the navigation ids no feature claims.
+- `Escape` is a binding like any other, not a field's own key handler, so it does not depend on who holds the focus.
 
 ## The contexts
 
-The window is in exactly one context at a time. `App.qml` derives it from what
-is on screen, by precedence — a page is a form before it is anything else, a
-draft beats reading, a query being typed beats the list underneath it:
+The window is in exactly one context at a time. `contextFor` in `src/keys/keymap.ts` derives it from what is on screen, by precedence — a page is a form before it is anything else, a draft beats reading, a query being typed beats the list underneath it. The router's `keyContext` feeds it from the app store and from what features report with `reportKeyState`:
 
-```qml
-readonly property string keyContext:
-    root.assistantEditing ? (root.activeAssistant.commandsOpen ? "assistantCommands" : "assistant")
-  : root.showPage  ? "page"
-  : root.composing ? "compose"
-  : searchBar.fieldFocused ? "search"
-  : root.calendarVisible ? "calendar"
-  : root.currentView === "reader" ? "reader"
-  : "list"
+```ts
+if (value.assistantEditing) return value.assistantCommands ? "assistantCommands" : "assistant";
+if (value.showPage) return "page";
+if (value.eventComposing) {
+  return value.guestSuggestions ? "eventGuests" : value.eventDescriptionFocused ? "eventDescription" : "eventCompose";
+}
+if (value.composing) return "compose";
+if (value.searchFocused) return "search";
+if (value.calendarVisible) return "calendar";
+if (value.currentView === "reader") return "reader";
+return "list";
 ```
+
+A draft in its own window has the compose context while that window has the keyboard, whatever the mail window behind it shows.
 
 | Context | What it is | What it binds |
 |---|---|---|
@@ -57,55 +56,28 @@ The AI input uses `assistant`: Return/Enter sends and Shift+Return/Enter inserts
 
 Changing the AI agent or model starts fresh chats and clears queued follow-ups while preserving unsent input. Previous chats remain readable in History, but cannot continue across the selection change; the cutoff persists across restarts. New chats created afterward can still resume normally.
 
-Qt 6.11's native `TextArea` accepts `ShortcutOverride` for editing keys even
-after `Keys.onShortcutOverride` leaves the event unaccepted. This was measured
-with a focused text area and a window Down shortcut: the shortcut never fired.
-The AI text area therefore forwards its `Keys.onPressed` event unchanged to
-`KeyRouter.routeKeyEvent`. The router decodes the key and applies the same
-`Keymap.js` bindings and context as its window shortcuts. This is one router
-with two event entry points, not a second set of local bindings. An unbound
-event is left alone, preserving normal typing, IME input and line breaks.
+In a text-entry context the router binds that context's few keys with `when: "always"`, so they reach the app before the focused field; `Escape` is bound that way in every context. Every other key goes to the field, so normal typing and line breaks are untouched. While an input method is composing (pinyin, kana, hangul), the router binds nothing at all, not even `Escape`: Return picks a candidate and Escape cancels the composition. Every ui text field reports its focus and composition to `src/ui/ime.ts`; `src/ui/ime.test.tsx` and `src/features/assistant/cjk.test.tsx` cover it.
 
 `mail` in the table below is shorthand for `list` and `reader`; `all` is every
 context.
 
-**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in single-line event fields.** The multiline event description keeps Return/Enter for line breaks, including pasted paragraphs; Ctrl+Return/Enter saves from either type of field. Its native text area forwards keys through the same router as the AI input.
-There is no "is the user typing" question anywhere in the code, because there is
-nothing left for it to answer: if a bare letter is not bound in `compose`, it
-cannot fire there, and the field gets it the way any other character arrives.
+**A text-entry context binds no bare key but `Escape`, except AI send/command selection described above and Enter to save in single-line event fields.** The multiline event description keeps Return/Enter for line breaks, including pasted paragraphs; Ctrl+Return/Enter saves from either type of field. `src/keys/keymap.test.ts` checks the rule over the whole table.
+
+If a bare letter is not bound in `compose`, it cannot fire there, and the field gets it the way any other character arrives. Outside the text-entry contexts the one typing question is asked once, in the router: while a ui text field has the focus (`textInputActive` in `src/ui/ime.ts`), the single-key shortcuts stand aside and the field gets its letters.
 
 ## One mechanism
 
-Implementation constraints: use an `Instantiator`, not a `Repeater`, to construct `Shortcut` objects. Park keyboard focus on a plain `Item`, not the departing focus scope, and do not leave `focus: true` on a component that can become invisible. Popups consume keys before the shortcut map: handle their keys on `contentItem` and let `CloseOnEscape` close them. Provider actions must be refused before optimistic updates even when their buttons are hidden; filter hints with `Keymap.hintsFor` too.
+Implementation constraints: never bind a key yourself; answer a binding id with `registerCommand` (the newest registration wins, and it goes when the component that made it unmounts). A key is bound only while something answers it, so an unclaimed key reaches the focused control. A popup that walks its own rows takes its keys with `pushKeyLayer`, which the router binds over the table in every context (`PickerKeys` in `src/features/mailbox/LabelMenu.tsx`). Something Escape should close before going back registers with `registerEscape`. Provider actions must be refused before optimistic updates even when their buttons are hidden; filter hints with `hintsFor` in `src/keys/keymap.ts` too.
 
-**The context owns the keyboard.** Changing context moves the focus — to
-whatever that context types into, or to a parked home item when the context
-types into nothing:
+**The context owns the keyboard, not the focused field.** The router binds again whenever the context, the focused text field, the open key layer or the shortcut sheet changes, and binds only what is live there.
 
-```qml
-onKeyContextChanged: Qt.callLater(applyContextFocus)
-function applyContextFocus() {
-  if (keyContext === "compose") compose.takeFocus()
-  else if (keyContext === "search") searchBar.focusField()
-  else parkKeyboard()
-}
-```
+This is the part that has to stay one thing. In the Qt client the context came from what was on screen while the focus stayed wherever the last click left it, and the two drifted: closing a reply left its invisible text field holding the keyboard, and `j` and `k` were gone for the rest of the session. Nothing warned — the keys stopped arriving. Here a field leaves the focused set when it loses the focus and when it unmounts (`trackTextField` in `src/ui/ime.ts`), so a closed draft cannot keep the letters; `src/ui/ime.test.tsx` checks that a field removed mid-composition leaves the app's keys on.
 
-This is the part that has to stay one thing. When the context came from what was
-on screen and the focus stayed wherever the last click left it, the two drifted:
-closing a reply left its text field holding the keyboard while invisible, Qt kept
-handing that field every keystroke, and `j` and `k` were simply gone for the rest
-of the session. Nothing warned — the keys stopped arriving.
-
-`ComposeView` therefore does **not** place its own focus when it opens. Opening
-it changes the context, and the context moves the keyboard. One mechanism, so
-the two cannot disagree.
+A draft places its own focus when it opens: the body for a reply or a saved draft, otherwise the first empty line, To and then Subject (`src/features/compose/ComposeView.tsx`).
 
 ## The bindings
 
-Generated from `ui/keys/Keymap.js`. `ui/tests/test_keymap.js` asserts this table
-matches it, so the two cannot drift — three hand-written copies of this list
-used to exist, and they had.
+Generated from `src/keys/keymap.ts`. `scripts/check-keys.ts`, run by `make check`, asserts this table matches it, so the two cannot drift — three hand-written copies of this list used to exist, and they had.
 
 <!-- BEGIN BINDINGS -->
 | id | keys | contexts | action |
@@ -182,7 +154,7 @@ In Drafts, `Enter`, `o` and `c` open the selected draft in the composer, with wh
 
 `Space` or `x` toggles the cursor row's selection in the list or reader context. Shift+click applies the clicked row's next checked state to the inclusive range from the cursor: an unchecked endpoint selects the range, and a checked endpoint clears it. Selections outside the range remain unchanged; the cursor then moves to the clicked row.
 
-`e` and `d` are the archive and trash buttons, and where a button's action is already done for every row it will reach, the button is its inverse, and so is the key: in the trash they restore, and in Archive they move an archived message to the Inbox. The rows are the ones the control acts on: the ticked rows when it is about one of them (a key, a ticked row's menu or middle-click, the reader on a ticked message), else the cursor's row (before there is one, the listing's rows, which is what the hint row and the empty reader's key list describe), the row itself, or the row the open message belongs to. A mixed selection gets the key's own verb, the way `s` stars a mixed one. Restore is the provider's untrash, which every client has, so it is also the way out of the trash on HEY, which has no archive and no move. It is not called Move to Inbox because where it lands is the provider's: Gmail takes the TRASH label off and leaves the rest, the others move the message to the Inbox. `e` turns back only in Archive: on IMAP every folder but the Inbox reads as archived, and `e` in one of them still files the message in Archive. `Model.keyActionFor` is the rule. `MessageList` applies it over each control's rows, with App's own `selectionActive` deciding whether the ticked rows are reached, and App sends the keys and the hint row through its `keyActions`. A button's tooltip, on a row or in the reader, names `e` or `d` only when the key reaches the same rows and asks the same of them. Hovering does not move the cursor, so a row names its keys only when it is the cursor's row, or ticked while the selection is active. A message that is not one of the listing's rows, such as one a notification opened over the Trash, is judged by its own labels. Because `e` files a message into Archive from every folder but Archive, a message read in Junk has no one-key way back, so on a mailbox whose labels are folders `v` offers the Inbox as well.
+`e` and `d` are the archive and trash buttons, and where a button's action is already done for every row it will reach, the button is its inverse, and so is the key: in the trash they restore, and in Archive they move an archived message to the Inbox. The rows are the ones the control acts on: the ticked rows when it is about one of them (a key, a ticked row's menu or middle-click, the reader on a ticked message), else the cursor's row (before there is one, the listing's rows, which is what the hint row and the empty reader's key list describe), the row itself, or the row the open message belongs to. A mixed selection gets the key's own verb, the way `s` stars a mixed one. Restore is the provider's untrash, which every client has, so it is also the way out of the trash on HEY, which has no archive and no move. It is not called Move to Inbox because where it lands is the provider's: Gmail takes the TRASH label off and leaves the rest, the others move the message to the Inbox. `e` turns back only in Archive: on IMAP every folder but the Inbox reads as archived, and `e` in one of them still files the message in Archive. `keyActionFor` in `src/mail/listModel.ts` is the rule. `keyAction` in `src/features/list/store.ts` applies it over the rows a control reaches (the ticked rows if there are any, else the cursor's row or the open message), and the list reports the result for the hint row through `reportKeyState`'s `actions`. A button's tooltip, on a row or in the reader, names `e` or `d` only when the key reaches the same rows and asks the same of them. Hovering does not move the cursor, so a row names its keys only when it is the cursor's row, or ticked while the selection is active. A message that is not one of the listing's rows, such as one a notification opened over the Trash, is judged by its own labels. Because `e` files a message into Archive from every folder but Archive, a message read in Junk has no one-key way back, so on a mailbox whose labels are folders `v` offers the Inbox as well.
 
 `n` and `p` walk the conversation rail beside the message on a provider whose listing collapses to conversations, opening the next and previous member in the same reader and stopping at the ends. The rail runs newest at the top, so `n` opens the stop below the open message, which is the older one, and `p` the stop above it, the newer — the keys follow the rail as it is drawn, the way `j` and `k` follow the list. They move the reader and nothing else. `j` and `k` move the list cursor and immediately open the representative of that row, leaving the conversation member selected with `n` or `p`. A message whose conversation has one member draws no rail, and both keys then do nothing. A right-click on a stop opens the same menu a row has — reply, archive, trash, spam, read, star — for that one message: the action reaches the member alone, where the same verb on the row reaches every counted member, and if the open message is the one taken out of the view the reader moves to the stop beside it, the newer one above or else the older below.
 
@@ -197,37 +169,23 @@ The event and label delete confirmation initially focuses Delete. Tab and Shift+
 `g i`, `g s`, `g u` and `g t` used to open the mailboxes, and they were two
 problems in one row.
 
-They were a chord, and Qt puts a deadline on an unfinished one:
-`styleHints.keyboardInputInterval`, 400ms here. Press `g`, think for half a
-second, press `i`, and nothing happens — no mailbox, no error, no hint that a
-clock had been running. Measured, not guessed:
-`0ms → fires · 300ms → fires · 500ms → dead · 800ms → dead`.
+They were a chord, and the Qt client this app replaced put a deadline on an unfinished one: `styleHints.keyboardInputInterval`, 400ms there. Press `g`, think for half a second, press `i`, and nothing happened — no mailbox, no error, no hint that a clock had been running. Measured then, not guessed: `0ms → fires · 300ms → fires · 500ms → dead · 800ms → dead`.
 
 And they had to be memorised. Four bindings that look like nothing on screen,
 for the four places you actually go.
 
-`Ctrl+1`…`Ctrl+9` replaces both. A modifier has no deadline, and **holding Ctrl
-puts the digit on every row of the rail**, so there is nothing to remember —
-the rail says which key opens it. The numbers run down the rail as it is drawn,
-mailboxes first and then the server's labels, from `Model.sidebarSlots`, which
+`Ctrl+1`…`Ctrl+9` replaces both (Command on macOS, as the table's `Ctrl` is everywhere there). A modifier has no deadline, and **holding Ctrl puts the digit on every row of the rail**, so there is nothing to remember — the rail says which key opens it. The numbers run down the rail as it is drawn, mailboxes first and then the server's labels, from `sidebarSlots` in `src/mail/labels.ts`, which
 is the same list the badges are drawn from: the number beside a row and the row
 a number opens are one fact rather than two. Past the ninth row there is simply
 no number: `Ctrl+0` is reset zoom, the way it is in every browser, and the
 rail does not take it.
 
-Held Ctrl is the one `Keys` handler in `App.qml`, and it is not a binding — a
-modifier alone cannot be a `Shortcut`, so there is nothing to route. It accepts
-no event, so what follows Ctrl still goes where it always went. It clears on
-`activeFocus` rather than on release because Ctrl+Tab can take the release, and
-waiting for one that is not coming would paint the numbers on permanently.
+Held Ctrl is read in `src/shell/Shell.tsx` off the window's raw key-down and key-up events, and it is not a binding — a modifier alone binds nothing, so there is nothing to route. It accepts no event, so what follows Ctrl still goes where it always went. It clears when the window loses the focus rather than only on release, because the release can land in another window, and waiting for one that is not coming would paint the numbers on permanently. The numbers show only in the list and reader contexts.
 
 `Escape` is the only bare key bound everywhere, because it is the way out of
 everywhere. With rows ticked and the list on screen — alone, or beside the
 reader in a wide window — it unticks them first and goes nowhere; the next
-press goes back. Where it goes is not decided by the key: the window keeps a history
-of the places it has been — a stack in `App.qml`, ruled by
-`ui/account/Navigation.js` — and `Escape`, like every Back bar, calls `back()`,
-which pops one entry. A draft, the event form and the shortcut sheet are
+press goes back. Where it goes is not decided by the key: the window keeps a history of the places it has been — a stack ruled by `src/app/navigation.ts` and kept in `src/app/store.ts` — and `Escape` (`goBack` in `src/keys/router.ts`), like every Back bar, ends in `back()`, which pops one entry. A draft, the event form and the shortcut sheet are
 entries too, so the sheet closes before the message under it, and a reply
 raised from the list returns to the list, not to the message it opened on the
 way. On the root, `back()` clears a search if there is one and otherwise closes
@@ -242,33 +200,20 @@ The shortcut sheet sits on top of the mailbox, and `survivesOverlay` is the
 whole guard: without it a row goes dead while the sheet is up, which is why `e`
 cannot archive behind it.
 
-Four rows carry it. `help` and `back` keep their own meaning — they are how the
-sheet goes away. `cursorDown` and `cursorUp` are handed to the sheet instead, to
-scroll it, in `runShortcut`. A sheet taller than the window that could only be
-read with a mouse would be the one screen here that contradicts the rest.
+A few rows carry it. `help` and `back` keep their own meaning — they are how the sheet goes away. The movement rows are handed to the sheet instead, in `src/shell/ShortcutHelp.tsx`: while it is up, `j`, `k`, `Shift+J` and `Shift+K` scroll it, the arrows, page keys and Home/End are the panel's own, and the list's cursor and scroll commands do nothing behind it. A sheet taller than the window that could only be read with a mouse would be the one screen here that contradicts the rest. `src/shell/Shell.test.tsx` covers it.
 
-**The account switcher is not on that list, and cannot be.** It is a
-`QQC.Popup`, and an open popup takes every key before the shortcut map sees it —
-`focus` true or false, bare key or modified. So `Alt+A` opens it through the
-table like any other key, and from there the keys come from the search line at
-the top of the popup — the one place in this window where the rule at the top
-of this document runs backwards. Letters narrow the rows to the mailboxes they
+**The account switcher is not on that list.** It is a ui `Popover` (`src/features/mailbox/AccountSwitcher.tsx`), not the sheet. `Alt+A` opens it through the table like any other key, and from there the keys come from the search line at the top of the popup and from its key layer (`PickerKeys`) — the one place in this window where the rule at the top of this document runs backwards. Letters narrow the rows to the mailboxes they
 name, by the name they were given or their address; `Down` and `Up`, or `Ctrl`
 with `j`, `k`, `n` or `p`, walk what is left; `Enter` opens the row the cursor
 is on. A bare `j` or `k` is a letter there now, as it has to be for "jack" to
 find a mailbox.
-`ui/tests/qml/tst_account_switcher.qml` exercises this on the production popup, and
-`Model.wrappedIndex` holds the only decision in it — the cursor wraps, where the
-message list clamps.
+`src/features/mailbox/Sidebar.test.tsx` exercises this on the production popup, and `wrappedIndex` in `src/mail/labels.ts` holds the only decision in it — the cursor wraps, where the message list clamps.
 
-The image viewer is the same kind of popup. While it is open `Left` and `Right` page
-through the message's pictures (wrapping at either end), `+` and `-` zoom, `0` fits
-the picture to the window again, and `Escape` closes it; none of these reach the
-reader underneath. `ui/tests/qml/tst_image_viewer.qml` covers them.
+The image viewer is a popup too, a ui `Dialog` (`src/features/reader/ImageViewer.tsx`). While it is open its own key handler takes the plain keys: `Left` and `Right` page through the message's pictures (wrapping at either end), `+` and `-` zoom, `0` fits the picture to the window again, and `Escape` closes it.
 
 ## The cursor
 
-Hover must not write `cursorId`: Qt re-reports hover as content scrolls beneath a stationary pointer. Reveal keyboard selection with `Model.contentYToReveal`; the list is a `Column`, not a view with `positionViewAtIndex`.
+Hover must not write `cursorId`: content scrolls beneath a stationary pointer, and the row that arrives under it reports hover. Reveal keyboard selection with `contentYToReveal` in `src/mail/listModel.ts`.
 
 `cursorId` is where the keyboard is. `selectedId` is what the reader shows.
 They are two different things, and conflating them was the first bug in this
@@ -286,7 +231,7 @@ so successive navigation keys work while the reader is open.
 
 `s` is the one acting key that follows the reader rather than the cursor. With a message open it stars the open message, on every provider, because that is the star the button beside it draws; `e` and `d` act on the cursor row, which is the row the open message belongs to. The difference only shows on a provider whose listing collapses to conversations, where `n` and `p` can walk the reader onto a member while the cursor stays on the row.
 
-Three rules, all in `ui/account/Model.js` so the node tests reach them:
+Three rules, all in `src/mail/listModel.ts` so its tests (`src/mail/listModel.test.ts`) reach them:
 
 - **`cursorAfterOffset`** — moving. Anchored on the cursor itself, clamped at
   both ends, and starting from the end the move came from when there is no
@@ -303,73 +248,25 @@ The last two exist because a cursor pointing at a message that is not listed
 cannot be found, and `cursorAfterOffset` restarts at the top from there. Every
 "the cursor jumped back to the first row" report is that.
 
-The list is a `Column` of rows inside a `Flickable`, not a `ListView` — the
-panel already owns a scroller, and nesting a second gives every wheel event two
-plausible targets. So there is no `positionViewAtIndex`, and keyboard movement
-has to scroll the list itself: **`Model.contentYToReveal`** decides where the
-scroller goes, leaving it alone while the row is already visible so stepping one
-row does not drag the list under someone reading it. It is called from
-`moveCursor`, not from `cursorId` changing. Hover never changes the cursor, and
-scrolling under the pointer would fight the mouse.
+The list is an NSH `List` (`src/features/list/index.tsx`), and keyboard movement scrolls it from an effect on the cursor: **`contentYToReveal`** decides where the scroller goes, leaving it alone while the row is already visible so stepping one row does not drag the list under someone reading it. Hover never changes the cursor, so this scroll never fights the mouse.
 
 ## The mouse
 
 In the month calendar, dragging an event previews its destination date. Escape cancels a held drag before navigating back; releasing outside the calendar also cancels. After a drop, the preview stays visible while saving and refreshing, or returns to the original date if saving fails. Events with guests still open the existing confirmation form before saving.
 
-The mouse does not move the keyboard's cursor. A row draws its own hover
-(`MessageRow.hot`), clicking one opens it, and right-clicking one sets the
-cursor explicitly before opening its menu — but hovering does nothing to
-`cursorId`.
+The mouse does not move the keyboard's cursor. A row draws its own hover (`hoveredId` in `src/features/list/Row.tsx`), clicking one opens it, and right-clicking one opens its menu for that row — but hovering does nothing to `cursorId`.
 
-That is not a preference. Qt re-reports hover when content moves under a
-pointer that has not moved, and the list scrolls to follow the keyboard. With
-hover writing `cursorId`, pressing `j` moved the cursor, the scroll brought a
-different row under the still pointer, and the cursor snapped back to it — so
-`j` and `k` stuck on whichever rows the mouse was resting near.
-`ui/tests/qml/tst_preview_on_cursor.qml` drives the production list with hover events while keyboard navigation scrolls it, and checks that hover cannot take the cursor back.
+That is not a preference. Hover is reported when content moves under a pointer that has not moved, and the list scrolls to follow the keyboard. In the Qt client, with hover writing `cursorId`, pressing `j` moved the cursor, the scroll brought a different row under the still pointer, and the cursor snapped back to it — so `j` and `k` stuck on whichever rows the mouse was resting near.
 
-A mouse with a back button takes the same step `Escape` takes — `goBack()`, so the two do not become separate implementations of going back — with one exception. It never closes the window. `Escape` on a root with nothing left to clear ends the window, which is right for a key somebody pressed on purpose and wrong for a button sitting under the hand with no affordance saying the next press shuts the mailbox, so the mouse stops there instead. `ui/components/MouseBack.qml` reports the press and `ui/App.qml` decides what it means, the same way `KeyRouter` does for keys.
+A mouse with a back button takes the same step `Escape` takes — `goBack()`, so the two do not become separate implementations of going back — with one exception. It never closes the window. `Escape` on a root with nothing left to clear ends the window, which is right for a key somebody pressed on purpose and wrong for a button sitting under the hand with no affordance saying the next press shuts the mailbox, so the mouse stops there instead. `src/shell/Shell.tsx` reports the press and `mouseBack` in `src/keys/router.ts` decides what it means, the same way the router does for keys: it goes back while `canGoBack()` says there is a step that is not closing the window, and otherwise only offers the press to the Escape layers.
 
 ## Adding a key
 
-1. Add a row to `BINDINGS` in `ui/keys/Keymap.js`. Name the contexts it means
-   something in — that is the guard, and there is no other. A `display` string
-   is how the sheet shows a range instead of enumerating every key.
-2. Add a case to `runShortcut` in `App.qml`. The second argument is the
-   sequence that fired, which is how a row of several keys tells them apart —
-   read it with `slotFor`, never by parsing the string.
-3. Add the row to the table above. The test will tell you if you forget.
+1. Add a row to `BINDINGS` in `src/keys/keymap.ts`. Name the contexts it means something in — that is the guard, and there is no other. A `display` string is how the sheet shows a range instead of enumerating every key.
+2. Answer its id with `registerCommand(id, ({ slot }) => ...)` from `src/keys/commands.ts`, in the feature that owns the action, or in `SHELL` in `src/keys/router.ts` when it is navigation. `slot` is which of the row's keys fired, which is how a row of several keys tells them apart — read it, never parse the sequence.
+3. Add the row to the table above. `make check` (`scripts/check-keys.ts`) fails if you forget.
 
 That is all. The shortcut sheet and the status hints pick it up on their own.
-
-## Why it looks like this
-
-Four things were found by running the code rather than reading it. Each cost a
-release-shaped bug, and each is now pinned by a test.
-
-**A `Repeater` builds no `Shortcut`s.** A `Shortcut` is a `QtObject` and a
-`Repeater` only builds `Item`s, so a `Repeater` creates nothing at all and every
-key goes silently dead. `KeyRouter` uses an `Instantiator`.
-
-**`FloatingWindow` does not forward `activeFocusItem`.** Quickshell's window is a
-proxy; reading `window.activeFocusItem` gives `undefined`, which reads as falsy
-and quietly passes every guard built on it. The attached `Window.activeFocusItem`
-is the one that works.
-
-**`forceActiveFocus()` on a `FocusScope` is a no-op.** It re-elects that scope's
-current focus item — which is the field you are trying to leave. Parking the
-keyboard has to land on a plain `Item`.
-
-**A window `Shortcut` beats a focused item's `Keys` handler.** A local
-`Keys.onEscapePressed` looks live and never runs. `SearchBar` had one; what it
-did lives in `goBack()` now, which clears the field and then hands the key to
-`back()`.
-
-And one thing that is *not* a problem, recorded because it was assumed to be:
-Qt already gives a focused `TextInput` the bare keys before any `Shortcut` sees
-them. Typing a letter into a visible field never fired a shortcut. The old
-hand-written "is the user typing" guard was not holding that line, and removing
-it changed no behaviour.
 
 ## Not here
 

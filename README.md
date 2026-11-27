@@ -35,7 +35,7 @@ The app is built with [NSH](https://nsh.dev): the interface is TSX in `src/`, an
 | `App.tsx`, `src/`, `nsh.json`, `theme.json` | The NSH app |
 | `ext/omamail-native/` | The app's Rust module, linking the mail library |
 | `core/` | The mail library and `omamail` CLI (Rust) |
-| `omarchy/` | The Omarchy shell plugin (QML bar widget and panel) |
+| `omarchy/` | The Omarchy bar notice widget (`omarchy/notice/`) and the release tooling; no mail panel |
 
 ## Run from source
 
