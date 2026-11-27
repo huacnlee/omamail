@@ -121,7 +121,7 @@ export function StatusBar(props: StatusBarProps) {
             <Each of={hints()} key={(h) => `${h.caps.join(" ")}\u0000${h.label}`}>
               {(hint) => (
                 <View class={cx("flex-row items-center gap-1")}>
-                  <Each of={hint().caps} key="index">{(cap) => <Kbd keys={cap()} />}</Each>
+                  <Each of={hint().caps} key="index">{(cap) => <Kbd keys={cap()} size="compact" />}</Each>
                   <Text class={cx(TEXT.caption, "leading-none")}>{hint().label}</Text>
                 </View>
               )}

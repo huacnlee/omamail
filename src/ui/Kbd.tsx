@@ -1,8 +1,9 @@
 // A key as the interface names it, and the status bar's row of key hints.
 //
 // A key cap (Visual language v2, NsVim's `Kbd`): 12pt mono on the raised
-// surface inside one hairline, 20pt tall and at least as wide. The cap
-// separates the key from its label by shape, so the pairs sit close together.
+// surface inside one hairline, 20pt tall and at least as wide (`compact`: 11pt
+// on a 16pt cap, for the 28pt status line). The cap separates the key from its
+// label by shape, so the pairs sit close together.
 import { keymap, Text, View } from "nsh";
 import { cx, FILL, LINE, RADIUS, sizedBox, TEXT, TYPE } from "./tokens";
 
@@ -11,6 +12,8 @@ export interface KbdProps {
   keys: string;
   /** `quiet` (default) draws the key in foreground text; `strong` in bright text, for a key inside a sentence. */
   variant?: "quiet" | "strong";
+  /** `regular` (default) is 20 tall; `compact` 16, for the status line, where a 20pt cap crowds the 28pt bar. */
+  size?: "regular" | "compact";
   testID?: string;
 }
 
@@ -149,6 +152,7 @@ export function keyCaps(text: string): string[] {
 
 /** One key or chord, a mono key cap. `keys` may be a chord in any spelling ("mod-k"): it is shown as this platform writes it. */
 export function Kbd(props: KbdProps) {
+  const compact = () => props.size === "compact";
   return (
     <View
       testID={props.testID}
@@ -156,15 +160,17 @@ export function Kbd(props: KbdProps) {
       accessibilityLabel={keyCapLabel(props.keys)}
       class={cx(
         "items-center justify-center",
-        sizedBox("h-[20px]", "h", 20),
-        sizedBox("min-w-[20px]", "min-w", 20),
-        sizedBox("px-[5px]", "px", 5),
+        compact() ? sizedBox("h-[16px]", "h", 16) : sizedBox("h-[20px]", "h", 20),
+        compact() ? sizedBox("min-w-[16px]", "min-w", 16) : sizedBox("min-w-[20px]", "min-w", 20),
+        compact() ? sizedBox("px-[4px]", "px", 4) : sizedBox("px-[5px]", "px", 5),
+        // The mono face's caps sit low in a short line box: a 1pt lift centres them.
+        compact() ? sizedBox("pb-[2px]", "pb", 2) : "",
         FILL.raised,
         LINE.border,
         RADIUS,
       )}
     >
-      <Text class={cx(TYPE.sm, "leading-none", TEXT.mono, props.variant === "strong" ? "text-bright" : "text-foreground")}>
+      <Text class={cx(compact() ? TYPE.xs : TYPE.sm, "leading-none", TEXT.mono, props.variant === "strong" ? "text-bright" : "text-foreground")}>
         {keyCapLabel(props.keys)}
       </Text>
     </View>

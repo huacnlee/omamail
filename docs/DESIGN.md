@@ -86,7 +86,9 @@ v1 was too compact. Spacing follows a 4/8 scale with these defaults at base 14:
 - **Choices are checkboxes, not switches** (square, primary when checked, a check glyph).
 - **Steppers**: − value + inside one border.
 - **Key caps**: mono caption on `surface-raised`, 1px border, 20 tall, min 20 wide. Use them
-  in the status line hints, the shortcut sheet, menus and tooltips.
+  in the status line hints, the shortcut sheet, menus and tooltips. The status line's caps
+  are compact (`Kbd size="compact"`): 11pt on a 16 tall, min 16 wide cap, so they sit
+  inside the 28 tall line with room above and below.
 - **Status line**: 28 tall on `muted`.
   - At the left, a filled primary pill naming the current place (`INBOX`, `COMPOSE`,
     `SETTINGS`, `CALENDAR`), then the account.
