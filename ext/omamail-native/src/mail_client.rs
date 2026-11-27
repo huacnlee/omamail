@@ -150,6 +150,20 @@ fn mailto_entry(exe: &str) -> Option<String> {
     ))
 }
 
+/// The Qt-era plugin's mail client name for its mailto: entry.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const LEGACY_MAILTO: &str = "omamail.desktop";
+
+/// Whether the user made the Qt-era plugin their mail client and this app
+/// has not taken over yet: its managed block still summons the plugin's
+/// panel (which the NSH plugin no longer has), or mailto: still goes to its
+/// entry (which the installer removes). Either leaves SUPER+SHIFT+E or
+/// mailto: links opening nothing, so the app turns the switch on again.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn is_legacy_default(bindings: &str, mailto: &str) -> bool {
+    mailto == LEGACY_MAILTO || (has_block(bindings) && !bindings.contains(&bindings_block()))
+}
+
 /// On, in the order that never leaves the switch half made: the bindings
 /// block is written first (a failed write changes nothing else), then the
 /// mailto default is made; if that fails, the bindings file gets its
@@ -331,6 +345,19 @@ mod linux {
         }
     }
 
+    /// Turns the switch on again for a user of the Qt-era plugin's switch
+    /// (`super::is_legacy_default`); false when there was nothing to move
+    /// or the move failed (Settings still shows the real state).
+    pub fn migrate() -> bool {
+        let Some(path) = bindings_file() else {
+            return false;
+        };
+        let text = read(&path).unwrap_or_default();
+        let mailto =
+            run("xdg-mime", &["query", "default", "x-scheme-handler/mailto"]).unwrap_or_default();
+        super::is_legacy_default(&text, &mailto) && set(true).is_ok()
+    }
+
     pub fn set(enabled: bool) -> Result<String, &'static str> {
         let path = bindings_file().ok_or("bindings_unwritable")?;
         let text = read(&path)?;
@@ -388,6 +415,19 @@ impl MailClient {
         }
     }
 
+    /// Moves a Qt-era plugin user's mail client switch to this app, once, at
+    /// launch: true when it did. Nothing changes for anyone else.
+    pub fn migrate_legacy() -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            linux::migrate()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
+
     /// Makes Omamail the mail client (true) or hands SUPER+SHIFT+E back
     /// (false). Returns the sentence to show; fails with a code
     /// (`mailto_entry_failed`, `mailto_default_failed`, `bindings_unreadable`, `bindings_unwritable`,
@@ -408,6 +448,21 @@ impl MailClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_qt_plugin_switch_is_moved_and_nothing_else() {
+        let qt_block = format!(
+            "{BLOCK_BEGIN}\nhl.unbind(\"SUPER + SHIFT + E\")\no.bind(\"SUPER + SHIFT + E\", \"Email\", \"omarchy-shell shell summon omamail '{{}}'\")\n{BLOCK_END}\n"
+        );
+        let ours = with_block("-- mine\n");
+        let mailto = format!("{MAILTO_ID}.desktop");
+        assert!(is_legacy_default(&qt_block, &mailto), "the Qt block");
+        assert!(is_legacy_default("", LEGACY_MAILTO), "the Qt mailto entry");
+        assert!(is_legacy_default(&ours, LEGACY_MAILTO), "ours, mailto still Qt's");
+        assert!(!is_legacy_default(&ours, &mailto), "already moved");
+        assert!(!is_legacy_default("-- mine\n", "hey.desktop"), "never chosen");
+        assert!(!is_legacy_default("-- mine\n", ""), "no mailto default");
+    }
 
     #[test]
     fn exec_paths_are_quoted_as_the_desktop_spec_says() {

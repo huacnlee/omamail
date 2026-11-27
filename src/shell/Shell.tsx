@@ -20,7 +20,7 @@ import { keyContext, mouseBack, useKeyRouter } from "../keys/router";
 import { isApple } from "../keys/labels";
 import { ConfirmHost, cx, FILL, SplitPane, SplitPanel, Toaster, uiScale } from "../ui";
 import { Header } from "./Header";
-import { startLaunchLinks } from "./launch";
+import { migrateLegacyMailClient, startLaunchLinks } from "./launch";
 import { bodyFor, LIST, listWidthFor, modeFor, SIDEBAR, sidebarVisible, sidebarWidthFor, type BodyState } from "./layout";
 import { animateNextLayout, slideIn } from "./motion";
 import { ShortcutHelp } from "./ShortcutHelp";
@@ -48,6 +48,9 @@ export function Shell(props: ShellProps) {
   if (props.launchLinks !== false) {
     const stopLinks = startLaunchLinks((request) => openCompose(request));
     cleanup(stopLinks);
+    // A Qt-era plugin user's SUPER+SHIFT+E and mailto: default still point
+    // at the old plugin; this app takes them over once (Linux only).
+    migrateLegacyMailClient();
   }
 
   // `[` and the status bar's switch fold the sidebar with a layout ease.
