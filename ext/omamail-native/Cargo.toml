@@ -1,0 +1,23 @@
+[package]
+name = "omamail-native"
+version = "0.1.0"
+edition = "2024"
+description = "Omamail's Rust for the NSH app: the mail backend, in process, as an nshm."
+license = "MIT"
+keywords = ["nshm"]
+publish = false
+
+# Its own workspace: the app's crate, not a member of the omamail one.
+[workspace]
+
+[dependencies]
+omamail = { path = "../../core" }
+nsh-core = "0.7.0"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+futures-util = "0.3"
+log = "0.4"
+
+# The agent worker entry (src/entry.rs) reads argv before the host's `main`.
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+libc = "0.2"

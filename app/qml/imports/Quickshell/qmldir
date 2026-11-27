@@ -1,3 +1,0 @@
-module Quickshell
-singleton Quickshell 1.0 Quickshell.qml
-FloatingWindow 1.0 FloatingWindow.qml

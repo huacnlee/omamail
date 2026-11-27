@@ -1,0 +1,136 @@
+// @ts-nocheck
+// Port of omarchy/ui/tests/test_aliases.js: the same cases against the TypeScript module.
+import { expect, test } from "nsh/test";
+import * as aliases from "./aliases";
+
+const plain = (value: unknown) => JSON.parse(JSON.stringify(value === undefined ? null : value));
+const eq = (actual: unknown, expected: unknown, _message?: string) => expect(plain(actual)).toEqual(plain(expected));
+const neq = (actual: unknown, expected: unknown, _message?: string) => expect(plain(actual)).not.toEqual(plain(expected));
+const is = (actual: unknown, expected: unknown, _message?: string) => expect(actual).toBe(expected);
+const isNot = (actual: unknown, expected: unknown, _message?: string) => expect(actual).not.toBe(expected);
+const ok = (value: unknown, _message?: string) => expect(!!value).toBe(true);
+
+test("aliases matches the Qt rules", () => {
+
+
+eq(aliases.parse("alias1@icloud.com, alias2@example.org"), [
+  { email: "alias1@icloud.com", displayName: "", isPrimary: false, isDefault: false },
+  { email: "alias2@example.org", displayName: "", isPrimary: false, isDefault: false }
+])
+eq(aliases.parse("alias1@icloud.com (default), alias2@example.org"), [
+  { email: "alias1@icloud.com", displayName: "", isPrimary: false, isDefault: true },
+  { email: "alias2@example.org", displayName: "", isPrimary: false, isDefault: false }
+])
+eq(aliases.parse("Work <alias1@icloud.com> (default), alias2@example.org"), [
+  { email: "alias1@icloud.com", displayName: "Work", isPrimary: false, isDefault: true },
+  { email: "alias2@example.org", displayName: "", isPrimary: false, isDefault: false }
+])
+eq(aliases.parse(["alias@me.com", "not an email", "duplicate@me.com", "duplicate@me.com"]), [
+  { email: "alias@me.com", displayName: "", isPrimary: false, isDefault: false },
+  { email: "duplicate@me.com", displayName: "", isPrimary: false, isDefault: false }
+])
+
+// One default. A list naming two is not a state the composer can act on, so
+// the first is kept and the rest read as ordinary aliases.
+eq(
+  aliases.parse("a@me.com (default), b@me.com (default)").map(row => row.isDefault),
+  [true, false])
+
+is(aliases.format([
+  { email: "a@icloud.com" },
+  { email: "b@icloud.com" }
+]), "a@icloud.com, b@icloud.com")
+is(aliases.format([
+  { email: "a@icloud.com", isDefault: true },
+  { email: "b@icloud.com", displayName: "Work" }
+]), "a@icloud.com (default), Work <b@icloud.com>")
+
+// ----------------------------------------------------------- the round trip
+
+// The settings page re-formats this list every time it opens and writes back
+// what it shows, so anything `format` produces that `parse` reads differently
+// is a value the user loses without touching the field.
+function roundTrip(text) {
+  return aliases.format(aliases.parse(text))
+}
+
+const commaName = "\"Lee, Jason\" <j@icloud.com>, second@icloud.com (default)"
+eq(aliases.parse(commaName), [
+  { email: "j@icloud.com", displayName: "Lee, Jason", isPrimary: false, isDefault: false },
+  { email: "second@icloud.com", displayName: "", isPrimary: false, isDefault: true }
+])
+is(roundTrip(commaName), commaName,
+  "a display name holding a comma survives being written back")
+is(roundTrip(roundTrip(commaName)), commaName,
+  "and survives it a second time")
+
+// A quotation mark in a name is escaped rather than ending the name early.
+const quotedName = "\"Jay \\\"JJ\\\" Lee\" <jj@icloud.com>"
+eq(aliases.parse(quotedName), [
+  { email: "jj@icloud.com", displayName: "Jay \"JJ\" Lee", isPrimary: false, isDefault: false }
+])
+is(roundTrip(quotedName), quotedName)
+
+// A name with nothing to escape is left as the user typed it.
+is(roundTrip("Work <b@icloud.com>"), "Work <b@icloud.com>")
+
+// Newlines separate too, so a field that was pasted into keeps its entries.
+eq(aliases.parse("a@me.com\nb@me.com").map(row => row.email),
+  ["a@me.com", "b@me.com"])
+
+// A name that says "(default)" in the middle of itself is a name.
+eq(aliases.parse("\"Not (default) really\" <c@me.com>"), [
+  { email: "c@me.com", displayName: "Not (default) really", isPrimary: false, isDefault: false }
+])
+
+is(aliases.format(""), "")
+eq(aliases.parse(null), [])
+eq(aliases.parse(42), [])
+
+// ------------------------------------------------------------- send-as list
+
+// The mailbox's own address leads and is primary. Nothing else may claim that.
+eq(aliases.sendAsList("me@icloud.com", "work@icloud.com"), [
+  { email: "me@icloud.com", displayName: "", isPrimary: true, isDefault: true },
+  { email: "work@icloud.com", displayName: "", isPrimary: false, isDefault: false }
+])
+
+// An alias marked default takes it from the mailbox address, which is what
+// makes the marker mean "the address the composer opens on".
+eq(aliases.sendAsList("me@icloud.com", "work@icloud.com (default)"), [
+  { email: "me@icloud.com", displayName: "", isPrimary: true, isDefault: false },
+  { email: "work@icloud.com", displayName: "", isPrimary: false, isDefault: true }
+])
+
+// An alias that repeats the mailbox address is the mailbox address.
+eq(aliases.sendAsList("me@icloud.com", "ME@icloud.com, other@icloud.com")
+  .map(row => row.email), ["me@icloud.com", "other@icloud.com"])
+
+// No address at all is an account still being set up, not a list with a blank
+// row in it.
+eq(aliases.sendAsList("", ""), [])
+eq(aliases.sendAsList("", "work@icloud.com").map(row => row.email), ["work@icloud.com"])
+eq(aliases.sendAsList("me@icloud.com", null), [
+  { email: "me@icloud.com", displayName: "", isPrimary: true, isDefault: true }
+])
+
+// ------------------------------------------------------------ sender name
+
+// The account's sender name goes on the mailbox's own address and nowhere
+// else: an alias keeps the name it was typed with, or none.
+{
+  const rows = aliases.sendAsList("me@icloud.com", '"Work Desk" <work@icloud.com>, other@icloud.com')
+  const before = JSON.stringify(rows)
+  eq(aliases.withSenderName(rows, "  Jane Example "), [
+    { email: "me@icloud.com", displayName: "Jane Example", isPrimary: true, isDefault: true },
+    { email: "work@icloud.com", displayName: "Work Desk", isPrimary: false, isDefault: false },
+    { email: "other@icloud.com", displayName: "", isPrimary: false, isDefault: false }
+  ])
+  is(JSON.stringify(rows), before, "the provider's list is not edited in place")
+  // No name is the list as it was: the address goes out alone.
+  is(aliases.withSenderName(rows, "   "), rows)
+  eq(aliases.withSenderName(null, "Jane"), [])
+}
+
+
+});

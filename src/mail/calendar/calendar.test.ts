@@ -1,0 +1,817 @@
+// test_calendar_feed.js of the Qt client, ported as written.
+// Three blocks of the original set process.env.TZ to walk DST days; QuickJS
+// keeps the system zone, so they stay in the Qt suite (ui/tests) only.
+import { test } from "nsh/test";
+import { assert, deepEqual } from "./testing";
+import * as feed from "./calendar";
+import type {
+  CalendarEvent, DayLane, DeleteRequest, EventWriteResult, GoogleEventBody, GoogleOptionsResult,
+} from "./types";
+
+// The Qt fixtures are partial events, and the Qt test read a
+// result's fields without narrowing it first. These say so to the types and
+// change nothing at run time.
+const asEvent = (value: object) => value as CalendarEvent
+const written = (result: EventWriteResult) => result as Extract<EventWriteResult, { ok: true }>
+const accepted = (result: GoogleOptionsResult) => result as Extract<GoogleOptionsResult, { ok: true }>
+const errorOf = (result: EventWriteResult) => result.ok ? undefined : result.error
+
+test("test_calendar_feed.js", () => {
+
+  {
+    const events = [
+      {uid:"ended",start:{ms:100},end:{ms:200}},
+      {uid:"ongoing",start:{ms:150},end:{ms:250}},
+      {uid:"future",start:{ms:300},end:{ms:400}},
+      {uid:"all-day",start:{ms:0,allDay:true},end:{ms:1000,allDay:true}}
+    ] as CalendarEvent[]
+    assert.deepStrictEqual(Array.from(feed.agendaEvents(events,200),e=>e.uid),["all-day","ongoing","future"])
+    assert.deepStrictEqual(Array.from(feed.agendaEvents(events,250),e=>e.uid),["all-day","future"])
+    assert.strictEqual(feed.agendaEvents(events,1000).length,0)
+  }
+
+  {
+    const event = (id: string, start: number, end: number) => asEvent({uid:id,sourceId:"calendar",start:{ms:start},end:{ms:end}})
+    const layout = feed.timedLayout([event("a",10,40),event("b",15,25),event("c",20,30),event("d",40,50)],{startMs:0,endMs:100})
+    assert.deepStrictEqual(Array.from(layout,row=>row.columns),[3,3,3,1])
+    for (let i=0;i<layout.length;i++) for (let j=i+1;j<layout.length;j++) {
+      if (layout[i].start < layout[j].end && layout[j].start < layout[i].end)
+        assert.notStrictEqual(layout[i].column,layout[j].column)
+    }
+    const resized = feed.gestureRange(event("resize",Date.UTC(2026,9,1,10),Date.UTC(2026,9,1,10,37)),0,19,"end")
+    assert.strictEqual(resized!.end,Date.UTC(2026,9,1,11))
+    const guests = feed.attendeeRows(asEvent({attendees:[{displayName:"<img src=x>",email:"a@example.test",responseStatus:"accepted"},{email:"b@example.test",partstat:"DECLINED"}]}))
+    assert.strictEqual(guests[0].name,"<img src=x>")
+    assert.strictEqual(guests[0].label,"Accepted")
+    assert.strictEqual(guests[1].label,"Declined")
+  }
+
+  // Shared copies and occurrences cannot share a selection key.
+  assert.notStrictEqual(feed.eventKey({sourceId:"one",googleId:"instance"}),
+    feed.eventKey({sourceId:"two",googleId:"instance"}))
+  assert.notStrictEqual(feed.eventKey({sourceId:"one",googleId:"first",uid:"series"}),
+    feed.eventKey({sourceId:"one",googleId:"second",uid:"series"}))
+  {
+    const source = {kind:"google",accountId:"me",canCreateMeet:true,timeZone:"Europe/Paris"}
+    const body: GoogleEventBody = {start:{dateTime:"2026-10-01T08:00:00Z"},end:{dateTime:"2026-10-01T09:00:00Z"}}
+    const options = accepted(feed.googleOptions(body,{createMeet:true,conferenceRequestId:"logical-request"},source,null))
+    assert.strictEqual(options.body.start.timeZone,"Europe/Paris")
+    assert.strictEqual(options.body.conferenceData!.createRequest.requestId,"logical-request")
+    assert.strictEqual(body.conferenceData,undefined)
+    const edit = accepted(feed.googleOptions(body,{createMeet:true},source,{conferenceData:{conferenceId:"existing"}}))
+    assert.strictEqual(edit.body.conferenceData,undefined,"a normal patch must preserve the existing conference")
+    assert.strictEqual(feed.googleOptions(body,{createMeet:true},source,null).ok,false)
+    const recurring = accepted(feed.googleOptions(body,{changeRecurrence:true,recurrence:{enabled:true,frequency:"WEEKLY",interval:2,count:4}},source,
+      {recurrenceLines:["RRULE:FREQ=DAILY", "EXDATE:20261001T080000Z"]}))
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(recurring.body.recurrence)), ["RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=4", "EXDATE:20261001T080000Z"])
+    assert.strictEqual(feed.googleOptions(body,{changeRecurrence:true},source,{recurringEventId:"parent"}).ok,false)
+    const guests = accepted(feed.googleOptions(body,{guestEmails:"person@example.org, new@example.org",reminderMode:"none"},source,
+      {attendees:[{email:"person@example.org",responseStatus:"accepted",optional:true}]}))
+    assert.strictEqual(guests.body.attendees![0].responseStatus,"accepted")
+    assert.strictEqual(guests.body.attendees![0].optional,true)
+    assert.strictEqual(guests.body.reminders!.useDefault,false)
+    assert.strictEqual(guests.body.reminders!.overrides!.length,0)
+    const event = asEvent({eventType:"default",organizer:{self:true}})
+    assert.strictEqual(feed.transferRefusal(source,{kind:"google",accountId:"other"},event),"Choose a calendar in the same account")
+    assert.strictEqual(feed.transferRefusal(source,source,{...event,recurringEventId:"parent"}),"Open the entire series before changing its calendar")
+  }
+
+  assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
+    error: {
+      code: 403,
+      message: "Google Calendar API has not been used in project 42 before or it is disabled.",
+      errors: [{ reason: "accessNotConfigured" }],
+      details: [{ reason: "SERVICE_DISABLED", metadata: {
+        service: "calendar-json.googleapis.com"
+      } }]
+    }
+  })), "The Google Calendar API is not enabled for this Google Cloud project")
+  assert.strictEqual(feed.isGoogleCalendarApiDisabledError(
+    "Google: The Google Calendar API is not enabled for this Google Cloud project"), true)
+  assert.strictEqual(feed.isGoogleCalendarApiDisabledError("Google: Network request failed"), false)
+  assert.strictEqual(feed.googleCalendarApiUrl(),
+    "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com")
+  assert.strictEqual(feed.googleResponseError(401, ""),
+    "Google rejected the calendar session. Sign in again")
+  assert.strictEqual(feed.googleResponseError(403, JSON.stringify({
+    error: {
+      message: "Request had insufficient authentication scopes.",
+      errors: [{ reason: "insufficientPermissions" }]
+    }
+  })), "Google Calendar permission is missing. Sign out and sign in again")
+  assert.strictEqual(feed.googleResponseError(500, "not json"),
+    "Google Calendar returned HTTP 500")
+  assert.strictEqual(feed.nativeRequestError("google"),
+    "Google could not complete this calendar request. Refresh the event and try again")
+
+  const week = feed.weekDays(new Date(2026, 7, 23).getTime(), 1)
+  assert.strictEqual(week.length, 7)
+  assert.strictEqual(week[0].isoDate, "2026-08-17")
+  assert.strictEqual(week[6].isoDate, "2026-08-23")
+  assert.strictEqual(feed.weekTitle(week), "17–23 August 2026")
+
+  const splitWeek = feed.weekDays(new Date(2026, 7, 31).getTime(), 1)
+  assert.strictEqual(feed.weekTitle(splitWeek), "31 August–6 September 2026")
+  const timed = asEvent({ start: { ms: new Date(2026, 7, 18, 9, 30).getTime() },
+    end: { ms: new Date(2026, 7, 18, 11, 0).getTime() } })
+  assert.strictEqual(feed.eventTop(timed, week[1], 7, 64), 160)
+  assert.strictEqual(feed.eventHeight(timed, week[1], 64), 96)
+  assert.strictEqual(feed.eventTop(asEvent({ start: { ms: week[1].startMs, allDay: true } }),
+    week[1], 7, 64), 0)
+
+  assert.strictEqual(feed.weekOpeningHour([], week, 7), 7)
+  assert.strictEqual(feed.weekOpeningHour([
+    { start: { ms: new Date(2026, 7, 17, 10, 30).getTime(), allDay: false },
+      end: { ms: new Date(2026, 7, 17, 11, 15).getTime() } },
+    { start: { ms: week[2].startMs, allDay: true }, end: { ms: week[2].endMs } }
+  ] as CalendarEvent[], week, 7), 10, "a quiet morning opens at the first event, past the usual hour")
+  assert.strictEqual(feed.weekOpeningHour([
+    { start: { ms: new Date(2026, 7, 17, 5, 30).getTime(), allDay: false },
+      end: { ms: new Date(2026, 7, 17, 6, 15).getTime() } },
+    { start: { ms: new Date(2026, 7, 18, 20, 0).getTime(), allDay: false },
+      end: { ms: new Date(2026, 7, 18, 22, 30).getTime() } }
+  ] as CalendarEvent[], week, 7), 5)
+  assert.strictEqual(feed.weekOpeningHour([{
+    start: { ms: new Date(2026, 7, 17, 22, 0).getTime(), allDay: false },
+    end: { ms: new Date(2026, 7, 18, 2, 0).getTime() }
+  }] as CalendarEvent[], week, 7), 0, "an overnight event remains visible on both days")
+  assert.strictEqual(feed.weekOpeningHour([{ start: { ms: week[2].startMs, allDay: true }, end: { ms: week[2].endMs } }] as CalendarEvent[],
+    week, 7), 7, "an all-day event sits above the hours")
+
+  const allDayEvents = [
+    { uid: "a", start: { ms: week[0].startMs, allDay: true }, end: { ms: week[1].endMs } },
+    { uid: "b", start: { ms: week[0].startMs, allDay: true }, end: { ms: week[0].endMs } },
+    timed
+  ] as CalendarEvent[]
+  assert.strictEqual(feed.allDayEventsOnDay(allDayEvents, week[0]).length, 2)
+  assert.strictEqual(feed.allDayEventsOnDay(allDayEvents, week[1]).length, 1)
+  assert.strictEqual(feed.maxAllDayEvents(allDayEvents, week), 2)
+  assert.strictEqual(feed.slotStart(week[1], 93, 7, 60, 30),
+    new Date(2026, 7, 18, 8, 30).getTime(), "empty slots snap to half hours")
+
+  // The now line. Same geometry as eventTop, so 9:30 on a 7:00 grid at 64px an
+  // hour lands at 160 — but bounded at both ends and to the one day it belongs
+  // to, because the alternative is a line claiming a time it is not at.
+  const halfNine = new Date(2026, 7, 18, 9, 30).getTime()
+  assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64, halfNine), 160)
+  assert.strictEqual(feed.nowOffset(week[2], 7, 19, 64, halfNine), -1,
+    "the line belongs to one column, not to the week")
+  assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+    new Date(2026, 7, 18, 6, 0).getTime()), -1, "before the first drawn hour")
+  assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+    new Date(2026, 7, 18, 21, 0).getTime()), -1, "after the last drawn hour")
+  assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+    new Date(2026, 7, 18, 7, 0).getTime()), 0, "the first hour itself is on the grid")
+  assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64,
+    new Date(2026, 7, 18, 19, 0).getTime()), 768, "and so is the last")
+  assert.strictEqual(feed.nowOffset(week[1], 7, 19, 64, NaN), -1)
+  assert.strictEqual(feed.nowOffset(null, 7, 19, 64, halfNine), -1)
+
+  // A day whose first event opens it at midnight still places it.
+  assert.strictEqual(feed.nowOffset(week[1], 0, 24, 64,
+    new Date(2026, 7, 18, 0, 30).getTime()), 32)
+
+  assert.strictEqual(feed.weekNowOffset(week, 7, 19, 64, halfNine), 160,
+    "the rail finds today without being told which column it is")
+  assert.strictEqual(feed.weekNowOffset(splitWeek, 7, 19, 64, halfNine), -1,
+    "another week on screen gets no line")
+  assert.strictEqual(feed.weekNowOffset([], 7, 19, 64, halfNine), -1)
+
+
+  const report = feed.caldavReport(
+    Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
+  assert.ok(report.indexOf('start="20260801T000000Z"') >= 0)
+  assert.ok(report.indexOf('end="20260901T000000Z"') >= 0)
+  assert.ok(report.indexOf("<c:calendar-data") >= 0)
+
+  const xml = [
+    '<?xml version="1.0"?>',
+    '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
+    '<d:response><d:href>/cal/a.ics</d:href><d:propstat><d:prop>',
+    '<c:calendar-data>BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nSUMMARY:A &amp; B\r\nDTSTART:20260824T080000Z\r\nDTEND:20260824T083000Z\r\nEND:VEVENT\r\nEND:VCALENDAR</c:calendar-data>',
+    '</d:prop></d:propstat></d:response>',
+    '<d:response><d:href>/cal/b.ics</d:href><d:propstat><d:prop>',
+    '<c:calendar-data>BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:b\r\nSUMMARY:All day\r\nDTSTART;VALUE=DATE:20260825\r\nDTEND;VALUE=DATE:20260826\r\nEND:VEVENT\r\nEND:VCALENDAR</c:calendar-data>',
+    '</d:prop></d:propstat></d:response>',
+    '</d:multistatus>'
+  ].join("")
+
+  const parsed = feed.eventsFromCaldav(xml, "work")
+  assert.strictEqual(parsed.length, 2)
+  assert.strictEqual(parsed[0].summary, "A & B")
+  assert.strictEqual(parsed[0].sourceId, "work")
+  assert.strictEqual(parsed[0].href, "/cal/a.ics")
+  assert.strictEqual(parsed[1].start.allDay, true)
+
+  // A server may send the calendar object in a CDATA section instead of escaping
+  // it, which RFC 4791 allows and DAViCal and iCloud do. Unwrapped, its first
+  // line reads `<![CDATA[BEGIN:VCALENDAR` and the collection parses to nothing.
+  const cdataXml = '<?xml version="1.0" encoding="UTF-8"?>'
+    + '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+    + '<d:response><d:href>/cal/cdata.ics</d:href><d:propstat>'
+    + '<d:prop><d:getetag>"C=1@U=cdata"</d:getetag>'
+    + '<c:calendar-data><![CDATA[BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:cdata\r\nSUMMARY:R&D sync &amp; Q&A\r\nDTSTART:20260824T080000Z\r\nDTEND:20260824T083000Z\r\nEND:VEVENT\r\nEND:VCALENDAR]]></c:calendar-data>'
+    + '</d:prop><d:status>HTTP/1.1 200 OK</d:status>'
+    + '</d:propstat></d:response></d:multistatus>'
+  const cdataParsed = feed.eventsFromCaldav(cdataXml, "work")
+  assert.strictEqual(cdataParsed.length, 1)
+  assert.strictEqual(cdataParsed[0].href, "/cal/cdata.ics")
+  // Nothing inside a CDATA section is escaped, so the entity pass must not touch
+  // it: "&amp;" there is those five characters and a summary keeps them.
+  assert.strictEqual(cdataParsed[0].summary, "R&D sync &amp; Q&A")
+
+  // Both encodings can appear in one element. The entities outside the section
+  // are decoded; the section's own content is handed over exactly as it arrived.
+  assert.strictEqual(
+    feed.tagText('<c:calendar-data>A &amp; B&#13;<![CDATA[C &amp; D]]>'
+      + ' &lt;end&gt;</c:calendar-data>', "calendar-data"),
+    "A & B\rC &amp; D <end>")
+
+  const recurringXml = [
+    '<?xml version="1.0"?>',
+    '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
+    '<d:response><d:href>/cal/standup.ics</d:href><d:propstat><d:prop>',
+    '<c:calendar-data>BEGIN:VCALENDAR\r\n',
+    'BEGIN:VTIMEZONE\r\nTZID:Test/PlusTwo\r\n',
+    'BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0200\r\n',
+    'TZOFFSETTO:+0200\r\nEND:STANDARD\r\n',
+    'END:VTIMEZONE\r\n',
+    'BEGIN:VEVENT\r\nUID:standup\r\nSUMMARY:Standup\r\n',
+    'DTSTART;TZID=Test/PlusTwo:20240208T140000\r\n',
+    'DTEND;TZID=Test/PlusTwo:20240208T150000\r\n',
+    'RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH\r\n',
+    'EXDATE;TZID=Test/PlusTwo:20260903T140000\r\nEND:VEVENT\r\n',
+    'BEGIN:VEVENT\r\nUID:standup\r\nSUMMARY:Moved standup\r\n',
+    'RECURRENCE-ID;TZID=Test/PlusTwo:20260917T140000\r\n',
+    'DTSTART;TZID=Test/PlusTwo:20260918T140000\r\n',
+    'DTEND;TZID=Test/PlusTwo:20260918T150000\r\n',
+    'END:VEVENT\r\nEND:VCALENDAR</c:calendar-data>',
+    '</d:prop></d:propstat></d:response></d:multistatus>'
+  ].join("")
+  const recurringEvents = feed.eventsFromCaldav(recurringXml, "work",
+    Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+  assert.strictEqual(recurringEvents.length, 1)
+  assert.strictEqual(recurringEvents[0].summary, "Moved standup")
+  assert.strictEqual(recurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 12, 0))
+  assert.strictEqual(recurringEvents[0].sourceId, "work")
+  assert.strictEqual(recurringEvents[0].href, "/cal/standup.ics")
+
+  const unresolvedRecurringXml = recurringXml
+    .replace([
+      "BEGIN:VTIMEZONE\r\nTZID:Test/PlusTwo\r\n",
+      "BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0200\r\n",
+      "TZOFFSETTO:+0200\r\nEND:STANDARD\r\n",
+      "END:VTIMEZONE\r\n"
+    ].join(""), "")
+    .replace(/Test\/PlusTwo/g, "Europe/Stockholm")
+  const unresolvedRecurringEvents = feed.eventsFromCaldav(unresolvedRecurringXml, "work",
+    Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+  assert.strictEqual(unresolvedRecurringEvents.length, 1)
+  assert.strictEqual(unresolvedRecurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 14, 0),
+    "an unresolved TZID uses the same placeholder on every machine")
+  assert.strictEqual(unresolvedRecurringEvents[0].start.resolved, false)
+
+  const utcRecurringXml = recurringXml
+    .replace(/;TZID=Test\/PlusTwo/g, "")
+    .replace(/20240208T140000/g, "20240208T130000Z")
+    .replace(/20240208T150000/g, "20240208T140000Z")
+    .replace(/20260903T140000/g, "20260903T130000Z")
+    .replace(/20260917T140000/g, "20260917T130000Z")
+    .replace(/20260918T140000/g, "20260918T120000Z")
+    .replace(/20260918T150000/g, "20260918T130000Z")
+  const utcRecurringEvents = feed.eventsFromCaldav(utcRecurringXml, "work",
+    Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+  assert.strictEqual(utcRecurringEvents.length, 1)
+  assert.strictEqual(utcRecurringEvents[0].start.ms, Date.UTC(2026, 8, 18, 12, 0))
+
+  // A rule from long ago is walked from the range it is asked for, not from its
+  // DTSTART. Walking from 1990 hit the loop's 10 000-day ceiling twenty-seven
+  // years in and returned nothing for 2026; the rules that did reach the range
+  // paid for every day since they began, on the shell's main thread, on every
+  // refresh — a weekly event from 2023 cost a quarter of a second each.
+  const ancientXml = recurringXml
+    .replace("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH", "RRULE:FREQ=WEEKLY;BYDAY=TH")
+    .replace(/20240208T140000/g, "19900104T140000")
+    .replace(/20240208T150000/g, "19900104T150000")
+  const ancientEvents = feed.eventsFromCaldav(ancientXml, "work",
+    Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ancientEvents.map(function(event) { return event.start.ms }))), [
+    Date.UTC(2026, 7, 27, 12, 0), Date.UTC(2026, 8, 10, 12, 0), Date.UTC(2026, 8, 18, 12, 0)
+  ], "every Thursday in range, minus the EXDATE, plus the moved one")
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ancientEvents.map(function(event) { return event.summary }))),
+    ["Standup", "Standup", "Moved standup"])
+
+  // COUNT is the one rule that has to be counted from the start, so it still is:
+  // ten Thursdays from July reach 3 September and no further, whatever the range.
+  const countedXml = recurringXml
+    .replace("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH", "RRULE:FREQ=WEEKLY;BYDAY=TH;COUNT=10")
+    .replace(/20240208T140000/g, "20260702T140000")
+    .replace(/20240208T150000/g, "20260702T150000")
+  const countedEvents = feed.eventsFromCaldav(countedXml, "work",
+    Date.UTC(2026, 7, 23), Date.UTC(2026, 8, 24))
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(countedEvents.map(function(event) { return event.start.ms }))), [
+    Date.UTC(2026, 7, 27, 12, 0), Date.UTC(2026, 8, 18, 12, 0)
+  ], "27 August is the ninth, 3 September the tenth and excluded, 17 September is past COUNT")
+
+  const days = feed.monthDays(2026, 7, 1)
+  assert.strictEqual(days.length, 42)
+  assert.strictEqual(days[0].isoDate, "2026-07-27")
+  assert.strictEqual(days[5].isoDate, "2026-08-01")
+  assert.strictEqual(days[41].isoDate, "2026-09-06")
+  assert.strictEqual(days[5].inMonth, true)
+  assert.strictEqual(days[0].inMonth, false)
+
+  assert.strictEqual(feed.monthGridDays(2026, 8, 1).length, 35)
+  assert.strictEqual(feed.monthGridDays(2026, 7, 1).length, 42)
+  for (let year = 2024; year <= 2028; year++) {
+    for (let month = 0; month < 12; month++) {
+      const grid = feed.monthGridDays(year, month, 1)
+      assert.ok(grid.length === 35 || grid.length === 42)
+      const inMonth = grid.filter(day => day.inMonth)
+      assert.strictEqual(inMonth.length, new Date(year, month + 1, 0).getDate())
+      assert.strictEqual(inMonth[0].day, 1)
+      assert.ok(grid.length === 35 || grid.slice(35).some(day => day.inMonth))
+    }
+  }
+  // Fill the available rows; reserve the overflow label only when it is needed.
+  assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 4), 4)
+  assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 5), 3)
+  assert.strictEqual(feed.monthEventLimit(10, 23, 2, 16, 5), 0)
+
+  {
+    const google = { kind: "google" }
+    const labels = (request: DeleteRequest) => Array.from(request.choices, choice => choice.value + ":" + choice.label)
+    const plain = feed.deleteRequest({ summary: "Dentist" }, google, true)
+    assert.strictEqual(plain.name, "Dentist")
+    assert.deepStrictEqual(labels(plain), ["all:Delete"])
+    const guests = asEvent({ summary: "Review", organizer: { self: true },
+      attendees: [{ self: true }, { email: "sam@example.test" }] })
+    assert.deepStrictEqual(labels(feed.deleteRequest(guests, google, true)),
+      ["none:Delete without email", "all:Delete and notify guests"])
+    // Someone else's meeting sends nothing from here, and no other provider can
+    // be asked not to notify.
+    assert.deepStrictEqual(labels(feed.deleteRequest(asEvent(Object.assign({}, guests, { organizer: { self: false } })), google, true)),
+      ["all:Delete"])
+    assert.deepStrictEqual(labels(feed.deleteRequest(guests, { kind: "microsoft" }, true)), ["all:Delete"])
+    const occurrence = Object.assign({ recurringEventId: "series" }, guests)
+    assert.deepStrictEqual(labels(feed.deleteRequest(occurrence, google, true)),
+      ["series:Delete series", "none:Delete occurrence without email", "all:Delete occurrence and notify guests"])
+    // A backend that cannot read the series offers only the occurrence.
+    assert.deepStrictEqual(labels(feed.deleteRequest({ summary: "Standup", recurringEventId: "series" }, google, false)),
+      ["all:Delete occurrence"])
+    // A series as an array of lines, which the rule also reads, though the
+    // readers here leave `recurrence` a sentence.
+    assert.ok(feed.deleteRequest({ recurrence: ["RRULE:FREQ=WEEKLY"] } as unknown as CalendarEvent, google, true).message.indexOf("Every occurrence") === 0)
+    assert.strictEqual(feed.deleteRequest(null, null, false).name, "Untitled event")
+  }
+
+  function spanFixture(id: string, start: Date, end: Date, allDay = false): CalendarEvent {
+    return {uid:id,sourceId:"synthetic",summary:"Same title",start:{ms:start.getTime(),allDay},end:{ms:end.getTime(),allDay}}
+  }
+  const holiday = spanFixture("holiday", new Date(2026,7,29,12), new Date(2026,8,7,12))
+  const overlap = spanFixture("overlap", new Date(2026,8,2), new Date(2026,8,5), true)
+  const dailyOne = spanFixture("daily-one", new Date(2026,8,1,9), new Date(2026,8,1,10))
+  const dailyTwo = spanFixture("daily-two", new Date(2026,8,2,9), new Date(2026,8,2,10))
+  const layout = feed.monthSpanLayout([dailyOne, overlap, dailyTwo, holiday], feed.monthGridDays(2026,8,1))
+  assert.strictEqual(layout.segments.length, 3)
+  assert.strictEqual(layout.segments[0].event, holiday)
+  assert.strictEqual(layout.segments[0].startColumn, 0)
+  assert.strictEqual(layout.segments[0].endColumn, 6)
+  assert.strictEqual(layout.segments[0].continuesBefore, true)
+  assert.strictEqual(layout.segments[0].continuesAfter, true)
+  assert.strictEqual(layout.segments[1].lane, 1)
+  assert.strictEqual(layout.segments[1].endColumn, 4, "exclusive midnight does not occupy Saturday")
+  assert.strictEqual(layout.segments[2].week, 1)
+  assert.strictEqual(layout.segments[2].endColumn, 0)
+  assert.strictEqual(layout.segments[2].continuesBefore, true)
+  assert.strictEqual(layout.segments[2].continuesAfter, false)
+  const midnightEnd = spanFixture("midnight", new Date(2026,8,1), new Date(2026,8,2))
+  assert.strictEqual(feed.spansMultipleDays(midnightEnd), false)
+  assert.strictEqual(feed.displayInAllDayLane(midnightEnd), true)
+  const overnight = spanFixture("overnight", new Date(2026,8,1,23), new Date(2026,8,2,1))
+  assert.strictEqual(feed.displayInAllDayLane(overnight), false)
+  assert.strictEqual(feed.displayInAllDayLane(holiday), true)
+  const travelDay = feed.weekDays(new Date(2026,8,2).getTime(),1)[2]
+  assert.strictEqual(feed.allDayEventsOnDay([holiday,dailyTwo],travelDay)[0],holiday)
+  assert.strictEqual(feed.timedLayout([holiday,dailyTwo],travelDay).length,1)
+  assert.strictEqual(feed.dayLanes([holiday,dailyTwo],travelDay).length,1,
+    "multi-day events stay in the all-day lane after integrating timed lanes")
+  assert.strictEqual(holiday.start.allDay,false,"display promotion must not mutate timed events")
+
+  const google = feed.eventsFromGoogle({ items: [{
+    id: "g1",
+    summary: "Google event",
+    description: "Details",
+    location: "Room 2",
+    htmlLink: "https://calendar.google.com/event?eid=x",
+    start: { dateTime: "2026-08-24T10:00:00+02:00" },
+    end: { dateTime: "2026-08-24T11:00:00+02:00" },
+    status: "confirmed"
+  }] }, "google:me")
+  assert.strictEqual(google.length, 1)
+  assert.strictEqual(google[0].uid, "g1")
+  assert.strictEqual(google[0].googleId, "g1",
+    "the write URL needs the item id, separate from the iCalUID")
+  assert.strictEqual(google[0].sourceId, "google:me")
+  assert.strictEqual(google[0].start.ms, Date.parse("2026-08-24T10:00:00+02:00"))
+  const googleUrl = feed.googleEventsUrl(Date.UTC(2026, 7, 1), Date.UTC(2026, 8, 1))
+  assert.ok(googleUrl.indexOf("https://www.googleapis.com/calendar/v3/calendars/primary/events?") === 0)
+  assert.strictEqual(feed.googleEventUrl("g1_20260824T080000Z"),
+    "https://www.googleapis.com/calendar/v3/calendars/primary/events/g1_20260824T080000Z")
+
+  const created = written(feed.createEvent({
+    title: "Planning", startMs: Date.UTC(2026, 7, 24, 8, 0),
+    endMs: Date.UTC(2026, 7, 24, 9, 0), location: "https://meet.example/room",
+    description: "Weekly plan"
+  }, 1234))
+  assert.strictEqual(created.ok, true)
+  assert.strictEqual(created.uid, "omamail-1234")
+  assert.ok(created.ics.indexOf("SUMMARY:Planning") > 0)
+  assert.ok(created.ics.indexOf("DTSTART:20260824T080000Z") > 0)
+  assert.ok(created.ics.indexOf("LOCATION:https://meet.example/room") > 0)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(created.google)), {
+    summary: "Planning", description: "Weekly plan", location: "https://meet.example/room",
+    start: { dateTime: "2026-08-24T08:00:00.000Z" },
+    end: { dateTime: "2026-08-24T09:00:00.000Z" }
+  })
+
+  const recurring = written(feed.createEvent({
+    title: "Planning", startMs: Date.UTC(2026, 7, 24, 8, 0),
+    endMs: Date.UTC(2026, 7, 24, 9, 0),
+    recurrence: { enabled: true, frequency: "WEEKLY", interval: 2, count: 8 }
+  }, 1234))
+  assert.strictEqual(recurring.ok, true)
+  assert.ok(recurring.ics.indexOf("RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=8") > 0)
+  assert.strictEqual(JSON.stringify(recurring.google.recurrence),
+    JSON.stringify(["RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=8"]))
+  assert.strictEqual(errorOf(feed.createEvent({
+    title: "Planning", startMs: 1, endMs: 2,
+    recurrence: { enabled: true, frequency: "FORTNIGHTLY", interval: 1 }
+  }, 1)), "Choose how often the event repeats")
+  assert.strictEqual(errorOf(feed.createEvent({
+    title: "Planning", startMs: 1, endMs: 2,
+    recurrence: { enabled: true, frequency: "DAILY", interval: 0 }
+  }, 1)), "Repeat interval must be at least 1")
+  assert.strictEqual(feed.recurrenceIntervalUnit("DAILY", 1), "day")
+  assert.strictEqual(feed.recurrenceIntervalUnit("WEEKLY", 2), "weeks")
+  assert.strictEqual(feed.recurrenceIntervalUnit("MONTHLY", "1"), "month")
+  assert.strictEqual(feed.recurrenceIntervalUnit("YEARLY", ""), "years")
+  assert.strictEqual(errorOf(feed.createEvent({ title: "", startMs: 1, endMs: 2 }, 1)),
+    "Add an event title")
+  assert.strictEqual(errorOf(feed.createEvent({ title: "x", startMs: 2, endMs: 1 }, 1)),
+    "End time must be after start time")
+
+  // An edit keeps the event's identity and tells every copy which write is new.
+  const updated = written(feed.updateEvent({
+    title: "Planning, moved", startMs: Date.UTC(2026, 7, 24, 10, 0),
+    endMs: Date.UTC(2026, 7, 24, 11, 0), location: "", description: "Weekly plan"
+  }, { uid: "omamail-1234", sequence: 0 }, 5678))
+  assert.strictEqual(updated.ok, true)
+  assert.strictEqual(updated.uid, "omamail-1234")
+  assert.ok(updated.ics.indexOf("UID:omamail-1234") > 0)
+  assert.ok(updated.ics.indexOf("SEQUENCE:1") > 0,
+    "a rewrite bumps the sequence so older copies yield")
+  assert.ok(updated.ics.indexOf("DTSTART:20260824T100000Z") > 0)
+  assert.ok(updated.ics.indexOf("SUMMARY:Planning\\, moved") > 0,
+    "ical text escapes what the field carries")
+  assert.ok(updated.ics.indexOf("RRULE") < 0,
+    "recurrence is not editable here, so none is written")
+  assert.ok(updated.ics.indexOf("LOCATION") < 0, "a cleared field leaves the ICS")
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(updated.google)), {
+    summary: "Planning, moved", description: "Weekly plan", location: "",
+    start: { dateTime: "2026-08-24T10:00:00.000Z" },
+    end: { dateTime: "2026-08-24T11:00:00.000Z" }
+  })
+  assert.ok(!("recurrence" in updated.google),
+    "omitting recurrence from the patch is what keeps the server's rule")
+  const bumpedAgain = written(feed.updateEvent({
+    title: "x", startMs: 1, endMs: 2
+  }, { uid: "u", sequence: 4 }, 1))
+  assert.ok(bumpedAgain.ics.indexOf("SEQUENCE:5") > 0)
+  assert.strictEqual(errorOf(feed.updateEvent({ title: "x", startMs: 1, endMs: 2 }, {}, 1)),
+    "The event has no identity to update")
+  assert.strictEqual(errorOf(feed.updateEvent({ title: "", startMs: 1, endMs: 2 },
+    { uid: "u" }, 1)), "Add an event title")
+
+  const convertedAllDay = written(feed.updateEvent({title:"Converted",allDay:true,
+    startMs:new Date(2026,8,9).getTime(),endMs:new Date(2026,8,11).getTime()},
+    asEvent({uid:"convert",start:{allDay:false}}),1))
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(convertedAllDay.google.start)),
+    {date:"2026-09-09",dateTime:null,timeZone:null})
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(convertedAllDay.google.end)),
+    {date:"2026-09-11",dateTime:null,timeZone:null})
+  const convertedTimed = written(feed.updateEvent({title:"Converted",allDay:false,
+    startMs:Date.UTC(2026,8,9,10),endMs:Date.UTC(2026,8,9,11)},
+    asEvent({uid:"convert",start:{allDay:true}}),1))
+  assert.strictEqual(convertedTimed.google.start.date,null)
+  assert.strictEqual(convertedTimed.google.end.date,null)
+  assert.strictEqual(convertedTimed.google.start.dateTime,"2026-09-09T10:00:00.000Z")
+  assert.strictEqual(feed.googleEventPatch({title:"Undo",start:1,end:2},false).start.date,null)
+  assert.strictEqual(feed.editorDateRange("2026-09-09","11:15","2026-09-10","05:15",false).ok,true)
+  assert.strictEqual(feed.editorDateRange("2026-09-09","11:15","2026-09-09","05:15",false).ok,false)
+  assert.strictEqual(feed.editorDateRange("2026-09-09","11:15","2026-09-09","11:15",false).ok,false)
+  assert.strictEqual(feed.editorDateRange("2026-02-30","11:15","2026-03-02","11:15",false).ok,false)
+  assert.strictEqual(feed.editorDateRange("2026-09-09","24:15","2026-09-10","11:15",false).ok,false)
+  assert.strictEqual(feed.editorDateRange("2026-09-09","","2026-09-09","",true).ok,true)
+  assert.strictEqual(feed.editorDateRange("2026-09-10","","2026-09-09","",true).ok,false)
+
+  // A CalDAV update replaces the whole resource, so fields this editor does not
+  // draw must survive a change to the ones it does. In particular, editing the
+  // title must not remove the organiser, attendees, alarms, timezone rules or a
+  // server extension from the VEVENT it puts back.
+  const preservedXml = [
+    '<?xml version="1.0"?>',
+    '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">',
+    '<d:response><d:href>/cal/preserved.ics</d:href><d:propstat><d:prop>',
+    '<c:calendar-data>BEGIN:VCALENDAR\r\nVERSION:2.0\r\n',
+    'BEGIN:VTIMEZONE\r\nTZID:Custom/Office\r\nEND:VTIMEZONE\r\n',
+    'BEGIN:VEVENT\r\nUID:preserved\r\nDTSTART:20260824T080000Z\r\n',
+    'DTEND:20260824T090000Z\r\nSUMMARY:Before\r\n',
+    'ORGANIZER:mailto:owner@example.com\r\nATTENDEE:mailto:guest@example.com\r\n',
+    'X-SERVER-FIELD:keep-me\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n',
+    'TRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR',
+    '</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>'
+  ].join("")
+  const preservedEvent = feed.eventsFromCaldav(preservedXml, "work")[0]
+  for (const kind of ["microsoft", "caldav", "icloud"]) {
+    assert.strictEqual(feed.writeRefusal({kind}, preservedEvent), "", "legacy editing remains available")
+    assert.strictEqual(feed.writeRefusal({kind}, preservedEvent, "reschedule"),
+      "Open the event editor to change its time", "new gestures are Google-only")
+  }
+  assert.strictEqual(feed.writeRefusal({kind:"google"}, {googleId:"event"}, "reschedule"), "")
+  const preservedUpdate = written(feed.updateEvent({
+    title: "After", startMs: Date.UTC(2026, 7, 24, 8, 0),
+    endMs: Date.UTC(2026, 7, 24, 9, 0), location: "", description: ""
+  }, preservedEvent, 5678))
+  assert.ok(preservedUpdate.ics.indexOf("SUMMARY:After") > 0)
+  assert.ok(preservedUpdate.ics.indexOf("SUMMARY:Before") < 0)
+  assert.ok(preservedUpdate.ics.indexOf("ORGANIZER:mailto:owner@example.com") > 0)
+  assert.ok(preservedUpdate.ics.indexOf("ATTENDEE:mailto:guest@example.com") > 0)
+  assert.ok(preservedUpdate.ics.indexOf("BEGIN:VALARM") > 0)
+  assert.ok(preservedUpdate.ics.indexOf("X-SERVER-FIELD:keep-me") > 0)
+  assert.ok(preservedUpdate.ics.indexOf("BEGIN:VTIMEZONE") > 0)
+
+  // A write is refused where it cannot really run: no source, a read-only
+  // calendar of any kind, or a recurring CalDAV event whose ICS state this
+  // client does not re-serialize. A recurring Google event edits fine — the
+  // server keeps the rule and one occurrence is patched.
+  assert.strictEqual(feed.writeRefusal(null, null), "Choose a calendar")
+  assert.strictEqual(feed.writeRefusal({ kind: "caldav", readOnly: true }, null),
+    "This calendar is read-only")
+  assert.strictEqual(feed.writeRefusal({ kind: "google", readOnly: true }, null),
+    "This calendar is read-only")
+  assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+    { recurrenceRule: "FREQ=WEEKLY" }),
+    "Recurring CalDAV events can only be changed in a full calendar client")
+  // A modified occurrence carries a RECURRENCE-ID but no RRULE — and its href
+  // is the series' shared file, so writing it would rewrite the whole series.
+  assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+    { recurrenceIdMs: new Date(2026, 7, 24).getTime() }),
+    "Recurring CalDAV events can only be changed in a full calendar client")
+  // A RECURRENCE-ID too malformed to parse leaves recurrenceIdMs at 0; the raw
+  // line still answers for it, because the href names the series' shared file.
+  assert.strictEqual(feed.writeRefusal({ kind: "caldav" },
+    { recurrenceIdMs: 0, source: { recurrenceId: "RECURRENCE-ID:not-a-date" } }),
+    "Recurring CalDAV events can only be changed in a full calendar client")
+  assert.strictEqual(feed.writeRefusal({ kind: "caldav" }, null), "")
+  assert.strictEqual(feed.writeRefusal({ kind: "google" }, null), "")
+  assert.match(feed.writeRefusal({ kind: "google" }, { eventType: "fromGmail" }), /created from Gmail/)
+  assert.strictEqual(feed.writeRefusal({ kind: "google" }, { eventType: "fromGmail" }, "delete"), "")
+  assert.strictEqual(feed.writeRefusal({ kind: "google" },
+    { recurrenceRule: "FREQ=WEEKLY" }), "")
+
+  // An all-day event is edited as the dates it spans: the ICS keeps VALUE=DATE
+  // with an exclusive end, the Google body carries date and never dateTime, and
+  // a title-only change cannot turn it into midnight-to-midnight times.
+  const allDayUpdate = written(feed.updateEvent({
+    title: "Conference, day one moved", startMs: new Date(2026, 7, 24).getTime(),
+    endMs: new Date(2026, 7, 26).getTime()
+  }, { uid: "conf-1", sequence: 1,
+    start: { ms: new Date(2026, 7, 24).getTime(), allDay: true } }, 0))
+  assert.ok(allDayUpdate.ok)
+  assert.ok(allDayUpdate.ics.indexOf("DTSTART;VALUE=DATE:20260824") > 0)
+  assert.ok(allDayUpdate.ics.indexOf("DTEND;VALUE=DATE:20260826") > 0,
+    "the exclusive end stays the day after the last one shown")
+  assert.ok(allDayUpdate.ics.indexOf("SEQUENCE:2") > 0)
+  assert.ok(allDayUpdate.ics.indexOf("DTSTART:") < 0,
+    "no date-time is written for an all-day event")
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(allDayUpdate.google)), {
+    summary: "Conference, day one moved", description: "", location: "",
+    start: { date: "2026-08-24" }, end: { date: "2026-08-26" }
+  })
+
+  // The CalDAV write address is the event's own href, resolved the way the
+  // server wrote it: absolute, absolute-path, or relative to the collection.
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "https://dav.example/cal/me/a.ics" }),
+    "https://dav.example/cal/me/a.ics")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "/cal/me/a.ics" }), "https://dav.example/cal/me/a.ics")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "a.ics" }), "https://dav.example/cal/me/a.ics")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me",
+    { href: "", uid: "omamail-1" }), "https://dav.example/cal/me/omamail-1.ics")
+  assert.strictEqual(feed.caldavEventUrl("http://dav.example/cal/me/",
+    { href: "/cal/me/a.ics" }), "", "CalDAV writes stay on HTTPS")
+  assert.strictEqual(feed.caldavEventUrl("", { href: "", uid: "" }), "")
+
+  // An absolute href is accepted only on the collection's own origin: anything
+  // else would send this calendar's credentials to a server that merely named
+  // an address in an answer.
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "https://other.example/cal/me/a.ics" }), "",
+    "a cross-origin href is refused before credentials go anywhere")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "https://dav.example.evil.com/a.ics" }), "",
+    "a host that merely starts with the source's is another origin")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
+    { href: "https://dav.example/cal/me/a.ics" }), "",
+    "a different port is a different origin")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example:8443/cal/me/",
+    { href: "/cal/me/a.ics" }),
+    "https://dav.example:8443/cal/me/a.ics",
+    "a path-absolute href keeps the collection port")
+  assert.strictEqual(feed.caldavEventUrl("https://[2001:db8::1]:8443/cal/",
+    { href: "/cal/a.ics" }),
+    "https://[2001:db8::1]:8443/cal/a.ics")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "https://dav.example:443/cal/me/a.ics" }),
+    "https://dav.example:443/cal/me/a.ics",
+    "the default port spelled out is still the same origin")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "//other.example/a.ics" }), "",
+    "a scheme-relative href still names its own host")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "//dav.example/cal/me/a.ics" }),
+    "https://dav.example/cal/me/a.ics",
+    "a scheme-relative href on the same host resolves")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "https://dav.example:443@evil.example/steal.ics" }), "",
+    "userinfo is not the collection host")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "https://user@dav.example/cal/me/a.ics" }),
+    "https://dav.example/cal/me/a.ics",
+    "userinfo on the collection host is dropped, not sent as the user")
+  assert.strictEqual(feed.urlOrigin("https://[2001:db8::1]/cal/"),
+    "https://[2001:db8::1]:443")
+  assert.strictEqual(feed.caldavEventUrl("https://[2001:db8::1]/cal/",
+    { href: "https://[2001:db8::2]/cal/a.ics" }), "",
+    "a different IPv6 host is another origin")
+
+  // Raw whitespace is refused: a URL's spaces arrive percent-encoded, and the
+  // resolved address becomes one quoted line of the transport's curl config,
+  // where a line break would write more options.
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "https://dav.example/cal/me/a.ics\noutput = elsewhere" }), "",
+    "a line break in an absolute href is refused")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "/cal/me/a.ics\r\nnext" }), "", "same for a path href")
+  assert.strictEqual(feed.caldavEventUrl("https://dav.example/cal/me/",
+    { href: "a b.ics" }), "", "a raw space is not a URL")
+  assert.ok(googleUrl.indexOf("singleEvents=true") > 0)
+  assert.ok(googleUrl.indexOf("orderBy=startTime") > 0)
+  assert.ok(googleUrl.indexOf("timeMin=2026-08-01T00%3A00%3A00.000Z") > 0)
+
+  // An hour's automatic height shows 16 hours, between what is readable and the usual height.
+  assert.strictEqual(feed.automaticHourHeight(420, 60, 25), 26.25)
+  assert.strictEqual(feed.automaticHourHeight(1600, 60, 25), 60, "a tall window keeps the usual height")
+  assert.strictEqual(feed.automaticHourHeight(200, 60, 25), 25, "a short window stays readable")
+  assert.strictEqual(feed.automaticHourHeight(0, 60, 25), 25)
+  assert.strictEqual(feed.automaticHourHeight(420, 60, 70), 70, "a large font outranks the usual height")
+
+  // A height saved by the zoom keys, with 0 for automatic.
+  assert.strictEqual(feed.normalizeHourHeight(40), 40)
+  assert.strictEqual(feed.normalizeHourHeight("35"), 35)
+  assert.strictEqual(feed.normalizeHourHeight(26.9), 26)
+  assert.strictEqual(feed.normalizeHourHeight(5), 10)
+  assert.strictEqual(feed.normalizeHourHeight(500), 120)
+  for (const unusable of [undefined, null, "", " ", "tall", true, [40], 0, -10, NaN, Infinity])
+    assert.strictEqual(feed.normalizeHourHeight(unusable), 0, String(unusable))
+
+  // One press of a zoom key starts from what is on screen and stops at each end of the range.
+  assert.strictEqual(feed.zoomedHourHeight(60, 60, -1), 55)
+  assert.strictEqual(feed.zoomedHourHeight(60, 60, 1), 65)
+  assert.strictEqual(feed.zoomedHourHeight(0, 26.25, 1), 31, "from automatic")
+  assert.strictEqual(feed.zoomedHourHeight(0, 25, -1), 20, "below what automatic goes to")
+  assert.strictEqual(feed.zoomedHourHeight(10, 10, -1), 10)
+  assert.strictEqual(feed.zoomedHourHeight(0, 10, -1), 0, "a press with no effect stays automatic")
+  assert.strictEqual(feed.zoomedHourHeight(120, 120, 1), 120)
+  assert.strictEqual(feed.zoomedHourHeight(40, 40, 0), 0, "reset returns to automatic")
+  // A window tall enough to stretch hours to 37.5: no invisible presses.
+  assert.strictEqual(feed.zoomedHourHeight(40, 40, -1, 37.5), 37, "stops where the window takes over")
+  assert.strictEqual(feed.zoomedHourHeight(37, 37.5, -1, 37.5), 37)
+  assert.strictEqual(feed.zoomedHourHeight(38, 38, -1, 37.5), 37, "half a pixel above the fit still scrolls")
+  assert.strictEqual(feed.zoomedHourHeight(25, 25, -1, 24.17), 24, "a step landing just above the fit is not the end")
+  assert.strictEqual(feed.zoomedHourHeight(25, 37.5, -1, 37.5), 25, "nothing to shrink, nothing saved")
+  assert.strictEqual(feed.zoomedHourHeight(25, 37.5, 1, 37.5), 43, "growing starts from what is on screen")
+  // A window stretching hours past the largest height: growing would not show.
+  assert.strictEqual(feed.zoomedHourHeight(0, 122.5, 1, 122.5), 0)
+  assert.strictEqual(feed.zoomedHourHeight(0, 122.5, -1, 122.5), 0)
+
+
+  // -------------------------------------------------------------- Microsoft
+  {
+    const view = {
+      value: [
+        { id: "AAMk1", iCalUId: "040000008200E00074C5B7101A82E008", subject: "Standup", bodyPreview: "Daily",
+          location: { displayName: "Teams" }, isAllDay: false, isCancelled: false,
+          start: { dateTime: "2026-09-08T13:00:00.0000000", timeZone: "UTC" },
+          end: { dateTime: "2026-09-08T13:15:00.0000000", timeZone: "UTC" },
+          organizer: { emailAddress: { name: "Ada", address: "ada@contoso.com" } },
+          attendees: [{ emailAddress: { name: "Bob", address: "bob@contoso.com" }, status: { response: "accepted" } }],
+          onlineMeeting: { joinUrl: "https://teams.microsoft.com/l/meetup-join/x" },
+          webLink: "https://outlook.office365.com/owa/?itemid=AAMk1" },
+        { id: "AAMk2", subject: "Offsite", isAllDay: true, isCancelled: false,
+          start: { dateTime: "2026-09-10T00:00:00.0000000", timeZone: "UTC" },
+          end: { dateTime: "2026-09-11T00:00:00.0000000", timeZone: "UTC" } },
+        { id: "AAMk3", subject: "Gone", isCancelled: true,
+          start: { dateTime: "2026-09-12T09:00:00.0000000", timeZone: "UTC" },
+          end: { dateTime: "2026-09-12T10:00:00.0000000", timeZone: "UTC" } }
+      ]
+    }
+    const events = feed.eventsFromGraph(view, "microsoft:outlook:me@contoso.com")
+    assert.strictEqual(events.length, 2, "a cancelled event is left out")
+    assert.strictEqual(events[0].summary, "Standup")
+    assert.strictEqual(events[0].graphId, "AAMk1")
+    assert.strictEqual(events[0].uid, "040000008200E00074C5B7101A82E008")
+    assert.strictEqual(events[0].start.ms, Date.UTC(2026, 8, 8, 13, 0, 0), "a UTC moment without its Z still parses as UTC")
+    assert.strictEqual(events[0].end.ms - events[0].start.ms, 15 * 60 * 1000)
+    assert.strictEqual(events[0].location, "Teams")
+    assert.strictEqual(events[0].meetLink, "https://teams.microsoft.com/l/meetup-join/x")
+    assert.strictEqual(events[0].organizer!.email, "ada@contoso.com")
+    assert.strictEqual(events[0].attendees![0].displayName, "Bob")
+    assert.strictEqual(events[0].href!.indexOf("https://outlook.office365.com/"), 0)
+    assert.strictEqual(events[1].start.allDay, true)
+    assert.strictEqual(events[1].start.ms, new Date(2026, 8, 10).getTime(), "an all-day event is its local midnight")
+
+    const url = feed.graphEventsUrl(Date.UTC(2026, 8, 7), Date.UTC(2026, 8, 14))
+    assert.ok(url.indexOf("https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=2026-09-07T00%3A00%3A00.000Z") === 0)
+    assert.ok(url.indexOf("endDateTime=2026-09-14T00%3A00%3A00.000Z") > 0)
+    assert.strictEqual(feed.graphEventUrl("AAMk1/x"), "https://graph.microsoft.com/v1.0/me/events/AAMk1%2Fx", "an id is one path segment")
+
+    const timed = feed.graphEventBody({ title: "Call", description: "Notes", location: "Room 1",
+      start: Date.UTC(2026, 8, 9, 14, 30), end: Date.UTC(2026, 8, 9, 15, 0) }, false)
+    assert.strictEqual(timed.subject, "Call")
+    assert.strictEqual(timed.start.dateTime, "2026-09-09T14:30:00")
+    assert.strictEqual(timed.start.timeZone, "UTC")
+    assert.strictEqual(timed.isAllDay, false)
+    assert.strictEqual(timed.location.displayName, "Room 1")
+    const allDay = feed.graphEventBody({ title: "Day", start: new Date(2026, 8, 10).getTime(), end: new Date(2026, 8, 11).getTime() }, true)
+    assert.strictEqual(allDay.isAllDay, true)
+    assert.ok(/^2026-09-10T00:00:00$/.test(allDay.start.dateTime))
+
+    assert.strictEqual(feed.graphResponseError(401, "{}"), "Microsoft refused the calendar request. Sign in again")
+    assert.ok(feed.graphResponseError(400, JSON.stringify({ error: { code: "ErrorInvalidRequest", message: "Bad start" } })).indexOf("Bad start") > 0)
+    assert.strictEqual(feed.graphResponseError(500, "not json"), "Microsoft Graph answered 500")
+    assert.strictEqual(feed.nativeRequestError("microsoft"),
+      "Microsoft calendar request failed. Check Graph permissions in Settings, then sign in again")
+    // A Microsoft 365 calendar refused for consent says what the administrator does and what follows,
+    // and nothing about the sign-in page, which a calendar refresh never shows.
+    const consent = feed.nativeRequestError("microsoft", "m365:ada@example.org", { message: "auth_consent_required" })
+    assert.strictEqual(consent, "Microsoft calendar request failed. An administrator has to approve this app "
+      + "for your organization. Then sign in to this mailbox again")
+    assert.ok(!/private window|page|browser/.test(consent), consent)
+    assert.strictEqual(feed.nativeRequestError("caldav"),
+      "CalDAV calendar request failed. Check its server address and password in Settings")
+    assert.strictEqual(feed.nativeRequestError("icloud"),
+      "iCloud calendar request failed. Check the mailbox's app-specific password in Settings")
+    assert.strictEqual(feed.nativeRequestError("unknown"),
+      "The calendar request failed")
+
+    const made = written(feed.createEvent({ title: "Plan", startMs: Date.UTC(2026, 8, 9, 9), endMs: Date.UTC(2026, 8, 9, 10) }, 1000))
+    assert.strictEqual(made.graph.subject, "Plan")
+    assert.strictEqual(made.recurring, false)
+  }
+
+  // Overlapping timed events share a day column in lanes.
+  {
+    const day = { startMs: new Date(2026, 8, 28).getTime(), endMs: new Date(2026, 8, 29).getTime() }
+    const at = (h: number, m?: number) => new Date(2026, 8, 28, h, m || 0).getTime()
+    const ev = (id: string, from: number, to: number): CalendarEvent => ({ uid: id, start: { ms: from, allDay: false }, end: { ms: to, allDay: false } })
+    const lanes = (events: CalendarEvent[]) => JSON.parse(JSON.stringify(feed.dayLanes(events, day)))
+      .map((l: DayLane) => [l.event.uid, l.lane, l.lanes, l.span])
+    assert.deepStrictEqual(lanes([ev("a", at(9), at(10))]), [["a", 0, 1, 1]], "a lone event keeps the column")
+    assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(9), at(10)), ev("c", at(9, 30), at(11))]),
+      [["a", 0, 3, 1], ["b", 1, 3, 1], ["c", 2, 3, 1]], "three at once are three lanes")
+    assert.deepStrictEqual(lanes([ev("a", at(9), at(12)), ev("b", at(9), at(10)), ev("c", at(10), at(11))]),
+      [["a", 0, 2, 1], ["b", 1, 2, 1], ["c", 1, 2, 1]], "a lane is reused once its event has ended")
+    assert.deepStrictEqual(lanes([ev("a", at(9), at(10)), ev("b", at(13), at(14))]),
+      [["a", 0, 1, 1], ["b", 0, 1, 1]], "events apart are separate clusters, each whole width")
+    assert.deepStrictEqual(lanes([ev("long", at(9), at(17)), ev("x", at(9), at(10)), ev("y", at(9), at(10)), ev("z", at(12), at(13))]),
+      [["long", 0, 3, 1], ["x", 1, 3, 1], ["y", 2, 3, 1], ["z", 1, 3, 2]],
+      "a later event stretches over the lanes left free beside it")
+    const shortEvents = [ev("p", at(9), at(9, 5)), ev("q", at(9, 15), at(9, 20))]
+    assert.deepStrictEqual(lanes(shortEvents), [["p", 0, 1, 1], ["q", 0, 1, 1]],
+      "preserve main's duration-scaled short blocks")
+    assert.strictEqual(feed.eventHeight(shortEvents[0], day, 60), 5)
+    const tiny = [ev("p", at(9), at(9)), ev("q", at(9, 1), at(9, 1))]
+    assert.strictEqual(feed.dayLanes(tiny, day, 60)[0].lanes, 2)
+    assert.strictEqual(feed.dayLanes(tiny, day, 240)[0].lanes, 1,
+      "minimum-height collisions use the view's actual pixels per hour")
+    assert.deepStrictEqual(lanes([ev("zero", at(9), at(9))]), [["zero", 0, 1, 1]], "a zero-length event still takes a slot")
+    assert.deepStrictEqual(lanes([ev("p", at(9), at(9)), ev("q", at(9, 1), at(9, 1))]),
+      [["p", 0, 2, 1], ["q", 1, 2, 1]], "events that overlap as drawn share lanes, not only by the clock")
+  }
+
+
+});

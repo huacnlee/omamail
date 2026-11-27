@@ -21,10 +21,15 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: core
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
@@ -32,6 +37,64 @@ jobs:
       - run: cargo check --locked --all-targets --no-default-features --features standalone
       - run: cargo test --locked --no-default-features --features standalone process
       - run: cargo test --locked --no-default-features --test cli agent_disabled_build_has_no_worker_or_agent_rpc
+
+  # The NSH app's Rust module (ext/omamail-native): the typed library
+  # facade it links and the worker thread that drives it.
+  nsh-native:
+    name: NSH app module
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ext/omamail-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ext/omamail-native
+      - run: cargo fmt --check -p omamail-native
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  # The TSX app: type checks, the key and native-member drift checks, and
+  # the headless `nsh test` suite. The CLI is one exact release, checked
+  # against the digest kept here rather than one fetched beside it; move
+  # NSH_VERSION and NSH_SHA256 together.
+  nsh-app:
+    name: NSH app (check and tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NSH_VERSION: v0.7.2
+      NSH_SHA256: cb087e1e6afeb4ce4c2e70d8f803ccffe376b0a73d48605e492ec50fbbd45bec
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            ext/omamail-native
+            .nsh/rust
+      # The drift checks are TypeScript run by Node directly (23.6+).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install nsh ${{ env.NSH_VERSION }}
+        run: |
+          work=$(mktemp -d)
+          curl -fsSL -o "$work/nsh.tar.gz" \
+            "https://github.com/longbridge/nsh/releases/download/$NSH_VERSION/nsh-linux-x86_64.tar.gz"
+          echo "$NSH_SHA256  $work/nsh.tar.gz" | sha256sum -c -
+          tar -xzf "$work/nsh.tar.gz" -C "$HOME"
+          echo "$HOME/nsh/bin" >> "$GITHUB_PATH"
+      - run: nsh --version
+      - run: nsh check
+      - run: node scripts/check-keys.ts
+      - run: node scripts/check-native-members.ts
+      - run: nsh test
 
   # iOS and Android apps run the backend in-process (no `omamail serve`
   # child). Keep the library building there so desktop-only code paths stay
@@ -52,6 +115,9 @@ jobs:
     timeout-minutes: 20
     env:
       RUSTFLAGS: -D warnings
+    defaults:
+      run:
+        working-directory: core
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -59,6 +125,7 @@ jobs:
           targets: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          workspaces: core
           key: mobile-${{ matrix.name }}
       - name: Use the Android NDK toolchain
         if: matrix.name == 'Android'
@@ -75,362 +142,35 @@ jobs:
             cargo check --locked --lib --target "$target"
           done
 
-  standalone-app-macos:
-    name: Standalone app (macOS arm64)
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13.5"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-        with:
-          toolchain: "1.98.1"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
-        with:
-          version: "6.8.3"
-          cache: true
-          aqtversion: "==3.3.0"
-          py7zrversion: "==1.0.0"
-      - run: python3 -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
-      - name: Build and test the standalone host
-        env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_CONTROLS_STYLE: Omamail
-          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
-        run: |
-          set -euo pipefail
-          version="$(python3 scripts/package-backend.py check)"
-          cargo test --locked --no-default-features --features standalone,integration-test-credentials
-          cargo build --release --locked --no-default-features --features standalone
-          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
-          cmake --build build/app
-          ctest --test-dir build/app --output-on-failure
-          python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "$version" --standalone
-      - name: Build and exercise the production archive
-        env:
-          QT_QPA_PLATFORM: cocoa
-        run: |
-          set -euo pipefail
-          version="$(python3 scripts/package-backend.py check)"
-          bash app/scripts/package-release.sh macos-aarch64 --host "$PWD/build/app/omamail-app" --backend "$PWD/target/release/omamail"
-          python3 app/tests/test_package.py
-          bash app/tests/test_install.sh
-          mkdir -p "$RUNNER_TEMP/omamail-smoke"
-          tar -xzf dist/omamail-app-macos-aarch64.tar.gz -C "$RUNNER_TEMP/omamail-smoke"
-          host="$RUNNER_TEMP/omamail-smoke/Omamail.app/Contents/MacOS/omamail-app"
-          backend="$RUNNER_TEMP/omamail-smoke/Omamail.app/Contents/MacOS/omamail"
-          "$host" --check-resources
-          "$host" --smoke-test "$RUNNER_TEMP/omamail-ready.json"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "$version" --standalone
-
-  standalone-app-linux:
-    name: Standalone app (Linux x86_64, glibc 2.35)
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13.5"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-        with:
-          toolchain: "1.98.1"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
-        with:
-          version: "6.8.3"
-          cache: true
-          aqtversion: "==3.3.0"
-          py7zrversion: "==1.0.0"
-      - name: Install pinned build tools and Qt runtime dependencies
-        run: |
-          set -euo pipefail
-          python3 -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libdbus-1-3 libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 patchelf
-      - name: Build and test the standalone host
-        env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_CONTROLS_STYLE: Omamail
-          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
-        run: |
-          set -euo pipefail
-          version="$(python3 scripts/package-backend.py check)"
-          cargo test --locked --no-default-features --features standalone,integration-test-credentials
-          cargo build --release --locked --no-default-features --features standalone
-          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
-          cmake --build build/app
-          ctest --test-dir build/app --output-on-failure
-          python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "$version" --standalone
-      - name: Build and exercise the production archive
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          set -euo pipefail
-          version="$(python3 scripts/package-backend.py check)"
-          bash app/scripts/package-release.sh linux-x86_64 --host "$PWD/build/app/omamail-app" --backend "$PWD/target/release/omamail"
-          python3 app/tests/test_package.py
-          bash app/tests/test_install.sh
-          mkdir -p "$RUNNER_TEMP/omamail-smoke"
-          tar -xzf dist/omamail-app-linux-x86_64.tar.gz -C "$RUNNER_TEMP/omamail-smoke"
-          host="$RUNNER_TEMP/omamail-smoke/omamail.app/bin/omamail-app"
-          backend="$RUNNER_TEMP/omamail-smoke/omamail.app/bin/omamail"
-          "$host" --check-resources
-          "$host" --smoke-test "$RUNNER_TEMP/omamail-ready.json"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "$version" --standalone
-
-  standalone-app-windows:
-    name: Standalone app (Windows x86_64)
-    runs-on: windows-2022
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13.5"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-        with:
-          toolchain: "1.98.1"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
-        with:
-          version: "6.8.3"
-          cache: true
-          aqtversion: "==3.3.0"
-          py7zrversion: "==1.0.0"
-      - shell: pwsh
-        run: python -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
-      - name: Build and test the standalone host
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_CONTROLS_STYLE: Omamail
-          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
-        run: |
-          $ErrorActionPreference = "Stop"
-          $version = python scripts/package-backend.py check
-          cargo build --release --locked --no-default-features --features standalone
-          if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
-          cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Qt configuration failed" }
-          cmake --build build/app --config Release
-          if ($LASTEXITCODE -ne 0) { throw "Qt build failed" }
-          ctest --test-dir build/app -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
-          python app/tests/test_qml_inventory.py
-          if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
-          python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version $version --standalone
-          if ($LASTEXITCODE -ne 0) { throw "backend API contract failed" }
-      - name: Build and exercise the production archive
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: windows
-        run: |
-          $ErrorActionPreference = "Stop"
-          $version = python scripts/package-backend.py check
-          & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe -Backend target/release/omamail.exe
-          if ($LASTEXITCODE -ne 0) { throw "Windows package failed" }
-          & app/tests/Test-Package.ps1
-          & app/tests/Test-Install.ps1
-          $smoke = Join-Path $env:RUNNER_TEMP "omamail-smoke"
-          Expand-Archive dist/omamail-app-windows-x86_64.zip -DestinationPath $smoke
-          $appExecutable = Join-Path $smoke "omamail/bin/omamail-app.exe"
-          $backend = Join-Path $smoke "omamail/bin/omamail.exe"
-          & $appExecutable --check-resources
-          if ($LASTEXITCODE -ne 0) { throw "resource check failed" }
-          & $appExecutable --smoke-test (Join-Path $env:RUNNER_TEMP "omamail-ready.json")
-          if ($LASTEXITCODE -ne 0) { throw "live smoke failed" }
-          python tests/test_backend_api.py --binary $backend --expected-version $version --standalone
-          if ($LASTEXITCODE -ne 0) { throw "packaged backend API contract failed" }
-
-  portable-tests:
-    name: Portable tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # Version-sensitive QML/libcurl checks remain on the Omarchy host.
-      - run: make test-rust test-js test-shell-portable
-      - run: python3 tests/test_backend_release.py
-      - run: python3 app/tests/test_release_workflow.py
-      - run: python3 scripts/package-backend.py check-api
-      - run: git diff --check
-      - name: Leave a note for the PR comment when this gate fails
-        if: failure() && github.event_name == 'pull_request'
-        env:
-          GATE: "Portable tests"
-          PR: ${{ github.event.pull_request.number }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          mkdir -p ci-report
-          printf '%s\n%s\n' "$PR" "$HEAD" > ci-report/pr.txt
-          cat > "ci-report/portable.md" <<'NOTE'
-          ### Portable tests failed
-          The Rust, JavaScript and portable shell suites, the release checks or the contract inventory did not pass. Run the same set locally and read the first failing name in the log:
-          ```
-          make test-rust test-js test-shell-portable
-          python3 tests/test_backend_release.py
-          python3 app/tests/test_release_workflow.py
-          python3 scripts/package-backend.py check-api
-          git diff --check
-          ```
-          NOTE
-      - uses: actions/upload-artifact@v4
-        if: failure() && github.event_name == 'pull_request'
-        with:
-          name: ci-report-portable
-          path: ci-report
-          retention-days: 3
-
-  # The unreleased step, if the checkout has one, against a backend built from
-  # this very revision: the whole contract, and the native worker with it.
-  # A step nobody has shipped is still a step that has to work.
-  unreleased-api:
-    name: Unreleased API gate
-    runs-on: ubuntu-latest
+  # The mail library's own unit tests, including the parity checks that run
+  # the Qt client's JavaScript (vendored in core/tests/oracles) under Node.
+  core-tests:
+    name: Mail core (Linux)
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: core
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Build this revision's backend and run the whole contract against it
-        run: |
-          set -euo pipefail
-          cargo build --locked --bin omamail
-          python3 scripts/package-backend.py check-api
-          python3 tests/test_backend_api.py --binary target/debug/omamail
-          python3 tests/test_agent_native_bridge.py
-      - name: Leave a note for the PR comment when this gate fails
-        if: failure() && github.event_name == 'pull_request'
-        env:
-          GATE: "Unreleased API gate"
-          PR: ${{ github.event.pull_request.number }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          mkdir -p ci-report
-          printf '%s\n%s\n' "$PR" "$HEAD" > ci-report/pr.txt
-          cat > "ci-report/unreleased.md" <<'NOTE'
-          ### Unreleased API gate failed
-          A backend built from this branch does not pass the whole contract, or the native agent bridge. Build it and run the same checks locally:
-          ```
-          cargo build --locked --bin omamail
-          python3 scripts/package-backend.py check-api
-          python3 tests/test_backend_api.py --binary target/debug/omamail
-          python3 tests/test_agent_native_bridge.py
-          ```
-          A contract case you added under `unreleased.cases` must pass here; `check-api` also refuses a second unreleased step and an unreleased list that names nothing in the contract.
-          NOTE
-      - uses: actions/upload-artifact@v4
-        if: failure() && github.event_name == 'pull_request'
         with:
-          name: ci-report-unreleased
-          path: ci-report
-          retention-days: 3
-
-  # The released API, against the binary the pin names as every user gets it:
-  # what the checkout calls released must be exactly what that binary speaks.
-  published-assets:
-    name: Released backend gate (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-24.04
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
+          workspaces: core
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - name: Require exact pin and verify the released API against the published binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARCH: ${{ matrix.arch }}
-          SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: |
-          set -euo pipefail
-          version="$(python3 scripts/package-backend.py pin-version)"
-          # A release PR cannot merge its version bump while publication is
-          # still building or has failed. The final pin commit reruns this gate.
-          case "$SOURCE_BRANCH" in
-            release/*) python3 scripts/package-backend.py check --require-pin ;;
-          esac
-          # Missing bootstrap assets intentionally fail this required check.
-          test "$(gh release view "v$version" --json isDraft --jq .isDraft)" = false
-          mkdir published
-          gh release download "v$version" --dir published --pattern 'omamail-linux-*.tar.gz' --pattern SHA256SUMS --pattern backend-api.json
-          python3 scripts/package-backend.py verify published
-          # Internal Rust changes may reuse this release; API changes may not.
-          python3 scripts/package-backend.py check-api --published published/backend-api.json
-          mkdir probe
-          tar -xzf "published/omamail-linux-$ARCH.tar.gz" -C probe
-          test "$(probe/omamail --version)" = "omamail $version"
-          python3 tests/test_backend_api.py --binary probe/omamail --expected-version "$version" --released
-          readelf -l probe/omamail > program-headers.txt
-          readelf -d probe/omamail > dynamic-headers.txt
-          if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
-          if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
-      - name: Leave a note for the PR comment when this gate fails
-        if: failure() && github.event_name == 'pull_request'
-        env:
-          GATE: "Released backend gate"
-          PR: ${{ github.event.pull_request.number }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          mkdir -p ci-report
-          printf '%s\n%s\n' "$PR" "$HEAD" > ci-report/pr.txt
-          cat > "ci-report/released-${{ matrix.arch }}.md" <<'NOTE'
-          ### Released backend gate failed
-          The backend the plugin pins (`backend-version`) does not speak what `backend-api.json` calls its released API, or the released fixtures do not pass against it. Backends ship in batches, so an API change does not wait for a release — it is declared as the one unreleased step:
-          - raise `apiVersion` to exactly `releasedApiVersion + 1`;
-          - list every new method under `unreleased.methods` and every new or changed contract case under `unreleased.cases`;
-          - leave the released cases as they are — the pinned binary has to keep passing them;
-          - a feature that needs the step checks the connected backend against its fixed minimum API revision and waits until that requirement is met.
-          If `apiVersion` is already a step ahead, the released view still changed: compare `backend-api.json` with the pinned release's copy (`gh release download v$(cat backend-version) --pattern backend-api.json`). See "Released and unreleased" in `docs/BACKEND-RUNTIME.md`.
-          NOTE
-      - uses: actions/upload-artifact@v4
-        if: failure() && github.event_name == 'pull_request'
-        with:
-          name: ci-report-released-${{ matrix.arch }}
-          path: ci-report
-          retention-days: 3
+          node-version: "22"
+      - run: cargo test --locked --lib
+      # The integration tests (tests/*.rs, cli included), as main ran them:
+      # integration-test-credentials keeps them off the runner's keyring.
+      - run: cargo test --locked --no-default-features --features standalone,integration-test-credentials --tests
 
-  # The one required check: both gates, always. A revision merges only when
-  # the pinned binary still speaks the released API and a binary built from
-  # the revision speaks all of it.
-  published-backend:
-    name: Published backend merge gate
-    needs: [published-assets, unreleased-api]
-    if: always()
-    runs-on: ubuntu-latest
+  # What existing Omarchy installs read from this checkout after the NSH
+  # cutover: the root manifest (the notice bar widget) and its one helper.
+  omarchy-plugin-entry:
+    name: Omarchy plugin entry
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - name: Require the released and the unreleased gates
-        env:
-          RELEASED: ${{ needs.published-assets.result }}
-          UNRELEASED: ${{ needs.unreleased-api.result }}
-        run: test "$RELEASED" = success && test "$UNRELEASED" = success
+      - uses: actions/checkout@v4
+      - run: make -C omarchy test lint

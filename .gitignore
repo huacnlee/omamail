@@ -16,3 +16,7 @@ docs/superpowers/
 
 # Python leaves these beside the harvester scripts.
 __pycache__/
+/.nsh
+/ext/*/target
+/ext/*/.nsh
+/core/target/
