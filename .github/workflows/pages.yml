@@ -9,8 +9,10 @@ on:
       - docs/terms.html
       - docs/legal.css
       - docs/images/**
-      - install.sh
-      - install.ps1
+      - omarchy/install.sh
+      - omarchy/install.ps1
+      - core/tests/test_website_install.py
+      - src/mail/providers/google.ts
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -33,7 +35,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - name: Check installation instructions
-        run: python3 tests/test_website_install.py
+        run: python3 core/tests/test_website_install.py
       # The page is one file, but every screenshot, icon and the og:image it
       # points at lives in docs/images. Staging only the HTML published a site
       # whose images all 404, so the whole image directory ships with it.
@@ -46,8 +48,8 @@ jobs:
           cp docs/index.html _site/index.html
           cp docs/privacy.html docs/terms.html docs/legal.css _site/
           cp -R docs/images _site/images
-          cp install.sh _site/install.sh
-          cp install.ps1 _site/install.ps1
+          cp omarchy/install.sh _site/install.sh
+          cp omarchy/install.ps1 _site/install.ps1
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

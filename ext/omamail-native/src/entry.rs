@@ -52,7 +52,10 @@ mod imp {
 
     #[used]
     #[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
-    #[cfg_attr(target_vendor = "apple", unsafe(link_section = "__DATA,__mod_init_func"))]
+    #[cfg_attr(
+        target_vendor = "apple",
+        unsafe(link_section = "__DATA,__mod_init_func")
+    )]
     static ENTER: extern "C" fn(c_int, *const *const c_char) = enter;
 
     /// Keeps the constructor in the linked executable: the linker drops an
