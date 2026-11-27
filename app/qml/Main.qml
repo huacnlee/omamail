@@ -87,7 +87,13 @@ ApplicationWindow {
 
   onWidthChanged: scheduleWindowSizeSave()
   onHeightChanged: scheduleWindowSizeSave()
-  onClosing: saveWindowSize()
+  // The compositor's close (Super+W, a title bar button) closes the window
+  // without going through the close chord. Send it through the same door so
+  // the process quits where nothing could bring a hidden window back.
+  onClosing: {
+    saveWindowSize()
+    shellAdapter.hide(manifestAdapter.value.id)
+  }
 
   Timer {
     id: windowSizeSettling

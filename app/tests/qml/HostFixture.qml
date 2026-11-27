@@ -5,7 +5,7 @@ QtObject {
     id: "omamail", name: "Omamail", version: "0.10.1",
     barWidget: {defaults:{refreshIntervalSec:333,maxMessages:17,notifyNewMail:"On"}}
   })
-  property var capabilities: ({agent:false,tray:false,mailto:false,notifications:true})
+  property var capabilities: ({agent:false,tray:false,mailto:false,notifications:true,reopen:true})
   property var settings: ({refreshIntervalSec:333,maxMessages:17,notifyNewMail:"Off"})
   property string backendPath: "/fixture/bin/omamail"
   property string notificationError: ""
@@ -30,7 +30,7 @@ QtObject {
   signal failed(string path, string error)
 
   function reset() {
-    capabilities = ({agent:false,tray:false,mailto:false,notifications:true})
+    capabilities = ({agent:false,tray:false,mailto:false,notifications:true,reopen:true})
     settings = ({refreshIntervalSec:333,maxMessages:17,notifyNewMail:"Off"})
     opened = []
     copied = []

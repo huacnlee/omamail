@@ -47,10 +47,11 @@ QtObject {
   function hide(pluginId) {
     if (String(pluginId || "") !== String(manifest.id || "omamail")) return false
     if (app && typeof app.close === "function") app.close()
-    // With no tray, no actionable notification and no Dock to click there is
-    // no route back to a hidden window. End the process so a launcher
-    // invocation starts a reachable application again.
-    if (!capabilities.tray && !capabilities.notifications && !capabilities.reopen
+    // Only a tray or a Dock reliably brings a hidden window back. A
+    // notification is a door only while it is on screen, and the launcher
+    // starts a second process rather than finding the hidden one. Without
+    // either, end the process so the next launch is the only instance.
+    if (!capabilities.tray && !capabilities.reopen
         && host && typeof host.quit === "function") host.quit()
     else if (host && typeof host.hide === "function") host.hide()
     return true

@@ -762,6 +762,33 @@ TestCase {
     compare(host.hidden, false)
   }
 
+  function test_close_quits_where_only_a_notification_could_reopen() {
+    // Linux and Windows: notifications work, but neither a tray nor a Dock
+    // can find a hidden window, and the launcher would start a duplicate.
+    host.capabilities = ({agent:false,tray:false,mailto:false,notifications:true,reopen:false})
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    verify(composition.shell.hide("omamail"))
+    compare(host.quitCalled, true)
+    compare(host.hidden, false)
+  }
+
+  function test_compositor_close_quits_where_nothing_can_reopen() {
+    host.capabilities = ({agent:false,tray:false,mailto:false,notifications:true,reopen:false})
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    composition.close()
+    compare(host.quitCalled, true)
+  }
+
+  function test_compositor_close_hides_where_the_dock_can_reopen() {
+    var composition = createTemporaryObject(compositionComponent, testCase)
+    verify(composition)
+    composition.close()
+    compare(host.quitCalled, false)
+    compare(host.hidden, true)
+  }
+
   function test_close_hides_rather_than_quits_where_the_dock_can_reopen() {
     host.capabilities = ({agent:false,tray:false,mailto:false,notifications:false,reopen:true})
     var composition = createTemporaryObject(compositionComponent, testCase)
