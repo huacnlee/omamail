@@ -231,7 +231,10 @@ which pops one entry. A draft, the event form and the shortcut sheet are
 entries too, so the sheet closes before the message under it, and a reply
 raised from the list returns to the list, not to the message it opened on the
 way. On the root, `back()` clears a search if there is one and otherwise closes
-the window.
+the window. On macOS closing the mail window — `Escape` on the root, the close
+button or Command-W — only hides it: the app stays in the Dock and keeps
+checking mail, and pressing the Dock icon shows the window again. Command-Q
+quits. On Windows and Linux closing the window ends the app.
 
 ## What survives an overlay
 

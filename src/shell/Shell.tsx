@@ -24,6 +24,7 @@ import { startLaunchLinks } from "./launch";
 import { bodyFor, LIST, listWidthFor, modeFor, SIDEBAR, sidebarVisible, sidebarWidthFor, type BodyState } from "./layout";
 import { animateNextLayout, slideIn } from "./motion";
 import { ShortcutHelp } from "./ShortcutHelp";
+import { hidesOnClose } from "./windowFocus";
 import { StatusBar } from "./StatusBar";
 
 export interface ShellProps {
@@ -66,10 +67,11 @@ export function Shell(props: ShellProps) {
   const body = () => bodyFor(state());
   const compact = () => mode() === "compact";
 
-  // Back on a root closes the window, as the Qt client's requestClose did.
+  // Back on a root closes the window, as the Qt client's requestClose did;
+  // on macOS it hides it, as the close button does (the app stays in the Dock).
   const window = currentWindow();
   effect(() => {
-    if (app.closeRequests() > 0) untracked(() => window.close());
+    if (app.closeRequests() > 0) untracked(() => (hidesOnClose() ? window.hide() : window.close()));
   });
 
   // Holding the mailbox digits' modifier (Ctrl; Command on Apple platforms,
