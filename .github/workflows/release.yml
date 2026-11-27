@@ -1,12 +1,20 @@
 name: Release
 
-# make publish pushes one versioned branch and opens its PR. Plugin and desktop
-# assets publish together before CI advances the pin; main remains PR-only.
+# `make publish` pushes release/X.Y.Z and opens its PR. That push runs this
+# workflow: it packages the NSH app on each desktop it ships for, signs the
+# update manifest installed apps check (nsh/updater), then tags, publishes and
+# re-downloads the release. Run it by hand with dry_run (the default) to build
+# and verify everything, with the real signing key, without a tag or release;
+# the assets are kept as the run's `release-dry-run` artifact.
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and verify only (no tag, no release)
+        type: boolean
+        default: true
   push:
     branches: ['release/**']
-    paths-ignore: ['backend-version', 'backend-api.json']
 
 permissions:
   contents: read
@@ -15,391 +23,332 @@ concurrency:
   group: omamail-release
   cancel-in-progress: false
 
+env:
+  # The nsh CLI that packages the app; ci.yml pins the same release.
+  NSH_VERSION: v0.7.2
+
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
-      branch: ${{ steps.version.outputs.branch }}
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
       - id: version
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: |
           set -euo pipefail
-          test -n "$GH_TOKEN"
-          version="$(python3 scripts/package-backend.py check)"
+          version="$(python3 omarchy/scripts/release.py version)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          branch="$(VERSION="$version" bash scripts/release-source.sh)"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-      - name: Require an unused release version
+          if [ "$DRY_RUN" = true ]; then publish=false; else publish=true; fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Omamail $version, publish=$publish" >> "$GITHUB_STEP_SUMMARY"
+      - name: Require release/X.Y.Z at this revision and an unused tag
+        if: steps.version.outputs.publish == 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          # Listing must succeed; network/authentication failures never mean absent.
+          test -n "$GH_TOKEN" || { echo 'RELEASE_TOKEN is not set' >&2; exit 1; }
+          bash omarchy/scripts/release-source.sh
+          # Listing must succeed; a network or authentication failure never means absent.
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > releases.txt
           if grep -Fx "v$VERSION" releases.txt; then echo 'Release version already exists' >&2; exit 1; else test "$?" -eq 1; fi
-      - name: Require a new API revision when the published contract changes
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Release tooling and installer tests
         run: |
           set -euo pipefail
-          version="$(python3 scripts/package-backend.py pin-version)"
-          mkdir baseline
-          gh release download "v$version" --dir baseline --pattern backend-api.json
-          python3 scripts/package-backend.py check-api --baseline baseline/backend-api.json
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "20.20.2"
-      - run: make test-js test-shell-portable
-      - run: python3 tests/test_backend_release.py
-      - run: python3 app/tests/test_release_workflow.py
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-cryptography shellcheck
+          make -C omarchy test lint
 
-  build:
+  package:
+    name: Package (${{ matrix.platform }})
     needs: prepare
+    # The shipped Google client's secrets live in the release environment.
+    environment: release
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
+          - platform: macos-aarch64
+            runner: macos-15
+            nsh_asset: nsh-macos-arm64.tar.gz
+            nsh_sha256: cac434767b137f0ba98e4bf609bcffa3daaa87f858c0036235a4be4a36986a42
+            target: --target macos --arch arm64
+            archive: tar.gz
+            runner_path: Omamail.app/Contents/MacOS/Omamail
+          - platform: linux-x86_64
             runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-musl
+            nsh_asset: nsh-linux-x86_64.tar.gz
+            nsh_sha256: cb087e1e6afeb4ce4c2e70d8f803ccffe376b0a73d48605e492ec50fbbd45bec
+            target: --target linux
+            archive: tar.gz
+            runner_path: Omamail/Omamail
+          - platform: windows-x86_64
+            runner: windows-2022
+            nsh_asset: nsh-windows-x86_64.zip
+            nsh_sha256: f22684757c75e744a3ede334ee0f3c395970f81e975349f33295d61734b7d640
+            target: --target windows
+            archive: zip
+            runner_path: Omamail/Omamail.exe
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      ARCHIVE: Omamail-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}.${{ matrix.archive }}
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "20.20.2"
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: "1.98.1"
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - run: rustup target add "${{ matrix.target }}"
-      - name: Test native static Linux backend
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.target }}
-          RUSTFLAGS: -C linker=musl-gcc
-        run: cargo test --locked --features integration-test-credentials
-      - name: Build native static Linux backend with the shipped Google client
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.target }}
-          RUSTFLAGS: -C linker=musl-gcc
-          # The shipped Google desktop client is compiled in here and nowhere
-          # else: tests, CI and development builds never see these secrets.
-          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        run: cargo build --release --locked
-      - name: Verify native version and static linkage, then package
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          TARGET: ${{ matrix.target }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          set -euo pipefail
-          binary="target/$TARGET/release/omamail"
-          test "$("$binary" --version)" = "omamail $VERSION"
-          readelf -l "$binary" > program-headers.txt
-          readelf -d "$binary" > dynamic-headers.txt
-          if grep -q INTERP program-headers.txt; then echo 'Binary has a dynamic interpreter' >&2; exit 1; else test "$?" -eq 1; fi
-          if grep -q NEEDED dynamic-headers.txt; then echo 'Binary has dynamic dependencies' >&2; exit 1; else test "$?" -eq 1; fi
-          python3 scripts/package-backend.py check-api
-          python3 tests/test_backend_api.py --binary "$binary" --expected-version "$VERSION" --shipped-google-client
-          python3 scripts/package-backend.py package "$binary" "$ARCH" artifact
-          python3 scripts/package-backend.py verify artifact --arch "$ARCH"
-          python3 scripts/package-backend.py provenance --output artifact/backend-build.json
-          cp backend-api.json artifact/backend-api.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: backend-${{ matrix.arch }}
-          path: artifact/*
-          if-no-files-found: error
-
-  app-macos-aarch64:
-    name: Standalone app (macOS arm64)
-    needs: prepare
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+          toolchain: stable
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.13.5"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-        with:
-          toolchain: "1.98.1"
-      - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
-        with:
-          version: "6.8.3"
-          cache: true
-          aqtversion: "==3.3.0"
-          py7zrversion: "==1.0.0"
-      - name: Install pinned CMake and Ninja
-        run: python3 -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
-      - name: Exercise the native Keychain credential contract
-        run: cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
-      - name: Test the standalone backend
-        run: cargo test --locked --no-default-features --features standalone,integration-test-credentials
-      - name: Build the standalone backend with the shipped Google client
-        env:
-          # The shipped Google desktop client is compiled in here and nowhere
-          # else: tests, CI and development builds never see these secrets.
-          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        run: cargo build --release --locked --no-default-features --features standalone
-      - name: Build and test the Qt host
-        env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_CONTROLS_STYLE: Omamail
-          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
+          python-version: "3.13"
+      - name: Linux build dependencies (GTK 4, WebKitGTK 6.0)
+        if: runner.os == 'Linux'
         run: |
-          set -euo pipefail
-          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
-          cmake --build build/app
-          ctest --test-dir build/app --output-on-failure
-          python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
-      - name: Package, unpack, and test the macOS archive and installer
-        env:
-          QT_QPA_PLATFORM: cocoa
-        run: |
-          set -euo pipefail
-          bash app/scripts/package-release.sh macos-aarch64 \
-            --host "$PWD/build/app/omamail-app" \
-            --backend "$PWD/target/release/omamail"
-          python3 app/tests/test_package.py
-          bash app/tests/test_install.sh
-          mkdir -p "$RUNNER_TEMP/omamail-smoke"
-          tar -xzf dist/omamail-app-macos-aarch64.tar.gz -C "$RUNNER_TEMP/omamail-smoke"
-          host="$RUNNER_TEMP/omamail-smoke/Omamail.app/Contents/MacOS/omamail-app"
-          backend="$RUNNER_TEMP/omamail-smoke/Omamail.app/Contents/MacOS/omamail"
-          "$host" --check-resources
-          ready="$RUNNER_TEMP/omamail-ready.json"
-          rm -f "$ready"
-          "$host" --smoke-test "$ready"
-          test -s "$ready"
-          python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); assert value["version"] == sys.argv[2] and type(value["apiVersion"]) is int' "$ready" "${{ needs.prepare.outputs.version }}"
-          test "$("$backend" --version)" = "omamail ${{ needs.prepare.outputs.version }}"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: app-macos-aarch64
-          path: dist/omamail-app-macos-aarch64.tar.gz
-          if-no-files-found: error
-
-  app-linux-x86_64:
-    name: Standalone app (Linux x86_64, glibc 2.35)
-    needs: prepare
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13.5"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-        with:
-          toolchain: "1.98.1"
-      - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
-        with:
-          version: "6.8.3"
-          cache: true
-          aqtversion: "==3.3.0"
-          py7zrversion: "==1.0.0"
-      - name: Install pinned build tools and Qt runtime dependencies
-        run: |
-          set -euo pipefail
-          python3 -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends dbus-x11 gnome-keyring libdbus-1-3 libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 patchelf
-      - name: Exercise the native Secret Service credential contract
+          sudo apt-get install -y --no-install-recommends clang libclang-dev libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: Install nsh ${{ env.NSH_VERSION }}
+        env:
+          NSH_ASSET: ${{ matrix.nsh_asset }}
+          NSH_SHA256: ${{ matrix.nsh_sha256 }}
         run: |
           set -euo pipefail
-          dbus-run-session -- bash -euo pipefail -c '
-            fixture=$(mktemp -d)
-            trap '\''rm -rf "$fixture"'\'' EXIT
-            export XDG_DATA_HOME="$fixture/data"
-            export XDG_RUNTIME_DIR="$fixture/runtime"
-            mkdir -m 700 -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$fixture/control"
-            printf "%s" "synthetic-native-release-password" | gnome-keyring-daemon --unlock --components=secrets --control-directory="$fixture/control"
-            cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
-          '
-      - name: Test the standalone backend
-        run: cargo test --locked --no-default-features --features standalone,integration-test-credentials
-      - name: Build the standalone backend with the shipped Google client
-        env:
-          # The shipped Google desktop client is compiled in here and nowhere
-          # else: tests, CI and development builds never see these secrets.
-          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        run: cargo build --release --locked --no-default-features --features standalone
-      - name: Build and test the Qt host
-        env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_CONTROLS_STYLE: Omamail
-          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
-        run: |
-          set -euo pipefail
-          cmake -S app -B build/app -G Ninja -DCMAKE_BUILD_TYPE=Release -DOMAMAIL_BACKEND="$PWD/target/release/omamail"
-          cmake --build build/app
-          ctest --test-dir build/app --output-on-failure
-          python3 app/tests/test_qml_inventory.py
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          python3 tests/test_backend_api.py --binary target/release/omamail --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
-      - name: Package, unpack, and test the Linux archive and installer
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          set -euo pipefail
-          bash app/scripts/package-release.sh linux-x86_64 \
-            --host "$PWD/build/app/omamail-app" \
-            --backend "$PWD/target/release/omamail"
-          python3 app/tests/test_package.py
-          bash app/tests/test_install.sh
-          mkdir -p "$RUNNER_TEMP/omamail-smoke"
-          tar -xzf dist/omamail-app-linux-x86_64.tar.gz -C "$RUNNER_TEMP/omamail-smoke"
-          host="$RUNNER_TEMP/omamail-smoke/omamail.app/bin/omamail-app"
-          backend="$RUNNER_TEMP/omamail-smoke/omamail.app/bin/omamail"
-          "$host" --check-resources
-          ready="$RUNNER_TEMP/omamail-ready.json"
-          rm -f "$ready"
-          "$host" --smoke-test "$ready"
-          test -s "$ready"
-          python3 -c 'import json,sys; value=json.load(open(sys.argv[1])); assert value["version"] == sys.argv[2] and type(value["apiVersion"]) is int' "$ready" "${{ needs.prepare.outputs.version }}"
-          test "$("$backend" --version)" = "omamail ${{ needs.prepare.outputs.version }}"
-          python3 tests/test_backend_api.py --binary "$backend" --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: app-linux-x86_64
-          path: dist/omamail-app-linux-x86_64.tar.gz
-          if-no-files-found: error
-
-  app-windows-x86_64:
-    name: Standalone app (Windows x86_64)
-    needs: prepare
-    runs-on: windows-2022
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.13.5"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
-        with:
-          toolchain: "1.98.1"
-      - uses: jurplel/install-qt-action/action@d325aaf2a8baeeda41ad0b5d39f84a6af9bcf005 # v4.3.0
-        with:
-          version: "6.8.3"
-          cache: true
-          aqtversion: "==3.3.0"
-          py7zrversion: "==1.0.0"
-      - name: Install pinned CMake and Ninja
-        shell: pwsh
-        run: python -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
-      - name: Exercise the native Credential Manager contract
-        shell: pwsh
-        run: |
-          cargo test --locked --lib --no-default-features --features standalone credentials_native -- --ignored --test-threads=1
-          if ($LASTEXITCODE -ne 0) { throw "native credential contract failed" }
-      - name: Test the standalone backend
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          cargo test --locked --no-default-features --features standalone,integration-test-credentials
-          if ($LASTEXITCODE -ne 0) { throw "standalone Rust tests failed" }
-      - name: Build the standalone backend with the shipped Google client
-        shell: pwsh
+          work="$RUNNER_TEMP/nsh-download"
+          mkdir -p "$work"
+          curl -fsSL -o "$work/$NSH_ASSET" \
+            "https://github.com/longbridge/nsh/releases/download/$NSH_VERSION/$NSH_ASSET"
+          actual="$(python -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$work/$NSH_ASSET")"
+          test "$actual" = "$NSH_SHA256" || { echo "nsh checksum mismatch: $actual" >&2; exit 1; }
+          python -c 'import shutil,sys; shutil.unpack_archive(sys.argv[1], sys.argv[2])' "$work/$NSH_ASSET" "$RUNNER_TEMP"
+          chmod +x "$RUNNER_TEMP/nsh/bin/"* || true
+          echo "$RUNNER_TEMP/nsh/bin" >> "$GITHUB_PATH"
+      - run: nsh --version
+      - name: Package with the shipped Google client
         env:
           # The shipped Google desktop client is compiled in here and nowhere
           # else: tests, CI and development builds never see these secrets.
           OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           OMAMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
-          $ErrorActionPreference = "Stop"
-          cargo build --release --locked --no-default-features --features standalone
-          if ($LASTEXITCODE -ne 0) { throw "standalone backend build failed" }
-      - name: Build and test the Qt host
-        shell: pwsh
+          set -euo pipefail
+          test -n "$OMAMAIL_GOOGLE_CLIENT_ID" || { echo 'GOOGLE_CLIENT_ID is not set' >&2; exit 1; }
+          nsh package ${{ matrix.target }}
+          ls -la .nsh/out
+          test -f ".nsh/out/$ARCHIVE" || { echo "nsh package wrote no $ARCHIVE" >&2; exit 1; }
+      - name: Check the archive's app, version and Google client
         env:
-          QT_QPA_PLATFORM: offscreen
-          QT_QUICK_CONTROLS_STYLE: Omamail
-          QT_QUICK_CONTROLS_FALLBACK_STYLE: Basic
+          OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          RUNNER_PATH: ${{ matrix.runner_path }}
+        run: |
+          set -euo pipefail
+          smoke="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke"
+          python - ".nsh/out/$ARCHIVE" "$smoke" "$RUNNER_PATH" "$VERSION" <<'PY'
+          import json, os, pathlib, shutil, sys
+          archive, smoke, runner, version = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3], sys.argv[4]
+          shutil.unpack_archive(archive, smoke)
+          binary = smoke / runner
+          assert binary.is_file(), f"no {runner}"
+          top = pathlib.PurePosixPath(runner).parts[0]
+          app = smoke / top / ("Contents/Resources/nsh" if top.endswith(".app") else "nsh") / "app.json"
+          info = json.loads(app.read_text())
+          assert info["id"] == "dev.huacnlee.omamail" and info["version"] == version, info
+          # The release build carries the shipped Google client (core's
+          # option_env!); only whether it is there is printed.
+          assert os.environ["OMAMAIL_GOOGLE_CLIENT_ID"].encode() in binary.read_bytes(), \
+              "the packaged app has no shipped Google client"
+          print(f"{runner}: {info['id']} {info['version']}, Google client present")
+          PY
+      - name: Install from the archive, check, uninstall (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          # install.sh as users run it, with its downloads served from here.
+          release="$RUNNER_TEMP/release" home="$RUNNER_TEMP/home" fake="$RUNNER_TEMP/fake"
+          mkdir -p "$release/v$VERSION" "$home" "$fake"
+          cp ".nsh/out/$ARCHIVE" "$release/v$VERSION/"
+          (cd "$release/v$VERSION" && shasum -a 256 "$ARCHIVE" > SHA256SUMS)
+          ln -s "$PWD/omarchy/tests/fake_curl.py" "$fake/curl"
+          HOME="$home" PATH="$fake:$PATH" FIXTURES="$release" sh install.sh --version "$VERSION"
+          codesign --verify --deep --strict "$home/Applications/Omamail.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$home/Applications/Omamail.app/Contents/Info.plist")" = dev.huacnlee.omamail
+          HOME="$home" sh install.sh --uninstall
+          test ! -e "$home/Applications/Omamail.app"
+      - name: Install from the archive, check, uninstall (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # install.sh as users run it, with its downloads served from here.
+          release="$RUNNER_TEMP/release" home="$RUNNER_TEMP/home" fake="$RUNNER_TEMP/fake"
+          mkdir -p "$release/v$VERSION" "$home" "$fake"
+          cp ".nsh/out/$ARCHIVE" "$release/v$VERSION/"
+          (cd "$release/v$VERSION" && sha256sum "$ARCHIVE" > SHA256SUMS)
+          ln -s "$PWD/omarchy/tests/fake_curl.py" "$fake/curl"
+          HOME="$home" PATH="$fake:$PATH" FIXTURES="$release" sh install.sh --version "$VERSION"
+          ldd "$home/.local/share/omamail/Omamail/Omamail" | tee ldd.txt
+          if grep -q 'not found' ldd.txt; then echo 'unresolved libraries' >&2; exit 1; fi
+          # What the Omarchy notice widget's helper finds.
+          test "$(HOME="$home" XDG_DATA_DIRS=/nonexistent sh omarchy/notice/omamail-app.sh status)" = installed
+          HOME="$home" sh install.sh --uninstall
+          test "$(HOME="$home" XDG_DATA_DIRS=/nonexistent PATH=/usr/bin:/bin sh omarchy/notice/omamail-app.sh status)" = missing
+      - name: Installer tests and an install from the archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cmake -S app -B build/app -G "Visual Studio 17 2022" -A x64 -DOMAMAIL_BACKEND="$PWD/target/release/omamail.exe"
-          if ($LASTEXITCODE -ne 0) { throw "Qt configuration failed" }
-          cmake --build build/app --config Release
-          if ($LASTEXITCODE -ne 0) { throw "Qt build failed" }
-          ctest --test-dir build/app -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw "Qt tests failed" }
-          python app/tests/test_qml_inventory.py
-          if ($LASTEXITCODE -ne 0) { throw "QML inventory failed" }
-          qmltestrunner -input app/tests/qml/tst_host_contract.qml -import app/qml/imports -import app/qml/styles -import ui
-          if ($LASTEXITCODE -ne 0) { throw "QML tests failed" }
-          python tests/test_backend_api.py --binary target/release/omamail.exe --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
-          if ($LASTEXITCODE -ne 0) { throw "backend API contract failed" }
-      - name: Package, unpack, and test the Windows archive and installer
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: windows
-        run: |
-          $ErrorActionPreference = "Stop"
-          & app/scripts/package-release.ps1 -HostBinary build/app/Release/omamail-app.exe `
-            -Backend target/release/omamail.exe
-          if ($LASTEXITCODE -ne 0) { throw "Windows package failed" }
-          & app/tests/Test-Package.ps1
-          & app/tests/Test-Install.ps1
-          $smoke = Join-Path $env:RUNNER_TEMP "omamail-smoke"
-          Expand-Archive dist/omamail-app-windows-x86_64.zip -DestinationPath $smoke
-          $appExecutable = Join-Path $smoke "omamail/bin/omamail-app.exe"
-          $backend = Join-Path $smoke "omamail/bin/omamail.exe"
-          & $appExecutable --check-resources
-          if ($LASTEXITCODE -ne 0) { throw "resource check failed" }
-          $ready = Join-Path $env:RUNNER_TEMP "omamail-ready.json"
-          Remove-Item -LiteralPath $ready -Force -ErrorAction SilentlyContinue
-          & $appExecutable --smoke-test $ready
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ready -PathType Leaf)) { throw "live smoke failed" }
-          $readyValue = Get-Content -LiteralPath $ready -Raw | ConvertFrom-Json
-          $apiIsInteger = (($readyValue.apiVersion -is [int]) -or ($readyValue.apiVersion -is [long]))
-          if ([string]$readyValue.version -ne "${{ needs.prepare.outputs.version }}" -or -not $apiIsInteger) { throw "live smoke returned invalid readiness metadata" }
-          $reported = & $backend --version
-          if ($LASTEXITCODE -ne 0 -or $reported -ne "omamail ${{ needs.prepare.outputs.version }}") { throw "backend version mismatch" }
-          python tests/test_backend_api.py --binary $backend --expected-version "${{ needs.prepare.outputs.version }}" --standalone --shipped-google-client
-          if ($LASTEXITCODE -ne 0) { throw "packaged backend API contract failed" }
+          # Under PowerShell 7 and Windows PowerShell 5.1 (what `irm | iex` runs).
+          pwsh -NoProfile -File omarchy/tests/test_install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 tests failed under pwsh" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File omarchy/tests/test_install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 tests failed under Windows PowerShell" }
+          # install.ps1 as users run it, with its downloads served from here.
+          $env:FIXTURES = Join-Path $env:RUNNER_TEMP "release"
+          $release = Join-Path $env:FIXTURES "v$env:VERSION"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          Copy-Item ".nsh/out/$env:ARCHIVE" $release
+          $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $release $env:ARCHIVE)).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $release "SHA256SUMS"), "$hash  $env:ARCHIVE`n")
+          $env:INSTALL_ARGS = ConvertTo-Json @{ Version = $env:VERSION } -Compress
+          powershell -NoProfile -ExecutionPolicy Bypass -File omarchy/tests/local_release.ps1
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed" }
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Omamail\Omamail.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Omamail.exe was not installed" }
+          if (-not (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Omamail.lnk'))) { throw "no Start menu shortcut" }
+          & ./install.ps1 -Uninstall
+          if (Test-Path -LiteralPath $exe) { throw "uninstall left Omamail.exe" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: app-windows-x86_64
-          path: dist/omamail-app-windows-x86_64.zip
+          name: package-${{ matrix.platform }}
+          path: .nsh/out/${{ env.ARCHIVE }}
           if-no-files-found: error
 
-  publish-and-pin:
-    needs: [prepare, build, app-macos-aarch64, app-linux-x86_64, app-windows-x86_64]
-    runs-on: ubuntu-latest
+  publish:
+    needs: [prepare, package]
+    runs-on: ubuntu-24.04
+    # NSH_UPDATE_KEY and RELEASE_TOKEN live in the release environment, which
+    # only release/** branches may use (see CONTRIBUTING, "Releasing").
+    environment: release
     timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PUBLISH: ${{ needs.prepare.outputs.publish }}
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
-          token: ${{ secrets.RELEASE_TOKEN }}
           fetch-depth: 0
+          # No token stays in .git/config: only the publishing step below
+          # holds RELEASE_TOKEN, for the tag push and the release.
+          persist-credentials: false
+      - name: Install nsh ${{ env.NSH_VERSION }} and the verifier's dependencies
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/nsh-download"
+          mkdir -p "$work"
+          curl -fsSL -o "$work/nsh.tar.gz" \
+            "https://github.com/longbridge/nsh/releases/download/$NSH_VERSION/nsh-linux-x86_64.tar.gz"
+          echo "cb087e1e6afeb4ce4c2e70d8f803ccffe376b0a73d48605e492ec50fbbd45bec  $work/nsh.tar.gz" | sha256sum -c -
+          tar -xzf "$work/nsh.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/nsh/bin" >> "$GITHUB_PATH"
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-cryptography
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: backend-*
+          pattern: package-*
           path: artifacts
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+          merge-multiple: true
+      - name: Assemble, sign and verify the release
+        env:
+          # release-notes.sh asks GitHub to generate notes, which needs a token
+          # that may write contents; the workflow's own token may not.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          NSH_UPDATE_KEY: ${{ secrets.NSH_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$NSH_UPDATE_KEY" || { echo 'NSH_UPDATE_KEY is not set' >&2; exit 1; }
+          test -n "$GH_TOKEN" || { echo 'RELEASE_TOKEN is not set' >&2; exit 1; }
+          mkdir release-assets
+          for platform in macos-aarch64.tar.gz linux-x86_64.tar.gz windows-x86_64.zip; do
+            cp "artifacts/Omamail-$VERSION-$platform" release-assets/
+          done
+          cp install.sh install.ps1 release-assets/
+          # Notes come from the merged PRs' "Release Notes" sections since the
+          # latest published release (release-notes.sh, as before).
+          previous="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          # A dry run keeps the version already released, so its notes are
+          # collected under a tag name that cannot exist.
+          tag="v$VERSION"
+          if [ "$PUBLISH" != true ]; then tag="v$VERSION-dry-run"; fi
+          git tag "$tag" "$GITHUB_SHA"
+          bash omarchy/scripts/release-notes.sh "$previous" "$tag" > release-notes.md
+          cat release-notes.md
+          key="$RUNNER_TEMP/update.secret"
+          trap 'rm -f "$key"' EXIT
+          ( umask 077; printf '%s\n' "$NSH_UPDATE_KEY" > "$key" )
+          # Absolute URLs: an app that checked just before a newer release
+          # still downloads the version its manifest names.
+          nsh update-manifest release-assets/Omamail-"$VERSION"-* --key "$key" --notes release-notes.md --out release-assets \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
+          rm -f "$key"
+          python3 omarchy/scripts/release.py checksums release-assets
+          python3 omarchy/scripts/release.py verify release-assets --version "$VERSION"
+          ls -la release-assets
+      - name: Keep the dry run's assets
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          pattern: app-*
-          path: artifacts
-      - name: Publish complete release, verify downloads, then advance the release branch pin
+          name: release-dry-run
+          path: |
+            release-assets/*
+            release-notes.md
+          if-no-files-found: error
+      - name: Tag, publish as a draft, verify, then make it public and verify again
+        if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-          BRANCH: ${{ needs.prepare.outputs.branch }}
         run: |
-          bash scripts/publish-backend.sh
+          set -euo pipefail
+          # Refuse a moved source branch or any pre-existing tag, again, right
+          # before the first effect.
+          bash omarchy/scripts/release-source.sh
+          # An explicit non-force tag push refuses a racing publisher. The
+          # token is given to this one command, never stored in .git/config.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            push origin "refs/tags/v$VERSION"
+          gh release create "v$VERSION" release-assets/* --verify-tag --draft --title "v$VERSION" --notes-file release-notes.md
+          mkdir draft-download
+          gh release download "v$VERSION" --dir draft-download
+          python3 omarchy/scripts/release.py verify draft-download --version "$VERSION"
+          for asset in release-assets/*; do cmp "$asset" "draft-download/$(basename "$asset")"; done
+          # Public only once GitHub has returned every draft byte unchanged.
+          gh release edit "v$VERSION" --draft=false --latest
+          mkdir public-download
+          gh release download "v$VERSION" --dir public-download
+          python3 omarchy/scripts/release.py verify public-download --version "$VERSION"
+          for asset in release-assets/*; do cmp "$asset" "public-download/$(basename "$asset")"; done
+          # What installed apps and install.sh read: the latest release's URLs.
+          for asset in latest.json latest.json.sig SHA256SUMS; do
+            curl -fsSL --retry 5 --retry-delay 10 -o "public-download/latest-$asset" \
+              "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$asset"
+            cmp "release-assets/$asset" "public-download/latest-$asset"
+          done
+          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          # The site serves the installers, which follow the latest release;
+          # Pages deploys them only once a release with the NSH archives is out.
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            || echo "::warning::Could not start Pages; run it by hand so the site serves this release's installers"

@@ -24,10 +24,10 @@ PANELS = (
     'role="tabpanel" id="install-windows" aria-labelledby="install-tab-windows" hidden',
 )
 
+assert "cp install.sh install.ps1 _site/" in PAGES_WORKFLOW, "the site does not publish the installers"
 for installer in ("install.sh", "install.ps1"):
-    assert (ROOT / "omarchy" / installer).is_file(), f"website links to a missing installer: {installer}"
-    assert f"cp omarchy/{installer} _site/{installer}" in PAGES_WORKFLOW, f"the site does not publish {installer}"
-    assert f"      - omarchy/{installer}\n" in PAGES_WORKFLOW, f"a change to {installer} does not redeploy the site"
+    assert (ROOT / installer).is_file(), f"website links to a missing installer: {installer}"
+    assert f"      - {installer}\n" in PAGES_WORKFLOW, f"a change to {installer} does not redeploy the site"
 assert PAGE.count(UNIX_INSTALL) == 2, "macOS and Linux must each show the canonical curl command"
 assert PAGE.count(WINDOWS_INSTALL) == 1, "Windows must show the canonical PowerShell command"
 assert "raw.githubusercontent.com" not in PAGE, "website still points at the raw repository"
@@ -36,15 +36,22 @@ for tab in TABS:
 for panel in PANELS:
     assert panel in PAGE, f"website is missing the install panel: {panel}"
 assert 'selectTab(document.getElementById("install-tab-windows"))' in PAGE, "the Windows tab does not open for Windows visitors"
-assert "TAR.GZ ONLY" in PAGE, "Linux package format is not explicit"
-assert "make app-run" in PAGE, "standalone development entry point is missing"
-assert "mailto:</code> registration" in PAGE, "standalone capability boundary is missing"
+assert "APPLE SILICON · MACOS 14+ · AD HOC SIGNED" in PAGE, "the macOS build's platform and signing are not explicit"
+assert "X86_64 · GLIBC 2.39+ · GTK 4.14+ · WEBKITGTK 6.0" in PAGE, "the Linux build's requirements are not explicit"
+assert '<pre class="block"><span class="prompt">$ </span>make run</pre>' in PAGE, "the source entry point is missing"
+assert "run:\n\tnsh run\n" in (ROOT / "Makefile").read_text(encoding="utf-8"), "make run no longer runs the app"
+assert "From then on Omamail updates itself." in PAGE, "the website does not say the app updates itself"
+for leftover in ("Qt", "QML", "Quickshell", "app-run", "2.35+", "TAR.GZ"):
+    assert leftover not in PAGE, f"the website still describes the old app: {leftover}"
 
-# The README sends NSH app users to the source until NSH packages are
-# published, so it carries no installer command; when it does, it must be the
-# site's, never the raw repository.
+# The README and the installation guide show the site's commands, never the
+# raw repository's.
+GUIDE = (ROOT / "docs/install.md").read_text(encoding="utf-8")
 for command in (UNIX_INSTALL, WINDOWS_INSTALL):
-    assert README.count(command) <= 1, "README must show an installer command at most once"
+    assert README.count(command) == 1, f"README must show {command} once"
+    assert GUIDE.count(command) == 1, f"docs/install.md must show {command} once"
+assert "docs/install.md" in PAGE and "(docs/install.md)" in README, "the installation guide is not linked"
+assert "raw.githubusercontent.com" not in GUIDE, "docs/install.md points at the raw repository"
 assert "raw/refs/heads" not in README and "raw.githubusercontent.com" not in README, "README still points at the raw repository"
 
 # The bar and the card after the install section both ask for sponsorship.

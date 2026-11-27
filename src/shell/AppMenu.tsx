@@ -9,6 +9,7 @@ import { hasCommand, keyReport, pushKeyLayer, registerEscape, runCommand } from 
 import { chordLabel } from "../keys/labels";
 import { Kbd, NavRow, Popover, Separator, sizedBox, ToolButton, type IconKey, cx } from "../ui";
 import { nextSelectable } from "./menuCursor";
+import { checkForUpdates } from "./updates";
 
 export const PROJECT_URL = "https://github.com/huacnlee/omamail";
 export const AUTHOR_URL = "https://x.com/huacnlee";
@@ -70,6 +71,10 @@ export function AppMenu(props: AppMenuProps) {
     },
     { id: "github", label: "GitHub...", icon: "code", visible: true, enabled: true, run: () => void openExternal(PROJECT_URL) },
     { id: "twitter", label: "Twitter...", icon: "browser", visible: true, enabled: true, run: () => void openExternal(AUTHOR_URL) },
+    {
+      id: "updates", label: "Check for Updates...", icon: "refresh", visible: true, enabled: true, separated: true,
+      run: () => checkForUpdates(),
+    },
     { id: "quit", label: "Quit", icon: "logout", visible: props.canQuit, enabled: true, separated: true, run: () => props.onQuit() },
   ];
   const setOpen = (value: boolean) =>

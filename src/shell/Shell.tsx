@@ -26,6 +26,7 @@ import { animateNextLayout, slideIn } from "./motion";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { hidesOnClose } from "./windowFocus";
 import { StatusBar } from "./StatusBar";
+import { checkForUpdatesQuietly } from "./updates";
 
 export interface ShellProps {
   /** The window is the app's own, so the menu offers Quit. */
@@ -34,6 +35,8 @@ export interface ShellProps {
   /** Read the launch's and later launches' mailto: links (default true).
    * Fixtures turn it off: this process's arguments are not theirs. */
   launchLinks?: boolean;
+  /** Look for a newer release once at launch (default true). */
+  updates?: boolean;
 }
 
 export function Shell(props: ShellProps) {
@@ -49,6 +52,7 @@ export function Shell(props: ShellProps) {
     const stopLinks = startLaunchLinks((request) => openCompose(request));
     cleanup(stopLinks);
   }
+  if (props.updates !== false) checkForUpdatesQuietly();
 
   // `[` and the status bar's switch fold the sidebar with a layout ease.
   registerCommand("toggleSidebar", () => {

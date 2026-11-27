@@ -38,7 +38,7 @@ Read the relevant document before changing its area; these contain constraints t
 ## Backend compatibility
 
 - The NSH app links `core/` in process through `ext/omamail-native`, so app and backend always build together: no binary pin or API handshake between them.
-- `core/backend-version` and `core/backend-api.json` belong to the standalone `omamail` binary's release flow, pending NSH packaging. Until it is ported, do not bump them, and keep `core/` API changes behind contract fixtures as before.
+- `core/backend-api.json` is the method inventory of the JSON-RPC API (`omamail serve`, the agent and MCP entry points); its Rust test fails when a method is added or removed without it. Version numbers live in `nsh.json`, and `make publish` keeps `core/Cargo.toml` and `manifest.json` in step.
 
 ## Security
 
@@ -53,6 +53,7 @@ Start with [CONTRIBUTING.md — Review](CONTRIBUTING.md#review) for scope decisi
 
 ## Releasing and verification
 
-- Run `make validate` (`nsh check`, the key and native-member drift checks, `nsh build`, `nsh test`) after TSX or behavior changes; `cargo test` in `core/` for Rust changes; `make -C omarchy test lint` for the notice widget and release tooling.
-- Releasing is pending NSH packaging: `omarchy/scripts/publish.sh`, `release.yml`, `pages.yml` and the installers still describe the Qt-era release and are not expected to work on this branch. Never push main directly; tags alone do not publish.
+- Run `make validate` (`nsh check`, the key and native-member drift checks, `nsh build`, `nsh test`) after TSX or behavior changes; `cargo test` in `core/` for Rust changes; `make -C omarchy test lint` for the notice widget, the installers and the release tooling.
+- `make publish VERSION=x.y.z` opens a release PR; its branch push runs `release.yml`, which packages macOS (arm64), Linux (x86_64) and Windows (x86_64) with `nsh package`, signs `latest.json` for the in-app updater with the `NSH_UPDATE_KEY` secret, and publishes. Run `release.yml` by hand with `dry_run` to prove a release change before merging it. Never push main directly; tags alone do not publish.
+- The update key's public half is `nsh.json`'s `updater.publicKey`. Changing it, the app id, or the archive names (`Omamail-<version>-<os>-<arch>`) strands installed copies: they refuse or cannot find the next update.
 - Preserve `omarchy/scripts/release-notes.sh` aggregation of PR release-note sections; GitHub-generated notes are not a substitute.

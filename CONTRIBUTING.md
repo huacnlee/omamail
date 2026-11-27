@@ -219,16 +219,23 @@ send it, and be able to explain any line in it.
 A release is one command, run on a clean `main` that matches `origin/main`:
 
 ```bash
-make publish VERSION=0.11.0
+make publish VERSION=0.13.0
 ```
 
-The command requires a clean main synchronized with origin and an authenticated `gh`. It creates `release/0.11.0`, updates `Cargo.toml`, `Cargo.lock` and `manifest.json`, pushes that branch and opens one PR. Without `VERSION`, it increments the patch version. It never pushes main or creates a tag locally.
+The command requires a clean main synchronized with origin and an authenticated `gh`. It creates `release/0.13.0`, sets the version in `nsh.json` (raising its `build`), `core/Cargo.toml`, both `Cargo.lock` files and the plugin's `manifest.json`, pushes that branch and opens one PR. Without `VERSION`, it increments the patch version. It never pushes main or creates a tag locally.
 
-The branch push triggers **Release**. CI tests and builds both native backends, creates the tag and GitHub release, downloads and verifies the published assets, then updates `backend-version` and the released API contract in the same PR. The required backend gate blocks that PR until the new pin is present and the actual released binaries pass. Review and merge the completed PR once; version metadata and the backend dependency reach main together.
+The branch push triggers **Release** (`.github/workflows/release.yml`):
 
-- Keep main's ruleset active without an always-on bypass. Every update, including a release, goes through a PR; the administrator's PR-only bypass is not part of the release workflow.
-- Never tag by hand or delete an existing release tag to reuse its version. If publication fails, inspect the retained tag, draft or release and follow the recovery instructions before choosing a new version.
-- Features may merge with one unreleased API step while checking the connected backend against their fixed minimum API revision. Publish a backend release to make that step available to users; the feature check remains valid after publication.
-- If publication succeeds but the pin push fails, keep the published assets and recover the pin on the same PR after verification.
+1. `nsh package` builds the app on macOS (Apple silicon, ad hoc signed), Linux (x86_64) and Windows (x86_64), with the shipped Google client compiled in. Each package is unpacked, checked, installed with the root `install.sh` or `install.ps1` (their downloads served from the run), and uninstalled again.
+2. The release notes are collected from the merged PRs' `## Release Notes` sections. `nsh update-manifest` writes `latest.json` and signs it with the `NSH_UPDATE_KEY` secret; installed apps refuse a manifest that does not match `nsh.json`'s `updater.publicKey`.
+3. `omarchy/scripts/release.py verify` checks the exact asset set, `SHA256SUMS`, the manifest and its signature. CI then tags `v0.13.0`, creates a draft release, downloads and verifies it, publishes it, and verifies the public downloads again.
+4. CI starts **Pages**, which serves the website's installers. Pages redeploys only once the latest release has the NSH archives, so merging installer changes never leaves the site's install commands pointing at a release they cannot install.
 
-See [backend releases and recovery](docs/BACKEND-RUNTIME.md#release-before-pin) for the complete sequence and token requirements.
+Merge the release PR once it has published and its checks pass.
+
+- Keep main's ruleset active without an always-on bypass. Every update, including a release, goes through a PR.
+- Never tag by hand or delete an existing release tag to reuse its version. If publication fails after the tag was pushed, inspect the tag, draft or release, then publish a new version.
+- To prove a change to the release pipeline before merging it, run **Release** by hand on its branch with `dry_run` (the default): it builds, signs and verifies everything, keeps the assets as the run's artifact, and tags and publishes nothing.
+- The update key is the one thing that cannot be replaced. Its secret half is kept offline by the maintainer and as the `NSH_UPDATE_KEY` secret; a new key means every installed copy refuses updates until reinstalled.
+- `NSH_UPDATE_KEY`, `RELEASE_TOKEN`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` belong in the `release` environment, whose deployment branches are limited to `release/**`, so a workflow edited on another branch cannot read them. Dry runs then run on a `release/**` branch.
+- `RELEASE_TOKEN` needs contents write (tags, releases and generated notes) and actions write (starting Pages).

@@ -8,25 +8,27 @@ Omamail is a native email and calendar app with multiple accounts and keyboard n
 
 ## Install
 
-### Omarchy plugin
+macOS (Apple silicon) and Linux (x86_64):
 
-The plugin requires **Omarchy 4** and follows the active Omarchy theme. It includes the bar widget, `mailto:` integration, and AI assistance through the configured Omarchy agent.
+```sh
+curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh
+```
 
-```bash
+Windows (x86_64), in PowerShell:
+
+```powershell
+irm https://huacnlee.github.io/omamail/install.ps1 | iex
+```
+
+The installer picks the latest release for your system and checks it against the release's `SHA256SUMS` before installing. It needs no administrator access, and it replaces Omamail 0.12 or earlier while keeping your accounts and settings. From then on Omamail updates itself. For a specific version, another location, removal or a manual install, see the [installation guide](docs/install.md).
+
+### Omarchy bar entry (optional)
+
+On [Omarchy](https://omarchy.org), the plugin puts an envelope in the bar that opens Omamail, or this page when the app is not installed yet:
+
+```sh
 omarchy plugin add https://github.com/huacnlee/omamail.git --enable
 ```
-
-Update it with:
-
-```bash
-omarchy plugin update omamail
-```
-
-Click the envelope in the bar, install the pinned backend when prompted, and add your mailbox. Prebuilt plugin backends are available for Linux x86_64 and aarch64.
-
-### Desktop and mobile app
-
-The app is built with [NSH](https://nsh.dev): the interface is TSX in `src/`, and the mail library runs in-process through the `ext/omamail-native` Rust module. No separate backend process is needed. Release packages for the NSH app are not published yet; run it from source.
 
 ## Repository layout
 
