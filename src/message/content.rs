@@ -519,11 +519,51 @@ pub(crate) fn content_id(value: &str) -> String {
     }
     String::from_utf8_lossy(&out).to_lowercase()
 }
+/// Embedded images are decided after the walk, against the HTML's `cid:`
+/// references; every other named, `attachment` or non-text leaf is a file.
 fn attachment(part: &Value) -> bool {
     if embedded_image(part) {
         return false;
     }
-    !text(&part["filename"]).is_empty() || disposition(part) == "attachment"
+    if !text(&part["filename"]).is_empty() || disposition(part) == "attachment" {
+        return true;
+    }
+    let mime = text(&part["mimeType"]).to_ascii_lowercase();
+    let leaf = part["parts"].as_array().is_none_or(|p| p.is_empty());
+    leaf && !mime.is_empty() && !mime.starts_with("text/") && !mime.starts_with("multipart/")
+}
+/// A display name for a part the sender left unnamed, from its type.
+fn unnamed(mime: &str) -> String {
+    let mime = mime.to_ascii_lowercase();
+    let mime = mime.split(';').next().unwrap_or_default().trim();
+    if matches!(mime, "message/rfc822" | "message/global") {
+        return "forwarded message.eml".into();
+    }
+    let extension = match mime {
+        "application/pdf" => "pdf",
+        "image/jpeg" | "image/jpg" | "image/pjpeg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/heic" => "heic",
+        "image/heif" => "heif",
+        "image/tiff" => "tiff",
+        "image/bmp" => "bmp",
+        "application/zip" => "zip",
+        "text/calendar" | "application/ics" => "ics",
+        "message/delivery-status" | "message/disposition-notification" => "txt",
+        _ => "",
+    };
+    if extension.is_empty() {
+        "attachment".into()
+    } else {
+        format!("attachment.{extension}")
+    }
+}
+fn file(part: &Value) -> Value {
+    let name = text(&part["filename"]);
+    let mime = text(&part["mimeType"]);
+    json!({"filename":if name.is_empty(){unnamed(mime)}else{decoded_header(name)},"mimeType":if mime.is_empty(){"application/octet-stream"}else{mime},"size":number(&part["body"]["size"]).floor().max(0.0) as u64,"attachmentId":text(&part["body"]["attachmentId"])})
 }
 fn decode_part(part: &Value) -> Result<String> {
     let data = text(&part["body"]["data"]);
@@ -543,13 +583,22 @@ fn decode_part(part: &Value) -> Result<String> {
         .unwrap_or_else(|| "utf-8".into());
     Ok(decode(&charset, &bytes64(data)))
 }
+/// What the walk collects besides the body: files in MIME order, embedded
+/// images waiting for the `cid:` check, and every `cid:` the HTML names.
+#[derive(Default)]
+struct Files {
+    listed: Vec<(usize, Value)>,
+    embedded: Vec<(usize, String, Value)>,
+    referenced: std::collections::HashSet<String>,
+    order: usize,
+}
 fn walk(
     part: &Value,
     depth: usize,
     budget: &mut usize,
     plain: &mut String,
     html: &mut String,
-    files: &mut Vec<Value>,
+    files: &mut Files,
 ) -> Result<()> {
     if depth > 12 {
         return Ok(());
@@ -559,8 +608,14 @@ fn walk(
     }
     *budget -= 1;
     let is_attachment = attachment(part);
-    if is_attachment && !text(&part["body"]["attachmentId"]).is_empty() {
-        files.push(json!({"filename":decoded_header(if text(&part["filename"]).is_empty(){"attachment"}else{text(&part["filename"])}),"mimeType":if text(&part["mimeType"]).is_empty(){"application/octet-stream"}else{text(&part["mimeType"])},"size":number(&part["body"]["size"]).floor().max(0.0) as u64,"attachmentId":text(&part["body"]["attachmentId"])}));
+    if !text(&part["body"]["attachmentId"]).is_empty() {
+        files.order += 1;
+        if is_attachment {
+            files.listed.push((files.order, file(part)));
+        } else if embedded_image(part) {
+            let id = content_id(&part_header(part, "Content-ID"));
+            files.embedded.push((files.order, id, file(part)));
+        }
     }
     if let Some(children) = part["parts"].as_array().filter(|p| !p.is_empty()) {
         for child in children {
@@ -570,11 +625,39 @@ fn walk(
         let mime = text(&part["mimeType"]).to_ascii_lowercase();
         if plain.is_empty() && mime.starts_with("text/plain") {
             *plain = decode_part(part)?;
-        } else if html.is_empty() && mime.starts_with("text/html") {
-            *html = decode_part(part)?;
+        } else if mime.starts_with("text/html") {
+            if html.is_empty() {
+                *html = decode_part(part)?;
+                files.referenced.extend(cid_references(html.as_bytes()));
+            } else {
+                // A later HTML part is not read as the body, only for the pictures it draws.
+                let data = text(&part["body"]["data"]);
+                if data.len() <= MAX_MESSAGE * 4 / 3 + 4 {
+                    files.referenced.extend(cid_references(&bytes64(data)));
+                }
+            }
         }
     }
     Ok(())
+}
+/// The attachment list: every file, plus each embedded image no HTML part
+/// draws through `cid:` (an iPhone photo under a plain-text body, an Outlook
+/// attachment that merely carries a Content-ID), in MIME order.
+fn attachment_list(files: Files) -> Vec<Value> {
+    let Files {
+        mut listed,
+        embedded,
+        referenced,
+        ..
+    } = files;
+    listed.extend(
+        embedded
+            .into_iter()
+            .filter(|(_, id, _)| id.is_empty() || !referenced.contains(id))
+            .map(|(order, _, file)| (order, file)),
+    );
+    listed.sort_by_key(|(order, _)| *order);
+    listed.into_iter().map(|(_, file)| file).collect()
 }
 // Be conservative: angle-bracket prose is a legitimate plain alternative.
 // Require nested markup, not merely a document-root name or closing tag in text.
@@ -629,7 +712,7 @@ pub(crate) fn prepare_for_render(message: &Value, now: i64) -> Result<Value> {
 fn prepare_content(message: &Value, now: i64, read_html: bool) -> Result<Value> {
     let mut plain = String::new();
     let mut html = String::new();
-    let mut files = Vec::new();
+    let mut files = Files::default();
     walk(
         &message["payload"],
         0,
@@ -638,6 +721,7 @@ fn prepare_content(message: &Value, now: i64, read_html: bool) -> Result<Value> 
         &mut html,
         &mut files,
     )?;
+    let files = attachment_list(files);
     let source = if !plain.is_empty() && !(markup_as_text(&plain) && !html.is_empty()) {
         "plain"
     } else if !html.is_empty() {

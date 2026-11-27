@@ -623,6 +623,8 @@ fn definitely_refused(error: &str) -> bool {
             | "m365_send_rejected"
             | "m365_send_not_attempted"
             | "m365_message_too_large"
+            // Refused for its size, locally before any I/O or by Microsoft Graph's answer.
+            | "message_too_large"
             | "smtp_recipient_refused"
     )
 }

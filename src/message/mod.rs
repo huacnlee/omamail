@@ -124,7 +124,11 @@ fn entity(
             .into();
         }
         body = json!({"size":bytes.len(),"data":URL_SAFE_NO_PAD.encode(&bytes)});
-        if !filename.is_empty() || disposition.disposition == mailparse::DispositionType::Attachment
+        // Any non-text leaf is a file the reader can list and fetch, even when
+        // the sender gave it no name (scanned PDFs, forwarded messages).
+        if !filename.is_empty()
+            || disposition.disposition == mailparse::DispositionType::Attachment
+            || !mime_type.starts_with("text/")
         {
             body["attachmentId"] = json!(format!("part:{id}"));
         }

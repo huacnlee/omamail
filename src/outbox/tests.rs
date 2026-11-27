@@ -1080,3 +1080,12 @@ fn test_directories_retry_collisions_without_reusing_or_removing_existing_data()
         0o700
     );
 }
+
+// Graph's size refusal reaches the outbox as `message_too_large`: the message
+// was not sent, so the entry fails and keeps the draft rather than reading as a
+// delivery nobody can confirm.
+#[test]
+fn size_refusals_are_definite_failures() {
+    assert!(definitely_refused("message_too_large"));
+    assert!(!definitely_refused("outlook_send_failed"));
+}

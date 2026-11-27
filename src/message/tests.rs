@@ -59,13 +59,15 @@ fn inline_images_are_embedded_instead_of_listed_as_attachments() {
         "headers": [],
         "parts": [
             part("image/png", "logo.png", serde_json::json!([
-                {"name":"Content-Disposition", "value":"inline"}
+                {"name":"Content-Disposition", "value":"inline"},
+                {"name":"Content-ID", "value":"<logo@example.invalid>"}
             ])),
             part("image/gif", "pixel.gif", serde_json::json!([
                 {"name":"Content-ID", "value":"<pixel@example.invalid>"}
             ])),
             part("image/png", "attachment-logo.png", serde_json::json!([
-                {"name":"Content-Disposition", "value":"inline; filename=attachment-logo.png"}
+                {"name":"Content-Disposition", "value":"inline; filename=attachment-logo.png"},
+                {"name":"Content-ID", "value":"<attachment-logo@example.invalid>"}
             ])),
             part("image/jpeg", "photo.jpg", serde_json::json!([
                 {"name":"Content-Disposition", "value":"attachment; filename=photo.jpg"},
@@ -73,7 +75,9 @@ fn inline_images_are_embedded_instead_of_listed_as_attachments() {
             ])),
             part("application/pdf", "document.pdf", serde_json::json!([
                 {"name":"Content-Disposition", "value":"inline"}
-            ]))
+            ])),
+            serde_json::json!({"mimeType":"text/html", "headers":[], "body":{"data":
+                URL_SAFE_NO_PAD.encode(r#"<img src="cid:LOGO@example.invalid"><img src="cid:pixel@example.invalid"><img src='cid:attachment-logo@example.invalid'>"#)}})
         ]
     }});
 
@@ -85,6 +89,164 @@ fn inline_images_are_embedded_instead_of_listed_as_attachments() {
         .map(|attachment| attachment["filename"].as_str().unwrap())
         .collect();
     assert_eq!(listed, ["photo.jpg", "document.pdf"]);
+}
+
+/// The attachment rows a raw message shows, as `(filename, mimeType)`, after the
+/// same parse and prepare the reader runs; each row must be fetchable.
+fn listed(raw: &str) -> Vec<(String, String)> {
+    let payload = super::parse(raw.replace('\n', "\r\n").as_bytes()).unwrap();
+    let message = serde_json::json!({"id":"x", "payload": payload});
+    let prepared = super::content::prepare(&message, 0).unwrap();
+    prepared["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| {
+            let id = file["attachmentId"].as_str().unwrap();
+            assert!(
+                super::content::attachment_bytes(&message, id).is_some(),
+                "{id} cannot be fetched"
+            );
+            (
+                file["filename"].as_str().unwrap().to_owned(),
+                file["mimeType"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+// iPhone and Apple Mail send photos as inline parts under a plain-text body:
+// nothing draws them, so they are the attachments.
+#[test]
+fn inline_photos_under_a_plain_body_are_listed() {
+    let raw = "Subject: photo
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Here it is
+--b
+Content-Type: image/jpeg; name=IMG_0001.jpeg
+Content-Disposition: inline; filename=IMG_0001.jpeg
+Content-Transfer-Encoding: base64
+
+/9j/4AAQ
+--b--
+";
+    assert_eq!(
+        listed(raw),
+        [("IMG_0001.jpeg".to_owned(), "image/jpeg".to_owned())]
+    );
+}
+
+// Outlook gives attached pictures a Content-ID the HTML never names; a picture
+// the HTML does draw (compared case-blind) stays out of the list.
+#[test]
+fn images_the_html_does_not_reference_are_listed() {
+    let raw = "Subject: scan
+Content-Type: multipart/related; boundary=b
+
+--b
+Content-Type: text/html
+
+<p>See attached</p><img src=\"cid:LOGO@x\">
+--b
+Content-Type: image/png; name=\"logo.png\"
+Content-ID: <logo@x>
+Content-Transfer-Encoding: base64
+
+iVBORw0K
+--b
+Content-Type: image/png; name=\"scan.png\"
+Content-ID: <abc@x>
+Content-Transfer-Encoding: base64
+
+iVBORw0K
+--b--
+";
+    assert_eq!(
+        listed(raw),
+        [("scan.png".to_owned(), "image/png".to_owned())]
+    );
+}
+
+#[test]
+fn forwarded_messages_are_listed_as_eml_files() {
+    let raw = "Subject: Fwd: hello
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Forwarding this
+--b
+Content-Type: message/rfc822
+
+From: someone@example.invalid
+Subject: hello
+
+original body
+--b--
+";
+    assert_eq!(
+        listed(raw),
+        [(
+            "forwarded message.eml".to_owned(),
+            "message/rfc822".to_owned()
+        )]
+    );
+}
+
+// Scanners and copiers send files with no name at all.
+#[test]
+fn unnamed_files_are_listed_under_a_name_from_their_type() {
+    let raw = "Subject: scan
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Scanned document
+--b
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0x
+--b
+Content-Type: application/x-unknown
+Content-Transfer-Encoding: base64
+
+AAEC
+--b--
+";
+    assert_eq!(
+        listed(raw),
+        [
+            ("attachment.pdf".to_owned(), "application/pdf".to_owned()),
+            ("attachment".to_owned(), "application/x-unknown".to_owned()),
+        ]
+    );
+}
+
+// Bodies never become attachments, and a lone body is not a file either.
+#[test]
+fn text_bodies_are_not_listed() {
+    let raw = "Subject: hi
+Content-Type: multipart/alternative; boundary=b
+
+--b
+Content-Type: text/plain
+
+hi
+--b
+Content-Type: text/html
+
+<p>hi</p>
+--b--
+";
+    assert!(listed(raw).is_empty());
+    assert!(listed("Subject: hi\n\nhello\n").is_empty());
 }
 
 // Some senders put the markup itself in the text/plain alternative. Shown as
