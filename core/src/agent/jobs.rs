@@ -398,13 +398,24 @@ fn process_handle(v: &Value) -> Option<OwnedFd> {
     }
     Some(fd)
 }
+/// The Qt plugin's worker as a source checkout ran it. The plugin's scripts
+/// left this repository with the NSH cutover, so outside tests the path no
+/// longer exists and never matches; tests read a vendored copy.
+#[cfg(not(test))]
+fn checkout_worker_script() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../omarchy/scripts/agent-job.py")
+}
+#[cfg(test)]
+fn checkout_worker_script() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agent-job.py")
+}
+
 // Upgrade compatibility only: recognize an already-running worker from this
 // checkout or this installed plugin. Never launch Python and never accept an
 // executable/script path supplied by job metadata.
 fn legacy_worker_args(args: &[u8], executable: &std::path::Path, id: &str) -> bool {
     use std::os::unix::fs::MetadataExt;
-    let mut candidates =
-        vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../omarchy/scripts/agent-job.py")];
+    let mut candidates = vec![checkout_worker_script()];
     if let Some(bin) = executable.parent()
         && bin.file_name().is_some_and(|name| name == "bin")
         && let Some(runtime) = bin.parent()
@@ -1392,7 +1403,7 @@ mod tests {
     #[test]
     fn native_draft_context_matches_original_ui_oracle() {
         use std::io::Write;
-        let script = r#"const A=require('../omarchy/ui/tests/load.js').load('tests/oracles/agent/Agent.js'); const p=JSON.parse(require('fs').readFileSync(0,'utf8')); process.stdout.write(A.draftPayload(p.draftFields,p.ask,p.account,p.accountId));"#;
+        let script = r#"const A=require('./tests/oracles/ui/tests/load.js').load('tests/oracles/agent/Agent.js'); const p=JSON.parse(require('fs').readFileSync(0,'utf8')); process.stdout.write(A.draftPayload(p.draftFields,p.ask,p.account,p.accountId));"#;
         for fields in [
             json!({"draftKey":"k","from":"","to":"Ada <ada@example.org>","subject":" 郵件 مرحبا ","body":"Unicode 😀\nquotes \" \\"}),
             json!({"draftKey":"k","subject":" ","body":""}),
@@ -1423,7 +1434,7 @@ mod tests {
     #[test]
     fn legacy_worker_compatibility_accepts_only_known_exact_script_argv() {
         let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../omarchy/scripts/agent-job.py")
+            .join("tests/fixtures/agent-job.py")
             .canonicalize()
             .unwrap();
         let exe = std::env::current_exe().unwrap();

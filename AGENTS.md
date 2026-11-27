@@ -21,26 +21,24 @@ Read the relevant document before changing its area; these contain constraints t
 
 ## Structure and boundaries
 
-- Group by module, not file type. Rust lives in `src/`, CLI handling in `src/cli/`, and dispatch in `src/backend/`. QML and its JavaScript live together under `ui/`. Rust unit tests live with their modules; UI tests live in `ui/tests/`; integration tests live in `tests/`.
-- Rust owns mail business logic and durable agent jobs. QML owns presentation and interaction state, communicating with the persistent backend over stdin/stdout rather than invoking CLI commands. See `docs/BACKEND.md` and `docs/ARCHITECTURE.md`.
-- QML JavaScript libraries start with `.pragma library` and use `var` and `function`, not `const`, `let`, arrows or template literals. Put testable presentation rules there. Tests load module paths, e.g. `load("compose/Senders.js")`; `ui/tests/load.js` resolves QML `.import` chains.
-- A list or object received through a `var` signal argument (on Qt 6.12) or a delegate's `modelData` is a sequence or reference object, not a JavaScript array or object: `Array.isArray` says no and its keys come back sorted. A receiver that judges such a value, keeps it or writes to it takes `Plain.plain` (`ui/backend/Plain.js`) of it first; `ui/tests/qml/tst_signal_lists.qml` shows the pattern.
-- List new QML files in the Makefile's lint inputs and import other modules explicitly.
-- `Service.qml` is shell-constructed and must declare no required properties. The shell injects only `shell`, `manifest`, `pluginRegistry`, and `barWidgetRegistry`; settings arrive through the bar widget's `applySettings`.
+- Group by module, not file type. The app is TSX on NSH: features in `src/features/`, domain logic in `src/mail/`, keys in `src/keys/`, the window shell in `src/shell/`, and the styled `ui` layer (tokens and controls every feature builds from) in `src/ui/`. The mail library is Rust in `core/` (CLI in `core/src/cli/`, dispatch in `core/src/backend/`); the NSH native module is `ext/omamail-native/`. `omarchy/` holds only the Omarchy notice widget and release tooling.
+- Rust owns mail business logic and durable agent jobs. TSX owns presentation and interaction state and reaches Rust only through `src/backend/client.ts` (the `omamail-native` module), never by invoking CLI commands. See `docs/NSH-PORT.md` and `docs/ARCHITECTURE.md`.
+- Tests live next to their modules: `*.test.ts(x)` beside the TSX (`nsh test`), Rust unit tests in their modules, Rust integration tests in `core/tests/`. Read component props and signals in JSX or closures; types come from `.nsh/types`, never by analogy.
+- Features import controls from `src/ui`, never from `nsh/base` directly, and draw only with theme tokens.
+- `omarchy/notice/` is the only QML left: a bar widget for existing Omarchy installs and its helper `omamail-app.sh`. Keep the helper's commands fixed and its tests (`make -C omarchy test lint`) passing.
 
 ## UI
 
-- Use the active Omarchy theme. Pass semantic colors from `App.qml` as required component properties; derive variants with alpha or `Style.normalFillFor` / `hoverFillFor` / `selectedFillFor`. Secondary text mixes foreground toward background, never `Qt.darker`. Provider artwork retains its original colors.
-- Render sender-controlled labels with `Text.PlainText`, never `AutoText`. Rich message bodies go through the sanitizer. Do not fetch remote message resources directly through Qt.
+- Follow [docs/DESIGN.md](docs/DESIGN.md). Colors come from theme tokens (`src/ui/tokens.ts`: `FILL`, `LINE`, `TEXT`); no raw colors in features. The Omarchy theme is followed through nsh-omarchy. Provider artwork retains its original colors.
+- Sender-controlled labels render as plain `Text`. Message bodies are sanitized in Rust (`core/src/message/html`) and drawn from that tree (`src/mail/message/html.ts`); never fetch remote message resources directly.
 - Never convey state by color alone. Use accurate labels; suffix actions that open another dialog/page/browser/terminal workflow with `...`.
-- An open popup keeps its trigger selected. Anchor to the control's edge, not the pointer. Place after opening and on height changes; on overflow, flip, clamp to the window, then clamp to zero.
-- Keep content direction separate from interface layout; no `LayoutMirroring`.
+- An open popup keeps its trigger selected and anchors to the control's edge, not the pointer; build popups from `src/ui` (`Popover`, `Menu`), never from a bare view.
+- Keep content direction separate from interface layout.
 
 ## Backend compatibility
 
-- `backend-version` is the plugin's exact binary pin, independent of Cargo's development version. Never substitute main/latest or a PATH binary. Keep both exact-version and API handshake checks; missing `apiVersion` is allowed only for historical 0.9.0/API 1.
-- New QML dependencies on methods, parameters, responses or error semantics require contract fixtures and an API revision exactly one past `releasedApiVersion`, named under `unreleased`. Gate each feature on its fixed minimum revision even after release. Internal Rust-only changes do not require a release.
-- The Published backend gate exercises the actual pinned release with current QML codecs. Inventory checks and source fingerprints do not replace behavioral compatibility tests.
+- The NSH app links `core/` in process through `ext/omamail-native`, so app and backend always build together: no binary pin or API handshake between them.
+- `core/backend-version` and `core/backend-api.json` belong to the standalone `omamail` binary's release flow, pending NSH packaging. Until it is ported, do not bump them, and keep `core/` API changes behind contract fixtures as before.
 
 ## Security
 
@@ -55,7 +53,6 @@ Start with [CONTRIBUTING.md — Review](CONTRIBUTING.md#review) for scope decisi
 
 ## Releasing and verification
 
-- `make publish VERSION=X.Y.Z` prepares one versioned release PR from clean, synchronized main; without VERSION it increments the patch. Never push main directly. Release CI publishes and verifies immutable assets before updating the binary pin and folding API metadata on that same branch. Tags alone do not publish. Follow `docs/BACKEND-RUNTIME.md` for release and recovery details.
-- Preserve `scripts/release-notes.sh` aggregation of PR release-note sections; GitHub-generated notes are not a substitute.
-- Run `make validate` after QML or behavior changes. `make test` includes Rust, JavaScript, source regressions and QML tests. Inspect the Makefile for the current targets.
-- QML tests and `qmllint` are local gates using the installed Qt; release CI uses `make test-js test-shell`. Unresolved `qs.Ui` / `qs.Commons` lint warnings are expected; the exit code is the gate.
+- Run `make validate` (`nsh check`, the key and native-member drift checks, `nsh build`, `nsh test`) after TSX or behavior changes; `cargo test` in `core/` for Rust changes; `make -C omarchy test lint` for the notice widget and release tooling.
+- Releasing is pending NSH packaging: `omarchy/scripts/publish.sh`, `release.yml`, `pages.yml` and the installers still describe the Qt-era release and are not expected to work on this branch. Never push main directly; tags alone do not publish.
+- Preserve `omarchy/scripts/release-notes.sh` aggregation of PR release-note sections; GitHub-generated notes are not a substitute.

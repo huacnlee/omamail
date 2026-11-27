@@ -94,7 +94,18 @@ fn parse_message() -> Result<serde_json::Value, &'static str> {
 }
 
 pub fn run() {
-    let cli = Cli::parse();
+    run_from(std::env::args_os())
+}
+
+/// [`run`] with the arguments given rather than read from the process: an
+/// executable that embeds the library (the NSH app) runs the agent's worker
+/// subcommands through it, with the argv it was started with.
+pub fn run_from<I, T>(args: I)
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let cli = Cli::parse_from(args);
     let Some(command) = cli.command else {
         Cli::command().print_help().expect("print help");
         println!();

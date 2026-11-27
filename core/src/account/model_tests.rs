@@ -6,7 +6,7 @@ use std::{
 
 fn oracle(calls: &Value, unified: bool) -> Value {
     let script = r#"
-const {load}=require('../omarchy/ui/tests/load');
+const {load}=require('./tests/oracles/ui/tests/load');
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
 const M=load(input.unified?'account/Unified.js':'account/Model.js');
 function hydrate(v) { if(!v||typeof v!=='object')return v; if(Array.isArray(v))return v.map(hydrate); for(const k of Object.keys(v)){if(k==='date'&&v[k])v[k]=new Date(v[k]);else v[k]=hydrate(v[k]);}return v; }

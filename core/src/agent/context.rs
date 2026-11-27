@@ -527,7 +527,7 @@ mod tests {
                 "imap:test@example.org",
             )
             .unwrap();
-            let script = r#"const M=require('../omarchy/ui/tests/load.js').load('tests/oracles/agent/Agent.js');const rows=JSON.parse(require('fs').readFileSync(0,'utf8'));const line=rows.length===1?M.payload(rows[0],rows[0].bodyText,'test@example.org',M.folderOf(rows[0].id,'inbox','imap'),' Read ','imap:test@example.org'):M.selectionPayload(rows,'test@example.org','inbox',' Read ','imap:test@example.org');process.stdout.write(line)"#;
+            let script = r#"const M=require('./tests/oracles/ui/tests/load.js').load('tests/oracles/agent/Agent.js');const rows=JSON.parse(require('fs').readFileSync(0,'utf8'));const line=rows.length===1?M.payload(rows[0],rows[0].bodyText,'test@example.org',M.folderOf(rows[0].id,'inbox','imap'),' Read ','imap:test@example.org'):M.selectionPayload(rows,'test@example.org','inbox',' Read ','imap:test@example.org');process.stdout.write(line)"#;
             let mut child = std::process::Command::new("node")
                 .args(["-e", script])
                 .stdin(std::process::Stdio::piped())

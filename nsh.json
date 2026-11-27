@@ -6,7 +6,12 @@
   "nsh": ">=0.7",
   "theme": "theme.json",
   "dependencies": {
-    "omamail-native": { "path": "ext/omamail-native" },
-    "nsh-omarchy": "0.2"
-  }
+    "omamail-native": {
+      "path": "ext/omamail-native"
+    },
+    "nsh-omarchy": "0.2",
+    "nsh-icon-lucide": "^0.2.2",
+    "nsh-icon": "^0.2.2"
+  },
+  "singleInstance": true
 }

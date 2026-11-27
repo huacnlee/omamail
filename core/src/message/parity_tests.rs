@@ -468,7 +468,7 @@ fn javascript_rewrites_name_the_typed_recipients() {
                 .collect()
         })
         .collect();
-    let script = r#"const M=require('../omarchy/ui/tests/load.js').load('message/Message.js');const xs=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(xs.map(t=>{const r=M.buildRawMessage({to:t,body:'x'});return r===null?null:r.split('\r\n').find(l=>l.startsWith('To:'))})))"#;
+    let script = r#"const M=require('./tests/oracles/ui/tests/load.js').load('message/Message.js');const xs=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(xs.map(t=>{const r=M.buildRawMessage({to:t,body:'x'});return r===null?null:r.split('\r\n').find(l=>l.startsWith('To:'))})))"#;
     let mut child = std::process::Command::new("node")
         .args(["-e", script])
         .stdin(std::process::Stdio::piped())
@@ -524,7 +524,7 @@ fn picker_text_reads_as_one_address_in_mailparse() {
         ]
         .map(String::from),
     );
-    let script = r#"const R=require('../omarchy/ui/tests/load.js').load('compose/Recipients.js');const names=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(names.map(n=>R.address({name:n,email:'dave@example.org'}))))"#;
+    let script = r#"const R=require('./tests/oracles/ui/tests/load.js').load('compose/Recipients.js');const names=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(names.map(n=>R.address({name:n,email:'dave@example.org'}))))"#;
     let mut child = std::process::Command::new("node")
         .args(["-e", script])
         .stdin(std::process::Stdio::piped())

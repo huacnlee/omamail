@@ -1,6 +1,6 @@
 // Capture the real production JS test corpus, including generated adversarial
 // and large-message fixtures. This is a migration oracle, never runtime code.
-const loader = require(process.cwd() + '/../omarchy/ui/tests/load.js');
+const loader = require(process.cwd() + '/tests/oracles/ui/tests/load.js');
 const original = loader.load;
 const baseline = require(process.cwd() + '/benchmarks/mail/baseline/ui/tests/load.js');
 const cases = [];
@@ -24,6 +24,6 @@ loader.load = function(path) {
 };
 const write = process.stdout.write;
 process.stdout.write = () => true;
-require(process.cwd() + '/../omarchy/ui/tests/test_html.js');
+require(process.cwd() + '/tests/oracles/ui/tests/test_html.js');
 process.stdout.write = write;
 process.stdout.write(JSON.stringify(cases));

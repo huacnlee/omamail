@@ -40,6 +40,9 @@ fn native_envelope_preserves_groups_cc_and_bcc_recipients() {
 fn folder_encoding_rejects_controls_and_uses_modified_utf7() {
     assert_eq!(encoded_mailbox("日本語").unwrap(), "&ZeVnLIqe-");
     assert_eq!(encoded_mailbox("R&D").unwrap(), "R&-D");
+    // Outside the BMP the run holds the UTF-16 surrogate pair.
+    assert_eq!(encoded_mailbox("😀").unwrap(), "&2D3eAA-");
+    assert_eq!(encoded_mailbox("工作/客户 😀").unwrap(), "&XeVPXA-/&W6JiNw- &2D3eAA-");
     for value in ["x\r", "x\n", "x\0", "x\t", ""] {
         assert!(encoded_mailbox(value).is_err());
     }

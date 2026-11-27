@@ -5,7 +5,7 @@ use std::io::Write;
 /// parity covers actual provider behavior rather than a second Rust expected value.
 fn oracle(input: &Value) -> Value {
     let script = r#"
-const {load}=require('../omarchy/ui/tests/load');
+const {load}=require('./tests/oracles/ui/tests/load');
 const P=load('providers/JmapProtocol.js');
 const T=load('providers/JmapThreads.js');
 const f=JSON.parse(require('fs').readFileSync(0,'utf8'));

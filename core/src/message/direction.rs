@@ -159,7 +159,7 @@ mod tests {
     use serde_json::{Value, json};
     #[test]
     fn existing_direction_suite_is_a_live_golden_oracle() {
-        let script = r#"const loader=require('../omarchy/ui/tests/load');const load=loader.load;const rows=[];loader.load=function(p){const m=load(p);if(p==='message/Direction.js')for(const name of ['attributeFor','endEdge','forced','hasAnswer','isRightToLeft','normalizeMode','resolve','resolveBody','resolveSubject','startEdge','strongDirectionOf','subjectDirectionOf']){const f=m[name];m[name]=function(...args){const result=f(...args);rows.push({name,args,result});return result;};}return m;};console.log=()=>{};require('../omarchy/ui/tests/test_direction');process.stdout.write(JSON.stringify(rows));"#;
+        let script = r#"const loader=require('./tests/oracles/ui/tests/load');const load=loader.load;const rows=[];loader.load=function(p){const m=load(p);if(p==='message/Direction.js')for(const name of ['attributeFor','endEdge','forced','hasAnswer','isRightToLeft','normalizeMode','resolve','resolveBody','resolveSubject','startEdge','strongDirectionOf','subjectDirectionOf']){const f=m[name];m[name]=function(...args){const result=f(...args);rows.push({name,args,result});return result;};}return m;};console.log=()=>{};require('./tests/oracles/ui/tests/test_direction');process.stdout.write(JSON.stringify(rows));"#;
         let output = std::process::Command::new("node")
             .args(["-e", script])
             .output()
@@ -243,7 +243,7 @@ mod tests {
                     .map(|mode| json!({"text":text,"mode":mode}))
             })
             .collect();
-        let script = r#"const {load}=require('../omarchy/ui/tests/load');const d=load('message/Direction.js');let s='';process.stdin.on('data',b=>s+=b);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(s).map(c=>[d.resolve(c.text,c.mode),d.resolveSubject(c.text,c.mode),d.resolveBody(c.text,c.mode),d.withoutReplyPrefixes(c.text)]))));"#;
+        let script = r#"const {load}=require('./tests/oracles/ui/tests/load');const d=load('message/Direction.js');let s='';process.stdin.on('data',b=>s+=b);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(s).map(c=>[d.resolve(c.text,c.mode),d.resolveSubject(c.text,c.mode),d.resolveBody(c.text,c.mode),d.withoutReplyPrefixes(c.text)]))));"#;
         use std::io::Write;
         let mut child = std::process::Command::new("node")
             .args(["-e", script])

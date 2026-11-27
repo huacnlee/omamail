@@ -59,6 +59,43 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
 
+  # The TSX app: type checks, the key and native-member drift checks, and
+  # the headless `nsh test` suite. The CLI is one exact release, checked
+  # against the digest kept here rather than one fetched beside it; move
+  # NSH_VERSION and NSH_SHA256 together.
+  nsh-app:
+    name: NSH app (check and tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NSH_VERSION: v0.7.2
+      NSH_SHA256: cb087e1e6afeb4ce4c2e70d8f803ccffe376b0a73d48605e492ec50fbbd45bec
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            ext/omamail-native
+            .nsh/rust
+      # The drift checks are TypeScript run by Node directly (23.6+).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install nsh ${{ env.NSH_VERSION }}
+        run: |
+          work=$(mktemp -d)
+          curl -fsSL -o "$work/nsh.tar.gz" \
+            "https://github.com/longbridge/nsh/releases/download/$NSH_VERSION/nsh-linux-x86_64.tar.gz"
+          echo "$NSH_SHA256  $work/nsh.tar.gz" | sha256sum -c -
+          tar -xzf "$work/nsh.tar.gz" -C "$HOME"
+          echo "$HOME/nsh/bin" >> "$GITHUB_PATH"
+      - run: nsh --version
+      - run: nsh check
+      - run: node scripts/check-keys.ts
+      - run: node scripts/check-native-members.ts
+      - run: nsh test
+
   # iOS and Android apps run the backend in-process (no `omamail serve`
   # child). Keep the library building there so desktop-only code paths stay
   # behind explicit platform branches.
@@ -106,7 +143,7 @@ jobs:
           done
 
   # The mail library's own unit tests, including the parity checks that run
-  # the Omarchy plugin's JavaScript under Node.
+  # the Qt client's JavaScript (vendored in core/tests/oracles) under Node.
   core-tests:
     name: Mail core (Linux)
     runs-on: ubuntu-24.04
@@ -124,3 +161,16 @@ jobs:
         with:
           node-version: "22"
       - run: cargo test --locked --lib
+      # The integration tests (tests/*.rs, cli included), as main ran them:
+      # integration-test-credentials keeps them off the runner's keyring.
+      - run: cargo test --locked --no-default-features --features standalone,integration-test-credentials --tests
+
+  # What existing Omarchy installs read from this checkout after the NSH
+  # cutover: the root manifest (the notice bar widget) and its one helper.
+  omarchy-plugin-entry:
+    name: Omarchy plugin entry
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -C omarchy test lint

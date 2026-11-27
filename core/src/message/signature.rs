@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn image_and_inline_match_live_js() {
         let cases = json!([{"data":"iVBORw0KGgoAAA==","html":"<p><img src=\"data:image/png;base64,iVBORw0KGgoAAA==\"></p>"},{"data":"PHN2Zz4=","html":"<b>سلام</b>"},{"data":"R0lGOA==","html":"<img src=\"data:image/gif;base64,R0lGOA==\">"}]);
-        let script = r#"const {load}=require('../omarchy/ui/tests/load');const s=load('message/Signature.js');let text='';process.stdin.on('data',b=>text+=b);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(text).map(c=>[s.importImage(c.data),s.inlineParts(c.html,'sig')]))));"#;
+        let script = r#"const {load}=require('./tests/oracles/ui/tests/load');const s=load('message/Signature.js');let text='';process.stdin.on('data',b=>text+=b);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(text).map(c=>[s.importImage(c.data),s.inlineParts(c.html,'sig')]))));"#;
         use std::io::Write;
         let mut child = std::process::Command::new("node")
             .args(["-e", script])
@@ -291,7 +291,7 @@ mod tests {
             "<p><img src=\"https://example.com/a.png\"></p>",
             "<p onclick=\"evil()\">Hello</p>"
         ]);
-        let script = r#"const {load}=require('../omarchy/ui/tests/load');const s=load('message/Signature.js');let text='';process.stdin.on('data',b=>text+=b);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(text).map(c=>s.importHtml(c)))));"#;
+        let script = r#"const {load}=require('./tests/oracles/ui/tests/load');const s=load('message/Signature.js');let text='';process.stdin.on('data',b=>text+=b);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(text).map(c=>s.importHtml(c)))));"#;
         use std::io::Write;
         let mut child = std::process::Command::new("node")
             .args(["-e", script])
@@ -318,7 +318,7 @@ mod tests {
     }
     #[test]
     fn existing_signature_suite_is_a_live_golden_oracle() {
-        let script = r#"const loader=require('../omarchy/ui/tests/load');const load=loader.load;const rows=[];loader.load=function(p){const m=load(p);if(p==='message/Signature.js')for(const name of ['rasterKind','importImage','importHtml','inlineParts','importNote']){const f=m[name];m[name]=function(...args){const result=f(...args);rows.push({name,args,result});return result;};}return m;};console.log=()=>{};require('../omarchy/ui/tests/test_signature');process.stdout.write(JSON.stringify(rows));"#;
+        let script = r#"const loader=require('./tests/oracles/ui/tests/load');const load=loader.load;const rows=[];loader.load=function(p){const m=load(p);if(p==='message/Signature.js')for(const name of ['rasterKind','importImage','importHtml','inlineParts','importNote']){const f=m[name];m[name]=function(...args){const result=f(...args);rows.push({name,args,result});return result;};}return m;};console.log=()=>{};require('./tests/oracles/ui/tests/test_signature');process.stdout.write(JSON.stringify(rows));"#;
         let output = std::process::Command::new("node")
             .args(["-e", script])
             .output()

@@ -406,7 +406,7 @@ mod forget_tests {
             assert!(forget_in(&staging, path.to_str().unwrap()).is_err())
         }
         let rejected = std::process::Command::new("sh")
-            .args(["../omarchy/scripts/attachment.sh", "forget"])
+            .args(["tests/fixtures/attachment.sh", "forget"])
             .arg(&staging)
             .arg(staging.join("../victim"))
             .output()

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "omamail",
+  "name": "Omamail",
+  "version": "0.13.0",
+  "author": "huacnlee",
+  "license": "MIT",
+  "homepage": "https://huacnlee.github.io/omamail/",
+  "description": "Omamail is now a standalone mail and calendar app. This bar entry opens it, or offers to install it when it is missing.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "omarchy/notice/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omamail",
+    "description": "Opens the standalone Omamail app, or offers to install it.",
+    "category": "Communication",
+    "aliases": [
+      "mail",
+      "email",
+      "inbox"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}

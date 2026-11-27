@@ -137,3 +137,94 @@ fn markup_in_the_plain_alternative_is_read_from_the_html_part() {
     assert_eq!(body["source"], "plain");
     assert_eq!(body["text"], only);
 }
+
+// Outgoing mail in Chinese, built and read back: an encoded subject and display
+// names (RFC 2047), UTF-8 text and HTML parts, and a Chinese attachment name.
+// The attachment name goes out as an RFC 2047 word in the parameter, as the
+// Qt backend's builder writes it, and is checked here as readers decode it.
+#[test]
+fn chinese_outgoing_mail_reads_back_as_written() {
+    use base64::engine::general_purpose::STANDARD;
+    let body = "你好，世界\n第二行：Hello 世界 😀";
+    let fields = serde_json::json!({
+        "from": "jane@example.com",
+        "fromName": "简 · 张三",
+        "to": "王小明 <wang@example.cn>, \"李雷，测试\" <lilei@example.cn>",
+        "subject": "季度回顾：预算与人员安排 😀",
+        "body": body,
+        "signatureHtml": "<b>签名</b>",
+        "boundary": "b",
+        "date": "Sat, 12 Sep 2026 10:00:00 +0000",
+        "messageId": "<cjk@example.com>",
+        "attachments": [{
+            "filename": "季度报告（终稿）.pdf",
+            "mimeType": "application/pdf",
+            "data": STANDARD.encode(b"%PDF synthetic"),
+        }],
+    });
+    let built = super::compose::build(&fields).unwrap();
+    let raw = URL_SAFE_NO_PAD
+        .decode(built["raw"].as_str().unwrap())
+        .unwrap();
+    // Headers are 7-bit on the wire.
+    let head = &raw[..raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap()];
+    assert!(head.is_ascii(), "{}", String::from_utf8_lossy(head));
+
+    let mail = mailparse::parse_mail(&raw).unwrap();
+    let get = |name: &str| mail.headers.iter().find(|h| h.get_key() == name).unwrap();
+    assert_eq!(get("Subject").get_value(), "季度回顾：预算与人员安排 😀");
+    let people = |name: &str| -> Vec<(String, String)> {
+        mailparse::addrparse_header(get(name))
+            .unwrap()
+            .iter()
+            .map(|a| match a {
+                mailparse::MailAddr::Single(s) => {
+                    (s.display_name.clone().unwrap_or_default(), s.addr.clone())
+                }
+                mailparse::MailAddr::Group(_) => panic!("group in {name}"),
+            })
+            .collect()
+    };
+    assert_eq!(
+        people("From"),
+        [("简 · 张三".to_owned(), "jane@example.com".to_owned())]
+    );
+    assert_eq!(
+        people("To"),
+        [
+            ("王小明".to_owned(), "wang@example.cn".to_owned()),
+            ("李雷，测试".to_owned(), "lilei@example.cn".to_owned()),
+        ]
+    );
+
+    // multipart/mixed: [alternative(text, html), attachment]
+    assert_eq!(mail.subparts.len(), 2);
+    let alt = &mail.subparts[0];
+    assert_eq!(alt.subparts.len(), 2);
+    assert_eq!(alt.subparts[0].ctype.mimetype, "text/plain");
+    assert_eq!(alt.subparts[0].ctype.charset.to_ascii_lowercase(), "utf-8");
+    assert_eq!(alt.subparts[0].get_body().unwrap(), body);
+    assert_eq!(alt.subparts[1].ctype.mimetype, "text/html");
+    let html = alt.subparts[1].get_body().unwrap();
+    assert!(html.contains("你好，世界"), "{html}");
+    assert!(html.contains("Hello 世界 😀"), "{html}");
+    assert!(html.contains("<b>签名</b>"), "{html}");
+
+    let file = &mail.subparts[1];
+    assert_eq!(file.get_body_raw().unwrap(), b"%PDF synthetic");
+    // The app's reader (parse, then prepare) names it as written.
+    let message = serde_json::json!({"id": "m", "payload": super::parse(&raw).unwrap()});
+    let shown = super::content::prepare(&message, 0).unwrap();
+    assert_eq!(shown["attachments"][0]["filename"], "季度报告（终稿）.pdf");
+    assert_eq!(shown["body"]["text"], body);
+}
+
+// A Chinese attachment name sent the RFC 2231 way (`filename*=`) by another
+// client reads back too.
+#[test]
+fn rfc2231_chinese_attachment_name_is_read() {
+    let raw = "Content-Type: multipart/mixed; boundary=x\r\n\r\n--x\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhi\r\n--x\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename*=UTF-8''%E5%AD%A3%E5%BA%A6%E6%8A%A5%E5%91%8A.pdf\r\nContent-Transfer-Encoding: base64\r\n\r\nAA==\r\n--x--\r\n";
+    let message = serde_json::json!({"id": "m", "payload": super::parse(raw.as_bytes()).unwrap()});
+    let shown = super::content::prepare(&message, 0).unwrap();
+    assert_eq!(shown["attachments"][0]["filename"], "季度报告.pdf");
+}

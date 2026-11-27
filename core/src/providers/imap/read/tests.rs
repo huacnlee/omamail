@@ -457,3 +457,15 @@ fn a_full_read_carries_a_message_larger_than_the_generic_parse_limit() {
     assert_eq!(parsed.len(), 1);
     assert_eq!(parsed[0]["id"], "7:INBOX");
 }
+#[test]
+fn list_decodes_modified_utf7_surrogate_pairs() {
+    let boxes = parse_folders(b"* LIST () \"/\" \"&XeVPXA-/&W6JiNw- &2D3eAA-\"\r\n").unwrap();
+    let value = folders_value(&boxes);
+    let label = value["labels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == "&XeVPXA-/&W6JiNw- &2D3eAA-")
+        .expect("the folder is listed");
+    assert_eq!(label["name"], "工作/客户 😀");
+}
