@@ -95,7 +95,7 @@ if [ "$uninstall" -eq 1 ]; then
     rm -f "$bin_link" "$desktop_file"
     remove_legacy
     rmdir "$(dirname -- "$install_dir")" 2>/dev/null || true
-    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "$desktop_dir" || true
+    if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q "$desktop_dir" || true; fi
   fi
   printf 'Omamail removed; accounts and settings were preserved.\n'
   exit 0
@@ -548,7 +548,7 @@ fi
 
 if [ "$os" = Linux ]; then
   remove_legacy
-  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "$desktop_dir" || true
+  if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q "$desktop_dir" || true; fi
 fi
 printf 'Omamail %s installed at %s\n' "$release_version" "$install_dir"
 printf 'Omamail checks for new versions itself and asks before updating.\n'
