@@ -212,3 +212,27 @@ test("a header button pressed while searching takes the press and releases the f
   await app.waitFor("text:Keyboard shortcuts");
   expect(app.value("id:header-search")).toBe("x");
 });
+
+test("on macOS the close button and Escape on the root hide the window, and the Dock brings it back", async () => {
+  const app = await open("../../App.tsx", { modules: backend(JANE), width: 1280, height: 820, platform: "macos" });
+  await app.waitFor("text:jane@example.com");
+  const main = app.window("main");
+  await main.pressClose();
+  // Hidden, not closed: the window is still open, and the app still runs.
+  expect(main.state()?.visible).toBe(false);
+  await app.reopen();
+  await app.waitUntil(() => main.state()?.visible === true);
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => main.state()?.visible === false);
+  expect(main.state()).not.toBe(null);
+  await app.reopen();
+  await app.waitUntil(() => main.state()?.visible === true);
+});
+
+test("elsewhere the close button closes the window", async () => {
+  const app = await open("../../App.tsx", { modules: backend(JANE), width: 1280, height: 820, platform: "linux" });
+  await app.waitFor("text:jane@example.com");
+  const main = app.window("main");
+  await main.pressClose();
+  expect(main.state()).toBe(null);
+});

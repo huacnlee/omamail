@@ -6,6 +6,13 @@
 // call is the whole of it. Features that open a message from a notification
 // call this after opening it.
 import { windows } from "nsh/desktop";
+import { isApple } from "../ui";
+
+/** Closing the mail window hides it rather than ending the app: macOS, where
+ * an app stays in the Dock with no window and the Dock icon shows it again. */
+export function hidesOnClose(): boolean {
+  return isApple();
+}
 
 export function bringToFront(id = "main"): boolean {
   try {
