@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtTest 1.3
+import Quickshell.Hyprland as IPC
 import "../.." as Omamail
 
 // Where the window is, is a history. Every page is an entry on it, every Back
@@ -54,6 +55,7 @@ Item {
     property bool sendPending: false
     property bool sending: false
     property bool windowOpen: false
+    property var backendRuntime: null
     property bool hasMailto: false
     property string defaultMailClient: "not-default"
     property var settings: ({})
@@ -260,6 +262,8 @@ Item {
       verify(barControl.visible)
       verify(!shortcutControl.visible)
       compare(barControl.parent, shortcutControl.parent)
+      compare(barControl.options.map(function(option) { return option.value }), ["Window", "Drop-down"])
+      compare(shortcutControl.options.map(function(option) { return option.value }), ["Window", "Drop-down"])
 
       mailService.hasMailto = true
       mailService.settings = ({ openOnShortcut: "Drop-down" })
@@ -286,6 +290,73 @@ Item {
       mailService.defaultMailClient = "not-default"
       verify(!shortcutControl.enabled)
       compare(shortcutControl.value, "Window")
+    }
+
+    function test_existing_drop_down_preference_uses_workspace_without_launching_a_browser() {
+      var loader = findChild(app, "mail-workspace-controller")
+      loader.active = true
+      try {
+        app.close()
+        mailService.defaultMailClient = "default"
+        mailService.settings = ({ openOnShortcut: "Drop-down" })
+        app.open(JSON.stringify({ openSource: "shortcut" }))
+        compare(app.inMailWorkspace, true)
+        compare(loader.item.currentAction, "show")
+        compare(loader.item.pending.length, 0)
+      } finally {
+        app.close()
+        loader.active = false
+      }
+    }
+
+    function test_workspace_tracks_compositor_visibility_and_dismisses_when_backend_is_unavailable() {
+      var loader = findChild(app, "mail-workspace-controller")
+      loader.active = true
+      try {
+        app.close()
+        mailService.settings = ({ openOnClick: "Drop-down" })
+        app.open(JSON.stringify({ openSource: "bar" }))
+        var command = findChild(loader.item, "mail-workspace-command")
+        command.stdout.text = "shown"
+        command.running = false
+        command.exited(0)
+        verify(mailService.windowOpen)
+
+        IPC.Hyprland.rawEvent({ name: "activespecial" })
+        compare(loader.item.currentAction, "status")
+        command.stdout.text = "hidden"
+        command.running = false
+        command.exited(0)
+        verify(!mailService.windowOpen)
+        verify(app.opened)
+
+        mailService.backendRuntime = ({ state: "error" })
+        var escape = findChild(app, "mail-workspace-backend-escape")
+        verify(escape.enabled)
+        escape.activated()
+        compare(loader.item.currentAction, "hide")
+      } finally {
+        mailService.backendRuntime = null
+        app.close()
+        loader.active = false
+      }
+    }
+
+    function test_workspace_link_goes_through_stdin_instead_of_helper_arguments() {
+      var loader = findChild(app, "mail-workspace-controller")
+      loader.active = true
+      try {
+        var command = findChild(loader.item, "mail-workspace-command")
+        var url = "https://example.org/reset?token=synthetic-token"
+        loader.item.enqueue("link", url)
+        compare(command.command.length, 3)
+        compare(command.command[2], "link")
+        verify(command.stdinEnabled)
+        command.started()
+        compare(JSON.parse(command.written), url)
+      } finally {
+        loader.active = false
+      }
     }
 
     function test_shortcut_opens_a_window_if_omamail_is_not_default() {

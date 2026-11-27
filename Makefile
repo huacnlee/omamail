@@ -40,7 +40,7 @@ QML_FILES := ui/Service.qml ui/BarWidget.qml ui/App.qml ui/hyprland/DropDownWind
 	ui/components/MenuActionRow.qml ui/components/MenuSeparatorLine.qml \
 	ui/components/KeyRouter.qml \
 	ui/components/WheelScroller.qml \
-	ui/hyprland/WindowFocus.qml \
+	ui/hyprland/WindowFocus.qml ui/hyprland/MailWorkspace.qml \
 	ui/components/ActionIcon.qml \
 	ui/components/AppTitle.qml \
 	ui/components/IconButton.qml \
@@ -212,6 +212,7 @@ test-shell-portable:
 	python3 tests/test_qml_names.py
 	python3 tests/test_qml_text_format.py
 	python3 tests/test_clipboard.py
+	python3 tests/test_mail_workspace.py
 	bash tests/test_source.sh
 	bash tests/test_source_hash_tools.sh
 	bash tests/test_service_source.sh

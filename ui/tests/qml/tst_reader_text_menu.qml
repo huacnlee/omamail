@@ -168,6 +168,22 @@ Item {
       compare(mailService.copied, ["https://example.com/board"])
     }
 
+    function test_workspace_gets_only_validated_http_links() {
+      var opened = []
+      reader.openHttpLink = function(url) { opened.push(url) }
+      var edit = body()
+      var point = pointOf(edit, "Open the board")
+      mouseClick(edit, point.x, point.y, Qt.RightButton)
+      wait(20)
+      menu().openLinkRow.activated()
+      reader.openLink("file:///etc/passwd")
+      reader.openLink("https://127.0.0.1/private")
+      reader.openLink("mailto:help@example.com")
+      reader.openHttpLink = null
+      compare(opened, ["https://example.com/board"])
+      compare(mailService.opened, [])
+    }
+
     function test_open_link_opens_it_outside() {
       var edit = body()
       var point = pointOf(edit, "Open the board")

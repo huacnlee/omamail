@@ -36,6 +36,8 @@ Item {
   property bool closingFromHost: false
   property bool dropDown: false
   property bool dropDownClosing: false
+  property bool inMailWorkspace: false
+  property bool mailWorkspaceFailed: false
   readonly property bool dropDownAvailable: dropDown && dropDownLoader.status !== Loader.Error
 
   property string draftSavedToast: ""
@@ -491,23 +493,29 @@ Item {
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(String(payloadJson || "{}")) || ({}) } catch (e) {}
-    var source = payload.openSource
-    var barClick = source === "bar"
-    var shortcut = source === "shortcut"
-    if (!standaloneWindowChrome && (barClick || shortcut)) {
-      var settings = service ? service.settings : null
-      var nextDropDown = !!settings && (barClick || service.defaultMailClient === "default")
-        && settings[barClick ? "openOnClick" : "openOnShortcut"] === "Drop-down"
-      if (opened && !dropDownClosing && nextDropDown === dropDown && (barClick || nextDropDown)) {
-        requestClose()
-        return
-      }
-      dropDown = nextDropDown
-    } else dropDown = false
+    var barClick = !standaloneWindowChrome && payload.openSource === "bar"
+    var shortcut = !standaloneWindowChrome && payload.openSource === "shortcut"
+    var settings = service ? service.settings : null
+    var nextDropDown = !!settings && (barClick || (shortcut && service.defaultMailClient === "default"))
+      && settings[barClick ? "openOnClick" : "openOnShortcut"] === "Drop-down"
+    var nextWorkspace = nextDropDown && !mailWorkspaceFailed && workspaceController.item !== null
+    if (inMailWorkspace && nextWorkspace) {
+      workspaceController.item.enqueue("toggle")
+      return
+    }
+    if (opened && !inMailWorkspace && !nextWorkspace && !dropDownClosing
+        && nextDropDown === dropDown && (barClick || nextDropDown)) {
+      requestClose()
+      return
+    }
+    if (inMailWorkspace) workspaceController.item.enqueue("hide")
+    inMailWorkspace = nextWorkspace
+    dropDown = nextDropDown && !nextWorkspace
     dropDownClosing = false
     closingFromHost = false
     opened = true
-    if (service) service.windowOpen = true
+    if (service) service.windowOpen = !inMailWorkspace
+    if (inMailWorkspace) workspaceController.item.enqueue("show")
     if (payload.mailbox && service) service.selectMailbox(String(payload.mailbox))
     // A notification can outlive the account it names; Service.switchTo
     // refuses one that is gone, and then there is no message to open either.
@@ -547,6 +555,8 @@ Item {
 
   function close() {
     closingFromHost = true
+    if (inMailWorkspace) workspaceController.item.hideOnUnload()
+    inMailWorkspace = false
     composeExitDialog.close()
     // Escape at the list root closes the window without clearing what the
     // cursor had previewed, so it reopened showing a stale message beside the
@@ -562,6 +572,10 @@ Item {
 
   function requestClose() {
     if (dropDownClosing) return
+    if (inMailWorkspace) {
+      workspaceController.item.enqueue("hide")
+      return
+    }
     if (opened && dropDownAvailable && dropDownLoader.item
         && dropDownLoader.item.beginClose()) return
     finishClose()
@@ -1414,7 +1428,7 @@ Item {
   // developer's real windows. See hyprland/WindowFocus.qml.
   Loader {
     id: windowFocus
-    active: !root.standaloneWindowChrome && !root.dropDownAvailable
+    active: !root.standaloneWindowChrome && !root.dropDownAvailable && !root.inMailWorkspace
       && !!Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
     source: "hyprland/WindowFocus.qml"
     onLoaded: item.windowTitle = Qt.binding(function() { return window.title })
@@ -1428,16 +1442,66 @@ Item {
     implicitHeight: Style.space(720)
     minimumSize: Qt.size(Style.space(760), Style.space(520))
 
-    visible: root.opened && !root.dropDownAvailable
+    visible: root.opened && !root.dropDownAvailable && !root.inMailWorkspace
 
     onVisibleChanged: {
-      if (!visible && root.opened && !root.dropDownAvailable && !root.closingFromHost)
+      if (!visible && root.opened && !root.dropDownAvailable && !root.inMailWorkspace && !root.closingFromHost)
         root.requestClose()
     }
 
     Item {
       id: floatingContent
       anchors.fill: parent
+    }
+  }
+
+  FloatingWindow {
+    id: workspaceWindow
+    title: "Omamail — Drop-down"
+    color: root.background
+    implicitWidth: Style.space(980)
+    implicitHeight: Style.space(720)
+    visible: root.opened && root.inMailWorkspace
+
+    onVisibleChanged: {
+      if (!visible && root.opened && root.inMailWorkspace && !root.closingFromHost)
+        root.finishClose()
+    }
+
+    Item {
+      id: workspaceContent
+      anchors.fill: parent
+
+      Shortcut {
+        objectName: "mail-workspace-backend-escape"
+        sequence: "Escape"
+        enabled: root.inMailWorkspace && root.backendUnavailable
+        onActivated: root.requestClose()
+      }
+    }
+  }
+
+  Loader {
+    id: workspaceController
+    objectName: "mail-workspace-controller"
+    active: !root.standaloneWindowChrome && !!Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
+    source: "hyprland/MailWorkspace.qml"
+    onLoaded: item.watchVisibility = Qt.binding(function() { return root.inMailWorkspace })
+  }
+
+  Connections {
+    target: workspaceController.item
+    function onVisibilityReported(visible) {
+      if (root.inMailWorkspace && root.service) root.service.windowOpen = visible
+    }
+    function onShowFailed() {
+      if (!root.inMailWorkspace) return
+      root.mailWorkspaceFailed = true
+      workspaceController.item.enqueue("hide")
+      root.dropDown = true
+      root.inMailWorkspace = false
+      if (root.service) root.service.windowOpen = true
+      Qt.callLater(root.focusMail)
     }
   }
 
@@ -1453,7 +1517,7 @@ Item {
   Rectangle {
     id: mailSurface
     parent: root.dropDownAvailable && dropDownLoader.item
-      ? dropDownLoader.item.mount : floatingContent
+      ? dropDownLoader.item.mount : (root.inMailWorkspace ? workspaceContent : floatingContent)
     anchors.fill: parent
     enabled: !root.dropDownClosing
     color: root.background
@@ -2016,6 +2080,9 @@ Item {
           visible: !root.showPage && !root.composing && !root.calendarVisible
             && (!root.compact || root.currentView === "reader")
           service: root.service
+          openHttpLink: root.inMailWorkspace ? function(url) {
+            workspaceController.item.enqueue("link", url)
+          } : null
           textColor: root.foreground
           backgroundColor: root.background
           accentColor: root.accent

@@ -44,6 +44,7 @@ Item {
   // Set by the reader itself when a document is too heavy to lay out, and
   // cleared by the user asking for it anyway.
   property bool forceRichAnyway: false
+  property var openHttpLink: null
 
   signal backRequested()
   signal memberRequested(string id)
@@ -100,7 +101,8 @@ Item {
     }
     var opened = Html.externallyOpenableHttpUrl(url)
     if (opened === "") return
-    if (root.service && typeof root.service.openExternal === "function")
+    if (root.openHttpLink) root.openHttpLink(opened)
+    else if (root.service && typeof root.service.openExternal === "function")
       root.service.openExternal(opened)
   }
 
