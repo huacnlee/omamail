@@ -74,7 +74,7 @@ printf 'untouched' > "$victim"
 ln -sf "$victim" "$file"
 printf '{"new":1}' | run export-settings
 [ "$(cat "$victim")" = untouched ] || fail "the export must not write through a planted link"
-[ -f "$file" ] && [ ! -L "$file" ] || fail "the export must be a regular file after replacing a link"
+if [ ! -f "$file" ] || [ -L "$file" ]; then fail "the export must be a regular file after replacing a link"; fi
 [ "$(cat "$file")" = '{"new":1}' ] || fail "the export must hold the new settings"
 
 # A planted link in place of the directory is refused.

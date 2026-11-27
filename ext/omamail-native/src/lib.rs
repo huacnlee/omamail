@@ -76,7 +76,7 @@ impl Backend {
     /// `~/.config/omarchy/shell.toml`): `{ family?, baseSize? }`, each present
     /// only when usable, so `{}` off Omarchy. The UI scales its type from it.
     pub fn omarchy_font() -> JsonValue {
-        omamail::platform::omarchy_font::read().into()
+        omamail::platform::omarchy_font::read()
     }
 
     /// The `mailto:` link this process was launched with (the desktop
@@ -91,7 +91,10 @@ impl Backend {
     /// directory (`$XDG_CONFIG_HOME` when absolute, else `$HOME/.config`) is
     /// a directory. Reads no file; the Theme setting's default follows it.
     pub fn is_omarchy() -> bool {
-        is_omarchy(std::env::var_os("XDG_CONFIG_HOME"), std::env::var_os("HOME"))
+        is_omarchy(
+            std::env::var_os("XDG_CONFIG_HOME"),
+            std::env::var_os("HOME"),
+        )
     }
 
     /// The operating system the backend runs on: `macos`, `linux`,
@@ -111,7 +114,11 @@ fn is_omarchy(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>)
     let config = xdg
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .or_else(|| home.map(PathBuf::from).filter(|p| p.is_absolute()).map(|h| h.join(".config")));
+        .or_else(|| {
+            home.map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .map(|h| h.join(".config"))
+        });
     config.is_some_and(|c| std::fs::metadata(c.join("omarchy")).is_ok_and(|m| m.is_dir()))
 }
 
@@ -127,7 +134,8 @@ mod tests {
     use super::{is_omarchy, launch_mailto};
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("omamail-is-omarchy-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("omamail-is-omarchy-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -149,36 +157,59 @@ mod tests {
     fn a_relative_xdg_is_ignored_for_home() {
         let home = scratch("home");
         std::fs::create_dir_all(home.join(".config/omarchy")).unwrap();
-        assert!(is_omarchy(Some("relative/config".into()), Some(home.clone().into())));
-        assert!(!is_omarchy(Some("relative/config".into()), Some("relative/home".into())));
+        assert!(is_omarchy(
+            Some("relative/config".into()),
+            Some(home.clone().into())
+        ));
+        assert!(!is_omarchy(
+            Some("relative/config".into()),
+            Some("relative/home".into())
+        ));
         assert!(!is_omarchy(None, None));
         let _ = std::fs::remove_dir_all(&home);
     }
 
     fn args(list: &[&str]) -> impl Iterator<Item = std::ffi::OsString> {
-        list.iter().map(|a| a.into()).collect::<Vec<std::ffi::OsString>>().into_iter()
+        list.iter()
+            .map(|a| a.into())
+            .collect::<Vec<std::ffi::OsString>>()
+            .into_iter()
     }
 
     #[test]
     fn picks_the_first_mailto_link_only() {
         assert_eq!(
-            launch_mailto(args(&["--flag", "MAILTO:a@example.com", "mailto:b@example.com"])),
+            launch_mailto(args(&[
+                "--flag",
+                "MAILTO:a@example.com",
+                "mailto:b@example.com"
+            ])),
             Some("MAILTO:a@example.com".into())
         );
-        assert_eq!(launch_mailto(args(&["https://example.com", "agent-worker"])), None);
+        assert_eq!(
+            launch_mailto(args(&["https://example.com", "agent-worker"])),
+            None
+        );
     }
 
     #[test]
     fn refuses_long_or_control_bearing_links() {
         let long = format!("mailto:{}", "a".repeat(40 * 1024));
         assert_eq!(launch_mailto(args(&[&long])), None);
-        assert_eq!(launch_mailto(args(&["mailto:a@example.com\r\nBcc:x"])), None);
+        assert_eq!(
+            launch_mailto(args(&["mailto:a@example.com\r\nBcc:x"])),
+            None
+        );
     }
 }
 
 fn open_download(path: &str) -> Result<(), &'static str> {
     let dirs = omamail::platform::dirs::AppDirs::discover()?;
-    let roots = Roots { downloads: dirs.downloads, runtime: dirs.runtime, pid: std::process::id() };
+    let roots = Roots {
+        downloads: dirs.downloads,
+        runtime: dirs.runtime,
+        pid: std::process::id(),
+    };
     open_saved(path, &roots, &mut |file| {
         let opener = if cfg!(target_os = "macos") {
             "open"
@@ -210,8 +241,28 @@ struct Roots {
 /// Types the desktop would run rather than show, beyond core's `openable`
 /// list: macOS's Terminal scripts, bundles and installers, and launchers.
 const ACTIVE_SUFFIXES: &[&str] = &[
-    "command", "tool", "terminal", "app", "pkg", "mpkg", "workflow", "scpt", "applescript", "jar",
-    "appimage", "run", "webloc", "inetloc", "fileloc", "py", "pl", "rb", "php", "csh", "ksh", "fish",
+    "command",
+    "tool",
+    "terminal",
+    "app",
+    "pkg",
+    "mpkg",
+    "workflow",
+    "scpt",
+    "applescript",
+    "jar",
+    "appimage",
+    "run",
+    "webloc",
+    "inetloc",
+    "fileloc",
+    "py",
+    "pl",
+    "rb",
+    "php",
+    "csh",
+    "ksh",
+    "fish",
 ];
 
 /// Opens `path` with `open` when it is a regular file the backend saved:
@@ -229,17 +280,25 @@ fn open_saved(
     if !std::fs::symlink_metadata(&file).is_ok_and(|m| m.is_file()) {
         return Err("path_refused");
     }
-    let in_downloads = std::fs::canonicalize(&roots.downloads).is_ok_and(|root| file.starts_with(&root) && file != root);
+    let in_downloads = std::fs::canonicalize(&roots.downloads)
+        .is_ok_and(|root| file.starts_with(&root) && file != root);
     if !in_downloads && !in_attachment_folder(&file, &roots.runtime, roots.pid) {
         return Err("path_refused");
     }
-    let name = file.file_name().and_then(|n| n.to_str()).ok_or("open_refused")?;
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("open_refused")?;
     let mut head = Vec::new();
     std::fs::File::open(&file)
         .and_then(|f| f.take(65536).read_to_end(&mut head))
         .map_err(|_| "file_missing")?;
     let lower = name.to_ascii_lowercase();
-    let active = ACTIVE_SUFFIXES.iter().any(|s| lower.trim_end_matches(['.', ' ']).ends_with(&format!(".{s}")));
+    let active = ACTIVE_SUFFIXES.iter().any(|s| {
+        lower
+            .trim_end_matches(['.', ' '])
+            .ends_with(&format!(".{s}"))
+    });
     if active || !omamail::attachment::openable(name, &head) {
         return Err("open_refused");
     }
@@ -252,8 +311,12 @@ fn open_saved(
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn in_attachment_folder(file: &std::path::Path, runtime: &std::path::Path, pid: u32) -> bool {
     use std::os::unix::fs::MetadataExt;
-    let Ok(runtime) = std::fs::canonicalize(runtime) else { return false };
-    let Some(folder) = file.parent() else { return false };
+    let Ok(runtime) = std::fs::canonicalize(runtime) else {
+        return false;
+    };
+    let Some(folder) = file.parent() else {
+        return false;
+    };
     if folder.parent() != Some(runtime.as_path()) {
         return false;
     }
@@ -266,8 +329,9 @@ fn in_attachment_folder(file: &std::path::Path, runtime: &std::path::Path, pid: 
     // SAFETY: getuid has no preconditions.
     let uid = unsafe { libc::getuid() };
     named
-        && std::fs::symlink_metadata(folder)
-            .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink() && m.uid() == uid && m.mode() & 0o777 == 0o700)
+        && std::fs::symlink_metadata(folder).is_ok_and(|m| {
+            m.is_dir() && !m.file_type().is_symlink() && m.uid() == uid && m.mode() & 0o777 == 0o700
+        })
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -290,7 +354,11 @@ mod open_tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("downloads")).unwrap();
         fs::create_dir_all(dir.join("runtime")).unwrap();
-        let roots = Roots { downloads: dir.join("downloads"), runtime: dir.join("runtime"), pid: PID };
+        let roots = Roots {
+            downloads: dir.join("downloads"),
+            runtime: dir.join("runtime"),
+            pid: PID,
+        };
         (dir, roots)
     }
 
@@ -317,7 +385,8 @@ mod open_tests {
     #[test]
     fn an_attachment_stored_to_open_opens() {
         let (dir, roots) = roots("runtime");
-        let file = attachment_folder(&roots, &format!("omamail-attachment-{PID}-0")).join("invoice.pdf");
+        let file =
+            attachment_folder(&roots, &format!("omamail-attachment-{PID}-0")).join("invoice.pdf");
         fs::write(&file, PDF).unwrap();
         let (result, opened) = try_open(&file, &roots);
         assert_eq!(result, Ok(()));
@@ -352,7 +421,8 @@ mod open_tests {
             fs::set_permissions(&folder, fs::Permissions::from_mode(mode)).unwrap();
             refused.push(folder.join("a.pdf"));
         }
-        let nested = attachment_folder(&roots, &format!("omamail-attachment-{PID}-2")).join("deeper");
+        let nested =
+            attachment_folder(&roots, &format!("omamail-attachment-{PID}-2")).join("deeper");
         fs::create_dir(&nested).unwrap();
         refused.push(nested.join("a.pdf"));
         refused.push(roots.runtime.join("a.pdf"));
@@ -380,7 +450,11 @@ mod open_tests {
         let folder = attachment_folder(&roots, &format!("omamail-attachment-{PID}-6"));
         symlink(outside.join("a.pdf"), folder.join("b.pdf")).unwrap();
         symlink(outside.join("a.pdf"), roots.downloads.join("c.pdf")).unwrap();
-        for file in [linked.join("a.pdf"), folder.join("b.pdf"), roots.downloads.join("c.pdf")] {
+        for file in [
+            linked.join("a.pdf"),
+            folder.join("b.pdf"),
+            roots.downloads.join("c.pdf"),
+        ] {
             let (result, opened) = try_open(&file, &roots);
             assert_eq!(result, Err("path_refused"), "{file:?}");
             assert!(opened.is_empty());
@@ -429,17 +503,32 @@ mod open_tests {
     #[test]
     fn what_core_stores_to_open_is_what_opens() {
         let dirs = omamail::platform::dirs::AppDirs::discover().unwrap();
-        let stored = omamail::attachment::store(&serde_json::json!({"filename": "invoice.pdf", "open": true}), PDF).unwrap();
+        let stored = omamail::attachment::store(
+            &serde_json::json!({"filename": "invoice.pdf", "open": true}),
+            PDF,
+        )
+        .unwrap();
         let path = PathBuf::from(stored["path"].as_str().unwrap());
         let folder = path.parent().unwrap().to_owned();
-        let roots = Roots { downloads: dirs.downloads, runtime: dirs.runtime, pid: std::process::id() };
+        let roots = Roots {
+            downloads: dirs.downloads,
+            runtime: dirs.runtime,
+            pid: std::process::id(),
+        };
         let (result, opened) = try_open(&path, &roots);
         let _ = fs::remove_dir_all(&folder);
         assert_eq!(result, Ok(()), "{path:?}");
         assert_eq!(opened.len(), 1);
         // And as another process, the same folder is refused.
-        let other = Roots { pid: std::process::id() + 1, ..roots };
-        let again = omamail::attachment::store(&serde_json::json!({"filename": "invoice.pdf", "open": true}), PDF).unwrap();
+        let other = Roots {
+            pid: std::process::id() + 1,
+            ..roots
+        };
+        let again = omamail::attachment::store(
+            &serde_json::json!({"filename": "invoice.pdf", "open": true}),
+            PDF,
+        )
+        .unwrap();
         let again = PathBuf::from(again["path"].as_str().unwrap());
         let (result, opened) = try_open(&again, &other);
         let _ = fs::remove_dir_all(again.parent().unwrap());

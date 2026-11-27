@@ -66,9 +66,7 @@ fn without_block(text: &str) -> String {
             blanks += 1;
             continue;
         }
-        for _ in 0..blanks {
-            out.push("");
-        }
+        out.extend(std::iter::repeat_n("", blanks));
         blanks = 0;
         out.push(line);
     }
@@ -123,7 +121,8 @@ fn exec_argument(arg: &str) -> Option<String> {
         return None;
     }
     const RESERVED: &[char] = &[
-        ' ', '\t', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(', ')', '`', '=',
+        ' ', '\t', '"', '\'', '\\', '>', '<', '~', '|', '&', ';', '$', '*', '?', '#', '(', ')',
+        '`', '=',
     ];
     let mut quoted = String::new();
     if arg.contains(RESERVED) {
@@ -183,7 +182,9 @@ mod files {
     /// is larger than `BINDINGS_LIMIT` or not UTF-8 (then nothing is written).
     pub fn read(path: &Path) -> Result<String, &'static str> {
         match std::fs::read(path) {
-            Ok(bytes) if bytes.len() <= BINDINGS_LIMIT => String::from_utf8(bytes).map_err(|_| "bindings_unreadable"),
+            Ok(bytes) if bytes.len() <= BINDINGS_LIMIT => {
+                String::from_utf8(bytes).map_err(|_| "bindings_unreadable")
+            }
             Ok(_) => Err("bindings_too_large"),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
             Err(_) => Err("bindings_unreadable"),
@@ -233,7 +234,11 @@ mod files {
         if std::fs::symlink_metadata(&target).is_ok_and(|m| m.is_dir()) {
             return Err("mailto_entry_failed");
         }
-        let tmp = dir.join(format!(".{}.desktop.{}", super::MAILTO_ID, std::process::id()));
+        let tmp = dir.join(format!(
+            ".{}.desktop.{}",
+            super::MAILTO_ID,
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&tmp);
         let written = std::fs::OpenOptions::new()
             .write(true)
@@ -263,7 +268,11 @@ mod linux {
         let config = std::env::var_os("XDG_CONFIG_HOME")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").filter(|v| !v.is_empty()).map(|h| PathBuf::from(h).join(".config")))?;
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .filter(|v| !v.is_empty())
+                    .map(|h| PathBuf::from(h).join(".config"))
+            })?;
         Some(config.join("hypr").join("bindings.lua"))
     }
 
@@ -274,7 +283,10 @@ mod linux {
             .stderr(Stdio::null())
             .output()
             .ok()?;
-        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 
     fn applications_dir() -> Option<PathBuf> {
@@ -282,7 +294,9 @@ mod linux {
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
             .or_else(|| {
-                std::env::var_os("HOME").filter(|v| !v.is_empty()).map(|h| PathBuf::from(h).join(".local").join("share"))
+                std::env::var_os("HOME")
+                    .filter(|v| !v.is_empty())
+                    .map(|h| PathBuf::from(h).join(".local").join("share"))
             })?;
         Some(data.join("applications"))
     }
@@ -290,7 +304,8 @@ mod linux {
     /// Writes the mailto entry for this executable (see `files::write_entry`).
     fn write_mailto_entry() -> Result<PathBuf, &'static str> {
         let exe = std::env::current_exe().map_err(|_| "mailto_entry_failed")?;
-        let text = super::mailto_entry(exe.to_str().ok_or("mailto_entry_failed")?).ok_or("mailto_entry_failed")?;
+        let text = super::mailto_entry(exe.to_str().ok_or("mailto_entry_failed")?)
+            .ok_or("mailto_entry_failed")?;
         let dir = applications_dir().ok_or("mailto_entry_failed")?;
         super::files::write_entry(&dir, &text)?;
         Ok(dir)
@@ -303,10 +318,17 @@ mod linux {
     }
 
     pub fn status() -> &'static str {
-        let Some(path) = bindings_file() else { return "not-default" };
+        let Some(path) = bindings_file() else {
+            return "not-default";
+        };
         let block = read(&path).map(|t| super::has_block(&t)).unwrap_or(false);
-        let mailto = run("xdg-mime", &["query", "default", "x-scheme-handler/mailto"]).unwrap_or_default();
-        if block && mailto == format!("{}.desktop", super::MAILTO_ID) { "default" } else { "not-default" }
+        let mailto =
+            run("xdg-mime", &["query", "default", "x-scheme-handler/mailto"]).unwrap_or_default();
+        if block && mailto == format!("{}.desktop", super::MAILTO_ID) {
+            "default"
+        } else {
+            "not-default"
+        }
     }
 
     pub fn set(enabled: bool) -> Result<String, &'static str> {
@@ -319,8 +341,20 @@ mod linux {
             }
             let desktop = format!("{}.desktop", super::MAILTO_ID);
             super::turn_on(&text, &mut |next| write(&path, next), &mut || {
-                run("xdg-mime", &["default", desktop.as_str(), "x-scheme-handler/mailto"]).ok_or("mailto_default_failed")?;
-                let _ = run("xdg-settings", &["set", "default-url-scheme-handler", "mailto", desktop.as_str()]);
+                run(
+                    "xdg-mime",
+                    &["default", desktop.as_str(), "x-scheme-handler/mailto"],
+                )
+                .ok_or("mailto_default_failed")?;
+                let _ = run(
+                    "xdg-settings",
+                    &[
+                        "set",
+                        "default-url-scheme-handler",
+                        "mailto",
+                        desktop.as_str(),
+                    ],
+                );
                 Ok(())
             })?;
             reload_hyprland();
@@ -377,8 +411,14 @@ mod tests {
 
     #[test]
     fn exec_paths_are_quoted_as_the_desktop_spec_says() {
-        assert_eq!(exec_argument("/usr/bin/omamail").unwrap(), "/usr/bin/omamail");
-        assert_eq!(exec_argument("/opt/My Apps/omamail").unwrap(), "\"/opt/My Apps/omamail\"");
+        assert_eq!(
+            exec_argument("/usr/bin/omamail").unwrap(),
+            "/usr/bin/omamail"
+        );
+        assert_eq!(
+            exec_argument("/opt/My Apps/omamail").unwrap(),
+            "\"/opt/My Apps/omamail\""
+        );
         // A quote, a dollar and a backtick are escaped inside the quotes, and
         // the backslash doubled again for the string value.
         assert_eq!(exec_argument("/a\"b").unwrap(), "\"/a\\\\\"b\"");
@@ -429,7 +469,11 @@ mod tests {
         assert_eq!(block.lines().count(), 6);
         assert!(block.contains("gtk-launch dev.huacnlee.omamail\")"));
         assert!(block.contains("\"xdg-open mailto:\")"));
-        assert!(block.lines().all(|l| l.is_ascii() && !l.contains('$') && !l.contains('`')));
+        assert!(
+            block
+                .lines()
+                .all(|l| l.is_ascii() && !l.contains('$') && !l.contains('`'))
+        );
         // The text around it never leaks into it.
         let on = with_block("evil = \"$(rm -rf ~)\"\n");
         let managed: Vec<&str> = on.lines().skip_while(|l| *l != BLOCK_BEGIN).collect();
@@ -472,7 +516,10 @@ mod tests {
     fn untrusted_file_text_round_trips() {
         // Unicode, quotes, backslashes, tabs and long lines are the
         // user's and come back unchanged.
-        let original = "-- 中文 注释\nbind = \"a\\\\b\"\t# ok\nhl.bind(\"SUPER + Q\", \"x\")\n".to_owned() + &"y".repeat(10_000) + "\n";
+        let original = "-- 中文 注释\nbind = \"a\\\\b\"\t# ok\nhl.bind(\"SUPER + Q\", \"x\")\n"
+            .to_owned()
+            + &"y".repeat(10_000)
+            + "\n";
         let on = with_block(&original);
         assert!(on.starts_with(&original));
         assert_eq!(without_block(&on), original);
@@ -481,10 +528,14 @@ mod tests {
     #[test]
     fn a_failed_bindings_write_never_switches_the_default() {
         let mut defaults = 0;
-        let result = turn_on("bind = A\n", &mut |_| Err("bindings_unwritable"), &mut || {
-            defaults += 1;
-            Ok(())
-        });
+        let result = turn_on(
+            "bind = A\n",
+            &mut |_| Err("bindings_unwritable"),
+            &mut || {
+                defaults += 1;
+                Ok(())
+            },
+        );
         assert_eq!(result, Err("bindings_unwritable"));
         assert_eq!(defaults, 0, "xdg-mime ran after a failed bindings write");
     }
@@ -493,23 +544,33 @@ mod tests {
     fn a_failed_default_puts_the_bindings_back() {
         let mut file = "bind = A\n".to_owned();
         let mut writes = Vec::new();
-        let result = turn_on(&file.clone(), &mut |next| {
-            writes.push(next.to_owned());
-            file = next.to_owned();
-            Ok(())
-        }, &mut || Err("mailto_default_failed"));
+        let result = turn_on(
+            &file.clone(),
+            &mut |next| {
+                writes.push(next.to_owned());
+                file = next.to_owned();
+                Ok(())
+            },
+            &mut || Err("mailto_default_failed"),
+        );
         assert_eq!(result, Err("mailto_default_failed"));
         assert_eq!(file, "bind = A\n");
         assert_eq!(writes, [with_block("bind = A\n"), "bind = A\n".to_owned()]);
         // Success: one write, the block, then the default.
         let order = std::cell::RefCell::new(Vec::new());
-        let ok = turn_on("", &mut |next| {
-            order.borrow_mut().push(if has_block(next) { "block" } else { "other" });
-            Ok(())
-        }, &mut || {
-            order.borrow_mut().push("default");
-            Ok(())
-        });
+        let ok = turn_on(
+            "",
+            &mut |next| {
+                order
+                    .borrow_mut()
+                    .push(if has_block(next) { "block" } else { "other" });
+                Ok(())
+            },
+            &mut || {
+                order.borrow_mut().push("default");
+                Ok(())
+            },
+        );
         assert_eq!(ok, Ok(()));
         assert_eq!(order.into_inner(), ["block", "default"]);
     }
@@ -523,7 +584,8 @@ mod tests {
         use std::path::{Path, PathBuf};
 
         fn scratch(name: &str) -> PathBuf {
-            let dir = std::env::temp_dir().join(format!("omamail-mc-{name}-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("omamail-mc-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).unwrap();
             dir
@@ -534,8 +596,10 @@ mod tests {
         }
 
         fn names(dir: &Path) -> Vec<String> {
-            let mut names: Vec<String> =
-                fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+            let mut names: Vec<String> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().into_string().unwrap())
+                .collect();
             names.sort();
             names
         }
@@ -622,7 +686,12 @@ mod tests {
             symlink(&target, &path).unwrap();
             write(&path, &with_block("bind = A\n")).unwrap();
             assert_eq!(fs::read_to_string(&target).unwrap(), "bind = A\n");
-            assert!(!fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+            assert!(
+                !fs::symlink_metadata(&path)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
             fs::remove_dir_all(&dir).unwrap();
         }
 
@@ -642,8 +711,16 @@ mod tests {
             fs::remove_file(&entry).unwrap();
             symlink(&victim, &entry).unwrap();
             write_entry(&apps, &text).unwrap();
-            assert_eq!(fs::read_to_string(&victim).unwrap(), "[Desktop Entry]\nName=Other\n");
-            assert!(!fs::symlink_metadata(&entry).unwrap().file_type().is_symlink());
+            assert_eq!(
+                fs::read_to_string(&victim).unwrap(),
+                "[Desktop Entry]\nName=Other\n"
+            );
+            assert!(
+                !fs::symlink_metadata(&entry)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
             assert_eq!(fs::read_to_string(&entry).unwrap(), text);
             // A link planted at the temporary's name: it is removed, and
             // a fresh file is made (create_new, O_NOFOLLOW), so nothing
@@ -651,7 +728,10 @@ mod tests {
             let tmp = apps.join(format!(".{MAILTO_ID}.desktop.{}", std::process::id()));
             symlink(&victim, &tmp).unwrap();
             write_entry(&apps, &text).unwrap();
-            assert_eq!(fs::read_to_string(&victim).unwrap(), "[Desktop Entry]\nName=Other\n");
+            assert_eq!(
+                fs::read_to_string(&victim).unwrap(),
+                "[Desktop Entry]\nName=Other\n"
+            );
             assert_eq!(names(&apps), [format!("{MAILTO_ID}.desktop")]);
             fs::remove_dir_all(&dir).unwrap();
         }
@@ -669,7 +749,13 @@ mod tests {
         #[test]
         fn an_executable_path_no_entry_can_hold_writes_nothing() {
             // `mailto_entry` refuses before any file is opened.
-            for exe in ["/opt/a\nExec=/bin/sh", "/opt/a\rb", "/opt/a\u{0}b", "/opt/a\u{1b}b", ""] {
+            for exe in [
+                "/opt/a\nExec=/bin/sh",
+                "/opt/a\rb",
+                "/opt/a\u{0}b",
+                "/opt/a\u{1b}b",
+                "",
+            ] {
                 assert_eq!(mailto_entry(exe), None, "{exe:?}");
             }
         }
