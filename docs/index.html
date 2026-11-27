@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google-site-verification" content="JGwE15Dikx-5fcwxClYH9JwIY7nfYAicq3gDjvICTrk">
-<title>Omamail — mail as a native Omarchy window</title>
-<meta name="description" content="Omamail is an Omarchy desktop email client: a Quickshell plugin that reads, triages and answers Gmail, Outlook, HEY and any IMAP mailbox in a native window.">
+<title>Omamail — a native mail app, designed for Omarchy</title>
+<meta name="description" content="Omamail is a native mail and calendar app for macOS, Linux and Windows, designed for Omarchy: Gmail, Outlook, Microsoft 365, HEY, JMAP and IMAP in one keyboard-first window.">
 <link rel="icon" type="image/svg+xml" href="images/omamail.svg">
-<meta property="og:title" content="Omamail — mail as a native Omarchy window">
-<meta property="og:description" content="Read, triage and answer Gmail, Outlook, HEY and any IMAP mailbox inside the omarchy-shell process you already have.">
+<meta property="og:title" content="Omamail — a native mail app, designed for Omarchy">
+<meta property="og:description" content="Read, triage and answer Gmail, Outlook, Microsoft 365, HEY, JMAP and IMAP mail in one native window on macOS, Linux and Windows.">
 <meta property="og:image" content="https://huacnlee.github.io/omamail/images/og-preview.jpg">
 <meta property="og:url" content="https://huacnlee.github.io/omamail/">
 <meta name="twitter:card" content="summary_large_image">
@@ -294,43 +294,6 @@ code {
   font-size: 0.8125rem;
 }
 
-/* ---------- command block ---------- */
-
-.command {
-  margin: 28px 0 0;
-  display: flex;
-  align-items: stretch;
-  border: 1px solid var(--muted);
-  background: var(--lighter-background);
-  text-align: left;
-}
-.command pre {
-  margin: 0;
-  padding: 12px 14px;
-  overflow-x: auto;
-  flex: 1;
-  font-size: 0.875rem;
-  line-height: 1.6;
-}
-.command .prompt { color: var(--green); user-select: none; }
-.command .cmd { color: var(--bright); }
-.copy {
-  appearance: none;
-  border: 0;
-  border-left: 1px solid var(--muted);
-  background: transparent;
-  color: var(--dim);
-  font: inherit;
-  font-size: 0.8125rem;
-  padding: 0 14px;
-  min-width: 88px;
-  cursor: pointer;
-  transition: background 150ms var(--ease), color 150ms var(--ease);
-}
-.copy:hover { background: var(--selection); color: var(--bright); }
-.copy:active { transform: translateY(1px); }
-.copy[data-state="done"] { color: var(--green); }
-
 .actions {
   margin: 20px 0 0;
   display: flex;
@@ -440,7 +403,8 @@ figcaption {
   display: flex;
   flex-direction: column;
 }
-.box:last-child { border-right: 0; }
+.box:nth-child(2n) { border-right: 0; }
+.box:nth-child(n+3) { border-top: 1px solid var(--hairline); }
 .box h3 {
   margin: 0;
   display: flex;
@@ -640,14 +604,19 @@ pre.block .c { color: var(--dim); }
   letter-spacing: 0.04em;
 }
 .install-platform pre.block { margin: 0; }
-.install-standalone {
-  padding-top: 24px;
-  border-top: 1px solid var(--hairline);
-  margin-top: 32px;
+.install-platform .where {
+  margin: 12px 0 0;
+  color: var(--dim);
+  font-size: 0.875rem;
 }
 .install-source {
   padding-top: 24px;
   border-top: 1px solid var(--hairline);
+}
+.install-plugin {
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
+  margin-top: 32px;
 }
 
 /* ---------- footer ---------- */
@@ -708,7 +677,6 @@ footer p:last-child { margin-bottom: 0; }
 }
 .js-anim .tagline { animation: popin 260ms var(--ease) 120ms both; }
 .js-anim .standfirst { animation: popin 260ms var(--ease) 170ms both; }
-.js-anim .command { animation: popin 260ms var(--ease) 210ms both; }
 .js-anim .actions { animation: popin 260ms var(--ease) 250ms both; }
 .js-anim .meta { animation: popin 260ms var(--ease) 290ms both; }
 
@@ -734,8 +702,8 @@ footer p:last-child { margin-bottom: 0; }
 
 @media (max-width: 900px) {
   .boxes { grid-template-columns: 1fr; }
-  .box { border-right: 0; border-bottom: 1px solid var(--hairline); }
-  .box:last-child { border-bottom: 0; }
+  .box { border-right: 0; }
+  .box:nth-child(n+2) { border-top: 1px solid var(--hairline); }
   .features { grid-template-columns: 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
   .install-tabs button { flex: 1 1 0; padding: 8px 12px; }
@@ -781,14 +749,6 @@ footer p:last-child { margin-bottom: 0; }
   .tagline { font-size: 1.1875rem; }
   section { padding: 36px 0; }
   .shot-row { grid-template-columns: 1fr; }
-  .command { flex-direction: column; }
-  .copy {
-    border-left: 0;
-    border-top: 1px solid var(--muted);
-    min-height: 44px;
-    text-align: left;
-    padding: 0 14px;
-  }
   .btn { min-height: 44px; }
 }
 
@@ -797,7 +757,7 @@ footer p:last-child { margin-bottom: 0; }
     animation: none !important;
     transition-duration: 0ms !important;
   }
-  .btn:active, .copy:active { transform: none; }
+  .btn:active { transform: none; }
   .js-anim section > .wrap,
   .js-anim footer > .wrap { opacity: 1; transform: none; }
 }
@@ -809,7 +769,7 @@ footer p:last-child { margin-bottom: 0; }
 
 <div class="topbar">
   <div class="wrap">
-    <span class="topbar-id"><b>Omamail</b> <span class="desc" data-zh="给 <a href='https://omarchy.org'>Omarchy</a> 写的邮件插件">an <a href="https://omarchy.org">Omarchy</a> plugin</span></span>
+    <span class="topbar-id"><b>Omamail</b> <span class="desc" data-zh="为 <a href='https://omarchy.org'>Omarchy</a> 设计的原生邮件应用">a native mail app, designed for <a href="https://omarchy.org">Omarchy</a></span></span>
     <div class="switches">
       <a class="sponsor-button" href="https://github.com/sponsors/huacnlee" target="_blank" rel="noopener" data-zh="赞助作者">Sponsor me</a>
       <button type="button" class="theme-toggle" aria-label="Switch to the light theme">
@@ -835,20 +795,15 @@ footer p:last-child { margin-bottom: 0; }
 █   █ █ █ █ █████ █ █ █ █████   █   █
 █   █ █   █ █   █ █   █ █   █   █   █
  ███  █   █ █   █ █   █ █   █ █████ █████</pre>
-    <h1 class="tagline" data-zh="专为 Omarchy 设计的原生邮件应用">Native mail app special design for Omarchy</h1>
-    <p class="standfirst" data-zh="Omamail 是一个 Quickshell 插件：通过 Gmail API、Microsoft OAuth、37signals 发布的 HEY CLI，或者 IMAP 与 SMTP，读信、整理、回信。">Omamail reads, triages and answers your mail over the official Gmail API, Microsoft OAuth for Outlook, the HEY CLI 37signals publish, or IMAP and SMTP for every other mailbox.</p>
-
-    <div class="command">
-      <pre><span class="prompt">$ </span><span class="cmd">omarchy plugin add https://github.com/huacnlee/omamail.git --enable</span></pre>
-      <button type="button" class="copy" data-zh="复制" data-copy="omarchy plugin add https://github.com/huacnlee/omamail.git --enable">Copy</button>
-    </div>
+    <h1 class="tagline" data-zh="专为 Omarchy 设计的原生邮件应用">A native mail app, designed for Omarchy</h1>
+    <p class="standfirst" data-zh="Omamail 在 macOS、Linux 和 Windows 上读信、整理、回信：通过官方 Gmail API，用 Microsoft 账号登录 Outlook 和 Microsoft 365，通过 37signals 发布的 HEY CLI，或者用 JMAP 和 IMAP 连接其他所有邮箱。">Omamail reads, triages and answers your mail on macOS, Linux and Windows, over the official Gmail API, Microsoft sign-in for Outlook and Microsoft 365, the HEY CLI 37signals publish, or JMAP and IMAP for every other mailbox.</p>
 
     <div class="actions">
-      <a class="btn" href="https://plugins.omarchy.org/plugin.html?id=omamail">OMARCHY PLUGIN</a>
+      <a class="btn" href="#install" data-zh="安装">INSTALL</a>
       <a class="btn" href="https://github.com/huacnlee/omamail">GITHUB</a>
     </div>
 
-    <p class="meta" data-zh="Quickshell 插件 · 服务、状态栏组件、面板 · MIT 许可">Quickshell plugin · service, bar widget and panel · MIT licensed</p>
+    <p class="meta" data-zh="macOS · Linux · Windows · 邮件和日历 · MIT 许可">macOS · Linux · Windows · mail and calendar · MIT licensed</p>
   </div>
 </header>
 
@@ -857,7 +812,7 @@ footer p:last-child { margin-bottom: 0; }
 <section>
   <div class="wrap">
     <h2><span class="idx">01</span> <span data-zh="它的样子">What it looks like</span></h2>
-    <p class="lede" data-zh="宽屏三栏，窄了就一栏。一个真正的 Hyprland 窗口，和别的窗口一样平铺。">Three columns when there is room, one when there is not — a real Hyprland window, tiled like any other.</p>
+    <p class="lede" data-zh="宽屏三栏，窄了就一栏。">Three columns when there is room, one when there is not.</p>
     <figure>
       <p class="shot-label" data-zh="大窗口">FULL WINDOW</p>
       <div class="shot-row">
@@ -879,18 +834,13 @@ footer p:last-child { margin-bottom: 0; }
       </div>
       <figcaption data-zh="窄下来就只剩一栏：列表、单封信、写信，一次一件事。">Narrow it and one column is left: the list, one message, one letter being written — a single thing at a time.</figcaption>
     </figure>
-    <figure class="figure-center">
-      <p class="shot-label" data-zh="状态栏快速预览">BAR PREVIEW</p>
-      <img class="shot shot-bar" src="images/bar-preview.webp" width="622" alt="Omamail - The quick preview from the bar: latest mail and what is up next" loading="lazy">
-      <figcaption data-zh="右键点状态栏里的信封，不打开窗口就能看到最新的邮件和接下来的日程。左键打开窗口，中键收信。">Right-click the envelope in the bar for the latest mail and what is up next, without opening the window. Left-click opens it; middle-click checks for mail.</figcaption>
-    </figure>
   </div>
 </section>
 
 <section>
   <div class="wrap">
     <h2><span class="idx">02</span> <span data-zh="它能打开的邮箱">Mailboxes it can open</span></h2>
-    <p class="lede" data-zh="四种邮箱，一个窗口。某种邮箱做不到的事，界面上就不提供。">Four kinds of mailbox, one window. What a mailbox cannot do, the panel does not offer.</p>
+    <p class="lede" data-zh="六种邮箱，一个窗口。某种邮箱做不到的事，界面上就不提供。">Six kinds of mailbox, one window. What a mailbox cannot do, the window does not offer.</p>
     <div class="boxes">
       <div class="box">
         <h3><img class="mark" src="images/gmail.png" width="20" alt="" loading="lazy">Gmail</h3>
@@ -903,9 +853,19 @@ footer p:last-child { margin-bottom: 0; }
         <p data-zh="Outlook.com、Hotmail、Live 和 MSN，使用 OAuth；Omamail 不会看到你的密码。">Outlook.com, Hotmail, Live and MSN over OAuth — Omamail never sees the account password.</p>
       </div>
       <div class="box">
+        <h3><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="4" width="17" height="12"/><path d="M1.5 5.5 10 11.5l8.5-6"/></svg>Microsoft 365</h3>
+        <span class="kind" data-zh="工作或学校账号">A WORK OR SCHOOL ACCOUNT</span>
+        <p data-zh="邮件和日历通过 Microsoft Graph，一次登录，不需要 IMAP。需要先在你的组织里注册一个应用。">Mail and calendar over Microsoft Graph with one sign-in, no IMAP. It needs an app registration in your organisation first.</p>
+      </div>
+      <div class="box">
         <h3><img class="mark" src="images/hey.png" width="20" alt="" loading="lazy">HEY</h3>
         <span class="kind" data-zh="通过 HEY CLI">THROUGH THE HEY CLI</span>
         <p data-zh="不需要地址，也不需要密码：37signals 发布的 <code>hey</code> 持有令牌。">No address and no password — the HEY CLI 37signals publish holds the token.</p>
+      </div>
+      <div class="box">
+        <h3><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="4" width="17" height="12"/><path d="M1.5 5.5 10 11.5l8.5-6"/></svg>JMAP</h3>
+        <span class="kind" data-zh="一个地址和一个密码">AN ADDRESS AND A PASSWORD</span>
+        <p data-zh="任何支持 JMAP 的服务器，从你地址的域名找到它，或者用你指定的服务器。">Any server that speaks JMAP, found from your address's domain or from a server you name.</p>
       </div>
       <div class="box">
         <h3><svg class="mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="4" width="17" height="12"/><path d="M1.5 5.5 10 11.5l8.5-6"/></svg>IMAP</h3>
@@ -919,20 +879,22 @@ footer p:last-child { margin-bottom: 0; }
 <section>
   <div class="wrap">
     <h2><span class="idx">03</span> <span data-zh="它做什么">What it does</span></h2>
-    <p class="lede" data-zh="为坐进 Omarchy 而设计，而不是把一个网页应用塞进窗口里。">Designed to sit inside Omarchy, not to look like a web app in a window.</p>
+    <p class="lede" data-zh="为坐进 Omarchy 而设计，而不是把一个网页应用塞进窗口里；在 macOS 和 Windows 上也一样好用。">Designed to sit inside Omarchy, not to look like a web app in a window — and just as much at home on macOS and Windows.</p>
     <ul class="features">
-      <li><span class="n">01</span><span class="t"><b data-zh="等宽、直角、够密">Monospace, square, dense</b><span data-zh="屏幕上除了你的邮件，没有别的东西。">Nothing on screen that is not your mail.</span></span></li>
-      <li><span class="n">02</span><span class="t"><b data-zh="键盘优先">Keyboard-first</b><span data-zh="移动、归档、加星、回复、撰写、换邮箱、换账号、搜索，都有键。">Move, archive, star, reply, compose, switch mailbox, switch account, search.</span></span></li>
-      <li><span class="n">03</span><span class="t"><b data-zh="一个点，不是数字">A dot, not a number</b><span data-zh="有未读时信封上亮一个点，没有就不亮，从不显示数量：数字在忙的邮箱里永远不是零，本身也常常不准，还催着你去清。窗口关着照常工作，每个账号都算，新信落地时发一条桌面通知。">The envelope shows a dot when mail is waiting and nothing when it is not — never a count. A number is never zero on a busy mailbox, is rarely right anyway, and asks to be worked down. Works while the window is shut, for every account, with a notification when new mail lands.</span></span></li>
-      <li><span class="n">04</span><span class="t"><b data-zh="一个窗口">One window</b><span data-zh="读信、归档、加星、删除、搜索、回信，不必再开一个占据独立区域的窗口。">Read, archive, star, trash, search and answer without a second window taking a region of its own.</span></span></li>
-      <li><span class="n">05</span><span class="t"><b data-zh="能回复的会议邀请">Invitations you can answer</b><span data-zh="从邮件自带的日历部分读出会议，用你的时区而不是组织者的时区画出来。是 / 也许 / 否直接回复组织者。Gmail 和 IMAP 都行，HEY 不行。">Read out of the message's own calendar part and drawn as a meeting, in your clock rather than the organiser's. Yes, Maybe and No answer the organiser. Gmail and IMAP alike; not HEY.</span></span></li>
+      <li><span class="n">01</span><span class="t"><b data-zh="键盘优先">Keyboard-first</b><span data-zh="移动、归档、加星、回复、撰写、换邮箱、换账号、搜索，都有键。">Move, archive, star, reply, compose, switch mailbox, switch account, search.</span></span></li>
+      <li><span class="n">02</span><span class="t"><b data-zh="多个邮箱">Several mailboxes</b><span data-zh="每个账号有自己的收件箱和缓存，切换时先显示上次的列表。“所有邮箱”把它们合成一个列表。">Each account has its own inbox and cache, so switching shows the last list at once. All mailboxes puts them in one list.</span></span></li>
+      <li><span class="n">03</span><span class="t"><b data-zh="新邮件通知">New mail notifications</b><span data-zh="Omamail 开着时，新信落进收件箱就发一条桌面通知；点一下就打开那封信。设置里可以关掉。">While Omamail is open, new mail in an inbox brings a desktop notification; clicking it opens the message. Settings can turn it off.</span></span></li>
+      <li><span class="n">04</span><span class="t"><b data-zh="日历">A calendar</b><span data-zh="Google、Microsoft 和 iCloud 账号的日、周、月和日程视图，可以新建和修改日程。">Day, week, month and agenda views for Google, Microsoft and iCloud accounts, with events you can create and edit.</span></span></li>
+      <li><span class="n">05</span><span class="t"><b data-zh="能回复的会议邀请">Invitations you can answer</b><span data-zh="从邮件自带的日历部分读出会议，用你的时区而不是组织者的时区画出来。是 / 也许 / 否直接回复组织者。">Read out of the message's own calendar part and drawn as a meeting, in your clock rather than the organiser's. Yes, Maybe and No answer the organiser.</span></span></li>
       <li><span class="n">06</span><span class="t"><b data-zh="一键退订">Off a list in one click</b><span data-zh="支持一键退订的邮件不必离开窗口就能退掉。在你开口之前，绝不会去请求发件人的地址。">A newsletter that supports one-click unsubscribing is unsubscribed from without leaving the window. Nothing is ever fetched from a sender's address until you ask.</span></span></li>
-      <li><span class="n">07</span><span class="t"><b data-zh="图片默认拦下">Images stay blocked</b><span data-zh="加载发件人的图片等于告诉对方这封信被读了、用的哪个地址、什么时候。要加载得你开口，而且只对那一封生效。">Loading a sender's pictures tells them the mail was read, from which address and when. They load when you ask, for that one message.</span></span></li>
-      <li><span class="n">08</span><span class="t"><b data-zh="你的主题">Your theme</b><span data-zh="每一个颜色都来自当前的 Omarchy 主题，桌面一换，邮箱立刻跟着换。">Every colour comes from the active Omarchy theme, so the mailbox changes the moment the desktop does.</span></span></li>
-      <li><span class="n">09</span><span class="t"><b data-zh="凭据在钥匙串里">Keyring-backed</b><span data-zh="Gmail 和 Outlook 刷新令牌以及每一个 IMAP 密码都放在 GNOME Keyring 里：不在配置文件里，也不在命令行上。">Gmail and Outlook refresh tokens and every IMAP password live in GNOME Keyring — never in a config file, never on a command line.</span></span></li>
-      <li><span class="n">10</span><span class="t"><b data-zh="多个邮箱">Several mailboxes</b><span data-zh="每个账号有自己的收件箱、缓存和未读数；列表、标签和头像按账号缓存，所以切换从不等网络。">Each with its own inbox, cache and unread count. List, labels and profile are cached per account, so switching never waits on the network.</span></span></li>
-      <li><span class="n">11</span><span class="t"><b data-zh="mailto: 链接">mailto: links</b><span data-zh="插件启用之后，桌面上任何地方点一个地址——浏览器、PDF、通知——都在这里打开撰写。">Once the plugin is enabled, clicking an address anywhere on the desktop opens compose here.</span></span></li>
-      <li><span class="n">12</span><span class="t"><b data-zh="撤销发送">Undo send</b><span data-zh="出站邮件默认延迟十秒，够你反悔。设成 0 就立即发送。">Outgoing mail is delayed by ten seconds so you can cancel it. Set it to 0 to send immediately.</span></span></li>
+      <li><span class="n">07</span><span class="t"><b data-zh="图片默认拦下">Images stay blocked</b><span data-zh="加载发件人的图片等于告诉对方这封信被读了、用的哪个地址、什么时候。“显示图片”只对那一封生效；“总是显示”要你自己选，设置里可以收回。">Loading a sender's pictures tells them the mail was read, from which address and when. Show images loads them for that one message; Always show is your choice, and Settings takes it back.</span></span></li>
+      <li><span class="n">08</span><span class="t"><b data-zh="附件">Attachments</b><span data-zh="打开附件，或者存到“下载”文件夹。图片在查看器里打开，可以翻看这封信里的每一张。">Open an attachment or save it to Downloads. Pictures open in a viewer that pages through every image in the message.</span></span></li>
+      <li><span class="n">09</span><span class="t"><b data-zh="你的主题">Your theme</b><span data-zh="系统、浅色、深色或 Omarchy。选 Omarchy 时，颜色和字体都来自当前的 Omarchy 主题，桌面一换，邮箱立刻跟着换。">System, Light, Dark or Omarchy. With Omarchy, colours and type come from the active Omarchy theme, so the mailbox changes the moment the desktop does.</span></span></li>
+      <li><span class="n">10</span><span class="t"><b data-zh="凭据在系统钥匙串里">In the system keychain</b><span data-zh="令牌和密码放在 macOS 钥匙串、Linux 的 Secret Service（比如 GNOME Keyring）或 Windows 凭据管理器里：不在配置文件里，也不在命令行上。">Tokens and passwords live in the macOS Keychain, the Secret Service on Linux (GNOME Keyring, for one) or Windows Credential Manager — never in a config file, never on a command line.</span></span></li>
+      <li><span class="n">11</span><span class="t"><b data-zh="AI 助手，由你把关">An AI assistant you approve</b><span data-zh="用你已经装好的 OpenCode、Codex 或 Claude 总结一封信、回答关于它的问题，或者起草回信。草稿只是提议：收件人由 Omamail 决定，发送要你自己按。">Summarise a message, ask about it or draft a reply with the OpenCode, Codex or Claude you already have. A draft is only a proposal: Omamail sets the recipients, and only your press sends it.</span></span></li>
+      <li><span class="n">12</span><span class="t"><b data-zh="mailto: 链接">mailto: links</b><span data-zh="在 Linux 上，设置里的“默认邮件客户端”让 Omamail 打开 <code>mailto:</code> 链接；在 Omarchy 上它还会接管 SUPER+SHIFT+E，SUPER+SHIFT+ALT+E 则写新邮件。">On Linux, Settings › Default mail client makes Omamail open <code>mailto:</code> links. On Omarchy it also takes SUPER+SHIFT+E, and SUPER+SHIFT+ALT+E for a new message.</span></span></li>
+      <li><span class="n">13</span><span class="t"><b data-zh="撤销发送">Undo send</b><span data-zh="出站邮件默认延迟十秒，够你反悔：按 Alt+Z 或点“撤销”。设成 0 就立即发送。">Outgoing mail is delayed by ten seconds so you can cancel it with Alt+Z or Undo. Set it to 0 to send immediately.</span></span></li>
+      <li><span class="n">14</span><span class="t"><b data-zh="自己更新">Updates itself</b><span data-zh="启动时检查新版本，更新前先问你。应用菜单和设置里都有“检查更新...”。更新清单带签名。">Checks for a new version at launch and asks before updating. Check for Updates... is in the app menu and in Settings. The update manifest is signed.</span></span></li>
     </ul>
   </div>
 </section>
@@ -940,7 +902,7 @@ footer p:last-child { margin-bottom: 0; }
 <section>
   <div class="wrap">
     <h2><span class="idx">04</span> <span data-zh="按键">Keys</span></h2>
-    <p class="lede" data-zh="键盘属于这个应用，上下文决定一个键在哪里意味着什么。所有绑定只写在一张表里，快捷键面板和状态栏提示都从那张表渲染。">The keyboard belongs to the application, and the context says what a key means where. Every binding lives in one table; the shortcut sheet and the status-bar hints render from it.</p>
+    <p class="lede" data-zh="键盘属于这个应用，上下文决定一个键在哪里意味着什么。所有绑定只写在一张表里，快捷键面板和状态栏提示都从那张表渲染。在 macOS 上，表里的 Ctrl 是 Command。">The keyboard belongs to the application, and the context says what a key means where. Every binding lives in one table; the shortcut sheet and the status-bar hints render from it. On macOS, Ctrl in this table is Command.</p>
     <div class="table-scroll">
       <table>
         <thead>
@@ -953,7 +915,7 @@ footer p:last-child { margin-bottom: 0; }
           <tr><td class="keycell"><kbd>j</kbd><span class="sep">/</span><kbd>k</kbd><br><kbd>Shift+J</kbd><span class="sep">/</span><kbd>Shift+K</kbd></td><td data-zh="下移 / 上移；向下 / 向上滚动打开的邮件">Move down / up; scroll the open message down / up</td></tr>
           <tr><td class="keycell"><kbd>Right</kbd><span class="sep">/</span><kbd>Left</kbd></td><td data-zh="打开选中的邮件 / 回到列表">Open the selected message / return to the list</td></tr>
           <tr><td class="keycell"><kbd>Return</kbd><span class="sep">or</span><kbd>o</kbd></td><td data-zh="打开选中的邮件">Open the selected message</td></tr>
-          <tr><td class="keycell"><kbd>Escape</kbd></td><td data-zh="回到列表；在列表里则关闭窗口">Back to the list; close the window from the list</td></tr>
+          <tr><td class="keycell"><kbd>Escape</kbd></td><td data-zh="返回；没有可返回的就关闭窗口">Back, or close the window</td></tr>
           <tr><td class="keycell"><kbd>e</kbd></td><td data-zh="归档">Archive</td></tr>
           <tr><td class="keycell"><kbd>d</kbd></td><td data-zh="移到废纸篓">Move to trash</td></tr>
           <tr><td class="keycell"><kbd>s</kbd></td><td data-zh="加星或取消星标">Star or unstar</td></tr>
@@ -961,11 +923,16 @@ footer p:last-child { margin-bottom: 0; }
           <tr><td class="keycell"><kbd>r</kbd><span class="sep">/</span><kbd>a</kbd><span class="sep">/</span><kbd>f</kbd></td><td data-zh="回复、全部回复、转发">Reply, reply all, forward</td></tr>
           <tr><td class="keycell"><kbd>c</kbd></td><td data-zh="写新邮件">Compose</td></tr>
           <tr><td class="keycell"><kbd>Ctrl</kbd> + <kbd>Return</kbd></td><td data-zh="发送">Send</td></tr>
+          <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>Z</kbd></td><td data-zh="撤销发送">Undo send</td></tr>
           <tr><td class="keycell"><kbd>/</kbd></td><td data-zh="搜索">Search</td></tr>
-          <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>1</kbd> … <kbd>Alt</kbd> + <kbd>0</kbd></td><td data-zh="导航栏上对应编号的邮箱——按住 Alt，导航栏会说明哪个是哪个">The mailbox with that number on the rail — hold Alt and the rail says which is which</td></tr>
+          <tr><td class="keycell"><kbd>Ctrl</kbd> + <kbd>1</kbd> … <kbd>Ctrl</kbd> + <kbd>9</kbd></td><td data-zh="对应编号的邮箱">The mailbox with that number</td></tr>
+          <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>1</kbd> … <kbd>Alt</kbd> + <kbd>0</kbd></td><td data-zh="对应编号的邮件账号">The email account with that number</td></tr>
           <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>A</kbd></td><td data-zh="切换账号">Switch account</td></tr>
+          <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>C</kbd></td><td data-zh="在邮件和日历之间切换">Switch between mail and calendar</td></tr>
+          <tr><td class="keycell"><kbd>Alt</kbd> + <kbd>G</kbd></td><td data-zh="就这封信或这份草稿问 AI">Ask AI about the message or draft</td></tr>
           <tr><td class="keycell"><kbd>Ctrl</kbd> + <kbd>=</kbd><span class="sep">/</span><kbd>Ctrl</kbd> + <kbd>-</kbd><span class="sep">/</span><kbd>Ctrl</kbd> + <kbd>0</kbd></td><td data-zh="缩放正文，或复位">Zoom the message body, or reset it</td></tr>
           <tr><td class="keycell"><kbd>F5</kbd><span class="sep">/</span><kbd>Ctrl</kbd> + <kbd>R</kbd></td><td data-zh="收信">Check for mail</td></tr>
+          <tr><td class="keycell"><kbd>Ctrl</kbd> + <kbd>,</kbd></td><td data-zh="打开设置">Open settings</td></tr>
           <tr><td class="keycell"><kbd>?</kbd></td><td data-zh="其余全部快捷键">Every shortcut</td></tr>
         </tbody>
       </table>
@@ -977,49 +944,18 @@ footer p:last-child { margin-bottom: 0; }
   <div class="wrap">
     <h2><span class="idx">05</span> <span data-zh="它不做什么">What it does not do</span></h2>
     <div class="prose">
-      <p data-zh="<b>没有内嵌浏览器。</b>邮件在 Omamail 自己构建的阅读视图里打开：标题、段落、列表和链接，用你自己的字体，行宽舒服，里面没有发件人的任何排版。发件人自己的版式离你只有一次点击，那一份走 Qt 自己的富文本引擎，它处理的正是真实邮件实际写成的 HTML 4 加行内样式那一子集。插件里根本嵌不进浏览器引擎：<code>QtWebEngineQuick::initialize()</code> 必须在宿主进程构建 <code>QGuiApplication</code> 之前运行，而插件加载得晚得多。"><b>No embedded browser.</b> A message opens in a reading view Omamail builds itself: headings, paragraphs, lists and links in your own type at a readable measure, with none of the sender's presentation in it. The sender's own layout is one click away, and that one renders through Qt's own rich text engine. A browser engine cannot be embedded in a plugin at all: <code>QtWebEngineQuick::initialize()</code> has to run before the host process builds its <code>QGuiApplication</code>, and a plugin loads long after that.</p>
-      <p data-zh="<b>不能下载附件。</b>暂时还不能。"><b>No attachment downloads.</b> Not yet.</p>
+      <p data-zh="<b>不用浏览器显示邮件。</b>邮件在 Omamail 自己构建的阅读视图里打开：标题、段落、列表和链接，用你自己的字体，行宽舒服，里面没有发件人的任何排版。发件人自己的版式离你只有一次点击。两种视图都由应用自己的文本视图画出来，画的是 Rust 核心已经清理过的结构：没有脚本，没有样式表，邮件里的任何东西都不能自己去联网。"><b>No browser engine for mail.</b> A message opens in a reading view Omamail builds itself: headings, paragraphs, lists and links in your own type at a readable measure, with none of the sender's presentation in it. The sender's own layout is one click away. Both are drawn by the app's own text view from a structure the Rust core has already cleaned: no scripts, no style sheets, and nothing in a message can reach the network on its own.</p>
       <p data-zh="<b>不会替你去敲自己网络的门。</b>指向本机或本机所在网络的图片——回环地址、私有地址、<code>.local</code> 名称、<code>file:</code>——永远不会被拉取，无论你请求多少次。"><b>It will not knock on your own network's door.</b> Images pointed at this machine or at the network around it — loopback, private addresses, <code>.local</code> names, <code>file:</code> — are never fetched at all, however often you ask.</p>
+      <p data-zh="<b>不在后台运行。</b>关掉窗口，Omamail 就退出了，所以只有它开着的时候才会收信、发通知。它没有托盘图标。"><b>It does not run in the background.</b> Closing the window quits Omamail, so it checks for mail and sends notifications only while it is open. There is no tray icon.</p>
     </div>
   </div>
 </section>
 
-<section>
+<section id="install">
   <div class="wrap">
     <h2><span class="idx">06</span> <span data-zh="安装">Install</span></h2>
-    <h3 class="install-heading" data-zh="Omarchy 插件">Omarchy plugin</h3>
-    <div class="grid-2">
-      <div>
-        <h3 data-zh="装上">INSTALL</h3>
-        <pre class="block"><span class="prompt">$ </span>omarchy plugin add https://github.com/huacnlee/omamail.git --enable</pre>
-        <div class="prose">
-          <p data-zh="然后点状态栏里的信封。想用键盘打开，把这一行加进 <code>~/.config/hypr/bindings.lua</code>：">Then click the envelope in the bar. To open it from the keyboard, add this to <code>~/.config/hypr/bindings.lua</code>:</p>
-        </div>
-        <pre class="block">o.bind("SUPER + SHIFT + G", "Omamail",
-       "omarchy shell shell toggle omamail '{}'")</pre>
-        <div class="prose">
-          <p data-zh="目标是 <code>shell</code>，不是插件 id：窗口由 shell 召唤，而 shell 正是最初加载它的那一个。">The target is <code>shell</code>, not the plugin id: the window is summoned by the shell, which is what loads it in the first place.</p>
-          <p data-zh="需要 Omarchy 4，外加 <code>socat</code>、<code>secret-tool</code>、<code>openssl</code>、<code>xdg-open</code> 和 <code>curl</code>——这些 Omarchy 都已经自带。HEY 邮箱还需要 <code>hey</code>。">Requires Omarchy 4, plus <code>socat</code>, <code>secret-tool</code>, <code>openssl</code>, <code>xdg-open</code> and <code>curl</code> — all of which Omarchy already ships. A HEY mailbox additionally needs <code>hey</code>.</p>
-        </div>
-      </div>
-      <div>
-        <h3 data-zh="卸掉">REMOVE</h3>
-        <pre class="block"><span class="prompt">$ </span>omarchy plugin remove omamail</pre>
-        <div class="prose">
-          <p data-zh="这只带走插件本身。它写下的东西都不在你的 Omarchy 配置里，所以清不清理是另一回事，完全由你决定：">That takes the plugin itself. Nothing it wrote lives inside your Omarchy config, so removing those is separate and entirely up to you:</p>
-        </div>
-        <pre class="block"><span class="prompt">$ </span>secret-tool clear service omamail  <span class="c"># credentials</span>
-<span class="prompt">$ </span>hey auth logout                    <span class="c"># HEY session</span>
-<span class="prompt">$ </span>rm -rf ~/.config/omamail           <span class="c"># accounts</span>
-<span class="prompt">$ </span>rm -rf ~/.cache/omamail            <span class="c"># cached mail</span></pre>
-        <div class="prose">
-          <p data-zh="在应用里退出登录，本身就会清掉钥匙串条目。这个插件从不改动你的 shell、Hyprland 或主题配置。">Signing out from inside the app clears the keyring entry on its own. The plugin never edits your shell, Hyprland or theme configuration.</p>
-        </div>
-      </div>
-    </div>
-    <div class="install-standalone">
-    <h3 class="install-heading" data-zh="独立桌面应用">Standalone desktop app</h3>
-    <p class="install-note" data-zh="独立版包含邮件、日历和原生桌面通知，暂不包含系统托盘、AI 辅助和 <code>mailto:</code> 注册。安装程序会先校验发布包，再替换已有版本。">The standalone app includes mail, calendar and native desktop notifications. This release does not include the system tray, AI assistance or <code>mailto:</code> registration. Each installer verifies the release package before replacing an existing version.</p>
+    <h3 class="install-heading" data-zh="桌面应用">Desktop app</h3>
+    <p class="install-note" data-zh="安装程序会先用发布版的 SHA256SUMS 校验下载的包，再替换已安装的版本；Omamail 0.12 及更早版本的安装也会被替换，账号和设置都保留。装好之后 Omamail 会自己更新。">Each installer checks the download against the release's SHA256SUMS before it replaces an installed copy. It also replaces an install of Omamail 0.12 or earlier, keeping your accounts and settings. From then on Omamail updates itself.</p>
     <div class="install-platforms">
       <div class="install-tabs" role="tablist" aria-label="Platform">
         <button type="button" role="tab" id="install-tab-macos" aria-controls="install-macos" aria-selected="true">macOS</button>
@@ -1027,22 +963,44 @@ footer p:last-child { margin-bottom: 0; }
         <button type="button" role="tab" id="install-tab-windows" aria-controls="install-windows" aria-selected="false" tabindex="-1">Windows</button>
       </div>
       <div class="install-platform" role="tabpanel" id="install-macos" aria-labelledby="install-tab-macos">
-        <span class="kind" data-zh="APPLE SILICON · TAR.GZ · 未签名">APPLE SILICON · TAR.GZ · UNSIGNED</span>
+        <span class="kind" data-zh="APPLE SILICON · MACOS 14+ · AD HOC 签名">APPLE SILICON · MACOS 14+ · AD HOC SIGNED</span>
         <pre class="block"><span class="prompt">$ </span>curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh</pre>
+        <p class="where" data-zh="装到 <code>~/Applications/Omamail.app</code>。应用是 ad hoc 签名，没有经过公证，所以安装程序会清除它的隔离标记。">Installs <code>Omamail.app</code> in <code>~/Applications</code>. The app is ad hoc signed rather than notarized, so the installer clears its quarantine flag.</p>
       </div>
       <div class="install-platform" role="tabpanel" id="install-linux" aria-labelledby="install-tab-linux" hidden>
-        <span class="kind" data-zh="X86_64 · GLIBC 2.35+ · 仅 TAR.GZ">X86_64 · GLIBC 2.35+ · TAR.GZ ONLY</span>
+        <span class="kind" data-zh="X86_64 · GLIBC 2.39+ · GTK 4.14+ · WEBKITGTK 6.0">X86_64 · GLIBC 2.39+ · GTK 4.14+ · WEBKITGTK 6.0</span>
         <pre class="block"><span class="prompt">$ </span>curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh</pre>
+        <p class="where" data-zh="装到 <code>~/.local/share/omamail</code>，并添加一个桌面入口。GTK 和 WebKitGTK 的包名：Arch 是 <code>gtk4</code> 和 <code>webkitgtk-6.0</code>，Debian 和 Ubuntu 是 <code>libgtk-4-1</code> 和 <code>libwebkitgtk-6.0-4</code>。">Installs in <code>~/.local/share/omamail</code> with a desktop entry. GTK and WebKitGTK come from <code>gtk4</code> and <code>webkitgtk-6.0</code> on Arch, <code>libgtk-4-1</code> and <code>libwebkitgtk-6.0-4</code> on Debian and Ubuntu.</p>
       </div>
       <div class="install-platform" role="tabpanel" id="install-windows" aria-labelledby="install-tab-windows" hidden>
-        <span class="kind" data-zh="X86_64 · ZIP · 未签名 · POWERSHELL">X86_64 · ZIP · UNSIGNED · POWERSHELL</span>
+        <span class="kind" data-zh="X86_64 · 按用户安装 · POWERSHELL">X86_64 · PER USER · POWERSHELL</span>
         <pre class="block"><span class="prompt">&gt; </span>irm https://huacnlee.github.io/omamail/install.ps1 | iex</pre>
+        <p class="where" data-zh="为当前用户装到 <code>%LOCALAPPDATA%\Programs\Omamail</code>，并添加一个开始菜单快捷方式。">Installs for the current user in <code>%LOCALAPPDATA%\Programs\Omamail</code> with a Start menu shortcut.</p>
       </div>
     </div>
     <div class="install-source">
       <h3 class="install-heading" data-zh="从源码运行">Run from source</h3>
-      <p class="install-note" data-zh="开发者安装 Rust、CMake 3.21+ 和 Qt 6.5+ 后，可以在仓库根目录启动独立版。">Developers with Rust, CMake 3.21+ and Qt 6.5+ can launch the standalone app from the repository root.</p>
-      <pre class="block"><span class="prompt">$ </span>make app-run</pre>
+      <p class="install-note" data-zh="装好 <a href='https://nsh.dev'>nsh</a> 命令行工具和 Rust 之后，在仓库根目录运行：">With the <a href="https://nsh.dev">nsh</a> command-line tool and Rust installed, run this at the repository root:</p>
+      <pre class="block"><span class="prompt">$ </span>make run</pre>
+    </div>
+    <div class="install-plugin">
+    <h3 class="install-heading" data-zh="Omarchy 状态栏入口（可选）">Omarchy bar entry (optional)</h3>
+    <p class="install-note" data-zh="在 Omarchy 上，这个插件在状态栏里放一个信封。装了 Omamail，点它就打开应用；没装的话，信封旁边亮一个点，提示文字会说明，点它打开这个页面去安装。它自己不读任何邮件。第一次加载时，它把旧插件的设置交给应用，在应用第一次启动时导入。">On Omarchy, this plugin puts an envelope in the bar. With Omamail installed, clicking it opens the app. Without it, a dot shows beside the envelope, the tooltip says so, and clicking opens this page to install it. It reads no mail itself. The first time it loads, it hands the old plugin's settings to the app to import on its first launch.</p>
+    <div class="grid-2">
+      <div>
+        <h3 data-zh="装上">INSTALL</h3>
+        <pre class="block"><span class="prompt">$ </span>omarchy plugin add https://github.com/huacnlee/omamail.git --enable</pre>
+        <div class="prose">
+          <p data-zh="已经装了旧插件的话，更新它就会换成这个入口。">If the old plugin is installed, updating it turns it into this entry.</p>
+        </div>
+      </div>
+      <div>
+        <h3 data-zh="卸掉">REMOVE</h3>
+        <pre class="block"><span class="prompt">$ </span>omarchy plugin remove omamail</pre>
+        <div class="prose">
+          <p data-zh="这只带走状态栏入口。Omamail 应用、你的账号和设置都还在。插件只写过一个文件，<code>~/.config/omamail/plugin-settings.json</code>，就是交给应用的那份设置。">That takes the bar entry only. The Omamail app, your accounts and your settings stay. The one file the plugin writes is <code>~/.config/omamail/plugin-settings.json</code>, the settings it hands to the app.</p>
+        </div>
+      </div>
     </div>
     </div>
   </div>
@@ -1073,7 +1031,6 @@ footer p:last-child { margin-bottom: 0; }
   var root = document.documentElement;
   var nodes = document.querySelectorAll("[data-zh]");
   var buttons = document.querySelectorAll(".lang button");
-  var copyLabels = { en: "Copied", zh: "已复制" };
   var lang = "en";
 
   Array.prototype.forEach.call(nodes, function (n) {
@@ -1178,20 +1135,6 @@ footer p:last-child { margin-bottom: 0; }
     selectTab(document.getElementById("install-tab-linux"));
   } else if (tabs.length && /win/i.test(navigator.platform || "")) {
     selectTab(document.getElementById("install-tab-windows"));
-  }
-
-  var copy = document.querySelector(".copy");
-  if (copy && navigator.clipboard) {
-    copy.addEventListener("click", function () {
-      navigator.clipboard.writeText(copy.getAttribute("data-copy")).then(function () {
-        copy.textContent = copyLabels[lang];
-        copy.setAttribute("data-state", "done");
-        setTimeout(function () {
-          copy.innerHTML = copy.getAttribute("data-" + lang);
-          copy.removeAttribute("data-state");
-        }, 1600);
-      });
-    });
   }
 })();
 </script>

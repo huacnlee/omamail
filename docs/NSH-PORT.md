@@ -400,3 +400,23 @@ window's title bar is hidden, and `detach.test.tsx` runs again. Suspected: the s
 `window_press` path, for views that refuse first responder.
 
 Remove the stopgaps and their tests once NSH delivers the press.
+
+## Packaging and releases
+
+Done in the release-nsh-packages change; this supersedes the "pending NSH
+packaging" items above.
+
+- `nsh package` builds the release on each desktop: macOS arm64 (ad hoc
+  signed `Omamail.app`), Linux x86_64 (`Omamail/` with its desktop entry) and
+  Windows x86_64 (`Omamail\`). The update archives it names
+  (`Omamail-<version>-<os>-<arch>`) are the release assets.
+- The app updates itself through `nsh/updater` from GitHub releases. The
+  release's `latest.json` is signed with the key whose public half is
+  `nsh.json`'s `updater.publicKey`; the secret is the `NSH_UPDATE_KEY`
+  repository secret.
+- `release.yml`, `omarchy/scripts/{publish,bump,release}`, the installers and
+  `omastore.toml` serve that release. The standalone `omamail` binary
+  packages, `core/backend-version` and the binary release scripts are gone;
+  the app runs its own executable for `serve` and the agent entry points.
+- The app icon is `assets/icon.png`, rendered from the Qt app's macOS plate
+  and logo by `assets/icon/render.sh`.

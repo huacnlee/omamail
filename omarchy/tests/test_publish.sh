@@ -2,7 +2,7 @@
 # scripts/publish.sh against a real git origin and a recorded fake gh.
 set -euo pipefail
 
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
 
@@ -29,13 +29,14 @@ fresh_checkout() {
   git init -q -b main "$root/clone"
   git -C "$root/clone" config user.name Tester
   git -C "$root/clone" config user.email tester@example.test
-  mkdir -p "$root/clone/scripts" "$root/clone/app"
-  cp "$project_dir/scripts/publish.sh" "$project_dir/scripts/bump.sh" \
-    "$project_dir/scripts/package-backend.py" "$root/clone/scripts/"
-  printf '[package]\nname = "omamail"\nversion = "0.1.0"\n' >"$root/clone/Cargo.toml"
-  printf '[[package]]\nname = "omamail"\nversion = "0.1.0"\n' >"$root/clone/Cargo.lock"
+  mkdir -p "$root/clone/omarchy/scripts" "$root/clone/core" "$root/clone/ext/omamail-native"
+  cp "$project_dir/omarchy/scripts/publish.sh" "$project_dir/omarchy/scripts/bump.sh" \
+    "$project_dir/omarchy/scripts/release.py" "$root/clone/omarchy/scripts/"
+  printf '{\n  "name": "Omamail",\n  "id": "dev.huacnlee.omamail",\n  "version": "0.1.0",\n  "build": 1\n}\n' >"$root/clone/nsh.json"
+  printf '[package]\nname = "omamail"\nversion = "0.1.0"\n' >"$root/clone/core/Cargo.toml"
+  printf '[[package]]\nname = "omamail"\nversion = "0.1.0"\n' >"$root/clone/core/Cargo.lock"
+  printf '[[package]]\nname = "omamail"\nversion = "0.1.0"\n' >"$root/clone/ext/omamail-native/Cargo.lock"
   printf '{\n  "version": "0.1.0"\n}\n' >"$root/clone/manifest.json"
-  printf 'cmake_minimum_required(VERSION 3.21)\nproject(omamail-app VERSION 0.1.0 LANGUAGES CXX)\n' >"$root/clone/app/CMakeLists.txt"
   printf '__pycache__/\n' >"$root/clone/.gitignore"
   git -C "$root/clone" add -A
   git -C "$root/clone" commit -q -m "Initial"
@@ -44,7 +45,7 @@ fresh_checkout() {
   : >"$PUBLISH_TEST_LOG"
 }
 
-publish() { (cd "$root/clone" && scripts/publish.sh "$@"); }
+publish() { (cd "$root/clone" && omarchy/scripts/publish.sh "$@"); }
 
 refuses() {
   local message="$1"; shift
@@ -62,8 +63,9 @@ fresh_checkout
 main_sha="$(git -C "$root/clone" rev-parse HEAD)"
 publish 0.2.0 >"$root/out"
 test "$(git -C "$root/clone" log -1 --format=%s)" = "Version 0.2.0"
-test "$(git -C "$root/clone" show --format= --name-only HEAD | LC_ALL=C sort | tr '\n' ' ')" = "Cargo.lock Cargo.toml app/CMakeLists.txt manifest.json "
-grep -F 'version = "0.2.0"' "$root/clone/Cargo.toml" >/dev/null
+test "$(git -C "$root/clone" show --format= --name-only HEAD | LC_ALL=C sort | tr '\n' ' ')" = "core/Cargo.lock core/Cargo.toml ext/omamail-native/Cargo.lock manifest.json nsh.json "
+grep -F 'version = "0.2.0"' "$root/clone/core/Cargo.toml" >/dev/null
+grep -F '"build": 2' "$root/clone/nsh.json" >/dev/null
 head_sha="$(git -C "$root/clone" rev-parse HEAD)"
 test "$(git -C "$root/origin.git" rev-parse refs/heads/main)" = "$main_sha"
 test "$(git -C "$root/origin.git" rev-parse refs/heads/release/0.2.0)" = "$head_sha"
@@ -85,7 +87,7 @@ test -z "$(git -C "$root/origin.git" tag)"
 
 # Refusals, each before anything reaches the origin.
 fresh_checkout
-echo scratch >"$root/clone/Cargo.toml"
+echo scratch >"$root/clone/core/Cargo.toml"
 refuses "working tree is not clean" 0.2.0
 
 fresh_checkout

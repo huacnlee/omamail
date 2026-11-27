@@ -53,8 +53,8 @@ case "$os:$arch" in
     ;;
   Linux:x86_64|Linux:amd64)
     target=linux-x86_64
-    top_level=omamail.app
-    install_dir=${OMAMAIL_INSTALL_ROOT:-"$HOME/.local/omamail.app"}
+    top_level=Omamail
+    install_dir=${OMAMAIL_INSTALL_ROOT:-"$HOME/.local/share/omamail/Omamail"}
     ;;
   *)
     printf 'unsupported platform: %s %s (published: macOS arm64, Linux x86_64)\n' "$os" "$arch" >&2
@@ -63,29 +63,53 @@ case "$os:$arch" in
 esac
 
 bin_dir=${OMAMAIL_BIN_DIR:-"$HOME/.local/bin"}
-bin_link="$bin_dir/omamail"
+app_id=dev.huacnlee.omamail
+# The Omarchy notice helper (notice/omamail-app.sh) finds the app by this
+# desktop entry, else by `omamail-app` on PATH.
+bin_link="$bin_dir/omamail-app"
 desktop_dir=${OMAMAIL_DESKTOP_DIR:-"$HOME/.local/share/applications"}
-desktop_file="$desktop_dir/omamail.desktop"
+desktop_file="$desktop_dir/$app_id.desktop"
+# What the Qt-era releases (0.12 and earlier) installed on Linux. On macOS
+# they used the same ~/Applications/Omamail.app, which the swap replaces.
+legacy_dir=${OMAMAIL_LEGACY_ROOT:-"$HOME/.local/omamail.app"}
+legacy_link="$bin_dir/omamail"
+legacy_desktop="$desktop_dir/omamail.desktop"
+
+# Removes the Qt-era app, its desktop entry, and its `omamail` link when that
+# still points into it (a link elsewhere is someone else's). Accounts,
+# settings and keyring entries are shared with the NSH app and stay.
+remove_legacy() {
+  [ "$os" = Linux ] || return 0
+  if [ -L "$legacy_link" ]; then
+    case "$(readlink "$legacy_link")" in
+      "$legacy_dir"/*) rm -f "$legacy_link" ;;
+    esac
+  fi
+  rm -f "$legacy_desktop"
+  rm -rf "$legacy_dir" "$legacy_dir.previous"
+}
 
 if [ "$uninstall" -eq 1 ]; then
   rm -rf "$install_dir" "$install_dir.previous"
   if [ "$os" = Linux ]; then
     rm -f "$bin_link" "$desktop_file"
+    remove_legacy
+    rmdir "$(dirname -- "$install_dir")" 2>/dev/null || true
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "$desktop_dir" || true
   fi
-  printf 'Omamail removed; user data was preserved.\n'
+  printf 'Omamail removed; accounts and settings were preserved.\n'
   exit 0
 fi
 
 if [ "$os" = Linux ] && [ "${OMAMAIL_TEST_SKIP_GLIBC:-0}" != 1 ]; then
-  command -v ldd >/dev/null 2>&1 || { printf 'Omamail requires glibc >= 2.35.\n' >&2; exit 1; }
+  command -v ldd >/dev/null 2>&1 || { printf 'Omamail requires glibc >= 2.39.\n' >&2; exit 1; }
   ldd_line=$(ldd --version 2>&1 | head -n 1 || true)
   case "$ldd_line" in *musl*) printf 'Omamail requires glibc; musl is not supported.\n' >&2; exit 1 ;; esac
   glibc=$(printf '%s\n' "$ldd_line" | sed -n 's/.* \([0-9][0-9]*\.[0-9][0-9]*\)$/\1/p')
   [ -n "$glibc" ] || { printf 'could not confirm the installed glibc version.\n' >&2; exit 1; }
   major=${glibc%%.*}; minor=${glibc#*.}
-  if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 35 ]; }; then
-    printf 'Omamail requires glibc >= 2.35; found %s.\n' "$glibc" >&2
+  if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 39 ]; }; then
+    printf 'Omamail requires glibc >= 2.39; found %s.\n' "$glibc" >&2
     exit 1
   fi
 fi
@@ -191,7 +215,9 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT HUP INT TERM
-asset="omamail-app-$target.tar.gz"
+# Release archives are named by `nsh update-manifest`'s rule:
+# Omamail-<version>-<target>.tar.gz.
+asset_pattern="^Omamail-[0-9]+\\.[0-9]+\\.[0-9]+([+-][0-9A-Za-z.-]+)?-$target\\.tar\\.gz\$"
 
 if [ -n "$archive_path" ]; then
   [ -f "$archive_path" ] || { printf 'local release archive is missing: %s\n' "$archive_path" >&2; exit 1; }
@@ -217,12 +243,33 @@ else
   else
     base="https://github.com/$repository/releases/download/$tag"
   fi
-  archive="$temp/$asset"
   sums="$temp/SHA256SUMS"
-  printf 'Downloading %s...\n' "$asset"
-  python3 "$bounded_download" "$archive" 2147483648 600 "$base/$asset"
   python3 "$bounded_download" "$sums" 1048576 60 "$base/SHA256SUMS"
-  checksum_name=$asset
+  if [ "$requested_version" = latest ]; then
+    # The latest release's one archive for this platform, as SHA256SUMS lists it.
+    checksum_name=$(ASSET_PATTERN=$asset_pattern awk '
+      BEGIN { count=0; pattern=ENVIRON["ASSET_PATTERN"] }
+      $1 ~ /^[0-9A-Fa-f]{64}$/ { name=$2; sub(/^\*/, "", name); if (name ~ pattern) { found=name; count++ } }
+      END { if (count == 1) print found }
+    ' "$sums")
+    [ -n "$checksum_name" ] || { printf 'the latest release has no single %s archive.\n' "$target" >&2; exit 1; }
+  else
+    checksum_name="Omamail-$requested_version-$target.tar.gz"
+  fi
+  archive="$temp/release.tar.gz"
+  printf 'Downloading %s...\n' "$checksum_name"
+  python3 "$bounded_download" "$archive" 2147483648 600 "$base/$checksum_name"
+fi
+
+printf '%s\n' "$checksum_name" | grep -Eq "$asset_pattern" || {
+  printf 'release archive name is not Omamail-<version>-%s.tar.gz: %s\n' "$target" "$checksum_name" >&2
+  exit 1
+}
+release_version=${checksum_name#Omamail-}
+release_version=${release_version%-"$target".tar.gz}
+if [ "$requested_version" != latest ] && [ "$release_version" != "$requested_version" ]; then
+  printf 'release version does not match the requested version.\n' >&2
+  exit 1
 fi
 
 expected=$(awk -v asset="$checksum_name" '
@@ -248,10 +295,10 @@ archive_bytes=$(wc -c < "$archive" | tr -d ' ')
 
 staging="$temp/extracted"
 mkdir -m 700 "$staging"
-python3 - "$archive" "$staging" "$top_level" "$target" "$requested_version" <<'PY'
+python3 - "$archive" "$staging" "$top_level" "$target" "$release_version" <<'PY'
 import json, os, pathlib, plistlib, re, shutil, struct, sys, tarfile
 
-archive, destination, expected_top, expected_target, requested_version = sys.argv[1:]
+archive, destination, expected_top, expected_target, release_version = sys.argv[1:]
 root = pathlib.Path(destination).resolve()
 seen = set()
 members = []
@@ -307,7 +354,8 @@ with tarfile.open(archive, "r:gz") as package:
         target.symlink_to(member.linkname)
 
 base = root / expected_top
-metadata_path = base / "release.json" if expected_target != "macos-aarch64" else base / "Contents/Resources/release.json"
+APP_ID = "dev.huacnlee.omamail"
+macos = expected_target == "macos-aarch64"
 def strict_json(path):
     if path.stat().st_size > 1024 * 1024:
         raise ValueError("metadata is too large")
@@ -319,40 +367,26 @@ def strict_json(path):
             result[key] = value
         return result
     return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=pairs)
-try:
-    metadata = strict_json(metadata_path)
-except Exception as error:
-    raise SystemExit(f"release metadata is missing or invalid: {error}")
-if metadata != {"schemaVersion": 1, "name": "omamail", "version": metadata.get("version"), "target": expected_target, "topLevel": expected_top}:
-    raise SystemExit("release metadata has invalid fields")
-release_version = metadata.get("version")
-if (not isinstance(release_version, str)
-        or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", release_version)):
-    raise SystemExit("release metadata has no version")
-if requested_version != "latest" and release_version != requested_version:
-    raise SystemExit("release version does not match the requested version")
-if expected_target == "macos-aarch64":
-    required = [
-        "Contents/MacOS/omamail-app", "Contents/MacOS/omamail",
-        "Contents/Resources/qml/Main.qml", "Contents/Resources/ui/Service.qml",
-        "Contents/Resources/manifest.json", "Contents/PlugIns/platforms/libqcocoa.dylib",
-        "Contents/Resources/omamail.icns", "Contents/Info.plist",
-    ]
-    executable = required[:2]
-else:
-    required = [
-        "bin/omamail-app", "bin/omamail", "bin/qt.conf", "qml/Main.qml", "ui/Service.qml",
-        "manifest.json", "plugins/platforms/libqxcb.so",
-        "share/applications/omamail.desktop", "share/icons/hicolor/scalable/apps/omamail.svg",
-    ]
-    executable = required[:2]
+# The `nsh package` layout: the runner, and the app's bundle in nsh/ beside
+# it (Contents/Resources/nsh in a macOS bundle).
+nsh_dir = "Contents/Resources/nsh" if macos else "nsh"
+executable = "Contents/MacOS/Omamail" if macos else "Omamail"
+required = [executable, f"{nsh_dir}/app.json", f"{nsh_dir}/bundle.nshc"]
+required += ["Contents/Info.plist"] if macos else [f"{APP_ID}.desktop", f"{APP_ID}.png"]
 for relative in required:
     path = base / relative
     if not path.is_file() or path.is_symlink():
         raise SystemExit(f"release payload is missing {relative}")
-for relative in executable:
-    if not os.access(base / relative, os.X_OK):
-        raise SystemExit(f"release executable is not executable: {relative}")
+if not os.access(base / executable, os.X_OK):
+    raise SystemExit(f"release executable is not executable: {executable}")
+try:
+    app = strict_json(base / nsh_dir / "app.json")
+except Exception as error:
+    raise SystemExit(f"release app.json is invalid: {error}")
+if not isinstance(app, dict) or app.get("id") != APP_ID:
+    raise SystemExit("release is not Omamail (app.json id)")
+if app.get("version") != release_version:
+    raise SystemExit("release app.json version does not match the archive name")
 def has_expected_architecture(path, target):
     with path.open("rb") as binary:
         header = binary.read(4096)
@@ -380,20 +414,25 @@ def has_expected_architecture(path, target):
         return False
     return any(struct.unpack_from(byte_order + "I", header, 8 + index * record_size)[0]
                == 0x0100000c for index in range(count))
-architecture_files = executable + (["Contents/PlugIns/platforms/libqcocoa.dylib"]
-                                   if expected_target == "macos-aarch64"
-                                   else ["plugins/platforms/libqxcb.so"])
-for relative in architecture_files:
-    if not has_expected_architecture(base / relative, expected_target):
-        raise SystemExit(f"release binary has the wrong architecture: {relative}")
-try:
-    manifest = strict_json(base / ("Contents/Resources/manifest.json" if expected_target == "macos-aarch64" else "manifest.json"))
-except Exception as error:
-    raise SystemExit(f"release manifest is invalid: {error}")
-if manifest.get("version") != release_version:
-    raise SystemExit("release manifest version does not match release metadata")
-if expected_target == "linux-x86_64":
-    desktop_path = base / "share/applications/omamail.desktop"
+if not has_expected_architecture(base / executable, expected_target):
+    raise SystemExit(f"release binary has the wrong architecture: {executable}")
+if macos:
+    plist_path = base / "Contents/Info.plist"
+    try:
+        if plist_path.stat().st_size > 1024 * 1024:
+            raise ValueError("Info.plist is too large")
+        info = plistlib.loads(plist_path.read_bytes())
+    except Exception as error:
+        raise SystemExit(f"macOS Info.plist is invalid: {error}")
+    if (info.get("CFBundleIdentifier") != APP_ID
+            or info.get("CFBundleExecutable") != "Omamail"
+            or info.get("CFBundlePackageType") != "APPL"
+            or info.get("CFBundleShortVersionString") != release_version):
+        raise SystemExit("macOS Info.plist does not match the release")
+    if "CFBundleURLTypes" in info or "CFBundleDocumentTypes" in info:
+        raise SystemExit("macOS release must not register URL or document handlers")
+else:
+    desktop_path = base / f"{APP_ID}.desktop"
     try:
         if desktop_path.stat().st_size > 1024 * 1024:
             raise ValueError("desktop entry is too large")
@@ -402,22 +441,8 @@ if expected_target == "linux-x86_64":
         raise SystemExit(f"Linux desktop entry is invalid: {error}")
     if re.search(r"mailto", desktop_text, re.IGNORECASE):
         raise SystemExit("Linux release must not register mailto handling")
-if expected_target == "macos-aarch64":
-    plist_path = base / "Contents/Info.plist"
-    try:
-        if plist_path.stat().st_size > 1024 * 1024:
-            raise ValueError("Info.plist is too large")
-        info = plistlib.loads(plist_path.read_bytes())
-    except Exception as error:
-        raise SystemExit(f"macOS Info.plist is invalid: {error}")
-    if (info.get("CFBundleIdentifier") != "com.omamail.app"
-            or info.get("CFBundleExecutable") != "omamail-app"
-            or info.get("CFBundlePackageType") != "APPL"
-            or info.get("CFBundleShortVersionString") != release_version
-            or info.get("CFBundleVersion") != release_version):
-        raise SystemExit("macOS Info.plist does not match the release")
-    if "CFBundleURLTypes" in info or "CFBundleDocumentTypes" in info:
-        raise SystemExit("macOS release must not register URL or document handlers")
+    if not re.search(r"^Exec=", desktop_text, re.MULTILINE):
+        raise SystemExit("Linux desktop entry has no Exec line")
 PY
 
 source_dir="$staging/$top_level"
@@ -475,11 +500,11 @@ install_transaction() {
     mkdir -p "$bin_dir" "$desktop_dir" || return 1
     link_temp="$bin_link.new.$$"
     rm -f "$link_temp"
-    ln -s "$install_dir/bin/omamail-app" "$link_temp" || return 1
+    ln -s "$install_dir/Omamail" "$link_temp" || return 1
     mv -f "$link_temp" "$bin_link" || return 1
     desktop_temp="$desktop_file.new.$$"
-    python3 - "$install_dir/share/applications/omamail.desktop" "$desktop_temp" \
-      "$install_dir/bin/omamail-app" "$install_dir/share/icons/hicolor/scalable/apps/omamail.svg" <<'PY' || return 1
+    python3 - "$install_dir/$app_id.desktop" "$desktop_temp" \
+      "$install_dir/Omamail" "$install_dir/$app_id.png" <<'PY' || return 1
 import pathlib, sys
 source, destination, executable, icon = sys.argv[1:]
 def quoted(value):
@@ -492,10 +517,14 @@ for line in lines:
         output.append("Exec=" + quoted(executable)); seen_exec = True
     elif line.startswith("Icon="):
         output.append("Icon=" + icon.replace('\\', '\\\\')); seen_icon = True
+    elif line.startswith("TryExec="):
+        continue
     else:
         output.append(line)
-if not seen_exec or not seen_icon:
-    raise SystemExit("desktop entry is missing Exec or Icon")
+if not seen_exec:
+    raise SystemExit("desktop entry is missing Exec")
+if not seen_icon:
+    output.append("Icon=" + icon.replace('\\', '\\\\'))
 pathlib.Path(destination).write_text("\n".join(output) + "\n", encoding="utf-8")
 PY
     chmod 600 "$desktop_temp" || return 1
@@ -518,6 +547,11 @@ else
 fi
 
 if [ "$os" = Linux ]; then
+  remove_legacy
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "$desktop_dir" || true
 fi
-printf 'Omamail installed at %s\n' "$install_dir"
+printf 'Omamail %s installed at %s\n' "$release_version" "$install_dir"
+printf 'Omamail checks for new versions itself and asks before updating.\n'
+if [ "$os" = Linux ]; then
+  printf 'It needs GTK 4.14+ and WebKitGTK 6.0 (Arch: gtk4 webkitgtk-6.0; Debian/Ubuntu: libgtk-4-1 libwebkitgtk-6.0-4).\n'
+fi

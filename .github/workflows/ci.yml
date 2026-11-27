@@ -166,11 +166,14 @@ jobs:
       - run: cargo test --locked --no-default-features --features standalone,integration-test-credentials --tests
 
   # What existing Omarchy installs read from this checkout after the NSH
-  # cutover: the root manifest (the notice bar widget) and its one helper.
+  # cutover (the root manifest of the notice bar widget and its one helper),
+  # the installers, and the release tooling release.yml runs.
   omarchy-plugin-entry:
-    name: Omarchy plugin entry
+    name: Omarchy plugin entry, installers and release tooling
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      # test_release.py verifies a signed update manifest with cryptography.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-cryptography shellcheck
       - run: make -C omarchy test lint

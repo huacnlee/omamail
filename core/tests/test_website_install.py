@@ -36,9 +36,13 @@ for tab in TABS:
 for panel in PANELS:
     assert panel in PAGE, f"website is missing the install panel: {panel}"
 assert 'selectTab(document.getElementById("install-tab-windows"))' in PAGE, "the Windows tab does not open for Windows visitors"
-assert "TAR.GZ ONLY" in PAGE, "Linux package format is not explicit"
-assert "make app-run" in PAGE, "standalone development entry point is missing"
-assert "mailto:</code> registration" in PAGE, "standalone capability boundary is missing"
+assert "APPLE SILICON · MACOS 14+ · AD HOC SIGNED" in PAGE, "the macOS build's platform and signing are not explicit"
+assert "X86_64 · GLIBC 2.39+ · GTK 4.14+ · WEBKITGTK 6.0" in PAGE, "the Linux build's requirements are not explicit"
+assert '<pre class="block"><span class="prompt">$ </span>make run</pre>' in PAGE, "the source entry point is missing"
+assert "run:\n\tnsh run\n" in (ROOT / "Makefile").read_text(encoding="utf-8"), "make run no longer runs the app"
+assert "From then on Omamail updates itself." in PAGE, "the website does not say the app updates itself"
+for leftover in ("Qt", "QML", "Quickshell", "app-run", "2.35+", "TAR.GZ"):
+    assert leftover not in PAGE, f"the website still describes the old app: {leftover}"
 
 # The README sends NSH app users to the source until NSH packages are
 # published, so it carries no installer command; when it does, it must be the

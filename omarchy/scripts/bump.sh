@@ -1,38 +1,8 @@
 #!/usr/bin/env bash
-# Prepare release metadata locally. Publication and pin advancement belong to CI.
+# Set a new version in every versioned file (nsh.json, manifest.json,
+# core/Cargo.toml and the Cargo.lock files) without committing. `make publish`
+# runs it on a fresh release branch; CI builds and publishes from there.
 set -euo pipefail
-project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$project_dir"
-version="${1-}"
-python3 - "$version" <<'PY'
-from pathlib import Path
-import importlib.util
-import re
-import sys
-spec = importlib.util.spec_from_file_location("release", "scripts/package-backend.py")
-release = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(release)
-version = sys.argv[1]
-if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
-    raise SystemExit("bump: usage: scripts/bump.sh MAJOR.MINOR.PATCH")
-current = release.check(Path("."))
-if tuple(map(int, version.split("."))) <= tuple(map(int, current.split("."))):
-    raise SystemExit("bump: the new version must be newer than " + current)
-patterns = {
-    "manifest.json": r'("version"\s*:\s*")[^"]+(")',
-    "Cargo.toml": r'(^\[package\][\s\S]*?^version\s*=\s*")[^"]+(")',
-    "Cargo.lock": r'(^\[\[package\]\]\nname = "omamail"\nversion = ")[^"]+(")',
-    "app/CMakeLists.txt": r'(^\s*project\s*\(\s*omamail-app\s+VERSION\s+)[^\s\)]+(\s+LANGUAGES\s+CXX\s*\))',
-}
-prepared = {}
-for name, pattern in patterns.items():
-    text, count = re.subn(pattern, lambda m: m[1] + version + m[2], Path(name).read_text(), flags=re.MULTILINE)
-    if count != 1:
-        raise SystemExit("bump: expected one version record in " + name)
-    prepared[name] = text
-for name, text in prepared.items():
-    Path(name).write_text(text)
-print("Prepared " + version + "; backend-version remains on the published runtime.")
-print("Use make publish from a clean main to create the release branch and PR.")
-print("CI publishes and verifies both assets before making a pin-only commit.")
-PY
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+[ "$#" -eq 1 ] || { echo "bump: usage: omarchy/scripts/bump.sh MAJOR.MINOR.PATCH" >&2; exit 2; }
+python3 "$root/omarchy/scripts/release.py" --root "$root" bump "$1"

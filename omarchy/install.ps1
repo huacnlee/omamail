@@ -1,35 +1,61 @@
+# Installs the Omamail Windows release (built by `nsh package --target windows`)
+# for the current user, the same way NSH's own setup does: program files in
+# %LOCALAPPDATA%\Programs\Omamail and a Start menu shortcut whose
+# AppUserModelID is the app id. Omamail updates itself from there.
+#
+#   irm https://huacnlee.github.io/omamail/install.ps1 | iex
+#   & ([scriptblock]::Create((irm https://huacnlee.github.io/omamail/install.ps1))) -Version 0.13.0
+#
+# It also removes what the Qt-era version of this script installed (program
+# files in %LOCALAPPDATA%\omamail, its user PATH entry and its notification
+# activator registration). Accounts, settings and saved passwords are never
+# touched: they live in %APPDATA%\omamail, %LOCALAPPDATA%\OmamailData and
+# Windows Credential Manager, outside every directory this script removes.
+#
+# Keep this file Windows PowerShell 5.1 compatible.
 param(
     [string]$Version = "latest",
     [switch]$Uninstall,
+    [Alias("Archive")]
     [string]$ArchivePath = "",
+    [Alias("Checksums")]
     [string]$ChecksumPath = "",
+    [switch]$TestMode,
     [string]$InstallRoot = "",
     [string]$StartMenuRoot = "",
-    [switch]$TestMode,
+    [string]$LegacyRoot = "",
+    [string]$RegistryRoot = "",
     [string]$TestArchitecture = "",
-    [string]$PathStateFile = "",
-    [string]$RegistryStateFile = "",
     [switch]$TestRedirectPolicy,
     [object]$TestHttpHandler = $null,
     [string]$RedirectStateFile = "",
-    [ValidateSet("", "AfterInstall", "AfterPath", "AfterRegistration", "AfterShortcut")]
+    [ValidateSet("", "AfterInstall", "AfterShortcut")]
     [string]$TestFailure = ""
 )
 
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Repository = "huacnlee/omamail"
-$Asset = "omamail-app-windows-x86_64.zip"
-$ExpectedTarget = "windows-x86_64"
-$AppUserModelId = "com.omamail.app"
-$ToastActivatorClsid = "{6E420BBE-A800-4FF9-BD65-472CC53922CA}"
-$ToastClassSubkey = "Software\Classes\CLSID\$ToastActivatorClsid"
-$ToastServerSubkey = "$ToastClassSubkey\LocalServer32"
+$AppId = "dev.huacnlee.omamail"
+$TopLevel = "Omamail"
+$ExecutableName = "Omamail.exe"
+$VersionPattern = '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$'
+$AssetPattern = '^Omamail-([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)-windows-x86_64\.zip$'
 $MaximumArchiveBytes = 2GB
 $MaximumEntries = 4096
 $MaximumEntryBytes = 512MB
 $MaximumExpandedBytes = 2GB
 $MaximumMetadataBytes = 1MB
+
+# What the Qt-era installer created (omarchy/install.ps1 before the NSH port):
+# the program directory %LOCALAPPDATA%\omamail with these top-level items, its
+# bin directory on the user PATH, and this toast activator COM registration.
+# bin goes last: it holds the marker that identifies a Qt-era directory.
+$LegacyPackageItems = @("qml", "ui", "licenses", "manifest.json", "release.json",
+    "app-icon.ico", "bin")
+$LegacyMarker = "bin\omamail-app.exe"
+$LegacyToastClsid = "{6E420BBE-A800-4FF9-BD65-472CC53922CA}"
 
 function Save-BoundedDownload([string]$Uri, [string]$Path, [long]$Limit,
     [int]$TimeoutSeconds, [object]$HandlerOverride = $null) {
@@ -42,7 +68,7 @@ function Save-BoundedDownload([string]$Uri, [string]$Path, [long]$Limit,
     $Cancellation = New-Object Threading.CancellationTokenSource
     $Cancellation.CancelAfter([TimeSpan]::FromSeconds($TimeoutSeconds))
     $Response = $null
-    $Input = $null
+    $Reader = $null
     $Output = $null
     try {
         $CurrentUri = New-Object Uri($Uri, [UriKind]::Absolute)
@@ -75,12 +101,12 @@ function Save-BoundedDownload([string]$Uri, [string]$Path, [long]$Limit,
         if ($null -ne $Declared -and $Declared -gt $Limit) {
             throw "release download is too large"
         }
-        $Input = $Response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $Reader = $Response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
         $Output = [IO.File]::Open($Path, [IO.FileMode]::CreateNew,
             [IO.FileAccess]::Write, [IO.FileShare]::None)
         $Buffer = New-Object byte[] 65536
         [long]$Total = 0
-        while (($Read = $Input.ReadAsync($Buffer, 0, $Buffer.Length,
+        while (($Read = $Reader.ReadAsync($Buffer, 0, $Buffer.Length,
                     $Cancellation.Token).GetAwaiter().GetResult()) -gt 0) {
             $Total += $Read
             if ($Total -gt $Limit) { throw "release download is too large" }
@@ -88,7 +114,7 @@ function Save-BoundedDownload([string]$Uri, [string]$Path, [long]$Limit,
         }
     } finally {
         if ($Output) { $Output.Dispose() }
-        if ($Input) { $Input.Dispose() }
+        if ($Reader) { $Reader.Dispose() }
         if ($Response) { $Response.Dispose() }
         $Cancellation.Dispose()
         $Client.Dispose()
@@ -98,16 +124,16 @@ function Save-BoundedDownload([string]$Uri, [string]$Path, [long]$Limit,
 
 function Copy-BoundedLocalFile([string]$Source, [string]$Destination, [long]$Limit,
     [string]$Description) {
-    $Input = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+    $Reader = [IO.File]::Open($Source, [IO.FileMode]::Open, [IO.FileAccess]::Read,
         [IO.FileShare]::Read)
     $Output = $null
     try {
-        if ($Input.Length -gt $Limit) { throw "$Description is too large" }
+        if ($Reader.Length -gt $Limit) { throw "$Description is too large" }
         $Output = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew,
             [IO.FileAccess]::Write, [IO.FileShare]::None)
         $Buffer = New-Object byte[] 65536
         [long]$Total = 0
-        while (($Read = $Input.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
+        while (($Read = $Reader.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
             $Total += $Read
             if ($Total -gt $Limit) { throw "$Description is too large" }
             $Output.Write($Buffer, 0, $Read)
@@ -118,14 +144,15 @@ function Copy-BoundedLocalFile([string]$Source, [string]$Destination, [long]$Lim
         throw
     } finally {
         if ($Output) { $Output.Dispose() }
-        $Input.Dispose()
+        $Reader.Dispose()
     }
 }
 
 function Assert-TestBoundary {
     if (-not $TestMode) {
-        if ($TestArchitecture -or $PathStateFile -or $RegistryStateFile -or $TestFailure -or
-            $TestRedirectPolicy -or $TestHttpHandler -or $RedirectStateFile) {
+        if ($InstallRoot -or $StartMenuRoot -or $LegacyRoot -or $RegistryRoot -or
+            $TestArchitecture -or $TestFailure -or $TestRedirectPolicy -or
+            $TestHttpHandler -or $RedirectStateFile) {
             throw "test-only arguments require -TestMode"
         }
         if ($env:OS -ne "Windows_NT") { throw "Omamail supports this installer only on Windows" }
@@ -134,21 +161,28 @@ function Assert-TestBoundary {
     if ($env:OMAMAIL_PACKAGE_TEST_MODE -ne "1") {
         throw "-TestMode is restricted to the package test harness"
     }
-    if (-not $InstallRoot -or -not $StartMenuRoot -or -not $PathStateFile -or
-        -not $RegistryStateFile -or
-        -not $TestArchitecture -or
+    if (-not $InstallRoot -or -not $StartMenuRoot -or -not $LegacyRoot -or
+        -not $RegistryRoot -or -not $TestArchitecture -or
         (-not $Uninstall -and (-not $ArchivePath -or -not $ChecksumPath))) {
-        throw "-TestMode requires isolated archive, checksum, install, Start Menu, PATH, and architecture inputs"
+        throw "-TestMode requires isolated archive, checksum, install, Start Menu, legacy, registry, and architecture inputs"
+    }
+    if ($RegistryRoot -cnotmatch '^Software\\OmamailInstallerTest-[0-9a-f]{32}$') {
+        throw "-RegistryRoot must be a Software\OmamailInstallerTest-<guid> key"
     }
 }
 
 function Normalize-Version([string]$Value) {
     if ($Value -eq "latest") { return "latest" }
     $Normalized = if ($Value.StartsWith('v')) { $Value.Substring(1) } else { $Value }
-    if ($Normalized -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
+    if ($Normalized -cnotmatch $VersionPattern) {
         throw "invalid release version: $Value"
     }
     return $Normalized
+}
+
+function Get-AssetVersion([string]$Name) {
+    if ($Name -cmatch $AssetPattern) { return $Matches[1] }
+    return ""
 }
 
 function Assert-X64Windows {
@@ -164,23 +198,42 @@ function Assert-X64Windows {
     }
 }
 
-function Get-ExpectedChecksum([string]$Path, [string]$ArchiveName) {
+function Read-ChecksumEntries([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "checksum file is missing: $Path"
     }
     if ((Get-Item -LiteralPath $Path).Length -gt $MaximumMetadataBytes) {
         throw "checksum file is too large"
     }
-    $Digests = @()
-    foreach ($Line in (Get-Content -LiteralPath $Path)) {
-        if ($Line -match '^([0-9A-Fa-f]{64})\s+\*?(.+)$' -and $Matches[2] -ceq $ArchiveName) {
-            $Digests += $Matches[1].ToLowerInvariant()
+    $Entries = @()
+    foreach ($Line in [IO.File]::ReadAllLines($Path)) {
+        if ($Line -match '^([0-9A-Fa-f]{64})\s+\*?(.+)$') {
+            $Entries += ,@($Matches[1].ToLowerInvariant(), $Matches[2])
         }
+    }
+    return ,$Entries
+}
+
+function Get-ExpectedChecksum([string]$Path, [string]$ArchiveName) {
+    $Digests = @()
+    foreach ($Entry in (Read-ChecksumEntries $Path)) {
+        if ($Entry[1] -ceq $ArchiveName) { $Digests += $Entry[0] }
     }
     if ($Digests.Count -ne 1) {
         throw "SHA256SUMS must contain exactly one entry for $ArchiveName"
     }
     return $Digests[0]
+}
+
+function Select-LatestAsset([string]$Path) {
+    $Names = @()
+    foreach ($Entry in (Read-ChecksumEntries $Path)) {
+        if (Get-AssetVersion $Entry[1]) { $Names += $Entry[1] }
+    }
+    if ($Names.Count -ne 1) {
+        throw "SHA256SUMS must list exactly one Omamail-<version>-windows-x86_64.zip"
+    }
+    return $Names[0]
 }
 
 function Test-ControlCharacter([string]$Value) {
@@ -199,9 +252,6 @@ function Assert-SafeEntryName([string]$Name) {
     }
     $Trimmed = $Name.TrimEnd('/')
     $Parts = $Trimmed.Split('/')
-    if ($Parts.Count -lt 1 -or $Parts[0] -cne "omamail") {
-        throw "release archive must contain one omamail top-level directory"
-    }
     foreach ($Part in $Parts) {
         if (-not $Part -or $Part -eq '.' -or $Part -eq '..' -or $Part.Length -gt 255 -or
             $Part -match '[<>"|?*]' -or $Part -match '[ .]$') {
@@ -211,6 +261,9 @@ function Assert-SafeEntryName([string]$Name) {
         if ($Stem -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {
             throw "release archive contains a reserved Windows path"
         }
+    }
+    if ($Parts[0] -cne $TopLevel) {
+        throw "release archive must contain one $TopLevel top-level directory"
     }
 }
 
@@ -235,19 +288,19 @@ function Assert-SafeEntryType($Entry, [bool]$IsDirectory) {
 
 function Read-ZipEntryBytes($Entry, [long]$Limit) {
     if ($Entry.Length -gt $Limit) { throw "release metadata is too large" }
-    $Input = $Entry.Open()
+    $Reader = $Entry.Open()
     $Memory = New-Object IO.MemoryStream
     try {
         $Buffer = New-Object byte[] 65536
         [long]$Total = 0
-        while (($Read = $Input.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
+        while (($Read = $Reader.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
             $Total += $Read
             if ($Total -gt $Limit) { throw "release metadata is too large" }
             $Memory.Write($Buffer, 0, $Read)
         }
         return ,$Memory.ToArray()
     } finally {
-        $Input.Dispose()
+        $Reader.Dispose()
         $Memory.Dispose()
     }
 }
@@ -258,20 +311,20 @@ function Read-ZipEntryText($Entry) {
 }
 
 function Read-ZipEntryPrefix($Entry, [long]$Limit) {
-    $Input = $Entry.Open()
+    $Reader = $Entry.Open()
     $Memory = New-Object IO.MemoryStream
     try {
         $Buffer = New-Object byte[] 65536
         [long]$Remaining = [Math]::Min($Entry.Length, $Limit)
         while ($Remaining -gt 0) {
-            $Read = $Input.Read($Buffer, 0, [int][Math]::Min($Buffer.Length, $Remaining))
+            $Read = $Reader.Read($Buffer, 0, [int][Math]::Min($Buffer.Length, $Remaining))
             if ($Read -le 0) { break }
             $Memory.Write($Buffer, 0, $Read)
             $Remaining -= $Read
         }
         return ,$Memory.ToArray()
     } finally {
-        $Input.Dispose()
+        $Reader.Dispose()
         $Memory.Dispose()
     }
 }
@@ -289,51 +342,67 @@ function Assert-X64PeEntry($Entry, [string]$Description) {
     }
 }
 
-function Test-JsonPropertyOnce([string]$Json, [string]$Name) {
-    return [regex]::Matches($Json, ('"' + [regex]::Escape($Name) + '"\s*:'),
-        [Text.RegularExpressions.RegexOptions]::IgnoreCase).Count -eq 1
+# Counts `"<Name>":` keys of the top-level object only, so a duplicate key
+# (which ConvertFrom-Json resolves silently) is refused while nested objects
+# may use the same names.
+function Get-TopLevelJsonKeyCount([string]$Json, [string]$Name) {
+    $Depth = 0
+    $Count = 0
+    $Index = 0
+    $Length = $Json.Length
+    while ($Index -lt $Length) {
+        $Character = $Json[$Index]
+        if ($Character -eq [char]'"') {
+            $Start = $Index + 1
+            $Index++
+            while ($Index -lt $Length -and $Json[$Index] -ne [char]'"') {
+                if ($Json[$Index] -eq [char]'\') { $Index++ }
+                $Index++
+            }
+            if ($Index -ge $Length) { throw "nsh/app.json is not valid JSON" }
+            $Text = $Json.Substring($Start, $Index - $Start)
+            $Index++
+            if ($Depth -eq 1) {
+                $Next = $Index
+                while ($Next -lt $Length -and [char]::IsWhiteSpace($Json[$Next])) { $Next++ }
+                if ($Next -lt $Length -and $Json[$Next] -eq [char]':' -and $Text -ceq $Name) {
+                    $Count++
+                }
+            }
+            continue
+        }
+        if ($Character -eq [char]'{' -or $Character -eq [char]'[') {
+            $Depth++
+        } elseif ($Character -eq [char]'}' -or $Character -eq [char]']') {
+            $Depth--
+        }
+        $Index++
+    }
+    return $Count
 }
 
-function Assert-ReleaseMetadata($ReleaseEntry, $ManifestEntry, [string]$RequestedVersion) {
-    $ReleaseText = Read-ZipEntryText $ReleaseEntry
-    foreach ($Name in @("schemaVersion", "name", "version", "target", "topLevel")) {
-        if (-not (Test-JsonPropertyOnce $ReleaseText $Name)) {
-            throw "release.json must contain one $Name property"
+function Assert-AppMetadata($Entry, [string]$ExpectedVersion) {
+    $Text = Read-ZipEntryText $Entry
+    foreach ($Name in @("id", "version")) {
+        if ((Get-TopLevelJsonKeyCount $Text $Name) -ne 1) {
+            throw "nsh/app.json must contain one $Name property"
         }
     }
-    $Release = $ReleaseText | ConvertFrom-Json
-    $PropertyNames = @($Release.PSObject.Properties | ForEach-Object { $_.Name })
-    $UnexpectedProperties = @($PropertyNames | Where-Object {
-        $_ -cnotin @("schemaVersion", "name", "version", "target", "topLevel")
-    })
-    if ($PropertyNames.Count -ne 5 -or $UnexpectedProperties.Count -ne 0) {
-        throw "release.json has an unexpected schema"
+    try {
+        $App = $Text | ConvertFrom-Json
+    } catch {
+        throw "nsh/app.json is not valid JSON"
     }
-    $SchemaIsInteger = $Release.schemaVersion -is [int] -or $Release.schemaVersion -is [long]
-    if (-not $SchemaIsInteger -or $Release.schemaVersion -ne 1 -or
-        $Release.name -isnot [string] -or $Release.name -cne "omamail" -or
-        $Release.target -isnot [string] -or $Release.target -cne $ExpectedTarget -or
-        $Release.topLevel -isnot [string] -or $Release.topLevel -cne "omamail") {
-        throw "release.json does not describe the Windows x86_64 Omamail package"
+    if ($null -eq $App -or $App -is [array]) { throw "nsh/app.json is not a JSON object" }
+    if ($App.id -isnot [string] -or $App.id -cne $AppId) {
+        throw "release archive is not Omamail: nsh/app.json id is not $AppId"
     }
-    if ($Release.version -isnot [string]) { throw "release archive version must be a string" }
-    $ArchiveVersion = $Release.version
-    if ($ArchiveVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$' -or
-        ($RequestedVersion -ne "latest" -and $ArchiveVersion -cne $RequestedVersion)) {
-        throw "release archive version does not match the requested version"
-    }
-
-    $ManifestText = Read-ZipEntryText $ManifestEntry
-    if (-not (Test-JsonPropertyOnce $ManifestText "version")) {
-        throw "manifest must contain one version property"
-    }
-    $Manifest = $ManifestText | ConvertFrom-Json
-    if ($Manifest.version -isnot [string] -or $Manifest.version -cne $ArchiveVersion) {
-        throw "manifest version does not match release.json"
+    if ($App.version -isnot [string] -or $App.version -cne $ExpectedVersion) {
+        throw "nsh/app.json version does not match the release archive name"
     }
 }
 
-function Open-ValidatedArchive([string]$Path, [string]$RequestedVersion) {
+function Open-ValidatedArchive([string]$Path, [string]$ExpectedVersion) {
     $File = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     try {
         $Zip = New-Object IO.Compression.ZipArchive($File, [IO.Compression.ZipArchiveMode]::Read, $false)
@@ -347,6 +416,7 @@ function Open-ValidatedArchive([string]$Path, [string]$RequestedVersion) {
         }
         $Names = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
         $Kinds = New-Object 'Collections.Generic.Dictionary[string,bool]' ([StringComparer]::OrdinalIgnoreCase)
+        $Entries = New-Object 'Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
         [long]$Expanded = 0
         foreach ($Entry in $Zip.Entries) {
             $Name = $Entry.FullName
@@ -367,6 +437,7 @@ function Open-ValidatedArchive([string]$Path, [string]$RequestedVersion) {
                 throw "release archive expands past its size limit"
             }
             $Kinds[$Name.TrimEnd('/')] = $IsDirectory
+            $Entries[$Name] = $Entry
         }
         foreach ($Name in @($Kinds.Keys)) {
             $Parts = $Name.Split('/')
@@ -378,28 +449,16 @@ function Open-ValidatedArchive([string]$Path, [string]$RequestedVersion) {
             }
         }
 
-        $Required = @(
-            "omamail/release.json",
-            "omamail/manifest.json",
-            "omamail/app-icon.ico",
-            "omamail/bin/omamail-app.exe",
-            "omamail/bin/omamail.exe",
-            "omamail/qml/Main.qml",
-            "omamail/ui/Service.qml",
-            "omamail/bin/platforms/qwindows.dll"
-        )
-        $Entries = @{}
-        foreach ($Entry in $Zip.Entries) { $Entries[$Entry.FullName.ToLowerInvariant()] = $Entry }
-        foreach ($RequiredName in $Required) {
+        $Executable = "$TopLevel/$ExecutableName"
+        $AppJson = "$TopLevel/nsh/app.json"
+        $Bundle = "$TopLevel/nsh/bundle.nshc"
+        foreach ($RequiredName in @($Executable, $AppJson, $Bundle)) {
             if (-not $Entries.ContainsKey($RequiredName) -or $Entries[$RequiredName].Length -eq 0) {
                 throw "release archive is missing $RequiredName"
             }
         }
-        Assert-ReleaseMetadata $Entries["omamail/release.json"] `
-            $Entries["omamail/manifest.json"] $RequestedVersion
-        Assert-X64PeEntry $Entries["omamail/bin/omamail-app.exe"] "standalone host"
-        Assert-X64PeEntry $Entries["omamail/bin/omamail.exe"] "backend"
-        Assert-X64PeEntry $Entries["omamail/bin/platforms/qwindows.dll"] "Qt platform plugin"
+        Assert-AppMetadata $Entries[$AppJson] $ExpectedVersion
+        Assert-X64PeEntry $Entries[$Executable] $ExecutableName
         return @{ File = $File; Zip = $Zip }
     } catch {
         $Zip.Dispose()
@@ -425,13 +484,13 @@ function Expand-ValidatedArchive($Opened, [string]$Destination) {
         }
         $Parent = Split-Path -Parent $Output
         New-Item -ItemType Directory -Force $Parent | Out-Null
-        $Input = $Entry.Open()
+        $Reader = $Entry.Open()
         $Target = [IO.File]::Open($Output, [IO.FileMode]::CreateNew,
             [IO.FileAccess]::Write, [IO.FileShare]::None)
         try {
             $Buffer = New-Object byte[] 65536
             [long]$Written = 0
-            while (($Read = $Input.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
+            while (($Read = $Reader.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
                 $Written += $Read
                 $Expanded += $Read
                 if ($Written -gt $MaximumEntryBytes -or $Expanded -gt $MaximumExpandedBytes) {
@@ -442,24 +501,8 @@ function Expand-ValidatedArchive($Opened, [string]$Destination) {
             if ($Written -ne $Entry.Length) { throw "release archive entry length changed during extraction" }
         } finally {
             $Target.Dispose()
-            $Input.Dispose()
+            $Reader.Dispose()
         }
-    }
-}
-
-function Get-PathValue {
-    if ($TestMode) {
-        if (-not (Test-Path -LiteralPath $PathStateFile)) { return "" }
-        return [IO.File]::ReadAllText($PathStateFile)
-    }
-    return [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
-}
-
-function Set-PathValue([AllowEmptyString()][string]$Value) {
-    if ($TestMode) {
-        [IO.File]::WriteAllText($PathStateFile, $Value, (New-Object Text.UTF8Encoding($false)))
-    } else {
-        [Environment]::SetEnvironmentVariable("Path", $Value, [EnvironmentVariableTarget]::User)
     }
 }
 
@@ -468,153 +511,182 @@ function Path-Key([string]$Value) {
     return $Value.Trim().Trim('"').TrimEnd('\', '/').ToLowerInvariant()
 }
 
-function Add-PathEntry([string]$Value, [string]$Entry) {
-    $Parts = @(if ($Value) { $Value.Split(';') | Where-Object { $_ } })
-    $Key = Path-Key $Entry
-    if (-not @($Parts | Where-Object { (Path-Key $_) -eq $Key }).Count) { $Parts += $Entry }
-    return ($Parts -join ';')
+function Test-ReparsePoint([string]$Path) {
+    $Item = Get-Item -LiteralPath $Path -Force
+    return ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
 }
 
-function Remove-PathEntry([string]$Value, [string]$Entry) {
-    $Key = Path-Key $Entry
-    return (@($Value.Split(';') | Where-Object { $_ -and (Path-Key $_) -ne $Key }) -join ';')
-}
-
-function Get-ToastRegistration {
-    if ($TestMode) {
-        $Exists = Test-Path -LiteralPath $RegistryStateFile -PathType Leaf
-        return @{
-            ClassExisted = $Exists
-            ServerKeyExisted = $Exists
-            ValueExisted = $Exists
-            Value = if ($Exists) { [IO.File]::ReadAllText($RegistryStateFile) } else { $null }
-            Kind = [Microsoft.Win32.RegistryValueKind]::String
-        }
-    }
-    $Class = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($ToastClassSubkey, $false)
-    $ClassExisted = $null -ne $Class
-    if ($Class) { $Class.Dispose() }
-    $Key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($ToastServerSubkey, $false)
-    if (-not $Key) {
-        return @{
-            ClassExisted = $ClassExisted
-            ServerKeyExisted = $false
-            ValueExisted = $false
-            Value = $null
-            Kind = [Microsoft.Win32.RegistryValueKind]::String
-        }
-    }
-    try {
-        $ValueExisted = @($Key.GetValueNames()) -contains ""
-        return @{
-            ClassExisted = $ClassExisted
-            ServerKeyExisted = $true
-            ValueExisted = $ValueExisted
-            Value = if ($ValueExisted) {
-                $Key.GetValue("", $null,
-                    [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-            } else { $null }
-            Kind = if ($ValueExisted) {
-                $Key.GetValueKind("")
-            } else { [Microsoft.Win32.RegistryValueKind]::String }
-        }
-    } finally {
-        $Key.Dispose()
+function Assert-SeparateRoots([string]$First, [string]$Second) {
+    $A = (Path-Key $First) + '\'
+    $B = (Path-Key $Second) + '\'
+    if ($A.StartsWith($B) -or $B.StartsWith($A)) {
+        throw "install directory overlaps the Qt-era program directory"
     }
 }
 
-function Set-ToastRegistration([string]$Command) {
-    if ($TestMode) {
-        [IO.File]::WriteAllText($RegistryStateFile, $Command,
-            (New-Object Text.UTF8Encoding($false)))
-        return
-    }
-    $Key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($ToastServerSubkey, $true)
-    if (-not $Key) { throw "could not create the toast activation registration" }
-    try {
-        $Key.SetValue("", $Command, [Microsoft.Win32.RegistryValueKind]::String)
-    } finally {
-        $Key.Dispose()
-    }
+# The current user's registry, below -RegistryRoot in test mode.
+function Get-UserRegistryPath([string]$Subkey) {
+    if ($RegistryRoot) { return "$RegistryRoot\$Subkey" }
+    return $Subkey
 }
 
-function Remove-EmptyToastClass {
+function Send-EnvironmentChange {
     if ($TestMode) { return }
     try {
-        [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKey($ToastClassSubkey, $false)
+        if (-not ("OmamailInstaller.EnvironmentBroadcast" -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace OmamailInstaller {
+    public static class EnvironmentBroadcast {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr SendMessageTimeout(IntPtr window, uint message,
+            UIntPtr wParam, string lParam, uint flags, uint timeout, out UIntPtr result);
+
+        public static void Send() {
+            UIntPtr result;
+            // HWND_BROADCAST, WM_SETTINGCHANGE, SMTO_ABORTIFHUNG
+            SendMessageTimeout(new IntPtr(0xffff), 0x001A, UIntPtr.Zero, "Environment",
+                0x0002, 5000, out result);
+        }
+    }
+}
+'@
+        }
+        [OmamailInstaller.EnvironmentBroadcast]::Send()
     } catch {
-        # Preserve a class key if another value or subkey exists.
+        # New shells still read the updated PATH from the registry.
     }
 }
 
-function Restore-ToastRegistration($Snapshot) {
-    if ($TestMode) {
-        if ($Snapshot.ValueExisted) {
-            [IO.File]::WriteAllText($RegistryStateFile, [string]$Snapshot.Value,
-                (New-Object Text.UTF8Encoding($false)))
-        } else {
-            Remove-Item -LiteralPath $RegistryStateFile -Force -ErrorAction SilentlyContinue
-        }
-        return
-    }
-    if (-not $Snapshot.ServerKeyExisted) {
-        [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($ToastServerSubkey, $false)
-        if (-not $Snapshot.ClassExisted) { Remove-EmptyToastClass }
-        return
-    }
-    $Key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($ToastServerSubkey, $true)
-    if (-not $Key) { throw "could not restore the toast activation registration" }
+# Removes the Qt-era `<legacy>\bin` entry from the user PATH, keeping every
+# other entry and the value's registry type (REG_EXPAND_SZ stays expandable).
+function Remove-LegacyPathEntry([string]$Entry) {
+    $Key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey(
+        (Get-UserRegistryPath "Environment"), $true)
+    if (-not $Key) { return }
+    $Changed = $false
     try {
-        if ($Snapshot.ValueExisted) {
-            $Key.SetValue("", $Snapshot.Value, $Snapshot.Kind)
-        } else {
-            $Key.DeleteValue("", $false)
+        if (@($Key.GetValueNames()) -notcontains "Path") { return }
+        $Kind = $Key.GetValueKind("Path")
+        if ($Kind -ne [Microsoft.Win32.RegistryValueKind]::String -and
+            $Kind -ne [Microsoft.Win32.RegistryValueKind]::ExpandString) { return }
+        $Raw = [string]$Key.GetValue("Path", "",
+            [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $Target = Path-Key $Entry
+        $Parts = @($Raw.Split(';'))
+        $Kept = @($Parts | Where-Object {
+            (Path-Key $_) -ne $Target -and
+            (Path-Key ([Environment]::ExpandEnvironmentVariables($_))) -ne $Target
+        })
+        if ($Kept.Count -eq $Parts.Count) { return }
+        $Key.SetValue("Path", ($Kept -join ';'), $Kind)
+        $Changed = $true
+    } finally {
+        $Key.Dispose()
+    }
+    if ($Changed) { Send-EnvironmentChange }
+}
+
+# Removes the Qt-era toast activator only while it still launches the Qt-era
+# program, so a registration that something else now owns stays.
+function Remove-LegacyToastRegistration([string]$LegacyExecutable) {
+    $ClassPath = Get-UserRegistryPath "Software\Classes\CLSID\$LegacyToastClsid"
+    $ServerPath = "$ClassPath\LocalServer32"
+    $Root = [Microsoft.Win32.Registry]::CurrentUser
+    $Key = $Root.OpenSubKey($ServerPath, $false)
+    if (-not $Key) { return }
+    $Command = ""
+    try {
+        if (@($Key.GetValueNames()) -contains "") {
+            $Command = [string]$Key.GetValue("", "",
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
         }
     } finally {
         $Key.Dispose()
     }
+    if (-not ($Command -match '^"([^"\r\n]+)" -ToastActivated$')) { return }
+    if ((Path-Key $Matches[1]) -ne (Path-Key $LegacyExecutable)) { return }
+    $Root.DeleteSubKeyTree($ServerPath, $false)
+    try {
+        $Root.DeleteSubKey($ClassPath, $false)
+    } catch {
+        # Keep a class key that has gained other subkeys.
+    }
 }
 
-function Get-RegisteredToastExecutable([string]$Command) {
-    if ($Command -match '^"([^"\r\n]+)" -ToastActivated$') { return $Matches[1] }
-    return ""
-}
-
-function Remove-OwnedToastRegistration([string]$Executable) {
-    $Snapshot = Get-ToastRegistration
-    if (-not $Snapshot.ValueExisted) { return }
-    $Registered = Get-RegisteredToastExecutable ([string]$Snapshot.Value)
-    if ((Path-Key $Registered) -ne (Path-Key $Executable)) { return }
-    if ($TestMode) {
-        Remove-Item -LiteralPath $RegistryStateFile -Force -ErrorAction SilentlyContinue
+# Removes the Qt package's own top-level items from a Qt-era program
+# directory, then the directory if nothing else is left in it.
+function Remove-LegacyProgramFiles([string]$Directory) {
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return }
+    if (Test-ReparsePoint $Directory) {
+        throw "refusing a reparse point at the Qt-era program directory $Directory"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $Directory $LegacyMarker) -PathType Leaf)) {
         return
     }
-    [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($ToastServerSubkey, $false)
-    Remove-EmptyToastClass
+    foreach ($Name in $LegacyPackageItems) {
+        $Item = Join-Path $Directory $Name
+        if (-not (Test-Path -LiteralPath $Item)) { continue }
+        if (Test-ReparsePoint $Item) {
+            throw "refusing a reparse point in the Qt-era program directory: $Item"
+        }
+        Remove-Item -LiteralPath $Item -Recurse -Force
+    }
+    if (-not (Get-ChildItem -LiteralPath $Directory -Force | Select-Object -First 1)) {
+        Remove-Item -LiteralPath $Directory -Force
+    }
+}
+
+function Remove-LegacyInstall {
+    $LegacyBin = Join-Path $LegacyRoot "bin"
+    Remove-LegacyPathEntry $LegacyBin
+    Remove-LegacyToastRegistration (Join-Path $LegacyBin "omamail-app.exe")
+    Remove-LegacyProgramFiles $LegacyRoot
+    Remove-LegacyProgramFiles "$LegacyRoot.previous"
+    $Parent = Split-Path -Parent $LegacyRoot
+    $Pattern = '^' + [regex]::Escape((Split-Path -Leaf $LegacyRoot)) + '\.new-[0-9a-f]{32}$'
+    if (Test-Path -LiteralPath $Parent -PathType Container) {
+        foreach ($Stale in @(Get-ChildItem -LiteralPath $Parent -Directory -Force |
+                Where-Object { $_.Name -match $Pattern })) {
+            Remove-LegacyProgramFiles $Stale.FullName
+        }
+    }
+}
+
+# Removes an Omamail program directory (or its backup), recognised by its
+# executable or NSH metadata; anything else at that path is left alone.
+function Remove-ProgramDirectory([string]$Directory) {
+    if (-not (Test-Path -LiteralPath $Directory)) { return }
+    if (Test-ReparsePoint $Directory) {
+        throw "refusing a reparse point at $Directory"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $Directory $ExecutableName) -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $Directory "nsh\app.json") -PathType Leaf)) {
+        Write-Warning "left $Directory in place: it does not hold Omamail"
+        return
+    }
+    Remove-Item -LiteralPath $Directory -Recurse -Force
 }
 
 function Write-Shortcut([string]$Path, [string]$Executable, [string]$WorkingDirectory,
-    [string]$Icon, [string]$ApplicationId, [string]$ActivatorClsid) {
+    [string]$ApplicationId) {
     $NewShortcut = "$Path.new-$([Guid]::NewGuid().ToString('N'))"
     try {
-        if ($TestMode -and $env:OS -ne "Windows_NT") {
-            [IO.File]::WriteAllText($NewShortcut,
-                "target=$Executable`nworkingDirectory=$WorkingDirectory`nicon=$Icon`nappUserModelId=$ApplicationId`ntoastActivatorClsid=$ActivatorClsid`n",
-                (New-Object Text.UTF8Encoding($false)))
-        } else {
-            if (-not ("OmamailInstaller.ShortcutWriter" -as [type])) {
-                Add-Type -TypeDefinition @'
+        if (-not ("OmamailInstaller.NshShortcutWriter" -as [type])) {
+            Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace OmamailInstaller {
     [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
-    internal class ShellLinkObject { }
+    internal class NshShellLinkObject { }
 
     [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown),
      Guid("000214F9-0000-0000-C000-000000000046")]
-    internal interface IShellLinkW {
+    internal interface INshShellLinkW {
         void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int maxPath,
             IntPtr findData, uint flags);
         void GetIDList(out IntPtr itemList);
@@ -642,17 +714,17 @@ namespace OmamailInstaller {
 
     [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown),
      Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
-    internal interface IPropertyStore {
+    internal interface INshPropertyStore {
         void GetCount(out uint count);
-        void GetAt(uint index, out PropertyKey key);
-        void GetValue(ref PropertyKey key, out PropVariant value);
-        void SetValue(ref PropertyKey key, ref PropVariant value);
+        void GetAt(uint index, out NshPropertyKey key);
+        void GetValue(ref NshPropertyKey key, out NshPropVariant value);
+        void SetValue(ref NshPropertyKey key, ref NshPropVariant value);
         void Commit();
     }
 
     [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown),
      Guid("0000010b-0000-0000-C000-000000000046")]
-    internal interface IPersistFile {
+    internal interface INshPersistFile {
         void GetClassID(out Guid classId);
         [PreserveSig] int IsDirty();
         void Load([MarshalAs(UnmanagedType.LPWStr)] string fileName, uint mode);
@@ -662,64 +734,53 @@ namespace OmamailInstaller {
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    internal struct PropertyKey {
+    internal struct NshPropertyKey {
         internal Guid formatId;
         internal uint propertyId;
-        internal PropertyKey(Guid formatId, uint propertyId) {
+        internal NshPropertyKey(Guid formatId, uint propertyId) {
             this.formatId = formatId;
             this.propertyId = propertyId;
         }
     }
 
     [StructLayout(LayoutKind.Explicit)]
-    internal struct PropVariant : IDisposable {
+    internal struct NshPropVariant : IDisposable {
         [FieldOffset(0)] private ushort valueType;
         [FieldOffset(8)] private IntPtr pointerValue;
 
-        internal PropVariant(string value) {
+        internal NshPropVariant(string value) {
             valueType = 31; // VT_LPWSTR
             pointerValue = Marshal.StringToCoTaskMemUni(value);
         }
 
-        internal PropVariant(Guid value) {
-            valueType = 72; // VT_CLSID
-            pointerValue = Marshal.AllocCoTaskMem(Marshal.SizeOf(typeof(Guid)));
-            Marshal.StructureToPtr(value, pointerValue, false);
-        }
-
         [DllImport("ole32.dll")]
-        private static extern int PropVariantClear(ref PropVariant value);
+        private static extern int PropVariantClear(ref NshPropVariant value);
 
         public void Dispose() { PropVariantClear(ref this); }
     }
 
-    public static class ShortcutWriter {
+    public static class NshShortcutWriter {
         public static void Save(string path, string target, string workingDirectory,
-                                string icon, string appUserModelId,
-                                string toastActivatorClsid) {
-            object link = new ShellLinkObject();
+                                string icon, string appUserModelId) {
+            object link = new NshShellLinkObject();
             try {
-                IShellLinkW shellLink = (IShellLinkW)link;
+                INshShellLinkW shellLink = (INshShellLinkW)link;
                 shellLink.SetPath(target);
                 shellLink.SetWorkingDirectory(workingDirectory);
                 shellLink.SetIconLocation(icon, 0);
 
-                PropertyKey key = new PropertyKey(
+                // PKEY_AppUserModel_ID
+                NshPropertyKey key = new NshPropertyKey(
                     new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
-                PropVariant value = new PropVariant(appUserModelId);
-                PropertyKey activatorKey = new PropertyKey(
-                    new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 26);
-                PropVariant activatorValue = new PropVariant(new Guid(toastActivatorClsid));
+                NshPropVariant value = new NshPropVariant(appUserModelId);
                 try {
-                    IPropertyStore properties = (IPropertyStore)link;
+                    INshPropertyStore properties = (INshPropertyStore)link;
                     properties.SetValue(ref key, ref value);
-                    properties.SetValue(ref activatorKey, ref activatorValue);
                     properties.Commit();
                 } finally {
-                    activatorValue.Dispose();
                     value.Dispose();
                 }
-                ((IPersistFile)link).Save(path, true);
+                ((INshPersistFile)link).Save(path, true);
             } finally {
                 if (Marshal.IsComObject(link)) Marshal.FinalReleaseComObject(link);
             }
@@ -727,26 +788,21 @@ namespace OmamailInstaller {
     }
 }
 '@
-            }
-            [OmamailInstaller.ShortcutWriter]::Save(
-                $NewShortcut, $Executable, $WorkingDirectory, $Icon, $ApplicationId,
-                $ActivatorClsid)
         }
+        [OmamailInstaller.NshShortcutWriter]::Save(
+            $NewShortcut, $Executable, $WorkingDirectory, $Executable, $ApplicationId)
         Move-Item -LiteralPath $NewShortcut -Destination $Path -Force
     } finally {
         Remove-Item -LiteralPath $NewShortcut -Force -ErrorAction SilentlyContinue
     }
 }
 
-function Invoke-Uninstall([string]$ProgramRoot, [string]$ProgramBin, [string]$HostExecutable,
-    [string]$ShortcutPath) {
-    $CurrentPath = Get-PathValue
-    Set-PathValue (Remove-PathEntry $CurrentPath $ProgramBin)
-    Remove-OwnedToastRegistration $HostExecutable
-    Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $ProgramRoot -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath "$ProgramRoot.previous" -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Output "Omamail removed; user data was preserved."
+function Invoke-Uninstall([string]$Shortcut) {
+    Remove-Item -LiteralPath $Shortcut -Force -ErrorAction SilentlyContinue
+    Remove-ProgramDirectory $InstallRoot
+    Remove-ProgramDirectory "$InstallRoot.previous"
+    Remove-LegacyInstall
+    Write-Output "Omamail removed; accounts, settings and saved passwords were preserved."
 }
 
 if ($TestRedirectPolicy) {
@@ -763,23 +819,24 @@ Assert-TestBoundary
 $RequestedVersion = Normalize-Version $Version
 Assert-X64Windows
 
-if (-not $InstallRoot) {
-    $InstallRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "omamail"
+$LocalAppData = [Environment]::GetFolderPath('LocalApplicationData')
+if (-not $InstallRoot -or -not $LegacyRoot) {
+    if (-not $LocalAppData) { throw "could not find the local application data folder" }
 }
+if (-not $InstallRoot) { $InstallRoot = Join-Path $LocalAppData "Programs\Omamail" }
+if (-not $LegacyRoot) { $LegacyRoot = Join-Path $LocalAppData "omamail" }
 if (-not $StartMenuRoot) {
     $StartMenuRoot = Join-Path ([Environment]::GetFolderPath('StartMenu')) "Programs"
 }
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
-$BinDir = Join-Path $InstallRoot "bin"
-$HostExecutable = Join-Path $BinDir "omamail-app.exe"
-if ($HostExecutable.Contains('"') -or (Test-ControlCharacter $HostExecutable)) {
-    throw "install path cannot be safely registered for toast activation"
-}
+$LegacyRoot = [IO.Path]::GetFullPath($LegacyRoot)
 $StartMenuRoot = [IO.Path]::GetFullPath($StartMenuRoot)
+Assert-SeparateRoots $InstallRoot $LegacyRoot
+$Executable = Join-Path $InstallRoot $ExecutableName
 $Shortcut = Join-Path $StartMenuRoot "Omamail.lnk"
 
 if ($Uninstall) {
-    Invoke-Uninstall $InstallRoot $BinDir $HostExecutable $Shortcut
+    Invoke-Uninstall $Shortcut
     return
 }
 
@@ -801,23 +858,34 @@ try {
             throw "checksum file is missing or too large"
         }
         $ArchiveName = [IO.Path]::GetFileName($ArchiveSource)
-        $Archive = Join-Path $Temp "local-release.zip"
-        $Sums = Join-Path $Temp "local.SHA256SUMS"
+        if (-not (Get-AssetVersion $ArchiveName)) {
+            throw "a local archive must be named Omamail-<version>-windows-x86_64.zip"
+        }
+        $Archive = Join-Path $Temp "release.zip"
+        $Sums = Join-Path $Temp "SHA256SUMS"
         Copy-BoundedLocalFile $ArchiveSource $Archive $MaximumArchiveBytes "release archive"
         Copy-BoundedLocalFile $SumsSource $Sums $MaximumMetadataBytes "checksum file"
     } else {
         if ($ChecksumPath) { throw "-ChecksumPath requires -ArchivePath" }
-        $Tag = if ($RequestedVersion -eq "latest") { "latest" } else { "v$RequestedVersion" }
-        $Base = if ($Tag -eq "latest") {
+        $Base = if ($RequestedVersion -eq "latest") {
             "https://github.com/$Repository/releases/latest/download"
         } else {
-            "https://github.com/$Repository/releases/download/$Tag"
+            "https://github.com/$Repository/releases/download/v$RequestedVersion"
         }
-        $Archive = Join-Path $Temp $Asset
         $Sums = Join-Path $Temp "SHA256SUMS"
-        $ArchiveName = $Asset
-        Save-BoundedDownload "$Base/$Asset" $Archive $MaximumArchiveBytes 300
         Save-BoundedDownload "$Base/SHA256SUMS" $Sums $MaximumMetadataBytes 60
+        $ArchiveName = if ($RequestedVersion -eq "latest") {
+            Select-LatestAsset $Sums
+        } else {
+            "Omamail-$RequestedVersion-windows-x86_64.zip"
+        }
+        $Archive = Join-Path $Temp "release.zip"
+        Save-BoundedDownload "$Base/$ArchiveName" $Archive $MaximumArchiveBytes 300
+    }
+    $ArchiveVersion = Get-AssetVersion $ArchiveName
+    if (-not $ArchiveVersion) { throw "unexpected release archive name: $ArchiveName" }
+    if ($RequestedVersion -ne "latest" -and $ArchiveVersion -cne $RequestedVersion) {
+        throw "release archive version does not match the requested version"
     }
     if (-not (Test-Path -LiteralPath $Archive -PathType Leaf) -or
         (Get-Item -LiteralPath $Archive).Length -gt $MaximumArchiveBytes) {
@@ -827,28 +895,39 @@ try {
     $Actual = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($Actual -cne $Expected) { throw "checksum mismatch for $ArchiveName" }
 
-    $Opened = Open-ValidatedArchive $Archive $RequestedVersion
+    $Opened = Open-ValidatedArchive $Archive $ArchiveVersion
     $Extracted = Join-Path $Temp "extracted"
     Expand-ValidatedArchive $Opened $Extracted
     $Opened.Zip.Dispose()
     $Opened.File.Dispose()
     $Opened = $null
-    $Source = Join-Path $Extracted "omamail"
+    $Source = Join-Path $Extracted $TopLevel
 
     $Backup = "$InstallRoot.previous"
+    $InstallExisted = Test-Path -LiteralPath $InstallRoot
+    if ($InstallExisted -and (Test-ReparsePoint $InstallRoot)) {
+        throw "refusing a reparse point at the install path"
+    }
     $Candidate = "$InstallRoot.new-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force (Split-Path -Parent $InstallRoot) | Out-Null
     Copy-Item -LiteralPath $Source -Destination $Candidate -Recurse
-    $OriginalPath = Get-PathValue
-    $OriginalToastRegistration = Get-ToastRegistration
+    if ($InstallExisted) {
+        # Keep the uninstaller of an install made by NSH's setup working.
+        foreach ($Uninstaller in @(Get-ChildItem -LiteralPath $InstallRoot -File -Force |
+                Where-Object { $_.Name -match '^unins[0-9]{3}\.(exe|dat|msg)$' })) {
+            $Destination = Join-Path $Candidate $Uninstaller.Name
+            if (-not (Test-Path -LiteralPath $Destination)) {
+                Copy-Item -LiteralPath $Uninstaller.FullName -Destination $Destination
+            }
+        }
+    }
     $ShortcutExisted = Test-Path -LiteralPath $Shortcut -PathType Leaf
     $ShortcutBackup = Join-Path $Temp "previous-shortcut.lnk"
     if ($ShortcutExisted) { Copy-Item -LiteralPath $Shortcut -Destination $ShortcutBackup }
     $StartMenuExisted = Test-Path -LiteralPath $StartMenuRoot -PathType Container
 
     if (Test-Path -LiteralPath $Backup) {
-        $BackupItem = Get-Item -LiteralPath $Backup -Force
-        if (($BackupItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        if (Test-ReparsePoint $Backup) {
             throw "refusing a reparse point at the previous-install path"
         }
         Remove-Item -LiteralPath $Backup -Recurse -Force
@@ -856,40 +935,24 @@ try {
     $MovedOldInstall = $false
     $InstalledNew = $false
     try {
-        if (Test-Path -LiteralPath $InstallRoot) {
-            $InstallItem = Get-Item -LiteralPath $InstallRoot -Force
-            if (($InstallItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "refusing a reparse point at the install path"
+        if ($InstallExisted) {
+            try {
+                Move-Item -LiteralPath $InstallRoot -Destination $Backup
+            } catch {
+                throw "could not replace $InstallRoot; quit Omamail and run the installer again ($($_.Exception.Message))"
             }
-            Move-Item -LiteralPath $InstallRoot -Destination $Backup
             $MovedOldInstall = $true
         }
         Move-Item -LiteralPath $Candidate -Destination $InstallRoot
         $InstalledNew = $true
         if ($TestFailure -eq "AfterInstall") { throw "synthetic failure after install" }
 
-        Set-PathValue (Add-PathEntry $OriginalPath $BinDir)
-        if ($TestFailure -eq "AfterPath") { throw "synthetic failure after PATH update" }
-
-        $ToastCommand = '"' + $HostExecutable + '" -ToastActivated'
-        Set-ToastRegistration $ToastCommand
-        if ($TestFailure -eq "AfterRegistration") {
-            throw "synthetic failure after toast registration"
-        }
-
         New-Item -ItemType Directory -Force $StartMenuRoot | Out-Null
-        Write-Shortcut $Shortcut $HostExecutable $InstallRoot `
-            (Join-Path $InstallRoot "app-icon.ico") $AppUserModelId $ToastActivatorClsid
+        Write-Shortcut $Shortcut $Executable $InstallRoot $AppId
         if ($TestFailure -eq "AfterShortcut") { throw "synthetic failure after shortcut update" }
     } catch {
         $InstallFailure = $_
         $RollbackFailures = New-Object 'Collections.Generic.List[string]'
-        try { Set-PathValue $OriginalPath } catch {
-            $RollbackFailures.Add("PATH: $($_.Exception.Message)")
-        }
-        try { Restore-ToastRegistration $OriginalToastRegistration } catch {
-            $RollbackFailures.Add("toast registration: $($_.Exception.Message)")
-        }
         try {
             Remove-Item -LiteralPath $Shortcut -Force -ErrorAction SilentlyContinue
             if ($ShortcutExisted -and (Test-Path -LiteralPath $ShortcutBackup -PathType Leaf)) {
@@ -916,7 +979,13 @@ try {
         throw $InstallFailure
     }
     Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Output "Omamail installed at $InstallRoot"
+    try {
+        Remove-LegacyInstall
+    } catch {
+        Write-Warning "Omamail is installed, but the previous Qt-based version could not be fully removed: $($_.Exception.Message)"
+    }
+    Write-Output "Omamail $ArchiveVersion installed at $InstallRoot"
+    Write-Output "Start it from the Start menu; Omamail checks for updates itself."
 } finally {
     if ($Opened) {
         $Opened.Zip.Dispose()

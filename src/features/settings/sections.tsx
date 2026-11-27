@@ -10,6 +10,7 @@ import * as Google from "../../mail/providers/google";
 import { Button, Checkbox, cx, Hint, SettingRow, Input, SegmentedControl, Select, Stepper, TEXT, toast } from "../../ui";
 import { diagnose } from "../assistant";
 import { googleClient } from "../accounts/flows";
+import { checkForUpdates } from "../../shell/updates";
 import { accountsStore } from "../../mail/accounts-store";
 import * as Model from "./model";
 import { settings } from "./store";
@@ -67,10 +68,11 @@ export function BackendSection() {
           onPress={() => void check()}
         />
       </SettingRow>
-      <SettingRow title="Version">
+      <SettingRow title="Version" description="Omamail checks for a new version at launch and asks before it updates.">
         <Text testID="backend-version-label" class={cx(TEXT.caption, TEXT.mono)} accessibilityLiveRegion="polite">
           {"Omamail " + (appInfo().version ?? "unknown") + (apiVersion() > 0 ? " · backend API " + apiVersion() : "")}
         </Text>
+        <Button testID="settings-check-updates" size="small" label="Check for Updates..." onPress={() => checkForUpdates()} />
       </SettingRow>
       <SettingRow
         title="Diagnose"
