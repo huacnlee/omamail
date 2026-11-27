@@ -37,6 +37,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
@@ -72,7 +73,14 @@ jobs:
               printf '\n' >> "$body"
             done
             if [ "$found" = 0 ]; then
-              printf 'A job failed before it could say why; the run log has the details.\n' >> "$body"
+              # No gate left a note: name the failed jobs, each with its log.
+              failed="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs \
+                --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | "- **\(.name)** (\(.conclusion)): [log](\(.url))"' || true)"
+              if [ -n "$failed" ]; then
+                printf '%s\n' "$failed" >> "$body"
+              else
+                printf 'A job failed before it could say why; the run log has the details.\n' >> "$body"
+              fi
             fi
             printf '\nFix, push, and the gates run again; this comment updates itself.\n' >> "$body"
           fi
