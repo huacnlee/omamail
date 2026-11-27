@@ -46,7 +46,7 @@ def scratch_root(directory, version="0.12.0", build=1, plugin="0.13.0", key=None
     (root / "core/Cargo.lock").write_text(lock)
     (root / "ext/omamail-native/Cargo.lock").write_text(lock)
     for installer in release.INSTALLERS:
-        shutil.copy(REPO / "omarchy" / installer, root / "omarchy" / installer)
+        shutil.copy(REPO / installer, root / installer)
     return root
 
 
@@ -89,7 +89,7 @@ class ReleaseAssets(unittest.TestCase):
             package.writestr("Omamail/Omamail.exe", b"MZ")
             package.writestr("Omamail/nsh/app.json", app_json(version))
         for installer in release.INSTALLERS:
-            shutil.copy(REPO / "omarchy" / installer, self.assets / installer)
+            shutil.copy(REPO / installer, self.assets / installer)
         self.sign_manifest(version)
 
     def sign_manifest(self, version=VERSION, notes="- Changes\n"):
@@ -169,7 +169,7 @@ class ReleaseAssets(unittest.TestCase):
         (self.assets / "SHA256SUMS").unlink()
         release.write_checksums(self.assets)
         self.sign_manifest()
-        self.assertRefused("is not this revision's omarchy/install.sh")
+        self.assertRefused("is not this revision's install.sh")
 
     def test_an_archive_entry_outside_the_app_is_refused(self):
         tar_archive(self.assets / f"Omamail-{VERSION}-linux-x86_64.tar.gz", {

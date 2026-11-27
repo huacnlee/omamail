@@ -228,7 +228,7 @@ The command requires a clean main synchronized with origin and an authenticated 
 
 The branch push triggers **Release** (`.github/workflows/release.yml`):
 
-1. `nsh package` builds the app on macOS (Apple silicon, ad hoc signed), Linux (x86_64) and Windows (x86_64), with the shipped Google client compiled in. Each package is unpacked, checked, installed with `omarchy/install.sh` or `install.ps1`, and uninstalled again.
+1. `nsh package` builds the app on macOS (Apple silicon, ad hoc signed), Linux (x86_64) and Windows (x86_64), with the shipped Google client compiled in. Each package is unpacked, checked, installed with the root `install.sh` or `install.ps1` (their downloads served from the run), and uninstalled again.
 2. The release notes are collected from the merged PRs' `## Release Notes` sections. `nsh update-manifest` writes `latest.json` and signs it with the `NSH_UPDATE_KEY` secret; installed apps refuse a manifest that does not match `nsh.json`'s `updater.publicKey`.
 3. `omarchy/scripts/release.py verify` checks the exact asset set, `SHA256SUMS`, the manifest and its signature. CI then tags `v0.13.0`, creates a draft release, downloads and verifies it, publishes it, and verifies the public downloads again.
 4. CI starts **Pages**, which serves the website's installers. Pages redeploys only once the latest release has the NSH archives, so merging installer changes never leaves the site's install commands pointing at a release they cannot install.

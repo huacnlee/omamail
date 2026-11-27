@@ -178,46 +178,58 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          release="$RUNNER_TEMP/release" home="$RUNNER_TEMP/home"
-          mkdir -p "$release" "$home"
-          cp ".nsh/out/$ARCHIVE" "$release/"
-          (cd "$release" && shasum -a 256 "$ARCHIVE" > SHA256SUMS)
-          HOME="$home" sh omarchy/install.sh --version "$VERSION" --archive "$release/$ARCHIVE"
+          # install.sh as users run it, with its downloads served from here.
+          release="$RUNNER_TEMP/release" home="$RUNNER_TEMP/home" fake="$RUNNER_TEMP/fake"
+          mkdir -p "$release/v$VERSION" "$home" "$fake"
+          cp ".nsh/out/$ARCHIVE" "$release/v$VERSION/"
+          (cd "$release/v$VERSION" && shasum -a 256 "$ARCHIVE" > SHA256SUMS)
+          ln -s "$PWD/omarchy/tests/fake_curl.py" "$fake/curl"
+          HOME="$home" PATH="$fake:$PATH" FIXTURES="$release" sh install.sh --version "$VERSION"
           codesign --verify --deep --strict "$home/Applications/Omamail.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$home/Applications/Omamail.app/Contents/Info.plist")" = dev.huacnlee.omamail
-          HOME="$home" sh omarchy/install.sh --uninstall
+          HOME="$home" sh install.sh --uninstall
           test ! -e "$home/Applications/Omamail.app"
       - name: Install from the archive, check, uninstall (Linux)
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          release="$RUNNER_TEMP/release" home="$RUNNER_TEMP/home"
-          mkdir -p "$release" "$home"
-          cp ".nsh/out/$ARCHIVE" "$release/"
-          (cd "$release" && sha256sum "$ARCHIVE" > SHA256SUMS)
-          HOME="$home" sh omarchy/install.sh --version "$VERSION" --archive "$release/$ARCHIVE"
+          # install.sh as users run it, with its downloads served from here.
+          release="$RUNNER_TEMP/release" home="$RUNNER_TEMP/home" fake="$RUNNER_TEMP/fake"
+          mkdir -p "$release/v$VERSION" "$home" "$fake"
+          cp ".nsh/out/$ARCHIVE" "$release/v$VERSION/"
+          (cd "$release/v$VERSION" && sha256sum "$ARCHIVE" > SHA256SUMS)
+          ln -s "$PWD/omarchy/tests/fake_curl.py" "$fake/curl"
+          HOME="$home" PATH="$fake:$PATH" FIXTURES="$release" sh install.sh --version "$VERSION"
           ldd "$home/.local/share/omamail/Omamail/Omamail" | tee ldd.txt
           if grep -q 'not found' ldd.txt; then echo 'unresolved libraries' >&2; exit 1; fi
           # What the Omarchy notice widget's helper finds.
           test "$(HOME="$home" XDG_DATA_DIRS=/nonexistent sh omarchy/notice/omamail-app.sh status)" = installed
-          HOME="$home" sh omarchy/install.sh --uninstall
+          HOME="$home" sh install.sh --uninstall
           test "$(HOME="$home" XDG_DATA_DIRS=/nonexistent PATH=/usr/bin:/bin sh omarchy/notice/omamail-app.sh status)" = missing
       - name: Installer tests and an install from the archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          # Under PowerShell 7 and Windows PowerShell 5.1 (what `irm | iex` runs).
           pwsh -NoProfile -File omarchy/tests/test_install.ps1
-          if ($LASTEXITCODE -ne 0) { throw "install.ps1 tests failed" }
-          $release = Join-Path $env:RUNNER_TEMP "release"
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 tests failed under pwsh" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File omarchy/tests/test_install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 tests failed under Windows PowerShell" }
+          # install.ps1 as users run it, with its downloads served from here.
+          $env:FIXTURES = Join-Path $env:RUNNER_TEMP "release"
+          $release = Join-Path $env:FIXTURES "v$env:VERSION"
           New-Item -ItemType Directory -Force -Path $release | Out-Null
           Copy-Item ".nsh/out/$env:ARCHIVE" $release
           $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $release $env:ARCHIVE)).Hash.ToLowerInvariant()
-          Set-Content -NoNewline -Encoding ascii -Path (Join-Path $release "SHA256SUMS") -Value "$hash  $env:ARCHIVE`n"
-          & ./omarchy/install.ps1 -Version $env:VERSION -Archive (Join-Path $release $env:ARCHIVE) -Checksums (Join-Path $release "SHA256SUMS")
+          [IO.File]::WriteAllText((Join-Path $release "SHA256SUMS"), "$hash  $env:ARCHIVE`n")
+          $env:INSTALL_ARGS = ConvertTo-Json @{ Version = $env:VERSION } -Compress
+          powershell -NoProfile -ExecutionPolicy Bypass -File omarchy/tests/local_release.ps1
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed" }
           $exe = Join-Path $env:LOCALAPPDATA "Programs\Omamail\Omamail.exe"
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Omamail.exe was not installed" }
-          & ./omarchy/install.ps1 -Uninstall
+          if (-not (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Omamail.lnk'))) { throw "no Start menu shortcut" }
+          & ./install.ps1 -Uninstall
           if (Test-Path -LiteralPath $exe) { throw "uninstall left Omamail.exe" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -274,7 +286,7 @@ jobs:
           for platform in macos-aarch64.tar.gz linux-x86_64.tar.gz windows-x86_64.zip; do
             cp "artifacts/Omamail-$VERSION-$platform" assets/
           done
-          cp omarchy/install.sh omarchy/install.ps1 assets/
+          cp install.sh install.ps1 assets/
           # Notes come from the merged PRs' "Release Notes" sections since the
           # latest published release (release-notes.sh, as before).
           previous="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"

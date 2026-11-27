@@ -955,7 +955,7 @@ footer p:last-child { margin-bottom: 0; }
   <div class="wrap">
     <h2><span class="idx">06</span> <span data-zh="安装">Install</span></h2>
     <h3 class="install-heading" data-zh="桌面应用">Desktop app</h3>
-    <p class="install-note" data-zh="安装程序会先用发布版的 SHA256SUMS 校验下载的包，再替换已安装的版本；Omamail 0.12 及更早版本的安装也会被替换，账号和设置都保留。装好之后 Omamail 会自己更新。">Each installer checks the download against the release's SHA256SUMS before it replaces an installed copy. It also replaces an install of Omamail 0.12 or earlier, keeping your accounts and settings. From then on Omamail updates itself.</p>
+    <p class="install-note" data-zh="安装程序会先用发布版的 SHA256SUMS 校验下载的包，再替换已安装的版本；Omamail 0.12 及更早版本的安装也会被替换，账号和设置都保留。装好之后 Omamail 会自己更新。指定版本、换安装位置或卸载，见<a href='https://github.com/huacnlee/omamail/blob/main/docs/install.md'>安装指南</a>。">Each installer checks the download against the release's SHA256SUMS before it replaces an installed copy. It also replaces an install of Omamail 0.12 or earlier, keeping your accounts and settings. From then on Omamail updates itself. For a specific version, another location or removal, see the <a href="https://github.com/huacnlee/omamail/blob/main/docs/install.md">installation guide</a>.</p>
     <div class="install-platforms">
       <div class="install-tabs" role="tablist" aria-label="Platform">
         <button type="button" role="tab" id="install-tab-macos" aria-controls="install-macos" aria-selected="true">macOS</button>
@@ -965,12 +965,12 @@ footer p:last-child { margin-bottom: 0; }
       <div class="install-platform" role="tabpanel" id="install-macos" aria-labelledby="install-tab-macos">
         <span class="kind" data-zh="APPLE SILICON · MACOS 14+ · AD HOC 签名">APPLE SILICON · MACOS 14+ · AD HOC SIGNED</span>
         <pre class="block"><span class="prompt">$ </span>curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh</pre>
-        <p class="where" data-zh="装到 <code>~/Applications/Omamail.app</code>。应用是 ad hoc 签名，没有经过公证，所以安装程序会清除它的隔离标记。">Installs <code>Omamail.app</code> in <code>~/Applications</code>. The app is ad hoc signed rather than notarized, so the installer clears its quarantine flag.</p>
+        <p class="where" data-zh="装到 <code>~/Applications/Omamail.app</code>。应用是 ad hoc 签名，没有经过公证。">Installs <code>Omamail.app</code> in <code>~/Applications</code>. The app is ad hoc signed, not notarized.</p>
       </div>
       <div class="install-platform" role="tabpanel" id="install-linux" aria-labelledby="install-tab-linux" hidden>
         <span class="kind" data-zh="X86_64 · GLIBC 2.39+ · GTK 4.14+ · WEBKITGTK 6.0">X86_64 · GLIBC 2.39+ · GTK 4.14+ · WEBKITGTK 6.0</span>
         <pre class="block"><span class="prompt">$ </span>curl -fsSL https://huacnlee.github.io/omamail/install.sh | sh</pre>
-        <p class="where" data-zh="装到 <code>~/.local/share/omamail</code>，并添加一个桌面入口。GTK 和 WebKitGTK 的包名：Arch 是 <code>gtk4</code> 和 <code>webkitgtk-6.0</code>，Debian 和 Ubuntu 是 <code>libgtk-4-1</code> 和 <code>libwebkitgtk-6.0-4</code>。">Installs in <code>~/.local/share/omamail</code> with a desktop entry. GTK and WebKitGTK come from <code>gtk4</code> and <code>webkitgtk-6.0</code> on Arch, <code>libgtk-4-1</code> and <code>libwebkitgtk-6.0-4</code> on Debian and Ubuntu.</p>
+        <p class="where" data-zh="装到 <code>~/.local/share/omamail</code>，添加一个桌面入口和 <code>~/.local/bin/omamail-app</code> 命令。GTK 和 WebKitGTK 的包名：Arch 是 <code>gtk4</code> 和 <code>webkitgtk-6.0</code>，Debian 和 Ubuntu 是 <code>libgtk-4-1</code> 和 <code>libwebkitgtk-6.0-4</code>。">Installs in <code>~/.local/share/omamail</code> with a desktop entry and an <code>omamail-app</code> command in <code>~/.local/bin</code>. GTK and WebKitGTK come from <code>gtk4</code> and <code>webkitgtk-6.0</code> on Arch, <code>libgtk-4-1</code> and <code>libwebkitgtk-6.0-4</code> on Debian and Ubuntu.</p>
       </div>
       <div class="install-platform" role="tabpanel" id="install-windows" aria-labelledby="install-tab-windows" hidden>
         <span class="kind" data-zh="X86_64 · 按用户安装 · POWERSHELL">X86_64 · PER USER · POWERSHELL</span>

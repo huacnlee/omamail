@@ -253,8 +253,8 @@ def verify(directory, version, root):
         fail(f"nsh.json updater.github is not {REPOSITORY}")
     verify_signature(raw, files["latest.json.sig"].read_text(encoding="ascii"), public_key)
     for installer in INSTALLERS:
-        if files[installer].read_bytes() != (root / "omarchy" / installer).read_bytes():
-            fail(f"{installer} is not this revision's omarchy/{installer}")
+        if files[installer].read_bytes() != (root / installer).read_bytes():
+            fail(f"{installer} is not this revision's {installer}")
 
 
 def main(argv=None):

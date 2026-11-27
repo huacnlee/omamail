@@ -1,109 +1,106 @@
 #!/usr/bin/env python3
-"""install.sh against synthetic NSH release archives, in a scratch HOME.
+"""install.sh against synthetic release archives, in a scratch HOME.
 
-Each case builds the archive `nsh package` would (the runner, nsh/app.json,
-nsh/bundle.nshc, the desktop entry or Info.plist), lists it in a SHA256SUMS,
-and runs the installer in test mode with --archive. Refusals are checked by
-what is left on disk, not only by the exit status.
+`curl` and `uname` are stand-ins on PATH: downloads come from a fixtures
+directory and the platform is whatever the case asks for, so nothing reaches
+the network or the host's install. Refusals are checked by what is left on
+disk, not only by the exit status.
 """
 import hashlib
 import io
 import json
 import os
 import pathlib
-import plistlib
-import struct
+import shutil
 import subprocess
 import tarfile
 import tempfile
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-INSTALLER = ROOT / "install.sh"
-HELPER = ROOT / "notice" / "omamail-app.sh"
+REPO = pathlib.Path(__file__).resolve().parents[2]
+INSTALLER = REPO / "install.sh"
+HELPER = REPO / "omarchy/notice/omamail-app.sh"
 APP_ID = "dev.huacnlee.omamail"
+DESKTOP = (
+    "[Desktop Entry]\nType=Application\nName=Omamail\nExec=Omamail\n"
+    f"Icon={APP_ID}\nStartupWMClass={APP_ID}\nTerminal=false\n"
+)
 
-ELF_X86_64 = b"\x7fELF\x02\x01\x01" + b"\0" * 11 + struct.pack("<H", 62) + b"\0" * 64
-ELF_ARM64 = b"\x7fELF\x02\x01\x01" + b"\0" * 11 + struct.pack("<H", 183) + b"\0" * 64
-MACHO_ARM64 = b"\xcf\xfa\xed\xfe" + struct.pack("<I", 0x0100000C) + b"\0" * 64
 
-
-def linux_files(version, app_id=APP_ID, runner=ELF_X86_64, desktop=None):
-    desktop = desktop or (
-        "[Desktop Entry]\nType=Application\nName=Omamail\nExec=Omamail\n"
-        f"Icon={app_id}\nStartupWMClass={app_id}\nTerminal=false\n"
-    )
+def linux_files(version):
     return {
-        "Omamail/Omamail": (runner, 0o755),
-        "Omamail/nsh/app.json": (json.dumps({"name": "Omamail", "id": app_id, "version": version}).encode(), 0o644),
+        "Omamail/Omamail": (b"\x7fELF runner", 0o755),
+        "Omamail/nsh/app.json": (json.dumps({"id": APP_ID, "version": version}).encode(), 0o644),
         "Omamail/nsh/bundle.nshc": (b"bytecode", 0o644),
-        f"Omamail/{APP_ID}.desktop": (desktop.encode(), 0o644),
+        f"Omamail/{APP_ID}.desktop": (DESKTOP.encode(), 0o644),
         f"Omamail/{APP_ID}.png": (b"\x89PNG\r\n\x1a\n", 0o644),
     }
 
 
-def macos_files(version, bundle_id=APP_ID):
-    info = plistlib.dumps({
-        "CFBundleIdentifier": bundle_id,
-        "CFBundleExecutable": "Omamail",
-        "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": version,
-        "CFBundleVersion": "1",
-    })
+def macos_files(version):
     return {
-        "Omamail.app/Contents/Info.plist": (info, 0o644),
-        "Omamail.app/Contents/MacOS/Omamail": (MACHO_ARM64, 0o755),
-        "Omamail.app/Contents/Resources/nsh/app.json": (json.dumps({"id": APP_ID, "version": version}).encode(), 0o644),
-        "Omamail.app/Contents/Resources/nsh/bundle.nshc": (b"bytecode", 0o644),
+        "Omamail.app/Contents/Info.plist": (b"<plist/>", 0o644),
+        "Omamail.app/Contents/MacOS/Omamail": (b"macho", 0o755),
+        "Omamail.app/Contents/Resources/nsh/app.json": (json.dumps({"version": version}).encode(), 0o644),
     }
 
 
 class InstallTest(unittest.TestCase):
     def setUp(self):
-        self.scratch = tempfile.TemporaryDirectory()
+        self.scratch = tempfile.TemporaryDirectory(prefix="omamail-install-test-")
+        self.addCleanup(self.scratch.cleanup)
         self.dir = pathlib.Path(self.scratch.name)
-        self.home = self.dir / "home"
+        self.home = self.dir / "home with spaces"
         self.home.mkdir()
-        self.releases = self.dir / "releases"
-        self.releases.mkdir()
+        self.fixtures = self.dir / "fixtures"
+        self.fixtures.mkdir()
+        self.bin = self.dir / "bin"
+        self.bin.mkdir()
+        self.mock("uname", '#!/bin/sh\nif [ "$1" = -s ]; then echo "${MOCK_OS:-Linux}"; else echo "${MOCK_ARCH:-x86_64}"; fi\n')
+        (self.bin / "curl").symlink_to(pathlib.Path(__file__).resolve().parent / "fake_curl.py")
 
-    def tearDown(self):
-        self.scratch.cleanup()
+    def mock(self, name, source):
+        path = self.bin / name
+        path.write_text(source)
+        path.chmod(0o755)
 
-    def archive(self, name, files, extra=None):
-        path = self.releases / name
-        with tarfile.open(path, "w:gz") as tar:
+    def release(self, version, files, target="linux-x86_64", extra=(), checksum=None):
+        directory = self.fixtures / f"v{version}"
+        directory.mkdir(exist_ok=True)
+        name = f"Omamail-{version}-{target}.tar.gz"
+        with tarfile.open(directory / name, "w:gz") as tar:
             for member, (data, mode) in files.items():
                 info = tarfile.TarInfo(member)
                 info.size = len(data)
                 info.mode = mode
                 tar.addfile(info, io.BytesIO(data))
-            for info in extra or []:
+            for info in extra:
                 tar.addfile(info)
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        with (self.releases / "SHA256SUMS").open("a") as sums:
-            sums.write(f"{digest}  {name}\n")
-        return path
+        digest = checksum or hashlib.sha256((directory / name).read_bytes()).hexdigest()
+        (directory / "SHA256SUMS").write_text(f"{digest}  {name}\n")
+        return directory / name
 
-    def install(self, archive, *args, os_name="Linux", arch="x86_64", **env):
-        environment = {
-            "PATH": os.environ["PATH"],
+    def install(self, *args, os_name="Linux", arch="x86_64", latest="0.13.0"):
+        env = {
+            "PATH": f"{self.bin}:/usr/bin:/bin:/usr/sbin:/sbin",
             "HOME": str(self.home),
             "TMPDIR": str(self.dir),
-            "OMAMAIL_INSTALL_TEST_MODE": "1",
-            "OMAMAIL_TEST_OS": os_name,
-            "OMAMAIL_TEST_ARCH": arch,
-            "OMAMAIL_TEST_SKIP_GLIBC": "1",
-            "OMAMAIL_TEST_XATTR_COMMAND": "/usr/bin/true",
-            **env,
+            "FIXTURES": str(self.fixtures),
+            "CURL_LOG": str(self.dir / "curl.log"),
+            "MOCK_OS": os_name,
+            "MOCK_ARCH": arch,
+            "MOCK_LATEST": latest,
         }
-        command = ["sh", str(INSTALLER), *args]
-        if archive is not None:
-            command += ["--archive", str(archive)]
-        return subprocess.run(command, env=environment, capture_output=True, text=True)
+        return subprocess.run(["sh", str(INSTALLER), *args], env=env, capture_output=True, text=True)
+
+    def helper_status(self):
+        return subprocess.run(
+            ["sh", str(HELPER), "status"], capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home), "XDG_DATA_DIRS": str(self.dir / "none")},
+        ).stdout.strip()
 
     @property
-    def linux_app(self):
+    def app(self):
         return self.home / ".local/share/omamail/Omamail"
 
     @property
@@ -115,57 +112,82 @@ class InstallTest(unittest.TestCase):
         return self.home / ".local/bin/omamail-app"
 
     def installed_version(self):
-        return json.loads((self.linux_app / "nsh/app.json").read_text())["version"]
+        return json.loads((self.app / "nsh/app.json").read_text())["version"]
 
     def assertRefused(self, result, message):
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(message, result.stderr)
-        self.assertFalse(self.linux_app.exists())
+        self.assertFalse(self.app.exists())
         self.assertFalse(self.link.exists() or self.link.is_symlink())
         self.assertFalse(self.desktop.exists())
+        self.assertEqual([p.name for p in self.dir.iterdir() if p.name.startswith("omamail-install.")], [])
 
-    def test_linux_installs_where_the_notice_helper_finds_it(self):
-        result = self.install(self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0")))
+    def test_linux_installs_the_latest_release_where_the_notice_helper_finds_it(self):
+        self.release("0.13.0", linux_files("0.13.0"))
+        result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Omamail 0.13.0 installed", result.stdout)
         self.assertEqual(self.installed_version(), "0.13.0")
-        self.assertTrue(os.access(self.linux_app / "Omamail", os.X_OK))
-        self.assertEqual(os.readlink(self.link), str(self.linux_app / "Omamail"))
+        self.assertTrue(os.access(self.app / "Omamail", os.X_OK))
+        self.assertEqual(os.readlink(self.link), str(self.app / "Omamail"))
         entry = self.desktop.read_text()
-        self.assertIn(f'Exec="{self.linux_app}/Omamail"\n', entry)
-        self.assertIn(f"Icon={self.linux_app}/{APP_ID}.png\n", entry)
+        self.assertIn(f'Exec="{self.app}/Omamail"\n', entry)
+        self.assertIn(f"Icon={self.app}/{APP_ID}.png\n", entry)
         self.assertIn(f"StartupWMClass={APP_ID}\n", entry)
-        status = subprocess.run(
-            ["sh", str(HELPER), "status"], capture_output=True, text=True,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home), "XDG_DATA_DIRS": str(self.dir / "none")},
-        )
-        self.assertEqual(status.stdout.strip(), "installed", status.stderr)
+        self.assertEqual(self.helper_status(), "installed")
 
-    def test_linux_upgrade_removes_the_qt_app_and_keeps_user_data(self):
+    def test_a_named_version_is_installed_without_asking_for_the_latest(self):
+        self.release("0.13.1", linux_files("0.13.1"))
+        result = self.install("--version", "v0.13.1", latest="9.9.9")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.installed_version(), "0.13.1")
+        self.assertNotIn("/releases/latest", (self.dir / "curl.log").read_text())
+
+    def test_dir_installs_under_another_prefix(self):
+        self.release("0.13.0", linux_files("0.13.0"))
+        prefix = self.dir / "prefix"
+        result = self.install("--dir", str(prefix))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((prefix / "share/omamail/Omamail/Omamail").is_file())
+        self.assertTrue((prefix / "bin/omamail-app").is_symlink())
+        self.assertTrue((prefix / f"share/applications/{APP_ID}.desktop").is_file())
+        self.assertFalse(self.app.exists())
+
+    def test_an_upgrade_replaces_the_app_and_keeps_user_data(self):
+        self.release("0.13.0", linux_files("0.13.0"))
+        self.assertEqual(self.install().returncode, 0)
+        data = self.home / ".local/share/omamail/cache.db"
+        data.write_text("mail")
+        config = self.home / ".config/omamail/accounts.json"
+        config.parent.mkdir(parents=True)
+        config.write_text("[]")
+        self.release("0.14.0", linux_files("0.14.0"))
+        result = self.install(latest="0.14.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.installed_version(), "0.14.0")
+        self.assertEqual(data.read_text(), "mail")
+        self.assertEqual(config.read_text(), "[]")
+        self.assertEqual(sorted(p.name for p in self.app.parent.iterdir()), ["Omamail", "cache.db"])
+
+    def test_the_qt_app_is_removed_and_its_accounts_kept(self):
         legacy = self.home / ".local/omamail.app"
         (legacy / "bin").mkdir(parents=True)
-        (legacy / "bin/omamail").write_text("qt")
+        (legacy / "bin/omamail-app").write_text("qt")
         bin_dir = self.home / ".local/bin"
         bin_dir.mkdir(parents=True)
-        (bin_dir / "omamail").symlink_to(legacy / "bin/omamail")
+        (bin_dir / "omamail").symlink_to(legacy / "bin/omamail-app")
         applications = self.home / ".local/share/applications"
         applications.mkdir(parents=True)
         (applications / "omamail.desktop").write_text("[Desktop Entry]\n")
-        config = self.home / ".config/omamail"
-        config.mkdir(parents=True)
-        (config / "accounts.json").write_text("[]")
-        # The app's own data shares the install's parent directory.
-        data = self.home / ".local/share/omamail/cache.db"
-        data.parent.mkdir(parents=True)
-        data.write_text("mail")
-
-        result = self.install(self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0")))
+        config = self.home / ".config/omamail/accounts.json"
+        config.parent.mkdir(parents=True)
+        config.write_text("[]")
+        self.release("0.13.0", linux_files("0.13.0"))
+        result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(legacy.exists())
         self.assertFalse((bin_dir / "omamail").is_symlink())
         self.assertFalse((applications / "omamail.desktop").exists())
-        self.assertEqual((config / "accounts.json").read_text(), "[]")
-        self.assertEqual(data.read_text(), "mail")
+        self.assertEqual(config.read_text(), "[]")
 
     def test_an_omamail_link_that_is_not_the_qt_apps_is_left_alone(self):
         bin_dir = self.home / ".local/bin"
@@ -173,106 +195,78 @@ class InstallTest(unittest.TestCase):
         other = self.dir / "elsewhere"
         other.write_text("someone else's")
         (bin_dir / "omamail").symlink_to(other)
-        result = self.install(self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0")))
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.release("0.13.0", linux_files("0.13.0"))
+        self.assertEqual(self.install().returncode, 0)
         self.assertEqual(os.readlink(bin_dir / "omamail"), str(other))
 
     def test_a_checksum_mismatch_installs_nothing(self):
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0"))
-        (self.releases / "SHA256SUMS").write_text(f"{'0' * 64}  {archive.name}\n")
-        self.assertRefused(self.install(archive), "checksum mismatch")
+        self.release("0.13.0", linux_files("0.13.0"), checksum="0" * 64)
+        self.assertRefused(self.install(), "Checksum verification failed")
 
-    def test_a_missing_checksum_entry_installs_nothing(self):
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0"))
-        (self.releases / "SHA256SUMS").write_text("")
-        self.assertRefused(self.install(archive), "exactly one valid entry")
+    def test_a_missing_checksum_installs_nothing(self):
+        archive = self.release("0.13.0", linux_files("0.13.0"))
+        (archive.parent / "SHA256SUMS").write_text("")
+        self.assertRefused(self.install(), "Missing or invalid checksum")
 
-    def test_another_apps_package_is_refused(self):
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0", app_id="com.example.other"))
-        self.assertRefused(self.install(archive), "app.json id")
-
-    def test_the_version_inside_must_match_the_archive_name(self):
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.12.9"))
-        self.assertRefused(self.install(archive), "does not match the archive name")
-
-    def test_a_requested_version_must_match_the_archive(self):
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0"))
-        self.assertRefused(self.install(archive, "--version", "0.14.0"), "does not match the requested version")
-
-    def test_an_archive_for_another_platform_is_refused(self):
-        archive = self.archive("Omamail-0.13.0-macos-aarch64.tar.gz", linux_files("0.13.0"))
-        self.assertRefused(self.install(archive), "release archive name is not")
-
-    def test_a_runner_for_another_architecture_is_refused(self):
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0", runner=ELF_ARM64))
-        self.assertRefused(self.install(archive), "wrong architecture")
-
-    def test_a_mailto_handler_is_refused(self):
-        desktop = "[Desktop Entry]\nType=Application\nExec=Omamail %u\nMimeType=x-scheme-handler/mailto;\n"
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0", desktop=desktop))
-        self.assertRefused(self.install(archive), "mailto")
-
-    def test_an_entry_outside_the_app_directory_is_refused(self):
-        escape = tarfile.TarInfo("Omamail/../../escaped")
-        escape.size = 0
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0"), extra=[escape])
-        self.assertRefused(self.install(archive), "unexpected top-level layout")
+    def test_a_parent_directory_entry_is_refused(self):
+        self.release("0.13.0", linux_files("0.13.0"), extra=[tarfile.TarInfo("Omamail/../../escaped")])
+        self.assertRefused(self.install(), "unsafe path")
         self.assertFalse((self.dir / "escaped").exists())
 
-    def test_a_link_out_of_the_app_directory_is_refused(self):
+    def test_an_entry_outside_the_app_directory_is_refused(self):
+        self.release("0.13.0", {**linux_files("0.13.0"), "Other/file": (b"x", 0o644)})
+        self.assertRefused(self.install(), "unsafe path")
+
+    def test_a_link_in_the_archive_is_refused(self):
         link = tarfile.TarInfo("Omamail/nsh/secrets")
         link.type = tarfile.SYMTYPE
         link.linkname = "../../../../.ssh"
-        archive = self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0"), extra=[link])
-        self.assertRefused(self.install(archive), "escapes staging")
+        self.release("0.13.0", linux_files("0.13.0"), extra=[link])
+        self.assertRefused(self.install(), "unsafe path")
 
-    def test_a_failed_replace_restores_the_installed_app(self):
-        first = self.install(self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0")))
-        self.assertEqual(first.returncode, 0, first.stderr)
-        entry = self.desktop.read_text()
-        result = self.install(
-            self.archive("Omamail-0.14.0-linux-x86_64.tar.gz", linux_files("0.14.0")),
-            OMAMAIL_TEST_FAIL_AFTER_REPLACE="1",
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("previous installation was restored", result.stderr)
-        self.assertEqual(self.installed_version(), "0.13.0")
-        self.assertEqual(self.desktop.read_text(), entry)
-        self.assertFalse(pathlib.Path(f"{self.linux_app}.previous").exists())
+    def test_an_archive_without_the_runner_is_refused(self):
+        files = linux_files("0.13.0")
+        del files["Omamail/Omamail"]
+        self.release("0.13.0", files)
+        self.assertRefused(self.install(), "missing Omamail")
 
-    def test_uninstall_removes_the_app_and_keeps_accounts(self):
-        self.assertEqual(self.install(self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0"))).returncode, 0)
-        config = self.home / ".config/omamail"
-        config.mkdir(parents=True)
-        (config / "accounts.json").write_text("[]")
+    def test_a_qt_era_release_says_why_it_cannot_be_installed(self):
+        self.assertRefused(self.install("--version", "0.12.0"), "Releases before 0.13.0")
+
+    def test_an_invalid_version_is_refused_before_any_download(self):
+        for version in ("latest;rm", "0.13", "0.13.0-rc.1", "../0.13.0"):
+            self.assertRefused(self.install("--version", version), "Version must be")
+        self.assertFalse((self.dir / "curl.log").exists())
+
+    def test_unsupported_platforms_are_refused(self):
+        for os_name, arch, message in (("Linux", "aarch64", "x86_64 only"), ("Darwin", "x86_64", "Apple silicon"),
+                                       ("FreeBSD", "amd64", "install.ps1")):
+            self.assertRefused(self.install(os_name=os_name, arch=arch), message)
+
+    def test_uninstall_removes_the_app_and_keeps_user_data(self):
+        self.release("0.13.0", linux_files("0.13.0"))
+        self.assertEqual(self.install().returncode, 0)
         data = self.home / ".local/share/omamail/cache.db"
         data.write_text("mail")
-        result = self.install(None, "--uninstall")
+        result = self.install("--uninstall")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.linux_app.exists())
+        self.assertFalse(self.app.exists())
         self.assertFalse(self.link.is_symlink())
         self.assertFalse(self.desktop.exists())
-        self.assertEqual((config / "accounts.json").read_text(), "[]")
         self.assertEqual(data.read_text(), "mail")
+        self.assertEqual(self.helper_status(), "missing")
 
+    @unittest.skipUnless(shutil.which("ditto"), "macOS installs copy with ditto")
     def test_macos_replaces_the_app_in_applications(self):
         app = self.home / "Applications/Omamail.app"
         (app / "Contents/MacOS").mkdir(parents=True)
         (app / "Contents/MacOS/omamail-app").write_text("qt")
-        archive = self.archive("Omamail-0.13.0-macos-aarch64.tar.gz", macos_files("0.13.0"))
-        result = self.install(archive, os_name="Darwin", arch="arm64")
+        self.release("0.13.0", macos_files("0.13.0"), target="macos-aarch64")
+        result = self.install(os_name="Darwin", arch="arm64")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((app / "Contents/MacOS/omamail-app").exists())
-        info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
-        self.assertEqual(info["CFBundleIdentifier"], APP_ID)
         self.assertTrue(os.access(app / "Contents/MacOS/Omamail", os.X_OK))
-
-    def test_macos_refuses_another_bundle_id(self):
-        archive = self.archive("Omamail-0.13.0-macos-aarch64.tar.gz", macos_files("0.13.0", bundle_id="com.omamail.app"))
-        result = self.install(archive, os_name="Darwin", arch="arm64")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Info.plist does not match", result.stderr)
-        self.assertFalse((self.home / "Applications/Omamail.app").exists())
+        self.assertEqual(sorted(p.name for p in app.parent.iterdir()), ["Omamail.app"])
 
 
 if __name__ == "__main__":

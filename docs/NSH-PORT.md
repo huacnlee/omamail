@@ -414,8 +414,9 @@ packaging" items above.
   release's `latest.json` is signed with the key whose public half is
   `nsh.json`'s `updater.publicKey`; the secret is the `NSH_UPDATE_KEY`
   repository secret.
-- `release.yml`, `omarchy/scripts/{publish,bump,release}`, the installers and
-  `omastore.toml` serve that release. The standalone `omamail` binary
+- `release.yml`, `omarchy/scripts/{publish,bump,release}`, the root
+  installers (`install.sh`, `install.ps1`, written after omasend's; see
+  `docs/install.md`) and `omastore.toml` serve that release. The standalone `omamail` binary
   packages, `core/backend-version` and the binary release scripts are gone;
   the app runs its own executable for `serve` and the agent entry points.
 - The app icon is `assets/icon.png`, rendered from the Qt app's macOS plate

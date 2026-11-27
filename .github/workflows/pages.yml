@@ -9,8 +9,8 @@ on:
       - docs/terms.html
       - docs/legal.css
       - docs/images/**
-      - omarchy/install.sh
-      - omarchy/install.ps1
+      - install.sh
+      - install.ps1
       - core/tests/test_website_install.py
       - src/mail/providers/google.ts
       - .github/workflows/pages.yml
@@ -65,8 +65,7 @@ jobs:
           cp docs/index.html _site/index.html
           cp docs/privacy.html docs/terms.html docs/legal.css _site/
           cp -R docs/images _site/images
-          cp omarchy/install.sh _site/install.sh
-          cp omarchy/install.ps1 _site/install.ps1
+          cp install.sh install.ps1 _site/
       - uses: actions/upload-pages-artifact@v3
         if: steps.release.outputs.ready == 'true'
         with:
