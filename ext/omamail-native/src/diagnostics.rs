@@ -41,20 +41,28 @@ const MAX_EVENTS: usize = 100;
 fn valid_report(report: &str) -> bool {
     !report.is_empty()
         && report.len() <= LIMIT
-        && report.bytes().all(|b| b == b'\n' || (0x20..0x7f).contains(&b))
+        && report
+            .bytes()
+            .all(|b| b == b'\n' || (0x20..0x7f).contains(&b))
         && report_shape(report)
 }
 
 fn report_shape(report: &str) -> bool {
-    let Some(body) = report.strip_suffix('\n') else { return false };
+    let Some(body) = report.strip_suffix('\n') else {
+        return false;
+    };
     let lines: Vec<&str> = body.split('\n').collect();
     if lines.len() < 7 {
         return false;
     }
     let fixed = lines[0] == "Omamail diagnostics"
         && lines[1].strip_prefix("app: ").is_some_and(version)
-        && lines[2].strip_prefix("API revision: ").is_some_and(|n| (1..=6).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_digit()))
-        && lines[3].strip_prefix("system: ").is_some_and(|os| os.len() <= 16 && os.bytes().all(|b| b.is_ascii_lowercase()))
+        && lines[2]
+            .strip_prefix("API revision: ")
+            .is_some_and(|n| (1..=6).contains(&n.len()) && n.bytes().all(|b| b.is_ascii_digit()))
+        && lines[3]
+            .strip_prefix("system: ")
+            .is_some_and(|os| os.len() <= 16 && os.bytes().all(|b| b.is_ascii_lowercase()))
         && lines[4].is_empty()
         && lines[5] == "Recent backend errors (known identifiers only; no raw provider text):";
     if !fixed {
@@ -69,16 +77,28 @@ fn report_shape(report: &str) -> bool {
 
 /// An app version: `0.12.0`, `1.0.0-beta.2+build.5`, or `unknown`.
 fn version(v: &str) -> bool {
-    (1..=40).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
+    (1..=40).contains(&v.len())
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
 }
 
 /// `{"time":"2026-11-27T10:00:00Z","method":"mail.send","code":-32000,"message":"smtp_delivery_unknown"}`
 fn event(line: &str) -> bool {
-    let Some(rest) = line.strip_prefix("{\"time\":\"") else { return false };
-    let Some((time, rest)) = rest.split_once("\",\"method\":\"") else { return false };
-    let Some((method_name, rest)) = rest.split_once("\",\"code\":") else { return false };
-    let Some((code_text, rest)) = rest.split_once(",\"message\":\"") else { return false };
-    let Some(message) = rest.strip_suffix("\"}") else { return false };
+    let Some(rest) = line.strip_prefix("{\"time\":\"") else {
+        return false;
+    };
+    let Some((time, rest)) = rest.split_once("\",\"method\":\"") else {
+        return false;
+    };
+    let Some((method_name, rest)) = rest.split_once("\",\"code\":") else {
+        return false;
+    };
+    let Some((code_text, rest)) = rest.split_once(",\"message\":\"") else {
+        return false;
+    };
+    let Some(message) = rest.strip_suffix("\"}") else {
+        return false;
+    };
     timestamp(time) && method(method_name) && code(code_text) && identifier(message)
 }
 
@@ -101,7 +121,9 @@ fn method(m: &str) -> bool {
     let parts: Vec<&str> = m.split('.').collect();
     m.len() <= 80
         && (2..=4).contains(&parts.len())
-        && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphabetic()))
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphabetic()))
         && m.as_bytes()[0].is_ascii_lowercase()
 }
 
@@ -109,8 +131,12 @@ fn method(m: &str) -> bool {
 fn code(c: &str) -> bool {
     c == "null"
         || (c.len() <= 6
-            && c.strip_prefix('-').unwrap_or(c).bytes().all(|b| b.is_ascii_digit())
-            && c.parse::<i32>().is_ok_and(|n| (-32768..=32767).contains(&n)))
+            && c.strip_prefix('-')
+                .unwrap_or(c)
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+            && c.parse::<i32>()
+                .is_ok_and(|n| (-32768..=32767).contains(&n)))
 }
 
 /// The client's own fixed sentences in the TSX vocabulary (its
@@ -135,7 +161,9 @@ const CLIENT_ERRORS: &[&str] = &[
 fn identifier(id: &str) -> bool {
     CLIENT_ERRORS.contains(&id)
         || ((1..=64).contains(&id.len())
-            && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'))
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'))
 }
 
 /// The fixed instructions, as diagnostics.py gave them, naming the file.
@@ -245,7 +273,13 @@ mod unix {
         let started = Instant::now();
         while started.elapsed() < grace {
             match child.try_wait() {
-                Ok(Some(status)) => return if status.success() { Ok(()) } else { Err("agent_failed") },
+                Ok(Some(status)) => {
+                    return if status.success() {
+                        Ok(())
+                    } else {
+                        Err("agent_failed")
+                    };
+                }
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
                 Err(_) => return Err("agent_failed"),
             }
@@ -343,7 +377,9 @@ mod tests {
         assert!(valid_report(&report(&[SEND, NULL_CODE])));
         let full: Vec<&str> = std::iter::repeat_n(SEND, MAX_EVENTS).collect();
         assert!(valid_report(&report(&full)));
-        let unknown = report(&[SEND]).replace("app: 0.12.0", "app: unknown").replace("system: linux", "system: unknown");
+        let unknown = report(&[SEND])
+            .replace("app: 0.12.0", "app: unknown")
+            .replace("system: linux", "system: unknown");
         assert!(valid_report(&unknown));
         let prerelease = report(&[SEND]).replace("app: 0.12.0", "app: 1.0.0-beta.2+build.5");
         assert!(valid_report(&prerelease));
@@ -353,10 +389,16 @@ mod tests {
     fn controls_non_ascii_and_oversize_are_refused() {
         assert!(!valid_report(""));
         assert!(!valid_report(&(report(&[SEND]) + "\u{1b}[31m")));
-        assert!(!valid_report(&report(&[SEND]).replace("linux", "lin\u{0}ux")));
+        assert!(!valid_report(
+            &report(&[SEND]).replace("linux", "lin\u{0}ux")
+        ));
         assert!(!valid_report(&report(&[SEND]).replace('\n', "\r\n")));
-        assert!(!valid_report(&report(&[SEND]).replace("mail.send", "mail.s\u{e9}nd")));
-        assert!(!valid_report(&report(&[SEND]).replace("linux", "l\u{4e2d}")));
+        assert!(!valid_report(
+            &report(&[SEND]).replace("mail.send", "mail.s\u{e9}nd")
+        ));
+        assert!(!valid_report(
+            &report(&[SEND]).replace("linux", "l\u{4e2d}")
+        ));
         assert!(!valid_report(&"x".repeat(LIMIT + 1)));
         // One event over the cap, or a missing final newline.
         let over: Vec<&str> = std::iter::repeat_n(SEND, MAX_EVENTS + 1).collect();
@@ -390,12 +432,22 @@ mod tests {
                 ("app: 0.12.0", format!("app: {value}")),
                 ("system: linux", format!("system: {value}")),
                 ("API revision: 10", format!("API revision: {value}")),
-                ("Omamail diagnostics", format!("Omamail diagnostics {value}")),
+                (
+                    "Omamail diagnostics",
+                    format!("Omamail diagnostics {value}"),
+                ),
             ] {
-                assert!(!valid_report(&report(&[SEND]).replace(from, &to)), "took {to:?}");
+                assert!(
+                    !valid_report(&report(&[SEND]).replace(from, &to)),
+                    "took {to:?}"
+                );
             }
             // In the blank line, or after "(none recorded)".
-            assert!(!valid_report(&report(&[SEND]).replacen("\n\n", &format!("\n{value}\n"), 1)));
+            assert!(!valid_report(&report(&[SEND]).replacen(
+                "\n\n",
+                &format!("\n{value}\n"),
+                1
+            )));
             assert!(!valid_report(&(report(&[]) + value + "\n")));
         }
     }
@@ -418,7 +470,9 @@ mod tests {
             assert!(!valid_report(&report(&[&bad])), "took {bad:?}");
         }
         assert!(valid_report(&report(&[&SEND.replace("-32000", "32767")])));
-        assert!(valid_report(&report(&[&SEND.replace("mail.send", "agent.jobs.projection")])));
+        assert!(valid_report(&report(&[
+            &SEND.replace("mail.send", "agent.jobs.projection")
+        ])));
     }
 
     #[test]
@@ -435,15 +489,23 @@ mod tests {
     #[cfg(not(target_os = "linux"))]
     #[test]
     fn elsewhere_nothing_is_written_or_started() {
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        assert_eq!(rt.block_on(imp::open_agent(report(&[SEND]))), Ok("absent".to_owned()));
-        assert_eq!(rt.block_on(imp::open_agent("alice@example.com\n".into())), Err("report_invalid"));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert_eq!(
+            rt.block_on(imp::open_agent(report(&[SEND]))),
+            Ok("absent".to_owned())
+        );
+        assert_eq!(
+            rt.block_on(imp::open_agent("alice@example.com\n".into())),
+            Err("report_invalid")
+        );
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     mod files {
         use super::super::unix;
-        use super::{report, SEND};
+        use super::{SEND, report};
         use std::fs;
         use std::os::unix::fs::{PermissionsExt, symlink};
         use std::path::{Path, PathBuf};
@@ -451,7 +513,8 @@ mod tests {
 
         /// A fresh private folder under the system temp dir.
         fn scratch(name: &str) -> PathBuf {
-            let dir = std::env::temp_dir().join(format!("omamail-diag-{name}-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("omamail-diag-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).unwrap();
             fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
@@ -491,7 +554,10 @@ mod tests {
             unix::save_in(&state, &again).unwrap();
             assert_eq!(fs::read_to_string(&path).unwrap(), again);
             assert_eq!(mode(&path), 0o600);
-            let names: Vec<_> = fs::read_dir(state.join("omamail/diagnostics")).unwrap().map(|e| e.unwrap().file_name()).collect();
+            let names: Vec<_> = fs::read_dir(state.join("omamail/diagnostics"))
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
             assert_eq!(names, ["report.txt"]);
             fs::remove_dir_all(&dir).unwrap();
         }
@@ -503,7 +569,10 @@ mod tests {
             let state = dir.join("open");
             fs::create_dir_all(state.join("omamail")).unwrap();
             fs::set_permissions(state.join("omamail"), fs::Permissions::from_mode(0o755)).unwrap();
-            assert_eq!(unix::save_in(&state, &report(&[SEND])), Err("storage_unavailable"));
+            assert_eq!(
+                unix::save_in(&state, &report(&[SEND])),
+                Err("storage_unavailable")
+            );
             assert!(!state.join("omamail/diagnostics").exists());
             // The folder a link to somewhere else: nothing lands there.
             let elsewhere = dir.join("elsewhere");
@@ -513,7 +582,10 @@ mod tests {
             fs::create_dir_all(linked.join("omamail")).unwrap();
             fs::set_permissions(linked.join("omamail"), fs::Permissions::from_mode(0o700)).unwrap();
             symlink(&elsewhere, linked.join("omamail/diagnostics")).unwrap();
-            assert_eq!(unix::save_in(&linked, &report(&[SEND])), Err("storage_unavailable"));
+            assert_eq!(
+                unix::save_in(&linked, &report(&[SEND])),
+                Err("storage_unavailable")
+            );
             assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
             fs::remove_dir_all(&dir).unwrap();
         }
@@ -547,7 +619,10 @@ mod tests {
             unix::open_with(&agent, &state, &body).unwrap();
             let report_path = state.join("omamail/diagnostics/report.txt");
             let argv = fs::read_to_string(&log).unwrap();
-            let expected = format!("--prompt\n{}\n", super::super::prompt(report_path.to_str().unwrap()));
+            let expected = format!(
+                "--prompt\n{}\n",
+                super::super::prompt(report_path.to_str().unwrap())
+            );
             assert_eq!(argv, expected);
             for secret in ["alice@example.com", "hunter2", "smtp_delivery_unknown"] {
                 assert!(!argv.contains(secret), "argv held {secret}");
@@ -563,9 +638,15 @@ mod tests {
             let log = dir.join("argv");
             let failing = fake_agent(&dir, &log, 3);
             let state = dir.join("state");
-            assert_eq!(unix::open_with(&failing, &state, &report(&[])), Err("agent_failed"));
+            assert_eq!(
+                unix::open_with(&failing, &state, &report(&[])),
+                Err("agent_failed")
+            );
             let missing = dir.join("no-such-agent");
-            assert_eq!(unix::spawn(&missing, &state.join("x")).err(), Some("agent_failed"));
+            assert_eq!(
+                unix::spawn(&missing, &state.join("x")).err(),
+                Some("agent_failed")
+            );
             // Still running at the deadline: success, reaped later.
             let slow = dir.join("slow");
             fs::write(&slow, "#!/bin/sh\nsleep 1\n").unwrap();

@@ -4,7 +4,7 @@
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PAGE = (ROOT / "docs/index.html").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 PAGES_WORKFLOW = (ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8")
@@ -25,9 +25,9 @@ PANELS = (
 )
 
 for installer in ("install.sh", "install.ps1"):
-    assert (ROOT / installer).is_file(), f"website links to a missing installer: {installer}"
-    assert f"cp {installer} _site/{installer}" in PAGES_WORKFLOW, f"the site does not publish {installer}"
-    assert f"      - {installer}\n" in PAGES_WORKFLOW, f"a change to {installer} does not redeploy the site"
+    assert (ROOT / "omarchy" / installer).is_file(), f"website links to a missing installer: {installer}"
+    assert f"cp omarchy/{installer} _site/{installer}" in PAGES_WORKFLOW, f"the site does not publish {installer}"
+    assert f"      - omarchy/{installer}\n" in PAGES_WORKFLOW, f"a change to {installer} does not redeploy the site"
 assert PAGE.count(UNIX_INSTALL) == 2, "macOS and Linux must each show the canonical curl command"
 assert PAGE.count(WINDOWS_INSTALL) == 1, "Windows must show the canonical PowerShell command"
 assert "raw.githubusercontent.com" not in PAGE, "website still points at the raw repository"
@@ -40,8 +40,11 @@ assert "TAR.GZ ONLY" in PAGE, "Linux package format is not explicit"
 assert "make app-run" in PAGE, "standalone development entry point is missing"
 assert "mailto:</code> registration" in PAGE, "standalone capability boundary is missing"
 
-assert README.count(UNIX_INSTALL) == 1, "README must show the canonical curl command once"
-assert README.count(WINDOWS_INSTALL) == 1, "README must show the canonical PowerShell command once"
+# The README sends NSH app users to the source until NSH packages are
+# published, so it carries no installer command; when it does, it must be the
+# site's, never the raw repository.
+for command in (UNIX_INSTALL, WINDOWS_INSTALL):
+    assert README.count(command) <= 1, "README must show an installer command at most once"
 assert "raw/refs/heads" not in README and "raw.githubusercontent.com" not in README, "README still points at the raw repository"
 
 # The bar and the card after the install section both ask for sponsorship.
@@ -65,8 +68,8 @@ assert '<meta name="google-site-verification" content="JGwE15Dikx-5fcwxClYH9JwIY
 PRIVACY = (ROOT / "docs/privacy.html").read_text(encoding="utf-8")
 assert "including the Limited Use requirements" in PRIVACY, "privacy policy lacks the Google Limited Use disclosure"
 import re
-OAUTH = (ROOT / "ui/providers/OAuth.js").read_text(encoding="utf-8")
-SCOPES = re.findall(r'"(https://www\.googleapis\.com/auth/[^"]+)"', OAUTH.split("var SCOPES = [", 1)[1].split("]", 1)[0])
+OAUTH = (ROOT / "src/mail/providers/google.ts").read_text(encoding="utf-8")
+SCOPES = re.findall(r'"(https://www\.googleapis\.com/auth/[^"]+)"', OAUTH.split("export const SCOPES = [", 1)[1].split("]", 1)[0])
 assert SCOPES, "could not read OAuth.SCOPES"
 for scope in SCOPES:
     assert f"<code>{scope}</code>" in PRIVACY, f"privacy policy does not explain the Google scope {scope}"

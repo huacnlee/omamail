@@ -87,7 +87,10 @@ fn start() -> Option<Worker> {
 }
 
 pub async fn request(method: String, params: Value) -> Result<Value, String> {
-    let id = format!("nsh-{}", NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let id = format!(
+        "nsh-{}",
+        NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
     let frame = serde_json::to_vec(&json!({
         "jsonrpc": "2.0", "id": id, "method": method, "params": params,
     }))
