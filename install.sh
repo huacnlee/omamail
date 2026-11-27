@@ -105,8 +105,9 @@ mkdir "$work/unpacked"
 tar -xzf "$work/$asset" -C "$work/unpacked"
 
 if [ "$platform" = macos ]; then
-  [ -x "$work/unpacked/Omamail.app/Contents/MacOS/Omamail" ] && [ -f "$work/unpacked/Omamail.app/Contents/Info.plist" ] \
-    || die 'Release archive is missing Omamail.app.'
+  if [ ! -x "$work/unpacked/Omamail.app/Contents/MacOS/Omamail" ] || [ ! -f "$work/unpacked/Omamail.app/Contents/Info.plist" ]; then
+    die 'Release archive is missing Omamail.app.'
+  fi
   mkdir -p "$destination"
   staging="$(mktemp -d "$destination/.omamail-install.XXXXXXXX")"
   trap 'rm -rf "$work" "${staging:-}"' 0
