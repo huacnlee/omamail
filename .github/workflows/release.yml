@@ -282,35 +282,39 @@ jobs:
           set -euo pipefail
           test -n "$NSH_UPDATE_KEY" || { echo 'NSH_UPDATE_KEY is not set' >&2; exit 1; }
           test -n "$GH_TOKEN" || { echo 'RELEASE_TOKEN is not set' >&2; exit 1; }
-          mkdir assets
+          mkdir release-assets
           for platform in macos-aarch64.tar.gz linux-x86_64.tar.gz windows-x86_64.zip; do
-            cp "artifacts/Omamail-$VERSION-$platform" assets/
+            cp "artifacts/Omamail-$VERSION-$platform" release-assets/
           done
-          cp install.sh install.ps1 assets/
+          cp install.sh install.ps1 release-assets/
           # Notes come from the merged PRs' "Release Notes" sections since the
           # latest published release (release-notes.sh, as before).
           previous="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
-          git tag "v$VERSION" "$GITHUB_SHA"
-          bash omarchy/scripts/release-notes.sh "$previous" "v$VERSION" > release-notes.md
+          # A dry run keeps the version already released, so its notes are
+          # collected under a tag name that cannot exist.
+          tag="v$VERSION"
+          if [ "$PUBLISH" != true ]; then tag="v$VERSION-dry-run"; fi
+          git tag "$tag" "$GITHUB_SHA"
+          bash omarchy/scripts/release-notes.sh "$previous" "$tag" > release-notes.md
           cat release-notes.md
           key="$RUNNER_TEMP/update.secret"
           trap 'rm -f "$key"' EXIT
           ( umask 077; printf '%s\n' "$NSH_UPDATE_KEY" > "$key" )
           # Absolute URLs: an app that checked just before a newer release
           # still downloads the version its manifest names.
-          nsh update-manifest assets/Omamail-"$VERSION"-* --key "$key" --notes release-notes.md --out assets \
+          nsh update-manifest release-assets/Omamail-"$VERSION"-* --key "$key" --notes release-notes.md --out release-assets \
             --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
           rm -f "$key"
-          python3 omarchy/scripts/release.py checksums assets
-          python3 omarchy/scripts/release.py verify assets --version "$VERSION"
-          ls -la assets
+          python3 omarchy/scripts/release.py checksums release-assets
+          python3 omarchy/scripts/release.py verify release-assets --version "$VERSION"
+          ls -la release-assets
       - name: Keep the dry run's assets
         if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-dry-run
           path: |
-            assets/*
+            release-assets/*
             release-notes.md
           if-no-files-found: error
       - name: Tag, publish as a draft, verify, then make it public and verify again
@@ -326,22 +330,22 @@ jobs:
           # token is given to this one command, never stored in .git/config.
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
             push origin "refs/tags/v$VERSION"
-          gh release create "v$VERSION" assets/* --verify-tag --draft --title "v$VERSION" --notes-file release-notes.md
+          gh release create "v$VERSION" release-assets/* --verify-tag --draft --title "v$VERSION" --notes-file release-notes.md
           mkdir draft-download
           gh release download "v$VERSION" --dir draft-download
           python3 omarchy/scripts/release.py verify draft-download --version "$VERSION"
-          for asset in assets/*; do cmp "$asset" "draft-download/$(basename "$asset")"; done
+          for asset in release-assets/*; do cmp "$asset" "draft-download/$(basename "$asset")"; done
           # Public only once GitHub has returned every draft byte unchanged.
           gh release edit "v$VERSION" --draft=false --latest
           mkdir public-download
           gh release download "v$VERSION" --dir public-download
           python3 omarchy/scripts/release.py verify public-download --version "$VERSION"
-          for asset in assets/*; do cmp "$asset" "public-download/$(basename "$asset")"; done
+          for asset in release-assets/*; do cmp "$asset" "public-download/$(basename "$asset")"; done
           # What installed apps and install.sh read: the latest release's URLs.
           for asset in latest.json latest.json.sig SHA256SUMS; do
             curl -fsSL --retry 5 --retry-delay 10 -o "public-download/latest-$asset" \
               "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/$asset"
-            cmp "assets/$asset" "public-download/latest-$asset"
+            cmp "release-assets/$asset" "public-download/latest-$asset"
           done
           echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"
           # The site serves the installers, which follow the latest release;
