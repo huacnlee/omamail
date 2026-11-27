@@ -35,7 +35,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
       - id: version
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
@@ -69,6 +71,8 @@ jobs:
   package:
     name: Package (${{ matrix.platform }})
     needs: prepare
+    # The shipped Google client's secrets live in the release environment.
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -103,9 +107,13 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       ARCHIVE: Omamail-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}.${{ matrix.archive }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       - name: Linux build dependencies (GTK 4, WebKitGTK 6.0)
@@ -211,7 +219,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Omamail.exe was not installed" }
           & ./omarchy/install.ps1 -Uninstall
           if (Test-Path -LiteralPath $exe) { throw "uninstall left Omamail.exe" }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: package-${{ matrix.platform }}
           path: .nsh/out/${{ env.ARCHIVE }}
@@ -220,16 +228,20 @@ jobs:
   publish:
     needs: [prepare, package]
     runs-on: ubuntu-24.04
+    # NSH_UPDATE_KEY and RELEASE_TOKEN live in the release environment, which
+    # only release/** branches may use (see CONTRIBUTING, "Releasing").
+    environment: release
     timeout-minutes: 30
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       PUBLISH: ${{ needs.prepare.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
-          # The tag push needs a token that may create tags; a dry run never pushes.
-          token: ${{ needs.prepare.outputs.publish == 'true' && secrets.RELEASE_TOKEN || github.token }}
+          # No token stays in .git/config: only the publishing step below
+          # holds RELEASE_TOKEN, for the tag push and the release.
+          persist-credentials: false
       - name: Install nsh ${{ env.NSH_VERSION }} and the verifier's dependencies
         run: |
           set -euo pipefail
@@ -243,18 +255,21 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.*  # unused here, and its outages fail apt-get update
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-cryptography
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: package-*
           path: artifacts
           merge-multiple: true
       - name: Assemble, sign and verify the release
         env:
-          GH_TOKEN: ${{ github.token }}
+          # release-notes.sh asks GitHub to generate notes, which needs a token
+          # that may write contents; the workflow's own token may not.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           NSH_UPDATE_KEY: ${{ secrets.NSH_UPDATE_KEY }}
         run: |
           set -euo pipefail
           test -n "$NSH_UPDATE_KEY" || { echo 'NSH_UPDATE_KEY is not set' >&2; exit 1; }
+          test -n "$GH_TOKEN" || { echo 'RELEASE_TOKEN is not set' >&2; exit 1; }
           mkdir assets
           for platform in macos-aarch64.tar.gz linux-x86_64.tar.gz windows-x86_64.zip; do
             cp "artifacts/Omamail-$VERSION-$platform" assets/
@@ -267,15 +282,19 @@ jobs:
           bash omarchy/scripts/release-notes.sh "$previous" "v$VERSION" > release-notes.md
           cat release-notes.md
           key="$RUNNER_TEMP/update.secret"
+          trap 'rm -f "$key"' EXIT
           ( umask 077; printf '%s\n' "$NSH_UPDATE_KEY" > "$key" )
-          nsh update-manifest assets/Omamail-"$VERSION"-* --key "$key" --notes release-notes.md --out assets
+          # Absolute URLs: an app that checked just before a newer release
+          # still downloads the version its manifest names.
+          nsh update-manifest assets/Omamail-"$VERSION"-* --key "$key" --notes release-notes.md --out assets \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
           rm -f "$key"
           python3 omarchy/scripts/release.py checksums assets
           python3 omarchy/scripts/release.py verify assets --version "$VERSION"
           ls -la assets
       - name: Keep the dry run's assets
         if: env.PUBLISH != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-dry-run
           path: |
@@ -291,8 +310,10 @@ jobs:
           # Refuse a moved source branch or any pre-existing tag, again, right
           # before the first effect.
           bash omarchy/scripts/release-source.sh
-          # An explicit non-force tag push refuses a racing publisher.
-          git push origin "refs/tags/v$VERSION"
+          # An explicit non-force tag push refuses a racing publisher. The
+          # token is given to this one command, never stored in .git/config.
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            push origin "refs/tags/v$VERSION"
           gh release create "v$VERSION" assets/* --verify-tag --draft --title "v$VERSION" --notes-file release-notes.md
           mkdir draft-download
           gh release download "v$VERSION" --dir draft-download
@@ -311,3 +332,7 @@ jobs:
             cmp "assets/$asset" "public-download/latest-$asset"
           done
           echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          # The site serves the installers, which follow the latest release;
+          # Pages deploys them only once a release with the NSH archives is out.
+          gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            || echo "::warning::Could not start Pages; run it by hand so the site serves this release's installers"

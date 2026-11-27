@@ -154,6 +154,10 @@ class InstallTest(unittest.TestCase):
         config = self.home / ".config/omamail"
         config.mkdir(parents=True)
         (config / "accounts.json").write_text("[]")
+        # The app's own data shares the install's parent directory.
+        data = self.home / ".local/share/omamail/cache.db"
+        data.parent.mkdir(parents=True)
+        data.write_text("mail")
 
         result = self.install(self.archive("Omamail-0.13.0-linux-x86_64.tar.gz", linux_files("0.13.0")))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -161,6 +165,7 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((bin_dir / "omamail").is_symlink())
         self.assertFalse((applications / "omamail.desktop").exists())
         self.assertEqual((config / "accounts.json").read_text(), "[]")
+        self.assertEqual(data.read_text(), "mail")
 
     def test_an_omamail_link_that_is_not_the_qt_apps_is_left_alone(self):
         bin_dir = self.home / ".local/bin"
@@ -240,12 +245,15 @@ class InstallTest(unittest.TestCase):
         config = self.home / ".config/omamail"
         config.mkdir(parents=True)
         (config / "accounts.json").write_text("[]")
+        data = self.home / ".local/share/omamail/cache.db"
+        data.write_text("mail")
         result = self.install(None, "--uninstall")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.linux_app.exists())
         self.assertFalse(self.link.is_symlink())
         self.assertFalse(self.desktop.exists())
         self.assertEqual((config / "accounts.json").read_text(), "[]")
+        self.assertEqual(data.read_text(), "mail")
 
     def test_macos_replaces_the_app_in_applications(self):
         app = self.home / "Applications/Omamail.app"

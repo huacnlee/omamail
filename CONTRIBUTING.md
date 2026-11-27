@@ -231,10 +231,13 @@ The branch push triggers **Release** (`.github/workflows/release.yml`):
 1. `nsh package` builds the app on macOS (Apple silicon, ad hoc signed), Linux (x86_64) and Windows (x86_64), with the shipped Google client compiled in. Each package is unpacked, checked, installed with `omarchy/install.sh` or `install.ps1`, and uninstalled again.
 2. The release notes are collected from the merged PRs' `## Release Notes` sections. `nsh update-manifest` writes `latest.json` and signs it with the `NSH_UPDATE_KEY` secret; installed apps refuse a manifest that does not match `nsh.json`'s `updater.publicKey`.
 3. `omarchy/scripts/release.py verify` checks the exact asset set, `SHA256SUMS`, the manifest and its signature. CI then tags `v0.13.0`, creates a draft release, downloads and verifies it, publishes it, and verifies the public downloads again.
+4. CI starts **Pages**, which serves the website's installers. Pages redeploys only once the latest release has the NSH archives, so merging installer changes never leaves the site's install commands pointing at a release they cannot install.
 
 Merge the release PR once it has published and its checks pass.
 
 - Keep main's ruleset active without an always-on bypass. Every update, including a release, goes through a PR.
 - Never tag by hand or delete an existing release tag to reuse its version. If publication fails after the tag was pushed, inspect the tag, draft or release, then publish a new version.
 - To prove a change to the release pipeline before merging it, run **Release** by hand on its branch with `dry_run` (the default): it builds, signs and verifies everything, keeps the assets as the run's artifact, and tags and publishes nothing.
-- The update key is the one thing that cannot be replaced. Its secret half is kept offline by the maintainer and as the `NSH_UPDATE_KEY` repository secret; a new key means every installed copy refuses updates until reinstalled.
+- The update key is the one thing that cannot be replaced. Its secret half is kept offline by the maintainer and as the `NSH_UPDATE_KEY` secret; a new key means every installed copy refuses updates until reinstalled.
+- `NSH_UPDATE_KEY`, `RELEASE_TOKEN`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` belong in the `release` environment, whose deployment branches are limited to `release/**`, so a workflow edited on another branch cannot read them. Dry runs then run on a `release/**` branch.
+- `RELEASE_TOKEN` needs contents write (tags, releases and generated notes) and actions write (starting Pages).

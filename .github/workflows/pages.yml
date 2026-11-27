@@ -33,7 +33,23 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # The installers install the latest release. Until one with the NSH
+      # archives is public, the site keeps serving the previous installers
+      # rather than ones that would find nothing to install; release.yml
+      # starts this workflow again once it has published.
+      - name: Require a latest release the installers can install
+        id: release
+        run: |
+          set -euo pipefail
+          sums="$(curl -fsSL --retry 3 "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/SHA256SUMS")"
+          if grep -Eq '  Omamail-[0-9]+\.[0-9]+\.[0-9]+-linux-x86_64\.tar\.gz$' <<<"$sums"; then
+            echo ready=true >> "$GITHUB_OUTPUT"
+          else
+            echo ready=false >> "$GITHUB_OUTPUT"
+            echo "::notice::The latest release has no NSH archives yet; the site is not redeployed"
+          fi
       - uses: actions/configure-pages@v5
+        if: steps.release.outputs.ready == 'true'
       - name: Check installation instructions
         run: python3 core/tests/test_website_install.py
       # The page is one file, but every screenshot, icon and the og:image it
@@ -43,6 +59,7 @@ jobs:
       # The installers are served from the site as well, so the install
       # commands name a stable address rather than a branch of the repository.
       - name: Stage the site
+        if: steps.release.outputs.ready == 'true'
         run: |
           mkdir -p _site
           cp docs/index.html _site/index.html
@@ -51,7 +68,9 @@ jobs:
           cp omarchy/install.sh _site/install.sh
           cp omarchy/install.ps1 _site/install.ps1
       - uses: actions/upload-pages-artifact@v3
+        if: steps.release.outputs.ready == 'true'
         with:
           path: _site
       - id: deployment
         uses: actions/deploy-pages@v4
+        if: steps.release.outputs.ready == 'true'

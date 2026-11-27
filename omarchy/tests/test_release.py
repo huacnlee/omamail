@@ -96,7 +96,8 @@ class ReleaseAssets(unittest.TestCase):
         platforms = {}
         for name, platform in release.archives(version).items():
             path = self.assets / name
-            platforms[platform] = {"url": name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            url = f"https://github.com/huacnlee/omamail/releases/download/v{version}/{name}"
+            platforms[platform] = {"url": url, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                                    "size": path.stat().st_size}
         manifest = json.dumps({"id": "dev.huacnlee.omamail", "version": version, "notes": notes,
                                "platforms": platforms}, indent=2).encode()
@@ -144,6 +145,20 @@ class ReleaseAssets(unittest.TestCase):
         (self.assets / "SHA256SUMS").unlink()
         release.write_checksums(self.assets)
         self.assertRefused("updater.publicKey")
+
+    def test_a_manifest_pointing_at_the_latest_release_is_refused(self):
+        # A relative URL resolves against releases/latest/download, which a
+        # newer release would change under an app mid-update.
+        manifest = json.loads((self.assets / "latest.json").read_text())
+        for entry in manifest["platforms"].values():
+            entry["url"] = entry["url"].rsplit("/", 1)[1]
+        raw = json.dumps(manifest).encode()
+        (self.assets / "latest.json").write_bytes(raw)
+        (self.assets / "latest.json.sig").write_text(
+            base64.b64encode(self.key.sign(release.SIGNATURE_CONTEXT + raw)).decode() + "\n")
+        (self.assets / "SHA256SUMS").unlink()
+        release.write_checksums(self.assets)
+        self.assertRefused("entry does not match")
 
     def test_a_manifest_without_notes_is_refused(self):
         self.sign_manifest(notes=" ")

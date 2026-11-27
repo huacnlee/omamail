@@ -115,6 +115,15 @@ PUBLISH_TEST_API_FAIL=1 refuses "cannot list releases" 0.2.0
 fresh_checkout
 refuses "must be newer than 0.1.0" 0.1.0
 
+# A default patch version behind the notice widget's is refused before a
+# local release branch exists.
+fresh_checkout
+printf '{\n  "version": "0.3.0"\n}\n' >"$root/clone/manifest.json"
+git -C "$root/clone" commit -q -am "Plugin 0.3.0"
+git -C "$root/clone" push -q origin main
+refuses "manifest.json is already at 0.3.0" 0.2.0
+! git -C "$root/clone" show-ref --verify --quiet refs/heads/release/0.2.0
+
 # A failed remote read must stop before the otherwise healthy push path.
 export PUBLISH_TEST_REAL_GIT="$(command -v git)"
 cat >"$root/bin/git" <<'GIT'

@@ -20,12 +20,17 @@ current="$(python3 omarchy/scripts/release.py version)" || fail "the versioned f
 version="${1:-$(python3 -c 'import sys; a,b,c = map(int, sys.argv[1].split(".")); print(f"{a}.{b}.{c+1}")' "$current")}"
 # Validate before constructing refs, querying GitHub, or editing the checkout.
 python3 - "$current" "$version" <<'PY'
-import re, sys
+import json, re, sys
 current, version = sys.argv[1:]
 if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version):
     raise SystemExit('publish: expected canonical MAJOR.MINOR.PATCH')
 if tuple(map(int, version.split('.'))) <= tuple(map(int, current.split('.'))):
     raise SystemExit('publish: version must be newer than ' + current)
+# bump.sh refuses a version behind the notice widget's; say so before a
+# release branch exists.
+plugin = json.load(open('manifest.json'))['version']
+if tuple(map(int, version.split('.'))) < tuple(map(int, plugin.split('.'))):
+    raise SystemExit(f'publish: manifest.json is already at {plugin}; publish {plugin} or newer')
 PY
 branch="release/$version"
 remote_tag="$(git ls-remote origin "refs/tags/v$version")" || fail "cannot query remote tags"

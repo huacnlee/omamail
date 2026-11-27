@@ -10,8 +10,9 @@
       Writes DIR/SHA256SUMS over the release assets.
   release.py verify DIR --version VERSION [--root DIR]
       Checks DIR holds exactly the release's assets: the three archives
-      `nsh package` makes, the signed update manifest, the installers and
-      SHA256SUMS, each matching the others.
+      `nsh package` makes, the signed update manifest (whose archive URLs
+      name this version's release), the installers and SHA256SUMS, each
+      matching the others.
 
 `verify` checks the manifest's signature against nsh.json's
 `updater.publicKey` with the `cryptography` package; it is what the app does
@@ -240,7 +241,8 @@ def verify(directory, version, root):
         fail(f"latest.json platforms are {sorted(platforms or {})}, expected {sorted(PLATFORMS)}")
     for name, platform in archives(version).items():
         entry = platforms[platform]
-        if (entry.get("url") != name or entry.get("sha256") != sums[name]
+        url = f"https://github.com/{REPOSITORY}/releases/download/v{version}/{name}"
+        if (entry.get("url") != url or entry.get("sha256") != sums[name]
                 or entry.get("size") != files[name].stat().st_size):
             fail(f"latest.json's {platform} entry does not match {name}")
     public_key = read_json(root / "nsh.json").get("updater", {}).get("publicKey")
