@@ -36,6 +36,7 @@ export const NATIVE_MEMBERS = [
   "Diagnostics.openAgent",
   "MailClient.status",
   "MailClient.setDefault",
+  "MailClient.migrateLegacy",
 ] as const;
 
 export interface NativeGuard {
@@ -94,6 +95,11 @@ export function guardNative(options: GuardOptions = {}): NativeGuard {
     }
     if (member === "Backend.launchMailto") {
       native[member] = options.launchMailto ?? null;
+      continue;
+    }
+    // Never the machine's bindings or mailto default: nothing to move.
+    if (member === "MailClient.migrateLegacy") {
+      native[member] = false;
       continue;
     }
     if (member === "MailClient.status") {

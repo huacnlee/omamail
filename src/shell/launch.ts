@@ -21,7 +21,7 @@
 // subject and body only, never attachments or other headers), and the result
 // only fills a draft. Nothing here sends.
 import { Application } from "nsh/desktop";
-import { Backend } from "omamail-native";
+import { Backend, MailClient } from "omamail-native";
 import { MAX_LENGTH } from "../mail/compose/mailto";
 import { bringToFront } from "./windowFocus";
 
@@ -78,5 +78,16 @@ export function startLaunchLinks(open: (request: { mailto: string }) => void): (
   } catch {
     // A platform with one instance and no launch arguments (phones, the web).
     return () => {};
+  }
+}
+
+/** Moves the Qt-era plugin's default mail client switch (SUPER+SHIFT+E
+ * summoning its panel, mailto: going to its removed entry) to this app, so an
+ * upgrade keeps both working. Does nothing for anyone who never chose it. */
+export function migrateLegacyMailClient(): void {
+  try {
+    MailClient.migrateLegacy();
+  } catch {
+    // Not Linux, or the module is older than this call: nothing to move.
   }
 }
