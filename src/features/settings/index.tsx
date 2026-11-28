@@ -25,6 +25,7 @@ import {
   UndoSendRow,
 } from "./sections";
 import { settings } from "./store";
+import { AnalyticsSetting } from "../analytics";
 import { CalendarSettings } from "../calendar";
 
 export { settings } from "./store";
@@ -40,6 +41,7 @@ const SECTIONS = [
   { id: "calendars", title: "Calendars" },
   { id: "oauth", title: "Google OAuth client" },
   { id: "ai", title: "AI" },
+  { id: "privacy", title: "Privacy" },
   { id: "keyboard", title: "Keyboard" },
 ] as const;
 
@@ -147,6 +149,9 @@ export function SettingsPage() {
           </SettingSection>
           <SettingSection testID="settings-section-ai" title="AI" viewRef={ref("ai")}>
             <AiSection />
+          </SettingSection>
+          <SettingSection testID="settings-section-privacy" title="Privacy" viewRef={ref("privacy")}>
+            <AnalyticsSetting />
           </SettingSection>
           <SettingSection testID="settings-section-keyboard" title="Keyboard" viewRef={ref("keyboard")}>
             <KeyboardSection />

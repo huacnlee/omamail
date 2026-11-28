@@ -85,6 +85,13 @@ fn raw_url_bytes_are_validated_before_normalization() {
 }
 
 async fn server(response: Vec<u8>) -> (SocketAddr, tokio::task::JoinHandle<String>) {
+    server_with_body(response, b"List-Unsubscribe=One-Click").await
+}
+
+async fn server_with_body(
+    response: Vec<u8>,
+    body: &'static [u8],
+) -> (SocketAddr, tokio::task::JoinHandle<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let job = tokio::spawn(async move {
@@ -99,7 +106,7 @@ async fn server(response: Vec<u8>) -> (SocketAddr, tokio::task::JoinHandle<Strin
             request.extend_from_slice(&block[..n]);
             if request.windows(4).any(|v| v == b"\r\n\r\n") {
                 let is_post = request.starts_with(b"POST ");
-                if !is_post || request.ends_with(b"List-Unsubscribe=One-Click") {
+                if !is_post || request.ends_with(body) {
                     break;
                 }
             }
@@ -181,6 +188,62 @@ async fn post_is_fixed_and_redirect_destination_receives_nothing() {
             .to_lowercase()
             .contains("content-type: application/x-www-form-urlencoded\r\n")
     );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), destination.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn usage_posts_carry_no_cookies_and_do_not_follow_redirects() {
+    let body = r#"{"site":"omamail","events":[{"name":"screen_view","url":"/message","ts":1780000000,"user_id":"98765432-1234-4321-8765-123456789abc","app_version":"0.13.0","ua":"Omamail/0.13.0 (macOS 27.2)"}]}"#;
+    let destination = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let redirect = format!(
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{}/redirected\r\nSet-Cookie: session=synthetic; Path=/\r\nContent-Length: 0\r\n\r\n",
+        destination.local_addr().unwrap()
+    );
+    let (address, first) = server_with_body(redirect.into_bytes(), body.as_bytes()).await;
+    let (next_address, second) = server_with_body(
+        b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        body.as_bytes(),
+    )
+    .await;
+    let client = test_client(address);
+    let untrusted_url = format!("http://{}/untrusted", destination.local_addr().unwrap());
+    for invalid in [
+        body.replace(r#""/message""#, r#""/message/private-message-id""#),
+        body.replace(r#""ts":"#, r#""email":"jane@example.com","ts":"#),
+        body.replace("98765432-1234-4321-8765-123456789abc", "jane@example.com"),
+        body.replace("macOS 27.2", "macOS Jane"),
+    ] {
+        assert_eq!(post_usage(&client, &untrusted_url, invalid).await, Ok(400));
+    }
+    assert_eq!(
+        post_usage(
+            &client,
+            &format!("http://sender.example:{}/batch", address.port()),
+            body.into()
+        )
+        .await,
+        Ok(307)
+    );
+    assert_eq!(
+        post_usage(
+            &client,
+            &format!("http://sender.example:{}/batch", next_address.port()),
+            body.into()
+        )
+        .await,
+        Ok(204)
+    );
+    for request in [first.await.unwrap(), second.await.unwrap()] {
+        let headers = request.to_ascii_lowercase();
+        assert!(request.starts_with("POST /batch HTTP/1.1\r\n"));
+        assert!(request.ends_with(body));
+        assert!(!headers.contains("\r\ncookie:"));
+        assert!(!headers.contains("\r\nauthorization:"));
+    }
     assert!(
         tokio::time::timeout(Duration::from_millis(50), destination.accept())
             .await

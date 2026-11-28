@@ -3,6 +3,7 @@
 import { mount } from "nsh";
 import { Application, Window } from "nsh/desktop";
 import { shutdown } from "./src/backend/client";
+import { Analytics } from "./src/features/analytics";
 import { Shell } from "./src/shell/Shell";
 import { bringToFront, hidesOnClose } from "./src/shell/windowFocus";
 import { followOmarchyFont, Omarchy, themeReady } from "./src/ui";
@@ -43,6 +44,7 @@ mount(() => {
       {() => (
         <If when={themeReady()}>
           <Shell canQuit onQuit={() => Application.quit()} />
+          <Analytics />
         </If>
       )}
     </Window>

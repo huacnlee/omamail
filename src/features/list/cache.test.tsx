@@ -100,7 +100,7 @@ function backend(options: Options = {}) {
       "Backend.nextEvent": () => null,
       "Backend.shutdown": () => undefined,
       "Backend.os": () => "linux",
-      "Backend.readConfig": () => null,
+      "Backend.readConfig": (name: string) => name === "analytics.json" ? "false" : null,
       "Backend.writeConfig": () => undefined,
     },
   };

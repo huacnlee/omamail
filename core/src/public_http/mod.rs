@@ -12,6 +12,7 @@ use std::{
 };
 
 mod downscale;
+mod usage;
 
 const DEADLINE: Duration = Duration::from_secs(20);
 const MAX_IMAGE: usize = 5 * 1024 * 1024;
@@ -222,6 +223,30 @@ pub async fn unsubscribe(url: &str) -> Result<u16, &'static str> {
             .status,
     )
 }
+/// Sends an opted-in usage batch to Omamail's fixed statistics endpoint.
+pub async fn post_usage_batch(body: String) -> Result<u16, &'static str> {
+    const ENDPOINT: &str = "https://nsmetry.huacnlee-account.workers.dev/api/events/batch";
+    post_usage(client()?, ENDPOINT, body).await
+}
+
+async fn post_usage(client: &Client, url: &str, body: String) -> Result<u16, &'static str> {
+    if !usage::approved_batch(&body) {
+        return Ok(400);
+    }
+    // The public client has no credential or cookie store and refuses all
+    // redirects. Drop the response after reading its status.
+    Ok(client
+        .post(url)
+        .timeout(Duration::from_secs(5))
+        .header("Content-Type", "text/plain;charset=UTF-8")
+        .body(body)
+        .send()
+        .await
+        .map_err(|_| "analytics_unavailable")?
+        .status()
+        .as_u16())
+}
+
 fn sniff(data: &[u8]) -> Option<&'static str> {
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("image/png")

@@ -851,3 +851,7 @@ address in front when the row shows a name.
 | Saved, signed in, copied | nsh-omarchy toast | the toaster's motion |
 | Remove account? | `ui` `confirm` (`AlertDialog` in the `ConfirmHost`) | the control's own motion |
 | Select (agent, mailbox), number fields | `ui` `Select`, `NumberInput` | the controls' own motion |
+
+## Analytics consent
+
+The startup permission uses the shared AlertDialog entrance and scrim, with focus on “Don’t allow”. Both choices use the shared button hover and press states. Settings → Privacy uses the shared Checkbox wash and checkmark for on/off feedback. With reduced motion, the dialog appears immediately and controls retain their state feedback.

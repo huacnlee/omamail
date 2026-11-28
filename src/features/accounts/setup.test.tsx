@@ -38,15 +38,25 @@ function backend(requests: Request[], options: { refuse?: boolean } = {}) {
       "Backend.nextEvent": () => null,
       "Backend.shutdown": () => undefined,
       "Backend.os": () => "linux",
-      "Backend.readConfig": () => null,
+      "Backend.readConfig": (name: string) => name === "analytics.json" ? "false" : null,
       "Backend.writeConfig": () => undefined,
+      "Backend.writeAnalyticsConsent": (_allowed: boolean): void => {},
     },
   };
 }
 
 test("a first run opens the chooser, and IMAP signs in through the keyring", async () => {
   const requests: Request[] = [];
-  const app = await open("../../../App.tsx", { modules: backend(requests), width: 1280, height: 820 });
+  const modules = backend(requests);
+  const consent: boolean[] = [];
+  modules["omamail-native"]["Backend.readConfig"] = () => null;
+  modules["omamail-native"]["Backend.writeAnalyticsConsent"] = (allowed) => {
+    consent.push(allowed);
+  };
+  const app = await open("../../../App.tsx", { modules, width: 1280, height: 820 });
+  await app.waitFor("id:analytics-consent-cancel");
+  await app.press("id:analytics-consent-cancel");
+  await app.waitUntil(() => consent[0] === false);
   await app.waitFor("text:Add a mailbox");
   expect(app.shows("text:Which kind?")).toBe(true);
   await app.press("id:provider-imap");

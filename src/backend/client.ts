@@ -70,6 +70,25 @@ export async function call<T = any>(method: string, params: object = {}): Promis
   return (reply ? reply.result : null) as T;
 }
 
+const ANALYTICS_CONFIG = "analytics.json";
+
+export async function readAnalyticsConsent(): Promise<string | null> {
+  if (preview) return (await preview("analytics.consent.read", {})) as string | null;
+  return Backend.readConfig(ANALYTICS_CONFIG);
+}
+
+export async function writeAnalyticsConsent(allowed: boolean): Promise<void> {
+  const text = JSON.stringify(allowed);
+  if (preview) await preview("analytics.consent.write", { text });
+  else Backend.writeAnalyticsConsent(allowed);
+}
+
+/** The analytics transport takes only a batch body. Rust owns the destination. */
+export async function sendAnalyticsBatch(body: string): Promise<number> {
+  if (preview) return (await preview("analytics.batch", { body })) as number;
+  return Backend.sendAnalyticsBatch(body);
+}
+
 function failed(method: string, error: BackendError): BackendError {
   for (const listener of [...errorListeners]) {
     try {

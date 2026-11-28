@@ -12,7 +12,8 @@
     },
     "nsh-omarchy": "0.2",
     "nsh-icon-lucide": "^0.2.2",
-    "nsh-icon": "^0.2.2"
+    "nsh-icon": "^0.2.2",
+    "nsmetry": "^0.1.0"
   },
   "singleInstance": true,
   "updater": {
