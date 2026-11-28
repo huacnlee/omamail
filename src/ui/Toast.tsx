@@ -11,7 +11,7 @@
 // 340pt card (surface, one border, 2pt corners, a shadow), the kind's icon in
 // its color, the title 13pt semibold bright, the description 12pt muted, a
 // bordered action in primary text, and a close button.
-import { Overlay, Text, View, cleanup, signal, untracked } from "nsh";
+import { Overlay, Text, View, cleanup, signal, untracked, type Signal } from "nsh";
 import { Button as BaseButton, Toast as BaseToast, ToastManager, ToastStack, type ToastEntry, type ToastMotion } from "nsh/base";
 import { scaled } from "./font";
 import { Icon, type IconKey } from "./Icon";
@@ -62,9 +62,9 @@ interface Shown {
 }
 
 // ---- The store --------------------------------------------------------------
-// One mounted Toaster at a time, as in nsh-omarchy. Each show gets a key of
-// its own, so a replaced toast is a new item (its own drawing and enter
-// motion) while the app's id moves to it.
+// One mounted Toaster at a time, as in nsh-omarchy. Timed replacements get
+// a new key and timeout; a persistent notice updates in place so its
+// countdown does not replay the entrance motion.
 
 interface Store {
   manager: ToastManager;
@@ -79,7 +79,7 @@ let store: Store | null = null;
 /** The key shown for each app id. */
 const keys = new Map<string, string>();
 /** Each key's toast: the manager keeps plain data, not the action's function. */
-const notices = new Map<string, Shown>();
+const notices = new Map<string, Signal<Shown>>();
 /** Toasts shown before a Toaster mounted. */
 let pending: Shown[] = [];
 let count = 0;
@@ -119,10 +119,18 @@ function stop(s: Store): void {
 
 function place(s: Store, shown: Shown): void {
   const old = keys.get(shown.id);
-  if (old !== undefined) s.manager.dismiss(old);
+  if (old !== undefined) {
+    const notice = notices.get(old);
+    const active = s.manager.entries().some((e) => e.id === old && e.status !== "ending");
+    if (active && notice && timeoutOf(notice().toast) === null && timeoutOf(shown.toast) === null) {
+      notice.set(shown);
+      return;
+    }
+    s.manager.dismiss(old);
+  }
   const key = nextKey();
   keys.set(shown.id, key);
-  notices.set(key, shown);
+  notices.set(key, signal(shown));
   s.manager.push(key, null, { timeout: timeoutOf(shown.toast) });
   sync(s);
   tick(s);
@@ -217,14 +225,16 @@ export function Toaster(props: ToasterProps) {
 
 function Notice(props: { entry: () => ToastEntry }) {
   const key = untracked(() => props.entry().id);
-  const { id, toast: t } = notices.get(key)!;
-  const kind = KIND[t.kind ?? "info"];
-  const spoken = t.description ? `${t.title}. ${t.description}` : t.title;
+  const notice = notices.get(key)!;
+  const id = untracked(() => notice().id);
+  const t = () => notice().toast;
+  const kind = () => KIND[t().kind ?? "info"];
+  const spoken = () => t().description ? `${t().title}. ${t().description}` : t().title;
   return (
     <BaseToast
       testID={`toast-${id}`}
       transitionStatus={props.entry().status}
-      accessibilityLabel={spoken}
+      accessibilityLabel={spoken()}
       onDismissRequest={() => dismissKey(key)}
       class={cx("flex-row w-full border border-border rounded-(--radius) bg-surface shadow-md text-foreground transition-all duration-[140ms]")}
       startingClass={cx("opacity-0 translate-y-2")}
@@ -232,23 +242,23 @@ function Notice(props: { entry: () => ToastEntry }) {
       swipingClass="transition-none"
     >
       <View style={{ paddingLeft: scaled(12), paddingTop: scaled(14) }}>
-        <Icon name={kind.icon} size={16} class={kind.color} />
+        <Icon name={kind().icon} size={16} class={kind().color} />
       </View>
       <View
         class="flex-1"
         style={{ minWidth: 0, gap: scaled(4), paddingVertical: scaled(12), paddingLeft: scaled(8) }}
       >
-        <Text class={`text-[${scaled(13)}px] font-semibold text-bright`}>{t.title}</Text>
-        <If when={t.description}>
-          <Text class={`text-[${scaled(12)}px] text-text-secondary`}>{t.description}</Text>
+        <Text class={`text-[${scaled(13)}px] font-semibold text-bright`}>{t().title}</Text>
+        <If when={t().description}>
+          <Text class={`text-[${scaled(12)}px] text-text-secondary`}>{t().description}</Text>
         </If>
-        <If when={t.action}>
+        <If when={t().action}>
           <View class="flex-row" style={{ paddingTop: scaled(4) }}>
             <BaseButton
               testID={`toast-${id}-action`}
-              accessibilityLabel={t.action!.label}
+              accessibilityLabel={t().action!.label}
               onPress={() => {
-                t.action!.onAction();
+                t().action!.onAction();
                 dismissKey(key);
               }}
               class={cx(
@@ -258,7 +268,7 @@ function Notice(props: { entry: () => ToastEntry }) {
               )}
               style={{ height: scaled(26), paddingHorizontal: scaled(12) }}
             >
-              <Text class={`text-[${scaled(13)}px] text-primary`}>{t.action!.label}</Text>
+              <Text class={`text-[${scaled(13)}px] text-primary`}>{t().action!.label}</Text>
             </BaseButton>
           </View>
         </If>
