@@ -3,7 +3,11 @@
 // to act while they are in flight. The probe shows the draft id the last
 // provider save and the last recovery record carried (empty: a new draft), and
 // whether Send is open. Synthetic backend only.
-import { syntheticRecovery } from "./syntheticBackend";
+//
+// Each mailbox keeps its drafts the way IMAP does: a save appends a new copy
+// and removes the draft it replaces from the mailbox the save went to. Both
+// mailboxes start with a draft at the same id, as two IMAP folders can.
+import { syntheticComposed, syntheticRecovery } from "./syntheticBackend";
 import { mount, signal, Text, View } from "nsh";
 import { Window } from "nsh/desktop";
 import { app } from "../../../app/store";
@@ -21,6 +25,8 @@ const NOTE = { filename: "notes.txt", mimeType: "text/plain", size: 5, data: "bm
 const readHeld = signal(false);
 const withFile = signal(false);
 const saved = signal("none");
+const drafts = signal<Record<string, string[]>>({ [SAM.id]: [DRAFT_ID], [JANE.id]: [DRAFT_ID] });
+let nextUid = 8;
 let releaseRead = () => {};
 let releaseFile = () => {};
 let failFile = () => {};
@@ -35,7 +41,13 @@ setComposeHost({
   readMessage: async () => {
     if (readHeld()) await new Promise<void>((resolve) => (releaseRead = resolve));
     return {
-      summary: { from: { name: "Sam Roe", email: SAM.email }, to: [{ name: "Ann Lee", email: "ann@example.net" }], subject: "Saved subject" },
+      summary: {
+        from: { name: "Sam Roe", email: SAM.email },
+        to: [{ name: "Ann Lee", email: "ann@example.net" }],
+        bcc: [{ name: "Bo Kim", email: "bo@example.net" }],
+        replyTo: [{ name: "Team", email: "team@example.net" }],
+        subject: "Saved subject",
+      },
       body: "Saved body",
       attachments: withFile() ? [FILE] : [],
     };
@@ -47,8 +59,11 @@ setComposeHost({
     });
     return "UERG";
   },
-  saveDraft: async (_accountId, payload) => {
-    saved.set(String(payload?.draftId ?? ""));
+  saveDraft: async (accountId, payload) => {
+    const replaced = String(payload?.draftId ?? "");
+    saved.set(replaced);
+    const mine = (drafts()[accountId] ?? []).filter((id) => id !== replaced);
+    drafts.set({ ...drafts(), [accountId]: [...mine, `${nextUid++}:Drafts`] });
     return {};
   },
 });
@@ -58,6 +73,10 @@ function Harness() {
     <View class="flex-1 bg-background gap-1">
       <Text testID="probe">
         {`saved=[${saved()}] recovered=[${syntheticRecovery()?.draft?.sourceDraftId ?? "none"}] typed=${String(syntheticRecovery()?.draft?.body ?? "").endsWith(" and more")} loading=${compose.forwardLoading()} send=${compose.canSend()} files=${compose.draft().draftAttachments.map((f) => f.filename).join(",")}`}
+      </Text>
+      <Text testID="mailboxes">{`sam=[${(drafts()[SAM.id] ?? []).join(",")}] jane=[${(drafts()[JANE.id] ?? []).join(",")}]`}</Text>
+      <Text testID="composed">
+        {`bcc=${String(syntheticComposed()?.bcc ?? "")} replyTo=${String(syntheticComposed()?.replyTo ?? "")} files=${(syntheticComposed()?.attachments ?? []).map((f: any) => `${f.filename}:${f.data ?? ""}`).join(",")}`}
       </Text>
       <View class="flex-row flex-wrap gap-1">
         <Button testID="load-accounts" label="Load accounts" onPress={() => app.setAccounts([SAM, JANE])} />

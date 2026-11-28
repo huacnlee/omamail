@@ -119,3 +119,34 @@ test("a file attached while the draft's files load is kept beside them", async (
   await app.waitUntil(() => probe(app).includes("loading=false"));
   expect(probe(app)).toContain("files=plan.pdf,notes.txt");
 });
+
+function line(app: App, prefix: string): string {
+  return app.texts().find((t) => t.startsWith(prefix)) ?? "";
+}
+
+test("a reopened draft saves its Bcc, Reply-To and file contents", async () => {
+  const app = await start();
+  await app.press("id:with-file");
+  await app.press("id:reopen");
+  await app.waitUntil(() => probe(app).includes("loading=true"));
+  await app.press("id:release-file");
+  await app.waitUntil(() => probe(app).includes("loading=false send=true"));
+  await app.type("id:compose-body", " and more");
+  expect(await save(app)).toBe("7:Drafts");
+  const composed = line(app, "bcc=");
+  expect(composed).toContain("bo@example.net");
+  expect(composed).toContain("replyTo=");
+  expect(composed).toContain("team@example.net");
+  expect(composed).toContain("plan.pdf:UERG");
+  expect(line(app, "sam=")).toBe("sam=[8:Drafts] jane=[7:Drafts]");
+});
+
+test("a read draft moved to another mailbox saves a new copy there and leaves both mailboxes' drafts", async () => {
+  const app = await start();
+  await app.press("id:reopen");
+  await app.waitUntil(() => app.value("id:compose-body") === "Saved body");
+  await app.press("id:from-jane");
+  await app.type("id:compose-body", " and more");
+  expect(await save(app)).toBe("");
+  expect(line(app, "sam=")).toBe("sam=[7:Drafts] jane=[7:Drafts,8:Drafts]");
+});

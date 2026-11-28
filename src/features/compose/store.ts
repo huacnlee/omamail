@@ -222,7 +222,11 @@ export function addContact(field: "to" | "cc" | "bcc", contact: Contact) {
 export function chooseFrom(identity: SendIdentity) {
   const accountId = String(identity.accountId || "") || draftSignal().accountId;
   const previous = draftSignal().accountId;
-  update({ fromEmail: String(identity.email || ""), fromWasChosen: true, accountId });
+  // A saved draft's id names a copy in its own mailbox only: a draft moved to
+  // another mailbox saves as a new copy there, so the save cannot remove that
+  // mailbox's draft at the same id, and the first mailbox keeps its copy.
+  const moved = accountId !== previous ? { sourceDraftId: "" } : {};
+  update({ fromEmail: String(identity.email || ""), fromWasChosen: true, accountId, ...moved });
   // The sign-off follows the mailbox, but only while the body is the one placed.
   const d = draftSignal();
   if (accountId !== previous && d.mode !== "draft" && !d.bodyWasEdited && d.body === d.placedBody) placeBody(null, "");
