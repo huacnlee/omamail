@@ -85,7 +85,7 @@ mod tests {
     #[tokio::test]
     async fn opting_out_aborts_a_batch_waiting_to_connect() {
         let (attempt, gate) = oneshot::channel();
-        let request = tokio::spawn(async { gate.await });
+        let request = tokio::spawn(gate);
         let mut state = BatchState {
             blocked: false,
             active: Some(request.abort_handle()),
