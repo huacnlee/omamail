@@ -11,6 +11,9 @@ export const syntheticOutbox = signal<{ accountId: string; sendId: string }[]>([
 /** The last draft recovery saved (`compose.recoverySave`), as the backend got it. */
 export const syntheticRecovery = signal<any>(null);
 
+/** The fields of the last `message.compose`, as the backend got them. */
+export const syntheticComposed = signal<any>(null);
+
 /** The synthetic contact book, CJK names among them. */
 export const SYNTHETIC_CONTACTS = [
   { name: "Ann Lee", email: "ann@example.net" },
@@ -29,6 +32,7 @@ setComposeRpc({
     }
     if (method === "contacts.suggest") return SYNTHETIC_CONTACTS as any;
     if (method === "contacts.google") return { contacts: [] } as any;
+    if (method === "message.compose") syntheticComposed.set(params.fields ?? null);
     if (method === "message.compose") return { raw: "UkFX", draftId: String(params.fields?.draftId || "") } as any;
     if (method === "outbox.enqueue") {
       const entry = { id: String(params.sendId), state: "queued", queuedAt: Date.now(), dueAt: Date.now() + 10_000 };
