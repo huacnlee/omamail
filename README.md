@@ -2,7 +2,9 @@
 
 Omamail is a native email and calendar app with multiple accounts and keyboard navigation. It runs as an NSH app on desktop and mobile, or as an Omarchy shell plugin.
 
-<img width="800" alt="Omamail — reading mail with AI assistance" src="docs/images/full-mail.webp" />
+<img width="800" alt="Omamail — reading demo mail in the dark theme" src="docs/images/full-mail.webp" />
+
+Screenshots show the native Linux app in its dark theme, using fictional demo mailboxes and messages.
 
 **If this helps you, please [sponsor me](https://github.com/sponsors/huacnlee).**
 
