@@ -20,8 +20,8 @@ import { currentWindow } from "nsh/desktop";
 import { ContactsPicker } from "./ContactsPicker";
 import { RecipientField } from "./RecipientField";
 import {
-  attachDropped, attachPasted, cancelLeave, chooseFiles, chooseFrom, compose, discard, loadForwardAttachments,
-  removeAttachment, requestLeave, saveAndLeave, send, setBody, showField, toggleQuote, update,
+  attachDropped, attachPasted, cancelLeave, chooseFiles, chooseFrom, compose, discard, removeAttachment,
+  requestLeave, retryOriginalAttachments, saveAndLeave, send, setBody, showField, toggleQuote, update,
 } from "./store";
 
 export interface ComposeViewProps {
@@ -352,7 +352,7 @@ function ForwardNote() {
             tone="danger"
             icon="error"
             text={compose.forwardError()}
-            action={{ label: "Retry", onPress: () => loadForwardAttachments() }}
+            action={{ label: "Retry", onPress: () => retryOriginalAttachments() }}
           />
         </If>
         <If when={!compose.forwardLoading() && compose.forwardError() === "" && d().mode === "forward"}>

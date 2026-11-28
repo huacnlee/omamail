@@ -20,7 +20,7 @@ import { registerCommand } from "../../keys/commands";
 import { dismissToast, toast } from "../../ui";
 import * as Draft from "../../mail/compose/draft";
 import type { Attachment, ComposeDraft, ComposeMode } from "../../mail/compose/draft";
-import { composeHost, loadRegistry, setAccountsSource, composeRpc } from "../../mail/compose/host";
+import { composeHost, loadRegistry, setAccountsSource, composeRpc, type PreparedMessage } from "../../mail/compose/host";
 import * as Mailto from "../../mail/compose/mailto";
 import { normalizeDelay } from "../../mail/compose/outbox";
 import * as Recipients from "../../mail/compose/recipients";
@@ -377,12 +377,15 @@ export function openCompose(request: ComposeRequest = {}) {
     beginReply(reply, accountId);
     return;
   }
+  const draftId = Draft.sourceIdOf(input.draftId ?? "");
+  // Opened by its id alone, a saved draft is read from its mailbox first.
+  const reopening = mode === "draft" && input.to === undefined && input.subject === undefined && input.body === undefined;
   const d: ComposeDraft = {
     ...base,
     ...fields,
     ccVisible: fields.cc.trim() !== "",
     bccVisible: fields.bcc.trim() !== "",
-    sourceDraftId: Draft.sourceIdOf(input.draftId ?? ""),
+    sourceDraftId: reopening ? "" : draftId,
     threadId: String(input.threadId || ""),
     inReplyTo: String(input.inReplyTo || ""),
   };
@@ -398,8 +401,64 @@ export function openCompose(request: ComposeRequest = {}) {
   }
   draftSignal.set(d);
   ensureFrom();
-  if (mode === "draft") loadDraftAttachments(accountId, Draft.sourceIdOf(input.draftId ?? ""), input.attachments ?? []);
-  else placeBody(null, "", fields.body);
+  if (mode !== "draft") placeBody(null, "", fields.body);
+  else if (reopening) void reopenSavedDraft(accountId, draftId);
+  else loadDraftAttachments(accountId, draftId, input.attachments ?? []);
+}
+
+/**
+ * A draft reopened by its id alone (the list's Continue editing, the reader's
+ * edit key) is read from its mailbox, as a reply reads its original. What the
+ * user typed while it was read stays.
+ *
+ * Saving or sending replaces the copy a draft is linked to, so it is linked
+ * only once it holds all of that copy: its text read untouched, then its files.
+ * Until then (a recovery record included), or when the user typed while it was
+ * read, a save makes a new draft and the saved one keeps what it had.
+ */
+async function reopenSavedDraft(accountId: string, messageId: string) {
+  const key = draftSignal().draftKey;
+  const host = composeHost();
+  if (!host.readMessage) {
+    fail("That draft could not be read");
+    return;
+  }
+  busySignal.set(true);
+  let saved: PreparedMessage;
+  try {
+    saved = await host.readMessage(accountId, messageId);
+  } catch (error) {
+    if (draftSignal().draftKey === key) fail(String((error as Error)?.message || "That draft could not be read"));
+    return;
+  } finally {
+    busySignal.set(false);
+  }
+  if (draftSignal().draftKey !== key || !openedSignal()) return;
+  const summary = saved.summary ?? {};
+  const recipients = (values: unknown) =>
+    committed(Recipients.normalize(Array.isArray(values) ? values : [values]).map(Recipients.address).join(", "));
+  const keep = (current: string, value: string) => (current.trim() === "" ? value : current);
+  // The backend names an empty subject for the list; a draft's field stays empty.
+  const subject = String(summary.subject || "");
+  const d = { ...draftSignal() };
+  d.to = keep(d.to, recipients(summary.to));
+  d.cc = keep(d.cc, recipients(summary.cc));
+  d.bcc = keep(d.bcc, recipients(summary.bcc));
+  d.replyTo = keep(d.replyTo, recipients(summary.replyTo));
+  d.subject = keep(d.subject, subject === "(no subject)" ? "" : subject);
+  d.body = keep(d.body, saved.body);
+  d.ccVisible = d.ccVisible || d.cc !== "";
+  d.bccVisible = d.bccVisible || d.bcc !== "";
+  d.replyToVisible = d.replyToVisible || d.replyTo !== "";
+  d.threadId = d.threadId || String(summary.threadId || "");
+  d.inReplyTo = d.inReplyTo || String(summary.inReplyTo || "");
+  // Its From comes back only where this mailbox may still send as it; otherwise
+  // the mailbox's own choice stands rather than a From that refuses to save.
+  const from = Recipients.cleanContact(summary.from)?.email.toLowerCase() ?? "";
+  if (!d.fromWasChosen && from !== "" && fromCandidates(accountId).some((c) => c.email.toLowerCase() === from)) d.fromEmail = from;
+  draftSignal.set(d);
+  ensureFrom();
+  loadDraftAttachments(accountId, messageId, saved.attachments, !d.userModified);
 }
 
 async function beginReply(reply: NonNullable<ComposeRequest["replyTo"]>, accountId: string) {
@@ -493,9 +552,14 @@ export function loadForwardAttachments() {
   });
 }
 
-function loadDraftAttachments(accountId: string, messageId: string, listed: any[]) {
+/** Where the open draft's files are read from, for Retry. */
+let draftFiles = { accountId: "", messageId: "", link: false };
+
+/** Reads a saved draft's parts; `link`: link the draft to its saved copy once they are in. */
+function loadDraftAttachments(accountId: string, messageId: string, listed: any[], link = false) {
+  draftFiles = { accountId, messageId, link };
   const d = draftSignal();
-  draftSignal.set({ ...d, originalAttachments: listed.slice() });
+  draftSignal.set({ ...d, originalAttachments: listed.slice(), ...(link && listed.length === 0 ? { sourceDraftId: messageId } : {}) });
   if (listed.length === 0) return;
   const serial = ++forwardLoadSerial;
   forwardLoadingSignal.set(true);
@@ -504,9 +568,26 @@ function loadDraftAttachments(accountId: string, messageId: string, listed: any[
     if (serial !== forwardLoadSerial || !openedSignal() || draftSignal().mode !== "draft") return;
     forwardLoadingSignal.set(false);
     forwardErrorSignal.set(error);
-    if (error) fail(error);
-    else draftSignal.set({ ...draftSignal(), draftAttachments: files });
+    if (error) {
+      fail(error);
+      return;
+    }
+    const d = draftSignal();
+    // Files the user attached meanwhile stay; the link holds only while the
+    // draft still belongs to the mailbox whose saved copy it would replace.
+    draftSignal.set({
+      ...d,
+      draftAttachments: [...files, ...d.draftAttachments],
+      ...(link && d.accountId === accountId ? { sourceDraftId: messageId } : {}),
+    });
   });
+}
+
+/** Retry on the original attachments' error: a draft's own, else a forward's. */
+export function retryOriginalAttachments() {
+  const d = draftSignal();
+  if (d.mode === "draft") loadDraftAttachments(draftFiles.accountId, draftFiles.messageId, d.originalAttachments, draftFiles.link);
+  else loadForwardAttachments();
 }
 
 /** Reopens a stored draft (recovery, an undone send). */

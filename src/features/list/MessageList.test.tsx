@@ -1,6 +1,7 @@
 // The list end to end on a stand-in backend: rows from imap.list / imap.messages /
 // message.summaries, keyboard movement, an optimistic archive with the exact
-// request the Qt client sent, and a failed change put back where it was.
+// request the Qt client sent, a failed change put back where it was, and a
+// saved draft reopened from its row menu.
 import { expect, open, test } from "nsh/test";
 
 const ACCOUNT = { email: "jane@example.com", provider: "imap", label: "Jane" };
@@ -13,7 +14,17 @@ function resource(n: number, extra: Record<string, unknown> = {}) {
   };
 }
 
-function backend(options: { failModify?: boolean; unread?: number[] } = {}) {
+// A draft saved earlier: the list knows its headers, the full read its text.
+const DRAFT = {
+  id: "7:Drafts", subject: "Saved subject", snippet: "Saved body", dateMs: NOW, isDraft: true, labelIds: ["DRAFT"],
+  from: { name: "Jane", email: "jane@example.com" },
+  to: [{ name: "Ann Lee", email: "ann@example.net" }], cc: [{ email: "bob@example.net" }],
+  bodyText: "Saved body",
+};
+
+type Options = { failModify?: boolean; unread?: number[] };
+
+function backend(options: Options = {}) {
   const calls: { method: string; params: any }[] = [];
   const rows = [1, 2, 3].map((n) => resource(n, options.unread ? { unread: options.unread.includes(n) } : {}));
   const modules = {
@@ -23,12 +34,16 @@ function backend(options: { failModify?: boolean; unread?: number[] } = {}) {
         switch (method) {
           case "accounts.read":
             return { result: { revision: "r1", registry: { version: 1, accounts: [ACCOUNT], activeId: "" } } };
-          case "imap.list":
-            return { result: { page: { ids: rows.map((r) => r.id), nextPageToken: "", estimate: rows.length } } };
+          case "imap.list": {
+            const listed = params.query === "folder:\\Drafts" ? [DRAFT] : rows;
+            return { result: { page: { ids: listed.map((r) => r.id), nextPageToken: "", estimate: listed.length } } };
+          }
           case "imap.messages":
-            return { result: { messages: rows.filter((r) => params.ids.includes(r.id)) } };
+            return { result: { messages: [...rows, DRAFT].filter((r) => params.ids.includes(r.id)) } };
           case "message.summaries":
             return { result: { summaries: params.messages } };
+          case "message.prepare":
+            return { result: { summary: params.message, body: { text: params.message.bodyText ?? "" }, attachments: [] } };
           case "imap.modify":
             return options.failModify ? { error: { code: -32000, message: "request_timed_out" } } : { result: {} };
           default:
@@ -45,7 +60,7 @@ function backend(options: { failModify?: boolean; unread?: number[] } = {}) {
   return { modules, calls };
 }
 
-async function start(options: { failModify?: boolean; unread?: number[] } = {}) {
+async function start(options: Options = {}) {
   const fake = backend(options);
   const app = await open("../../../App.tsx", { modules: fake.modules, width: 1280, height: 820, platform: "linux" });
   await app.waitFor("text:Subject 3");
@@ -149,4 +164,25 @@ test("the row menu is held by the message: Escape closes it and clears the targe
   // Open again on another row: the menu follows that message.
   await app.rightClick("id:message-row-2");
   await app.waitFor("text:Reply all");
+});
+
+test("Continue editing opens a saved draft with what was written in it", async () => {
+  const { app, calls } = await start();
+  await app.press("id:mailbox-drafts");
+  await app.waitFor("text:Saved subject");
+  await app.rightClick("id:message-row-0");
+  await app.press("text:Continue editing");
+  await app.waitFor("id:compose");
+  await app.waitUntil(() => app.value("id:compose-body") === "Saved body");
+  expect(app.value("id:compose-subject")).toBe("Saved subject");
+  // Saved again, it keeps its recipients and replaces the copy it came from.
+  await app.type("id:compose-body", " and more");
+  await app.press("id:compose-back");
+  await app.press("id:compose-exit-save");
+  await app.waitUntil(() => calls.some((c) => c.method === "message.compose"));
+  const fields = calls.find((c) => c.method === "message.compose")!.params.fields;
+  expect(fields.to).toBe("Ann Lee <ann@example.net>");
+  expect(fields.cc).toBe("bob@example.net");
+  expect(fields.subject).toBe("Saved subject");
+  expect(fields.draftId).toBe("7:Drafts");
 });
