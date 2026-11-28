@@ -88,8 +88,6 @@ const parkedSignal = signal<Parked[]>([]);
 const interruptedSignal = signal<ComposeDraft | null>(null);
 /** Drafts waiting to reopen, in order (recovered, or displaced). */
 const recoveryDraftsSignal = signal<ComposeDraft[]>([]);
-/** Bumps when a draft reopens by itself, for the restore flash. */
-const restoreRevisionSignal = signal(0);
 const forwardLoadingSignal = signal(false);
 const forwardErrorSignal = signal("");
 const attachingSignal = signal(false);
@@ -125,7 +123,6 @@ export const compose = {
   exitDialogOpen: () => exitDialogSignal(),
   busy: () => busySignal(),
   windowed: () => windowedSignal(),
-  restoreRevision: () => restoreRevisionSignal(),
   focusRequest: () => focusRequestSignal(),
   /** Every file this draft carries, in send order. */
   attachments: computed(() => Draft.outgoingAttachments(draftSignal())),
@@ -528,10 +525,6 @@ function restoreDraft(saved: ComposeDraft) {
   if (d.mode === "forward" && d.originalAttachments.length > 0 && d.forwardedAttachments.length === 0) loadForwardAttachments();
 }
 
-function flashRestore() {
-  restoreRevisionSignal.update((n) => n + 1);
-}
-
 /** The draft closes: the next held one reopens, or compose goes away. */
 function finish() {
   clearCurrent(true);
@@ -546,7 +539,6 @@ function finish() {
   if (queued.length > 0) {
     recoveryDraftsSignal.set(queued.slice(1));
     restoreDraft(queued[0]);
-    flashRestore();
     scheduleRecovery();
     return;
   }
@@ -632,7 +624,6 @@ export function saveAndLeave(force = false) {
 function recoverDetachedSave(saved: ComposeDraft) {
   if (!openedSignal()) {
     restoreDraft(saved);
-    flashRestore();
     scheduleRecovery();
     return;
   }
@@ -852,7 +843,6 @@ function restoreParkedDraft(sendId: string, oldest: boolean): boolean {
   }
   clearCurrent(false);
   restoreDraft(draft);
-  flashRestore();
   const revision = saveRecovery();
   if (receiptAccount !== "" && sendId !== "") queueReceiptAck(receiptAccount, sendId, revision);
   // The draft that was open is saved to the provider so it is not lost behind this one.
@@ -1327,7 +1317,6 @@ function restoreRecovered() {
   pendingRestore = null;
   if (first.deliveryUnknown === true) recoveryNoticeSignal.set("Delivery status is unknown. Check Sent before trying again.");
   restoreDraft(first);
-  flashRestore();
   if (restored.length > 1) recoveryDraftsSignal.set([...recoveryDraftsSignal(), ...restored.slice(1)]);
 }
 

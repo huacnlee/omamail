@@ -4,10 +4,10 @@
 // drawn, the invitation and the agent's findings, the body, its attachments,
 // and the action bar on the reader's lower edge (MessageReader.qml,
 // ReaderNotice.qml, ReaderBlankSlate.qml, ReaderSkeleton.qml).
-import { computed, createMotion, effect, reduceMotion, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
+import { computed, effect, reduceMotion, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import {
   ActionBar, ActionBarGroup, ActionBarSeparator, ActionBarSpacer, Button, Tooltip, confirmAction, EmptyPane, Icon, Kbd,
-  NoticeStack, ReaderSkeleton, SegmentedControl, ToolButton, TEXT, LINE, RADIUS, cx, enterRise, scaled, sizedBox,
+  NoticeStack, ReaderSkeleton, SegmentedControl, ToolButton, TEXT, LINE, RADIUS, cx, scaled, sizedBox,
   type NoticeItem, type SegmentOption,
 } from "../../ui";
 import { app } from "../../app/store";
@@ -212,6 +212,7 @@ function BlankSlate() {
   return (
     <View testID="reader-blank" class="flex-1 items-center justify-center gap-4 p-6">
       <EmptyPane
+        instant
         title={title()}
         description={blankSubtitle({ loading: listStore.loading(), count: count(), searching: searching() })}
         icon={searching() ? "search" : "mail"}
@@ -325,12 +326,9 @@ function Message() {
   let offset = 0;
   let contentHeight = 0;
   const inset = () => scaled(pageInset(width()));
-  // The page rises into place when a message opens (DESIGN.md "NSH reader").
-  const motion = createMotion();
   effect(() => {
     reader.id();
     untracked(() => {
-      if (!reduceMotion()) void motion.play(enterRise(4));
       offset = 0;
       scroll?.scrollTo({ y: 0, animated: false });
     });
@@ -389,7 +387,7 @@ function Message() {
         }}
         contentStyle={{ paddingHorizontal: inset(), paddingTop: inset(), paddingBottom: scaled(32) }}
       >
-        <View class="gap-3" style={motion.style}>
+        <View class="gap-3">
           <If when={reader.summary()}>
             {(s) => (
               <Header
@@ -476,6 +474,7 @@ export function Reader(props: ReaderProps = {}) {
       </If>
       <If when={state() === "error"}>
         <EmptyPane
+          instant
           testID="reader-error"
           title={reader.error()}
           description="The message may have moved, or the connection dropped."

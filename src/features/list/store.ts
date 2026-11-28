@@ -7,7 +7,7 @@
 // Navigation and selection (cursor, selected, checked) stay in `app`; this file
 // only reads them and moves them the way the Qt list did. Other features
 // trigger list work through the exports at the bottom (`listStore`).
-import { batch, computed, effect, LayoutAnimation, Notifications, openUrl, reduceMotion, signal, untracked } from "nsh";
+import { batch, computed, effect, Notifications, openUrl, signal, untracked } from "nsh";
 import { app, type AccountRef } from "../../app/store";
 import { call, on } from "../../backend/client";
 import { labelIdOfMailbox } from "../../mail/labels";
@@ -23,14 +23,8 @@ import { restoreChecks, unifiedBatchOutcome, type GroupResult } from "../../mail
 import { accountOf, allLoaded, anyHasMore, firstError, groupByAccount, mergeMessages, notifiedId, sourceIdOf, unifiedId } from "../../mail/unified";
 import { mailboxStore } from "../mailbox/store";
 import { openMovePicker } from "../mailbox/MessagePicker";
-import { DURATION, toast } from "../../ui";
+import { toast } from "../../ui";
 import { bringToFront } from "../../shell/windowFocus";
-
-/** Rows leaving or coming back close or open their gap instead of jumping. */
-function animateRows() {
-  if (untracked(reduceMotion)) return;
-  LayoutAnimation.configureNext(LayoutAnimation.create(DURATION.normal, "easeOut", "opacity"));
-}
 
 // ------------------------------------------------------------------ settings
 
@@ -67,8 +61,6 @@ interface Source {
 
 const sourcesSignal = signal<Record<string, Source>>({});
 const serials = new Map<string, number>();
-/** Rows' "seen once" flag for the list's entry wave: once per view. */
-const viewSerialSignal = signal(0);
 
 function accountById(id: string): AccountRef | null {
   return app.accounts().find((a) => a.id === id) ?? null;
@@ -357,15 +349,11 @@ effect(() => {
   lastViewKey = key;
   untracked(() => {
     pendingChecks = [];
-    if (previewRows) {
-      viewSerialSignal.set(viewSerialSignal() + 1);
-      return;
-    }
+    if (previewRows) return;
     const accounts = viewAccounts();
     const next: Record<string, Source> = { ...sourcesSignal() };
     for (const a of accounts) next[a.id] = { ...sourceOf(a.id), rows: [], nextPageToken: "", loaded: false, loading: true, error: "", query: "" };
     sourcesSignal.set(next);
-    viewSerialSignal.set(viewSerialSignal() + 1);
     for (const a of accounts) void loadSource(a, false);
   });
 });
@@ -444,7 +432,6 @@ export function act(action: string, ids?: readonly string[], options: ActOptions
     }
   }
   // The cursor and the open message move off rows that leave, before they go.
-  if (leaving.length > 0) animateRows();
   batch(() => {
     const cursor = untracked(() => app.cursorId());
     const selected = untracked(() => app.selectedId());
@@ -525,7 +512,6 @@ function settle(action: string, label: string, before: Pending[], outcomes: Grou
     if (failed.length > 0) {
       firstFailure ||= lastErrors.get(outcome.accountId) || "The change was not applied";
       // Put back exactly the rows whose request failed, where they were.
-      animateRows();
       patchSource(outcome.accountId, (s) => ({ rows: M.restoreRows(s.rows, before[i].all, failed) }));
       if (unified) pendingChecks = pendingChecks.concat(failed.map((id) => unifiedId(outcome.accountId, id)));
       // What the server holds is no longer certain: read it again.
@@ -574,7 +560,6 @@ function offerUndo(action: string, label: string, before: Pending[], count: numb
 
 /** Puts the rows back as they were and sends the inverse verb. */
 function undo(inverse: string, before: Pending[], labelId: string) {
-  animateRows();
   batch(() => {
     for (const group of before) {
       const ids = group.rows.map((r) => sourceRowId(group.accountId, r.id));
@@ -901,8 +886,6 @@ export const listStore = {
   hasMore: () => hasMoreSignal(),
   error: () => errorSignal(),
   estimate: () => estimateSignal(),
-  /** Bumps once per view: the rows' entry wave plays once per bump. */
-  viewSerial: () => viewSerialSignal(),
   view: listView,
   ownerOf,
   rowFor: (id: string) => M.summariesById(messagesSignal(), [id])[0] ?? null,

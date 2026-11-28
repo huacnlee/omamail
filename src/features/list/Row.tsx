@@ -6,12 +6,12 @@
 // the row's id, so a cell reused for another message shows that message's
 // state. Every row has the same height; quick actions overlay the trailing
 // metadata in place, so text never moves when they appear.
-import { createMotion, effect, signal, Text, untracked, View } from "nsh";
+import { signal, Text, untracked, View } from "nsh";
 import { app } from "../../app/store";
 import type { Summary } from "../../mail/listModel";
 import * as M from "../../mail/listModel";
 import { rowIsConversation } from "../../mail/unified";
-import { Checkbox, Icon, ControlledContextMenu, ListRow, cx, scaled, ShortcutTooltip, type RowQuickAction, DISTANCE, enterRise, staggerDelay, STAGGER, TEXT } from "../../ui";
+import { Checkbox, Icon, ControlledContextMenu, ListRow, cx, scaled, ShortcutTooltip, type RowQuickAction, TEXT } from "../../ui";
 import { messageDrag } from "../mailbox/drag";
 import { RowMenu } from "./RowMenu";
 import { listStore } from "./store";
@@ -35,14 +35,9 @@ export function sourceLabelCap(rowWidth: number): number | undefined {
 /** The id under the pointer, "" for none: one for the whole list, keyed by id. */
 export const hoveredId = signal("");
 
-/** Rows that have played the entry wave in the current view (by `viewSerial:id`). */
-const waved = new Set<string>();
-
 export interface MessageRowProps {
   item: () => Summary;
   index: () => number;
-  /** The entry wave may play for rows first shown now. */
-  waveOpen: () => boolean;
 }
 
 export function MessageRow(props: MessageRowProps) {
@@ -60,17 +55,6 @@ export function MessageRow(props: MessageRowProps) {
   const trashVerb = () => M.keyActionFor("trash", [row()], view());
   const starVerb = () => M.starActionFor([row()]);
   const count = () => M.badgeCount(row());
-
-  // The entry wave: the first rows of a new view fade and rise once.
-  const motion = createMotion();
-  effect(() => {
-    const key = listStore.viewSerial() + ":" + id();
-    const index = props.index();
-    if (!props.waveOpen() || index >= STAGGER.cap || untracked(() => waved.has(key))) return;
-    waved.add(key);
-    if (waved.size > 400) waved.clear();
-    void motion.play(enterRise(DISTANCE.toast / 2, staggerDelay(index)));
-  });
 
   const quickActions = (): RowQuickAction[] => {
     const actions: RowQuickAction[] = [];
@@ -203,7 +187,6 @@ export function MessageRow(props: MessageRowProps) {
             const ids = M.reachedIds(untracked(() => app.checked()), untracked(id));
             listStore.act(target.kind === "label" ? M.MOVE_PREFIX + target.key : target.verb, ids);
           }}
-          style={motion.style}
           // Quick actions over the trailing metadata: ListRow shows them while the row
           // is hovered, selected or focused, for the pointer (no Tab stops); screen
           // readers get them as the row's actions. Each is also in the row menu and

@@ -1,24 +1,8 @@
 // Shapes of what is coming, so a pane does not jump when it lands
 // (ListSkeleton.qml, ReaderSkeleton.qml). A word like "Opening..." says
 // nothing the click did not already say.
-//
-// One animated value breathes a whole skeleton: running one per bar would put
-// a dozen animations on the screen to say a single thing. It rests under
-// reduced motion and stops when the skeleton goes.
-import { cleanup, createAnimatedValue, reduceMotion, View, type JSX } from "nsh";
-import { PULSE_MS } from "./motion";
+import { View, type JSX } from "nsh";
 import { cx, FILL, RADIUS } from "./tokens";
-
-/** The shared breath: from 0.45 to 1 and back, eased, for as long as it is shown. */
-function usePulse() {
-  const pulse = createAnimatedValue(1);
-  if (!reduceMotion()) {
-    pulse.set(0.45);
-    void pulse.keyframes([0.45, 1, 0.45], { duration: PULSE_MS * 2, iterations: "infinite", easing: "easeInOut" });
-  }
-  cleanup(() => void pulse.stop());
-  return pulse;
-}
 
 export interface SkeletonBarProps {
   /** Width as a fraction of the line (0..1). */
@@ -27,7 +11,7 @@ export interface SkeletonBarProps {
   height: number;
 }
 
-/** One placeholder line. Use it inside a `Skeleton`, which breathes it. */
+/** One placeholder line. Use it inside a `Skeleton`. */
 export function SkeletonBar(props: SkeletonBarProps) {
   return (
     <View
@@ -44,16 +28,14 @@ export interface SkeletonProps {
   testID?: string;
 }
 
-/** A group of placeholder shapes breathing together, announced as loading. */
+/** A group of static placeholder shapes, announced as loading. */
 export function Skeleton(props: SkeletonProps) {
-  const pulse = usePulse();
   return (
     <View
       testID={props.testID}
       role="progressbar"
       accessibilityLabel={props.label}
       accessibilityState={{ busy: true }}
-      style={{ opacity: pulse }}
     >
       {props.children}
     </View>

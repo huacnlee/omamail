@@ -2,7 +2,7 @@
 // the overlay layer, in the regions docs/DESIGN.md fixes. Owner: the shell
 // agent. Features are slotted in by their exported components; the shell
 // decides only where each sits and when it shows.
-import { cleanup, createMotion, effect, signal, untracked, View, windowSize, type KeyEvent } from "nsh";
+import { cleanup, effect, signal, untracked, View, windowSize, type KeyEvent } from "nsh";
 import { currentWindow } from "nsh/desktop";
 import { loadAccounts } from "../app/bootstrap";
 import { persistPrefs, prefs } from "../app/prefs";
@@ -22,7 +22,7 @@ import { ConfirmHost, cx, FILL, SplitPane, SplitPanel, Toaster, uiScale } from "
 import { Header } from "./Header";
 import { migrateLegacyMailClient, startLaunchLinks } from "./launch";
 import { bodyFor, LIST, listWidthFor, modeFor, SIDEBAR, sidebarVisible, sidebarWidthFor, type BodyState } from "./layout";
-import { animateNextLayout, slideIn } from "./motion";
+import { animateNextLayout } from "./motion";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { hidesOnClose } from "./windowFocus";
 import { StatusBar } from "./StatusBar";
@@ -170,22 +170,9 @@ export function Shell(props: ShellProps) {
 }
 
 /** The list and the reader: side by side with a stored split, or in compact
- * mode one at a time, the reader sliding over from the right. */
+ * mode one at a time. */
 function MailPanes(props: { compact: boolean }) {
   const width = signal(0);
-  const readerMotion = createMotion();
-  const listMotion = createMotion();
-  let wasOpen = app.readerOpen();
-  effect(() => {
-    const open = app.readerOpen();
-    const compact = props.compact;
-    untracked(() => {
-      if (compact && open !== wasOpen) {
-        void (open ? readerMotion : listMotion).play(slideIn(open));
-      }
-      wasOpen = open;
-    });
-  });
   const listShown = () => !(props.compact && app.readerOpen());
   const readerShown = () => !props.compact || app.readerOpen();
   return (
@@ -204,7 +191,7 @@ function MailPanes(props: { compact: boolean }) {
           size={props.compact ? null : listWidthFor(prefs.listWidth(), width(), uiScale())}
           minSize={LIST.min * uiScale()}
         >
-          <View class="flex-1" style={listMotion.style}>
+          <View class="flex-1">
             {/* No sidebar in compact mode: the mailboxes ride above the list. */}
             <If when={props.compact}>
               <MailboxTabs />
@@ -213,7 +200,7 @@ function MailPanes(props: { compact: boolean }) {
           </View>
         </SplitPanel>
         <SplitPanel testID="reader-pane" visible={readerShown()} minSize={LIST.readerMin * uiScale()}>
-          <View class="flex-1" style={readerMotion.style}>
+          <View class="flex-1">
             {/* One column: the reader's Back bar does what Escape does here,
                 one step back off the reader to the list. */}
             <Reader onBack={props.compact ? () => app.back() : undefined} />

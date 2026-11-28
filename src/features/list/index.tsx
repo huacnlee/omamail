@@ -18,24 +18,6 @@ export function MessageList() {
   let listRef: ListRef | null = null;
   const viewport = signal(0);
 
-  // The entry wave plays for the first rows of a view, then closes until the next view.
-  const waveOpen = signal(true);
-  let waveTimer = 0;
-  effect(() => {
-    listStore.viewSerial();
-    untracked(() => {
-      waveOpen.set(true);
-      clearTimeout(waveTimer);
-    });
-  });
-  effect(() => {
-    if (listStore.messages().length === 0) return;
-    untracked(() => {
-      clearTimeout(waveTimer);
-      waveTimer = setTimeout(() => waveOpen.set(false), 700);
-    });
-  });
-
   // The cursor stays in view with the smallest scroll; a row that is already
   // visible does not move the list.
   effect(() => {
@@ -162,6 +144,7 @@ export function MessageList() {
               when={listStore.error() === ""}
               else={
                 <EmptyPane
+                  instant
                   icon="error"
                   tone="danger"
                   title="Could not load messages"
@@ -172,6 +155,7 @@ export function MessageList() {
             >
               <If when={listStore.loaded()} else={<LoadingRow label="Loading messages" layout="block" />}>
                 <EmptyPane
+                  instant
                   icon={searching() ? "search" : "inbox"}
                   title={searching() ? "Nothing matches that search" : "Nothing here"}
                 />
@@ -188,7 +172,7 @@ export function MessageList() {
             </If>
           )}
         >
-          {(item, index) => <MessageRow item={item} index={index} waveOpen={() => waveOpen()} />}
+          {(item, index) => <MessageRow item={item} index={index} />}
         </List>
       </If>
     </View>
