@@ -67,7 +67,8 @@ class InstallTest(unittest.TestCase):
     def release(self, version, files, target="linux-x86_64", extra=(), checksum=None):
         directory = self.fixtures / f"v{version}"
         directory.mkdir(exist_ok=True)
-        name = f"Omamail-{version}-{target}.tar.gz"
+        # 0.13.0 published Omamail-*; later releases are lower case.
+        name = f"{'Omamail' if version == '0.13.0' else 'omamail'}-{version}-{target}.tar.gz"
         with tarfile.open(directory / name, "w:gz") as tar:
             for member, (data, mode) in files.items():
                 info = tarfile.TarInfo(member)
@@ -140,7 +141,16 @@ class InstallTest(unittest.TestCase):
         result = self.install("--version", "v0.13.1", latest="9.9.9")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.installed_version(), "0.13.1")
-        self.assertNotIn("/releases/latest", (self.dir / "curl.log").read_text())
+        log = (self.dir / "curl.log").read_text()
+        self.assertNotIn("/releases/latest", log)
+        # Release file names are lower case after 0.13.0.
+        self.assertIn("/v0.13.1/omamail-0.13.1-linux-x86_64.tar.gz", log)
+
+    def test_0_13_0_is_downloaded_under_its_published_name(self):
+        self.release("0.13.0", linux_files("0.13.0"))
+        result = self.install("--version", "0.13.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("/v0.13.0/Omamail-0.13.0-linux-x86_64.tar.gz", (self.dir / "curl.log").read_text())
 
     def test_dir_installs_under_another_prefix(self):
         self.release("0.13.0", linux_files("0.13.0"))

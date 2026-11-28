@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           sums="$(curl -fsSL --retry 3 "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/SHA256SUMS")"
-          if grep -Eq '  Omamail-[0-9]+\.[0-9]+\.[0-9]+-linux-x86_64\.tar\.gz$' <<<"$sums"; then
+          if grep -Eiq '  omamail-[0-9]+\.[0-9]+\.[0-9]+-linux-x86_64\.tar\.gz$' <<<"$sums"; then
             echo ready=true >> "$GITHUB_OUTPUT"
           else
             echo ready=false >> "$GITHUB_OUTPUT"

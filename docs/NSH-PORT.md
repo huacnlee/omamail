@@ -401,7 +401,8 @@ packaging" items above.
 - `nsh package` builds the release on each desktop: macOS arm64 (ad hoc
   signed `Omamail.app`), Linux x86_64 (`Omamail/` with its desktop entry) and
   Windows x86_64 (`Omamail\`). The update archives it names
-  (`Omamail-<version>-<os>-<arch>`) are the release assets.
+  (`Omamail-<version>-<os>-<arch>`) are published in lower case
+  (`omamail-<version>-<os>-<arch>`) after 0.13.0, which kept `Omamail-`.
 - The app updates itself through `nsh/updater` from GitHub releases. The
   release's `latest.json` is signed with the key whose public half is
   `nsh.json`'s `updater.publicKey`; the secret is the `NSH_UPDATE_KEY`
