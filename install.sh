@@ -75,7 +75,9 @@ fi
 version="${version#v}"
 awk -v version="$version" 'BEGIN {exit !(version ~ /^[0-9]+\.[0-9]+\.[0-9]+$/)}' \
   || die 'Version must be a release version such as 0.13.0 or v0.13.0.'
-asset="Omamail-$version-$target.tar.gz"
+# 0.13.0, the first NSH release, published its archives as Omamail-*.
+asset="omamail-$version-$target.tar.gz"
+[ "$version" = 0.13.0 ] && asset="Omamail-$version-$target.tar.gz"
 base="$repo/releases/download/v$version"
 work="$(mktemp -d "${TMPDIR:-/tmp}/omamail-install.XXXXXXXX")"
 trap 'rm -rf "$work"' 0

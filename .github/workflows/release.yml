@@ -105,7 +105,11 @@ jobs:
         shell: bash
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
-      ARCHIVE: Omamail-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}.${{ matrix.archive }}
+      # `nsh package` names the archive after the app (Omamail-...); releases
+      # publish it in lower case. Installed apps follow latest.json's URLs, so
+      # the name is not part of the update contract.
+      PACKAGE: Omamail-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}.${{ matrix.archive }}
+      ARCHIVE: omamail-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}.${{ matrix.archive }}
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -148,8 +152,11 @@ jobs:
           set -euo pipefail
           test -n "$OMAMAIL_GOOGLE_CLIENT_ID" || { echo 'GOOGLE_CLIENT_ID is not set' >&2; exit 1; }
           nsh package ${{ matrix.target }}
+          test -f ".nsh/out/$PACKAGE" || { echo "nsh package wrote no $PACKAGE" >&2; exit 1; }
+          # Two steps: the macOS and Windows runners' file systems ignore case.
+          mv ".nsh/out/$PACKAGE" ".nsh/out/$ARCHIVE.renaming"
+          mv ".nsh/out/$ARCHIVE.renaming" ".nsh/out/$ARCHIVE"
           ls -la .nsh/out
-          test -f ".nsh/out/$ARCHIVE" || { echo "nsh package wrote no $ARCHIVE" >&2; exit 1; }
       - name: Check the archive's app, version and Google client
         env:
           OMAMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -284,7 +291,7 @@ jobs:
           test -n "$GH_TOKEN" || { echo 'RELEASE_TOKEN is not set' >&2; exit 1; }
           mkdir release-assets
           for platform in macos-aarch64.tar.gz linux-x86_64.tar.gz windows-x86_64.zip; do
-            cp "artifacts/Omamail-$VERSION-$platform" release-assets/
+            cp "artifacts/omamail-$VERSION-$platform" release-assets/
           done
           cp install.sh install.ps1 release-assets/
           # Notes come from the merged PRs' "Release Notes" sections since the
@@ -302,7 +309,7 @@ jobs:
           ( umask 077; printf '%s\n' "$NSH_UPDATE_KEY" > "$key" )
           # Absolute URLs: an app that checked just before a newer release
           # still downloads the version its manifest names.
-          nsh update-manifest release-assets/Omamail-"$VERSION"-* --key "$key" --notes release-notes.md --out release-assets \
+          nsh update-manifest release-assets/omamail-"$VERSION"-* --key "$key" --notes release-notes.md --out release-assets \
             --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
           rm -f "$key"
           python3 omarchy/scripts/release.py checksums release-assets

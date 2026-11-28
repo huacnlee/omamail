@@ -29,7 +29,8 @@ function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { thr
 function New-Release([string]$Version, [hashtable]$Entries, [string]$Checksum = '') {
     $dir = Join-Path $Temp "fixtures\v$Version"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    $name = "Omamail-$Version-windows-x86_64.zip"
+    # 0.13.0 published Omamail-*; later releases are lower case.
+    $name = if ($Version -eq '0.13.0') { "Omamail-$Version-windows-x86_64.zip" } else { "omamail-$Version-windows-x86_64.zip" }
     $path = Join-Path $dir $name
     $zip = [IO.Compression.ZipFile]::Open($path, 'Create')
     try {

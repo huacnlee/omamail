@@ -62,7 +62,8 @@ if ($Version -eq 'latest') {
 }
 $Version = $Version -replace '^v', ''
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version must be a release version such as 0.13.0 or v0.13.0.' }
-$asset = "Omamail-$Version-windows-x86_64.zip"
+# 0.13.0, the first NSH release, published its archive as Omamail-*.
+$asset = if ($Version -eq '0.13.0') { "Omamail-$Version-windows-x86_64.zip" } else { "omamail-$Version-windows-x86_64.zip" }
 $base = "$repository/releases/download/v$Version"
 $work = Join-Path ([IO.Path]::GetTempPath()) ('omamail-install-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null

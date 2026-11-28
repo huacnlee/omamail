@@ -82,9 +82,9 @@ SHA-256 against `SHA256SUMS`, and extract it:
 
 | System | Archive | Contains |
 | --- | --- | --- |
-| macOS | `Omamail-VERSION-macos-aarch64.tar.gz` | `Omamail.app`; move it to Applications |
-| Linux | `Omamail-VERSION-linux-x86_64.tar.gz` | `Omamail/`, with the `Omamail` runner and a desktop entry |
-| Windows | `Omamail-VERSION-windows-x86_64.zip` | `Omamail\`, with `Omamail.exe` |
+| macOS | `omamail-VERSION-macos-aarch64.tar.gz` | `Omamail.app`; move it to Applications |
+| Linux | `omamail-VERSION-linux-x86_64.tar.gz` | `Omamail/`, with the `Omamail` runner and a desktop entry |
+| Windows | `omamail-VERSION-windows-x86_64.zip` | `Omamail\`, with `Omamail.exe` |
 
 The app updates itself where it was extracted, so put it somewhere your user
 can write to.
