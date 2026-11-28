@@ -87,3 +87,16 @@ test("text is 13/12 at 14 and scales with the base size", async () => {
   expect(app.spanStyle("text:Settings saved").fontSize).toBe(title);
   expect(app.layout("id:toast-info")!.width).toBe(width);
 });
+
+// A countdown tick must keep the same Undo control under keyboard focus.
+test("a persistent countdown keeps keyboard Undo focused on update", async () => {
+  const app = await open("./fixtures/CountdownApp.tsx", OPTIONS);
+  await app.waitFor("text:Sending in 10s");
+  await app.clock!.runFor(200);
+  await app.keyboard.press("tab");
+  await app.keyboard.press("alt+t");
+  expect(app.accessibility("id:toast-countdown")!.name).toBe("Sending in 9s");
+  expect(app.count("id:toast-countdown")).toBe(1);
+  await app.keyboard.press("space");
+  await app.waitFor("text:Actions: 10");
+});
