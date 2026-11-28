@@ -77,15 +77,15 @@ class ReleaseAssets(unittest.TestCase):
         self.scratch.cleanup()
 
     def build_assets(self, version=VERSION, linux_version=None):
-        tar_archive(self.assets / f"Omamail-{version}-macos-aarch64.tar.gz", {
+        tar_archive(self.assets / f"omamail-{version}-macos-aarch64.tar.gz", {
             "Omamail.app/Contents/MacOS/Omamail": b"macho",
             "Omamail.app/Contents/Resources/nsh/app.json": app_json(version),
         })
-        tar_archive(self.assets / f"Omamail-{version}-linux-x86_64.tar.gz", {
+        tar_archive(self.assets / f"omamail-{version}-linux-x86_64.tar.gz", {
             "Omamail/Omamail": b"elf",
             "Omamail/nsh/app.json": app_json(linux_version or version),
         })
-        with zipfile.ZipFile(self.assets / f"Omamail-{version}-windows-x86_64.zip", "w") as package:
+        with zipfile.ZipFile(self.assets / f"omamail-{version}-windows-x86_64.zip", "w") as package:
             package.writestr("Omamail/Omamail.exe", b"MZ")
             package.writestr("Omamail/nsh/app.json", app_json(version))
         for installer in release.INSTALLERS:
@@ -117,7 +117,7 @@ class ReleaseAssets(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.assets.iterdir()), release.release_assets(VERSION))
 
     def test_a_missing_platform_is_refused(self):
-        (self.assets / f"Omamail-{VERSION}-windows-x86_64.zip").unlink()
+        (self.assets / f"omamail-{VERSION}-windows-x86_64.zip").unlink()
         self.assertRefused("missing")
 
     def test_an_extra_asset_is_refused(self):
@@ -125,7 +125,7 @@ class ReleaseAssets(unittest.TestCase):
         self.assertRefused("unexpected")
 
     def test_a_changed_archive_is_refused(self):
-        with (self.assets / f"Omamail-{VERSION}-linux-x86_64.tar.gz").open("ab") as archive:
+        with (self.assets / f"omamail-{VERSION}-linux-x86_64.tar.gz").open("ab") as archive:
             archive.write(b"\0")
         self.assertRefused("checksum mismatch")
 
@@ -172,7 +172,7 @@ class ReleaseAssets(unittest.TestCase):
         self.assertRefused("is not this revision's install.sh")
 
     def test_an_archive_entry_outside_the_app_is_refused(self):
-        tar_archive(self.assets / f"Omamail-{VERSION}-linux-x86_64.tar.gz", {
+        tar_archive(self.assets / f"omamail-{VERSION}-linux-x86_64.tar.gz", {
             "Omamail/Omamail": b"elf",
             "Omamail/nsh/app.json": app_json(VERSION),
             "Omamail/../evil": b"x",

@@ -55,5 +55,5 @@ Start with [CONTRIBUTING.md — Review](CONTRIBUTING.md#review) for scope decisi
 
 - Run `make validate` (`nsh check`, the key and native-member drift checks, `nsh build`, `nsh test`) after TSX or behavior changes; `cargo test` in `core/` for Rust changes; `make -C omarchy test lint` for the notice widget, the installers and the release tooling.
 - `make publish VERSION=x.y.z` opens a release PR; its branch push runs `release.yml`, which packages macOS (arm64), Linux (x86_64) and Windows (x86_64) with `nsh package`, signs `latest.json` for the in-app updater with the `NSH_UPDATE_KEY` secret, and publishes. Run `release.yml` by hand with `dry_run` to prove a release change before merging it. Never push main directly; tags alone do not publish.
-- The update key's public half is `nsh.json`'s `updater.publicKey`. Changing it, the app id, or the archive names (`Omamail-<version>-<os>-<arch>`) strands installed copies: they refuse or cannot find the next update.
+- The update key's public half is `nsh.json`'s `updater.publicKey`. Changing it, the app id, or the archive names (`omamail-<version>-<os>-<arch>`, lower case since 0.13.0) strands installed copies: they refuse or cannot find the next update.
 - Preserve `omarchy/scripts/release-notes.sh` aggregation of PR release-note sections; GitHub-generated notes are not a substitute.

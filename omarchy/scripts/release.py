@@ -56,7 +56,8 @@ def fail(message):
 
 
 def archives(version):
-    return {f"{NAME}-{version}-{platform}.{ext}": platform for platform, ext in PLATFORMS.items()}
+    # Release file names are lower case; the app keeps its display name.
+    return {f"{NAME.lower()}-{version}-{platform}.{ext}": platform for platform, ext in PLATFORMS.items()}
 
 
 def release_assets(version):
