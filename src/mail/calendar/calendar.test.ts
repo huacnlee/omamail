@@ -323,16 +323,6 @@ test("test_calendar_feed.js", () => {
 
   assert.strictEqual(feed.monthGridDays(2026, 8, 1).length, 35)
   assert.strictEqual(feed.monthGridDays(2026, 7, 1).length, 42)
-  for (let year = 2024; year <= 2028; year++) {
-    for (let month = 0; month < 12; month++) {
-      const grid = feed.monthGridDays(year, month, 1)
-      assert.ok(grid.length === 35 || grid.length === 42)
-      const inMonth = grid.filter(day => day.inMonth)
-      assert.strictEqual(inMonth.length, new Date(year, month + 1, 0).getDate())
-      assert.strictEqual(inMonth[0].day, 1)
-      assert.ok(grid.length === 35 || grid.slice(35).some(day => day.inMonth))
-    }
-  }
   // Fill the available rows; reserve the overflow label only when it is needed.
   assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 4), 4)
   assert.strictEqual(feed.monthEventLimit(98, 23, 2, 16, 5), 3)
@@ -815,3 +805,17 @@ test("test_calendar_feed.js", () => {
 
 
 });
+
+// Each year runs separately under NSH's per-call execution budget.
+for (let year = 2024; year <= 2028; year++) {
+  test(`calendar month grids contain every day in ${year}`, () => {
+    for (let month = 0; month < 12; month++) {
+      const grid = feed.monthGridDays(year, month, 1)
+      assert.ok(grid.length === 35 || grid.length === 42)
+      const inMonth = grid.filter(day => day.inMonth)
+      assert.strictEqual(inMonth.length, new Date(year, month + 1, 0).getDate())
+      assert.strictEqual(inMonth[0].day, 1)
+      assert.ok(grid.length === 35 || grid.slice(35).some(day => day.inMonth))
+    }
+  });
+}
