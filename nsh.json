@@ -1,8 +1,8 @@
 {
   "name": "Omamail",
   "id": "dev.huacnlee.omamail",
-  "version": "0.13.0",
-  "build": 2,
+  "version": "0.14.0",
+  "build": 3,
   "icon": "assets/icon.png",
   "nsh": ">=0.7",
   "theme": "theme.json",
