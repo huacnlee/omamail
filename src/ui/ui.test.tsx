@@ -7,7 +7,6 @@ import { badgeText } from "./Counts";
 import { initialOf } from "./InitialAvatar";
 import { splitEntries } from "./ChipInput";
 import { isResetPress } from "./SplitPane";
-import { staggerDelay, STAGGER } from "./motion";
 import { cx } from "./tokens";
 import { iconKeyFor } from "./Icon";
 import { quickActionsA11y } from "./Row";
@@ -43,12 +42,6 @@ test("splitEntries ends entries at commas and semicolons", () => {
 test("a double click resets a split, a single one does not", () => {
   expect(isResetPress({ clickCount: 2 })).toBe(true);
   expect(isResetPress({ clickCount: 1 })).toBe(false);
-});
-
-test("the entrance wave is capped", () => {
-  expect(staggerDelay(0)).toBe(0);
-  expect(staggerDelay(3)).toBe(3 * STAGGER.step);
-  expect(staggerDelay(500)).toBe(STAGGER.cap * STAGGER.step);
 });
 
 test("cx drops empty classes", () => {

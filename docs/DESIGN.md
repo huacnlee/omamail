@@ -283,10 +283,10 @@ Motion inventory (tokens from `src/ui/motion.ts`; every line falls back to an in
 | Quick action press | Press scale from the `ui` `IconButton` | `SCALE.press` |
 | Star toggles | Glyph swap (star outline / filled) with color transition | `DURATION.fast` |
 | Unread changes (mark read / unread) | Dot fades, subject weight swaps | `DURATION.fast` |
-| Rows removed by archive, trash, spam, move | `LayoutAnimation.configureNext` before the optimistic edit: rows below close the gap, removed row fades | `DURATION.normal`, `easeOut` |
-| Failed action restores rows / undo | `LayoutAnimation` insert: rows open space, restored row fades in | `DURATION.normal` |
-| A new view lists for the first time | Entry wave: the first 10 rows fade and rise once (`createMotion`), 40 ms apart; never on reloads or paging | `DURATION.normal`, `DISTANCE.toast` / 2 |
-| Initial loading | Skeleton rows pulse (opacity 0.45 to 1, 900 ms), then the list replaces them | pulse only; no motion under reduced motion |
+| Rows removed by archive, trash, spam, move | Apply the optimistic edit immediately | — |
+| Failed action restores rows / undo | Restore rows immediately | — |
+| A mailbox, group or search changes | Rows and empty states appear as soon as they are ready | — |
+| Initial loading | Static skeleton rows until the list is ready | — |
 | Keyboard cursor leaves the viewport | `scrollToIndex` with the smallest scroll (`viewPosition` 0 or 1), animated | platform scroll |
 | Load more footer | Button label swaps to a spinner icon while loading | `DURATION.fast` |
 | Context menu opens / closes | The `ui` `ContextMenu` popup motion (grows from the pointer) | `ui` menu tokens |
@@ -341,8 +341,8 @@ Motion inventory (tokens from `src/ui/motion.ts`). Under reduced motion, every l
 
 | State change | Tool | Tokens | Reduced motion |
 | --- | --- | --- | --- |
-| A message opens (or the next one replaces it) | The page rises a few points and fades in (`createMotion().play(enterRise(4))`); the scroll returns to the top at once | `DURATION.normal`, `EASING.enter` | appears at once |
-| Message loading | `ReaderSkeleton` bars pulse, then the body replaces them; header first when the list already knows the row | `PULSE_MS` | no pulse |
+| A message opens (or the next one replaces it) | The content or its static loading placeholder appears at once and scroll returns to the top | — | same |
+| Message loading | Static `ReaderSkeleton` bars until the body is ready. Show the header first when the list already knows the row | — | same |
 | A notice appears or goes (blocked images, heavy, unsubscribe done) | ui's titled `Notice` rises in (`enterRise()`) in a `NoticeStack` keyed by id, so the others stay still | `DURATION.normal`, `EASING.enter` | appears at once |
 | Unsubscribe in flight | The notice's action swaps to its busy label ("Unsubscribing...") in place | the component's own | the same |
 | Images arrive after "Show images" | Repaints batched on a backing-off timer (100 ms doubling to 3 s), not one per picture; a "Loading images..." notice while the queue runs | — | the same |
@@ -558,9 +558,9 @@ header pass.
 
 | Change | Tool | Tokens | Reduced motion |
 | --- | --- | --- | --- |
-| Hover and press on header, status-line and menu controls; the place pill's words change with the page | ui controls' own state transitions; the pill swaps its words at once (the page change carries the motion) | `DURATION.fast`, `SCALE.press` | colors change at once, no scale |
+| Hover and press on header, status-line and menu controls; the place pill's words change with the page | ui controls' own state transitions; the pill swaps its words at once | `DURATION.fast`, `SCALE.press` | colors change at once, no scale |
 | Sidebar folds to its rail or opens (`[`, the header toggle, the app menu) | `LayoutAnimation.configureNext` before the change (`animateNextLayout`, through the `toggleSidebar` command) | `DURATION.normal`, ease-out | lands at once |
-| Compact list to reader, and back (Enter / Escape / the reader's Back) | `createMotion` on the arriving pane: fade and slide in from the side it comes from (`slideIn`) | `DURATION.normal`, `DISTANCE.page` | the pane swaps at once |
+| Compact list to reader, and back (Enter / Escape / the reader's Back) | The pane swaps at once | — | same |
 | Mode change as the window or base size crosses a breakpoint | instant relayout: the change follows the user's own resize | — | — |
 | Shortcut sheet opens and closes (`?`, Escape, backdrop, Close) | ui `OverlayPanel` on nsh/base `Sheet`, rising from the bottom edge below the header; focus moves into it and returns | the component's own | lands at once |
 | Shortcut sheet scrolls (j / k, arrows, page keys) | the scroll view's own scroll | — | — |
@@ -645,7 +645,7 @@ esc close or interrupt), one keymap with the commands the dock registers.
 | Component | Built on | For |
 | --- | --- | --- |
 | `Notice`, `NoticeStack` | View or `Titled`, `ui` `Button` (ghost, small) | One-line reasons above content: one contract, 0–2 actions, the narrower answer first, a busy action relabelled (`busyLabel`), never hidden. With `title` ("Agent", "Calendar"), the one titled notice of the app: a `Titled` panel with the title on its top hairline, the tone icon, a 13pt line and ghost actions (warning and danger still `alert`) |
-| `Skeleton`, `SkeletonBar`, `ListSkeleton`, `ReaderSkeleton` | View, one `createAnimatedValue` | The shape of what is coming; one shared breath per skeleton |
+| `Skeleton`, `SkeletonBar`, `ListSkeleton`, `ReaderSkeleton` | View | Static shapes of the content that is loading |
 | `SplitPane`, `SplitPanel` | `ResizablePanelGroup`, `ResizablePanel` | Hairline separator, 7-point hit band, accent while dragged, double-click `onReset` |
 | `SplitHandle` | View with `pan`; `line="start" \| "end"` puts the hairline on the band's edge to meet a neighbour's borders | One pane edge whose size the app owns (the assistant dock): a guide follows the pointer on the UI thread, the size commits on release; arrows, Home / End, Return and double-click; announced as adjustable |
 | `Kbd`, `KeyHints`, `keyCapLabel`, `keyCapParts`, `chordLabel`, `keyCaps`, `isApple` | View, Text, `keymap.label` | A key cap: mono 12pt on `surface-raised`, one hairline, 20 tall and at least 20 wide; a chord in any spelling (`mod-k`, `Ctrl+Enter`) is written as the platform does (⌘K on Apple platforms, Ctrl+K elsewhere), never `mod`; menus and tooltips use the same caps; hint pairs from data. The one key-label helper of the app: `chordLabel` writes a keys-table chord through `keymap.label` (`Ctrl++` ⌘+, `Ctrl+1…9` ⌘1…9, a single key as its cap, Escape "esc", "?" as is) and `keyCaps` splits a table text into one cap per key (alternatives apart, the same key once, "g then i" one cap "G I"); `KeyHints caps="perKey"` draws them. `src/keys/labels.ts` re-exports these |
@@ -694,7 +694,7 @@ esc close or interrupt), one keymap with the commands the dock registers.
 
 ### Motion inventory
 
-Every duration and easing comes from `src/ui/motion.ts` (`DURATION`, `SCALE`, `DISTANCE`, `PULSE_MS`, `STAGGER`, `CLASS`, `enterRise`, `enterFade`). Under reduced motion every row of this table is an instant change; the `CLASS` transitions carry `motion-reduce:` resets, the motions and animated values are not started.
+Every duration and easing comes from `src/ui/motion.ts` (`DURATION`, `SCALE`, `DISTANCE`, `CLASS`, `enterRise`, `enterFade`). Under reduced motion every row of this table is an instant change; the `CLASS` transitions carry `motion-reduce:` resets, the motions and animated values are not started.
 
 | Change | Tool | Tokens | Reduced motion |
 | --- | --- | --- | --- |
@@ -702,8 +702,8 @@ Every duration and easing comes from `src/ui/motion.ts` (`DURATION`, `SCALE`, `D
 | Press on `ToolButton`, chip remove buttons | class transition to `active:scale` (`CLASS.press`, `CLASS.pressIcon`) | `SCALE.press` 0.97, `SCALE.pressIcon` 0.95, `DURATION.fast` | no scale |
 | A notice is added to a stack | `createMotion` enter: fade and rise (`enterRise`) | `DISTANCE.popup`, `DURATION.normal`, ease-out | appears at once |
 | A notice's action goes busy | the button's label swaps to `busyLabel` and its loader turns | nsh-omarchy's own | the label swaps, the loader rests |
-| Skeleton waiting | one animated value per skeleton, keyframes 0.45 → 1 → 0.45 | `PULSE_MS` 900 each way, ease-in-out, infinite | rests at full opacity |
-| Skeleton replaced by content | the caller's `enterFade` on the content | `DURATION.normal` | at once |
+| Skeleton waiting | Static placeholder shapes | — | same |
+| Mail skeleton replaced by content | Show the available content immediately | — | same |
 | `Spinner` | `createMotion` `spin`, linear, infinite | 900 ms a turn | rests; the words say it |
 | `SegmentedControl` choice | the `Tabs` indicator slides natively to the chosen option | the core's indicator motion | jumps |
 | `UnreadDot` read / unread | opacity transition in its fixed lane | `DURATION.fast` | at once |
@@ -713,9 +713,8 @@ Every duration and easing comes from `src/ui/motion.ts` (`DURATION`, `SCALE`, `D
 | Menu and context menu open | nsh-omarchy's popup entrance from the trigger | the component's own | the component's own |
 | `ControlledContextMenu` opens and closes | popup starting / ending classes: fade and 4-point rise | 180 ms, ease-out | appears and goes at once |
 | `ChoiceDialog` opens | `ui` `Dialog`'s own | the component's own | the component's own |
-| `EmptyPane` appears | `createMotion` enter: fade (`enterFade`) | `DURATION.normal` | at once |
+| `EmptyPane` appears | Fade (`enterFade`) except in the message list and reader, where it appears immediately | `DURATION.normal` when fading | at once |
 | Avatar picture loads | opacity transition over the initial | `DURATION.normal` | at once |
-| A list's rows entering together | `staggerDelay(index)` on each row's `enterRise` | `STAGGER.step` 40 ms, first `STAGGER.cap` 10 rows only | all at once |
 
 ## NSH compose
 
@@ -733,9 +732,9 @@ its name and a warning glyph, not only by color.
 
 | Change | Tool | Tokens |
 | --- | --- | --- |
-| Compose opens over the mail | `createMotion` `enter: enterRise(16)` on the editor root | `DURATION.normal`, `DISTANCE.page` |
-| A draft comes back by itself (undone send, recovered, held draft reopened) | `flash.play` opacity 0.32 to 0 on a `primary` layer | 720 ms, `ms()` makes it instant under reduced motion |
-| Attachment row arrives | `createMotion` `enterRise(4)`, 30 ms apart, capped at six | `DURATION.normal` |
+| Compose opens over the mail | Editor appears immediately | — |
+| A draft comes back by itself (undone send, recovered, held draft reopened) | Editor shows the restored draft immediately | — |
+| Attachment row arrives | Attachment appears immediately | — |
 | Hover, press and selection of buttons, chips, suggestions | ui classes `CLASS.wash`, `CLASS.press`, `CLASS.pressIcon` | `DURATION.fast`, `SCALE.press` |
 | Body and recipient line focus border | `CLASS.wash` color transition | `DURATION.fast` |
 | Suggestions under a recipient line | appear and go with the field's focus (150 ms grace so a press lands) | instant swap; the list is anchored under its line |

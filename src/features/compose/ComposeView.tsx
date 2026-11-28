@@ -5,10 +5,10 @@
 //
 // What a sender wrote (a quoted reply, a forwarded subject, contact names)
 // is shown as plain text; nothing in it can press Send.
-import { computed, createMotion, effect, Image, untracked, platform, Scroll, signal, Text, View, type InputRef, type JSX } from "nsh";
+import { computed, effect, Image, untracked, platform, Scroll, signal, Text, View, type InputRef, type JSX } from "nsh";
 import {
   ActionBar, ActionBarSpacer, Button, ChoiceDialog, cx, scaled, sizedBox, Icon, Input, Notice, Select, ShortcutTooltip,
-  Spinner, TextEditor, ToolButton, enterRise, HEIGHT_PT, KeyHints, ms, CLASS, FILL, LINE, RADIUS, TEXT,
+  Spinner, TextEditor, ToolButton, HEIGHT_PT, KeyHints, CLASS, FILL, LINE, RADIUS, TEXT,
   textInputActive,
 } from "../../ui";
 import { hasCommand, runCommand } from "../../keys/commands";
@@ -53,8 +53,6 @@ export function ComposeView(props: ComposeViewProps) {
     for (const ref of [toRef, ccRef, bccRef, replyToRef, subjectRef, bodyRef]) ref?.blur();
   };
   const dragging = signal(false);
-  const enter = createMotion({ enter: enterRise(DISTANCE_PAGE) });
-  const flash = createMotion({ initial: { opacity: 0 } });
 
   // Where the keyboard goes when a draft opens: the body for an answer, else
   // the first empty line (To, then Subject), else the body.
@@ -68,15 +66,6 @@ export function ComposeView(props: ComposeViewProps) {
       else if (d.subject === "") subjectRef?.focus();
       else bodyRef?.focus();
     }, 0);
-  });
-
-  // A draft that came back by itself (an undone send, a recovered one) flashes once.
-  let lastRevision = compose.restoreRevision();
-  effect(() => {
-    const revision = compose.restoreRevision();
-    if (revision === lastRevision) return;
-    lastRevision = revision;
-    void flash.play({ keyframes: { opacity: [0.32, 0] }, duration: ms(720), easing: "easeOut" });
   });
 
   const fromKey = (row: { accountId: string; email: string }) => row.accountId + "\n" + row.email.toLowerCase();
@@ -154,7 +143,6 @@ export function ComposeView(props: ComposeViewProps) {
       testID="compose"
       accessibilityLabel={compose.title()}
       class="flex-1 bg-background"
-      style={enter.style}
       onFileDragEnter={() => dragging.set(true)}
       onFileDragLeave={() => dragging.set(false)}
       onFileDrop={(e) => {
@@ -312,14 +300,10 @@ export function ComposeView(props: ComposeViewProps) {
         </View>
       </If>
 
-      <View class="pointer-events-none absolute inset-0 bg-primary" style={flash.style} />
-
       <ExitDialog />
     </View>
   );
 }
-
-const DISTANCE_PAGE = 16;
 
 /** One line of the header: its caption in a fixed column, so every field starts at one edge. */
 function FieldRow(props: { label: string; align?: "center" | "start"; children?: JSX.Element }) {
@@ -379,12 +363,10 @@ function Attachments() {
 }
 
 function AttachmentRow(props: { file: Draft.Attachment; index: number }) {
-  const motion = createMotion({ enter: enterRise(4, Math.min(props.index, 6) * 30) });
   const isImage = () => /^image\/(png|jpe?g|gif|webp)$/i.test(props.file.mimeType) && !!props.file.data;
   return (
     <View
       testID={`compose-attachment-${props.index}`}
-      style={motion.style}
       class={cx("flex-row items-center gap-2 px-3 py-1", RADIUS, LINE.border, FILL.rest)}
     >
       <If when={isImage()}>

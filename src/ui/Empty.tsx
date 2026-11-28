@@ -23,15 +23,17 @@ export interface EmptyPaneProps {
   /** The next action: one or two `Button`s. */
   actions?: JSX.Element;
   testID?: string;
+  /** Show the placeholder immediately in panes that swap content without motion. */
+  instant?: boolean;
 }
 
 export function EmptyPane(props: EmptyPaneProps) {
-  const motion = createMotion({ enter: enterFade() });
+  const motion = props.instant ? undefined : createMotion({ enter: enterFade() });
   const tone = () => props.tone ?? "neutral";
   return (
     <View
       testID={props.testID}
-      style={motion.style}
+      style={motion?.style}
       role={tone() === "danger" ? "alert" : undefined}
       class={cx(
         "items-center gap-2 px-6",
