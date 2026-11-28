@@ -24,6 +24,8 @@ type StandIn = (...args: any[]) => unknown;
  * `node scripts/check-native-members.ts` fails until it is. */
 export const NATIVE_MEMBERS = [
   "Backend.request",
+  "Backend.sendAnalyticsBatch",
+  "Backend.writeAnalyticsConsent",
   "Backend.nextEvent",
   "Backend.shutdown",
   "Backend.readConfig",

@@ -5,6 +5,7 @@
 //! notifications across, so the TSX speaks the exact protocol the Qt client
 //! spoke and the UI thread never waits on the network.
 
+mod analytics;
 mod diagnostics;
 mod entry;
 mod mail_client;
@@ -35,6 +36,16 @@ impl Backend {
         worker::request(method, params).await
     }
 
+    /// Sends a consented batch to Omamail's fixed statistics endpoint.
+    pub async fn send_analytics_batch(body: String) -> Result<u16, String> {
+        analytics::send_batch(body).await
+    }
+
+    /// Saves the analytics preference and cancels the active send when revoked.
+    pub fn write_analytics_consent(allowed: bool) -> Result<(), String> {
+        analytics::write_consent(allowed)
+    }
+
     /// The next backend notification (`{ method, params }`: `mail.updated`,
     /// outbox changes, `gmail.settled`), or null once the backend stops.
     /// One reader loops on it and fans the notifications out.
@@ -49,7 +60,7 @@ impl Backend {
     }
 
     /// One of the UI's private config files (`credentials.json`,
-    /// `window.json`, `calendars.json`, and the read-only
+    /// `window.json`, `calendars.json`, `analytics.json`, and the read-only
     /// `plugin-settings.json` the Omarchy plugin hands over once), or null
     /// when absent. Other names are refused.
     pub fn read_config(name: String) -> Result<Option<String>, String> {

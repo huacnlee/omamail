@@ -17,7 +17,10 @@ function backend(accounts: Array<{ email: string; provider: string; label?: stri
       "Backend.shutdown": () => undefined,
       "Backend.os": () => "linux",
       "Backend.launchMailto": launchMailto,
-      "Backend.readConfig": (name: string) => written[name] ?? (name === "window.json" ? windowFile : null),
+      "Backend.readConfig": (name: string) => {
+        if (name === "analytics.json") return "false";
+        return written[name] ?? (name === "window.json" ? windowFile : null);
+      },
       "Backend.writeConfig": (name: string, text: string) => {
         written[name] = text;
       },

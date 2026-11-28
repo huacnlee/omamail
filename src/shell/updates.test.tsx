@@ -21,7 +21,7 @@ function backend() {
       "Backend.shutdown": () => undefined,
       "Backend.os": () => "linux",
       "Backend.launchMailto": null,
-      "Backend.readConfig": () => null,
+      "Backend.readConfig": (name: string) => name === "analytics.json" ? "false" : null,
       "Backend.writeConfig": () => undefined,
     },
   };

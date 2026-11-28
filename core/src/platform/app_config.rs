@@ -1,6 +1,6 @@
 //! The UI's own private config files beside the backend's: the Gmail OAuth
 //! client (`credentials.json`, which the backend reads), window preferences
-//! and calendar choices. Only these names, only in `<config>/omamail`, only
+//! and calendar choices, and the analytics consent choice. Only these names, only in `<config>/omamail`, only
 //! owner-readable (0600), replaced atomically. The Qt client wrote them
 //! through `platform.writeConfig`; the NSH app calls these through
 //! `omamail-native`.
@@ -10,7 +10,7 @@ use std::io::Read;
 use super::{dirs, private_fs};
 
 /// The files the UI may read and write.
-pub const NAMES: &[&str] = &["credentials.json", "window.json", "calendars.json"];
+pub const NAMES: &[&str] = &["credentials.json", "window.json", "calendars.json", "analytics.json"];
 /// Files the UI may only read: the Omarchy plugin's settings, handed over
 /// once by `omarchy/notice/omamail-app.sh export-settings` for the app to
 /// import on its first launch. Never written from here.

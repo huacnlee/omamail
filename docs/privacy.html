@@ -24,10 +24,10 @@
 <main id="content">
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="updated">Effective October 28, 2026</p>
+    <p class="updated">Updated November 28, 2026</p>
 
     <div class="summary">
-      <p><b>In short:</b> Omamail is a desktop application that runs entirely on your own computer. It connects your device directly to the mail and calendar services you sign in to. The developer operates no servers for Omamail and never receives, collects or stores your mail, calendar data, contacts or credentials. Omamail contains no analytics, telemetry or advertising.</p>
+      <p><b>In short:</b> Omamail is a desktop application that runs entirely on your own computer. It connects your device directly to the mail and calendar services you sign in to. Your mail, calendar data, contacts and credentials stay out of the developer’s systems. You can choose to share anonymous usage statistics. Statistics are off by default and Omamail has no advertising.</p>
     </div>
 
     <h2>Who we are</h2>
@@ -54,7 +54,7 @@
     <p>Omamail's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
 
     <h2>How data is stored</h2>
-    <p>All data Omamail keeps is stored locally on your device, in locations only your user account can read:</p>
+    <p>Omamail stores your account data and settings locally on your device, in locations only your user account can read:</p>
     <ul>
       <li><b>Credentials</b>, such as OAuth refresh tokens and passwords, are stored in your operating system's credential store: Keychain on macOS, Credential Manager on Windows, or the Secret Service keyring on Linux. Access tokens are kept in memory only and are never written to disk.</li>
       <li><b>OAuth client settings</b> that you supply yourself are stored in a file in Omamail's configuration directory that only your user account can read.</li>
@@ -62,14 +62,19 @@
     </ul>
     <p>None of this data is uploaded to the developer or to any service other than the provider the data belongs to.</p>
 
+    <h2>Optional usage statistics</h2>
+    <p>Omamail asks for permission at startup if you have not made a choice. If you allow statistics, Omamail sends the names of feature screens you open, event times, the app version and operating system information to the developer’s self-hosted NsMetry instance on Cloudflare. Cloudflare provides the country from the network connection. Omamail does not measure your precise location, send an IP address in the statistics payload, or store IP addresses in NsMetry’s analytics records.</p>
+    <p>Omamail creates a random installation ID after you opt in and stores it on your device. NsMetry stores a hash scoped to this site to count distinct installations. Statistics use no cookies and contain no email addresses, account IDs, device serial numbers, message content or IDs, calendar content, attachment names, or search text.</p>
+    <p>Statistics help us understand which features are used. You can turn them off any time in Settings → Privacy. This stops collection and clears the queue of statistics waiting to be sent. It does not remove statistics the service has already received.</p>
+
     <h2>How data is shared</h2>
-    <p>Omamail does not share, sell, rent or transfer your data to the developer or to third parties, with the following exceptions, each of which happens only as a direct result of something you do:</p>
+    <p>Omamail does not sell or rent your data. With your permission, Omamail shares the usage statistics described above. The following features also communicate with other services when you use them:</p>
     <ul>
       <li><b>Your mail and calendar providers.</b> Omamail communicates directly with the services of the accounts you add, such as Google, Microsoft, HEY, or the IMAP, SMTP, JMAP and CalDAV servers you configure, to read and change your data and to send the mail you write.</li>
       <li><b>AI assistant (optional, off unless you use it).</b> Omamail can work with an AI coding assistant command-line tool that you have installed and signed in to yourself, such as Claude Code, Codex or OpenCode. Only when you explicitly ask the assistant about a message or conversation does Omamail pass the content of that message or conversation to the tool you selected, which then processes it under the terms and privacy policy of its provider and your account with it. The developer of Omamail does not receive this content. Any reply, draft or action the assistant proposes is shown to you, and nothing is sent or changed until you approve it. If you never use the assistant, no mail content is passed to any AI tool.</li>
       <li><b>Remote content in messages.</b> Images hosted on senders' servers are blocked by default. If you choose to load them for a message, your device requests those images from the sender's servers, which can reveal your IP address to them.</li>
       <li><b>Links and unsubscribe requests.</b> When you open a link in a message, it opens in your web browser. When you use one-click unsubscribe, Omamail sends the unsubscribe request to the address the sender provided.</li>
-      <li><b>Legal requirements.</b> The developer does not hold your data and so cannot disclose it. Your providers' own policies govern any requests made to them.</li>
+      <li><b>Legal requirements.</b> Your providers’ own policies govern requests for the account data they hold.</li>
     </ul>
 
     <h2>Data retention and deletion</h2>
